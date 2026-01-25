@@ -6,6 +6,10 @@ if [ -z "$1" ]; then
   exit 1
 fi
 
+# Pull latest changes first (using merge strategy)
+echo "Pulling latest changes..."
+git pull --no-rebase origin main || exit 1
+
 # Git commit/push
 git add .
 git commit -m "$1"
