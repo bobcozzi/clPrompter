@@ -1,17 +1,32 @@
 {
+  "extends": "./tsconfig.json",  // Inherit shared options from main tsconfig.json
   "compilerOptions": {
-    "module": "esnext",
+    "module": "ESNext",  // Browser-compatible ES modules
     "target": "es2020",
-    "lib": ["es2020", "dom"],
-    "outDir": "media",
-    "sourceMap": false,
+    "lib": [
+      "es2020",
+      "dom"
+    ],
+    "outDir": "media",  // Output to media/ for webview
+    "sourceMap": true,  // Enable for debugging
+    "rootDir": "src",
     "strict": true,
-    "types": [],
     "esModuleInterop": true,
-    "skipLibCheck": true
+    "moduleResolution": "bundler",  // Better for webview imports
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true
   },
   "include": [
+    "src/promptHelpers.ts",
     "src/clParmInput.ts",
-    "src/promptHelpers.ts"
+    "src/QlgPathName.ts",
+    "src/prompter.ts",  // Add this (main webview logic)
+    "src/types.ts"      // Add this (interfaces and types)
+  ],
+  "exclude": [
+    "node_modules",
+    ".vscode-test",
+    "out",
+    "backup"
   ]
 }

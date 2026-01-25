@@ -1,30 +1,8 @@
-
 import * as vscode from 'vscode';
-import { DOMParser } from '@xmldom/xmldom';
+import { CLToken, CLNode, CLParsedParm, CLValue } from './types';
+
+// import { DOMParser } from '@xmldom/xmldom';
 // tokenizeCL.ts - Tokenizer + Parser for IBM i CL Commands
-
-export type CLToken =
-    | { type: 'command' | 'keyword' | 'function' | 'variable' | 'value' | 'string' | 'symbolic_value'; value: string }
-    | { type: 'paren_open' | 'paren_close'; value: '(' | ')' }
-    | { type: 'space'; value: ' ' };
-
-export interface CLNode {
-    type: 'command_call';
-    name: string;
-    parameters: CLParameter[];
-}
-
-export interface CLParameter {
-    name: string;
-    value: CLValue;
-}
-
-export type CLValue =
-    | string
-    | CLNode
-    | CLValue[]
-    | { function: string; args: CLValue[] }
-    | { type: 'expression'; tokens: CLToken[] };
 
 /** Tokenizer */
 export function tokenizeCL(input: string): CLToken[] {
@@ -111,14 +89,17 @@ export function parseCL(tokens: CLToken[]): CLNode {
         return tok;
     };
 
+
     function parseValue(): CLValue {
-        // Handles both single and multiple ELEM groups (parenthesized expressions)
+        // Collects multiple groups: unwrapped expression(s) and parenthesized groups
         const values: CLValue[] = [];
         while (i < tokens.length) {
             // Skip spaces between groups
             while (peek() && peek().type === 'space') next();
 
-            // If next is a parenthesized group, parse it as an expression
+            // Stop if the enclosing param's ')' is next
+            if (peek() && peek().type === 'paren_close') break;
+
             if (peek() && peek().type === 'paren_open') {
                 next(); // consume '('
                 const exprTokens: CLToken[] = [];
@@ -129,32 +110,30 @@ export function parseCL(tokens: CLToken[]): CLNode {
                     if (tok.type === 'paren_close') depth--;
                     if (depth > 0) exprTokens.push(tok);
                 }
-                values.push({ type: 'expression', tokens: exprTokens });
-                // Skip spaces after group
-                while (peek() && peek().type === 'space') next();
-            } else {
-                // Not a parenthesized group, parse as a single value/expression
-                // (This covers simple parameters and positional values)
-                const exprTokens: CLToken[] = [];
-                while (i < tokens.length && peek().type !== 'paren_close' && peek().type !== 'paren_open') {
-                    exprTokens.push(next());
+                // Mark this expression as originally wrapped
+                values.push({ type: 'expression', tokens: exprTokens, wrapped: true } as any);
+                continue;
+            }
+
+            // Unwrapped expression until next '(' or ')'
+            const exprTokens: CLToken[] = [];
+            while (i < tokens.length && peek().type !== 'paren_close' && peek().type !== 'paren_open') {
+                exprTokens.push(next());
+            }
+            if (exprTokens.length === 1) {
+                const single = exprTokens[0];
+                if (
+                    single.type === 'string' ||
+                    single.type === 'value' ||
+                    single.type === 'symbolic_value' ||
+                    single.type === 'variable'
+                ) {
+                    values.push(single.value);
+                } else {
+                    values.push({ type: 'expression', tokens: exprTokens, wrapped: false } as any);
                 }
-                if (exprTokens.length === 1) {
-                    const single = exprTokens[0];
-                    if (
-                        single.type === 'string' ||
-                        single.type === 'value' ||
-                        single.type === 'symbolic_value' ||
-                        single.type === 'variable'
-                    ) {
-                        values.push(single.value);
-                    } else {
-                        values.push({ type: 'expression', tokens: exprTokens });
-                    }
-                } else if (exprTokens.length > 0) {
-                    values.push({ type: 'expression', tokens: exprTokens });
-                }
-                break; // Only one non-paren group allowed
+            } else if (exprTokens.length > 0) {
+                values.push({ type: 'expression', tokens: exprTokens, wrapped: false } as any);
             }
         }
         if (values.length === 1) return values[0];
@@ -162,53 +141,340 @@ export function parseCL(tokens: CLToken[]): CLNode {
     }
 
     const commandToken = consume('command');
-    const parameters: CLParameter[] = [];
+    const parameters: CLParsedParm[] = [];
     let positionalIndex = 1;
+    let seenNamed = false;
 
     while (i < tokens.length) {
-        if (peek().type === 'space') next();
-
+        if (peek() && peek().type === 'space') next();
         const tok = peek();
-        // Always treat all-caps words as keywords (even if misclassified as value)
-        if (
-            (tok.type === 'keyword') ||
-            (tok.type === 'value' && /^[A-Z][A-Z0-9]*$/i.test(tok.value))
-        ) {
-            const paramName = next();
-            // Accept both keyword and value tokens as parameter names
-            console.log('PARAM:', paramName.value, 'Next token:', peek());
-            if (peek() && peek().type === 'paren_open') {
+        if (!tok) break;
+
+        // Named parameter: KEYWORD '(' value ')'
+        if (tok.type === 'keyword') {
+            const lookahead = tokens[i + 1];
+            if (lookahead && lookahead.type === 'paren_open') {
+                const parmName = next(); // keyword
+                seenNamed = true;
+                // Debug
+                console.log('PARM:', parmName.value, 'Next token:', peek());
                 next(); // consume '('
                 const val = parseValue();
                 if (peek() && peek().type === 'paren_close') next();
-                parameters.push({ name: paramName.value, value: val });
-            } else {
-                // If not followed by paren, skip (or handle as error)
-                continue; // next();
+                parameters.push({ name: parmName.value, value: val });
+                continue;
             }
-        } else if (tok.type !== 'paren_open' && tok.type !== 'paren_close') {
-            // Only allow positional parameters for known commands (e.g., MONMSG)
-            // For most commands, skip unexpected value tokens
-            next(); // skip
-        } else {
-            next(); // Skip unexpected
         }
+
+        // Positional parameter(s) allowed only before first named parameter
+        if (!seenNamed && (tok.type === 'value' || tok.type === 'string' || tok.type === 'variable' || tok.type === 'symbolic_value' || tok.type === 'function')) {
+            const posTok = next(); // consume the positional token
+            parameters.push({ name: `__pos${positionalIndex++}`, value: posTok.value });
+            continue;
+        }
+
+        // Otherwise, consume and move on
+        next();
     }
 
     return { type: 'command_call', name: commandToken.value, parameters };
 }
 
+// Add these helpers near your submit/prompt handling:
+
+type AnyMeta = any; // use your real ParmMeta type
+
+export function mapPositionalToMetaValue(meta: AnyMeta, raw: string) {
+    // Heuristic: if first top-level Elem is QUAL (OBJ+LIB), convert "LIB/OBJ" or "OBJ" into [ ['OBJ','LIB'] ]
+    const hasQualFirst =
+        Array.isArray(meta.Elems) &&
+        meta.Elems.length > 0 &&
+        meta.Elems[0] &&
+        (meta.Elems[0].Type === 'QUAL' || meta.Elems[0].type === 'QUAL');
+
+    if (hasQualFirst) {
+        const parts = raw.split('/');
+        const obj = parts.length === 2 ? parts[1] : parts[0];
+        const lib = parts.length === 2 ? parts[0] : '*LIBL';
+        // Shape expected downstream: [ ['OBJ','LIB'] ] (+ other elem groups remain default/empty)
+        return [[obj, lib]];
+    }
+
+    // Otherwise leave as-is (simple CHAR, etc.)
+    return raw;
+}
 
 
-export function formatCLCmd(label: string | undefined, cmdName: string, paramStr: string): string {
-    // Tokenize and parse just the parameter string
-    const tokens = tokenizeCL(`${cmdName} ${paramStr}`);
+/**
+ * Converts leading __posN parameters to real keywords using parmMetas order.
+ * Stops mapping as soon as a named keyword is seen. Positionals after that are ignored.
+ */
+export function resolvePositionalsToKeywords(ast: import('./types').CLNode, parmMetas: AnyMeta[]) {
+    const mapped: import('./types').CLParsedParm[] = [];
+    let metaIdx = 0;
+    let seenNamed = false;
+
+    for (const p of ast.parameters) {
+        if (p.name.startsWith('__pos')) {
+            if (seenNamed) {
+                console.warn('[clPrompter] Positional found after a named parameter. Ignoring:', p.value);
+                continue;
+            }
+            // Find next unmapped meta
+            while (metaIdx < parmMetas.length && mapped.some(m => m.name === parmMetas[metaIdx].Kwd)) {
+                metaIdx++;
+            }
+            if (metaIdx >= parmMetas.length) continue;
+
+            const meta = parmMetas[metaIdx++];
+            const val = typeof p.value === 'string' ? mapPositionalToMetaValue(meta, p.value) : p.value;
+            mapped.push({ name: meta.Kwd, value: val });
+        } else {
+            seenNamed = true;
+            mapped.push(p);
+        }
+    }
+
+    return { ...ast, parameters: mapped };
+}
+
+
+
+// Named parm = keyword immediately followed by '(' (no blanks)
+function isNamedAt(tokens: any[], idx: number): boolean {
+    return tokens[idx]?.type === 'keyword' && tokens[idx + 1]?.type === 'paren_open';
+}
+
+// Helper: numeric PosNbr (or “no pos”)
+function getPosNbrMeta(m: any): number {
+    const raw = m?.PosNbr ?? m?.Pos ?? m?.Position ?? m?.PosNum ?? m?.PosNumber;
+    const n = Number.parseInt(String(raw), 10);
+    return Number.isFinite(n) && n > 0 ? n : Number.POSITIVE_INFINITY;
+}
+
+//////////
+export function rewriteLeadingPositionalsByList(fullCmd: string, positionalKwds: string[], cmdMaxPos?: number): string {
+  const tokens = tokenizeCL(fullCmd);
+  if (!tokens.length || positionalKwds.length === 0) return fullCmd;
+
+  const cmdIdx = tokens.findIndex(t => t.type === 'command');
+  if (cmdIdx < 0) return fullCmd;
+
+  const limit =
+    Number.isFinite(cmdMaxPos as number) && (cmdMaxPos as number) >= 0
+      ? Math.min(positionalKwds.length, cmdMaxPos as number)
+      : positionalKwds.length;
+
+  const kwdList = positionalKwds.slice(0, limit);
+  const outVals = tokens.map(t => t.value);
+
+  const isNamedAt = (idx: number) =>
+    tokens[idx]?.type === 'keyword' && tokens[idx + 1]?.type === 'paren_open';
+
+  let i = cmdIdx + 1;
+  let posIdx = 0;
+
+  while (i < tokens.length && posIdx < kwdList.length) {
+    const t = tokens[i];
+    if (t.type === 'space') { i++; continue; }
+    if (isNamedAt(i)) break; // stop at first named parm (KWD()
+
+    // Case 1: positional wrapped in (...) → capture group
+    if (t.type === 'paren_open') {
+      let depth = 1;
+      let j = i + 1;
+      while (j < tokens.length && depth > 0) {
+        if (tokens[j].type === 'paren_open') depth++;
+        else if (tokens[j].type === 'paren_close') depth--;
+        j++;
+      }
+      const closeIdx = j - 1;
+      if (depth !== 0 || closeIdx <= i) break; // unbalanced; bail out
+
+      const inner = tokens.slice(i + 1, closeIdx).map(x => x.value).join('');
+      const kwd = kwdList[posIdx++];
+      outVals[i] = `${kwd}(${inner})`;
+      for (let k = i + 1; k <= closeIdx; k++) outVals[k] = '';
+      i = closeIdx + 1;
+      continue;
+    }
+
+    // Case 2: bare value-like token → positional
+ const isBareKeyword = t.type === 'keyword' && tokens[i + 1]?.type !== 'paren_open';
+    const isPositional =
+      isBareKeyword ||
+      t.type === 'value' ||
+      t.type === 'string' ||
+      t.type === 'variable' ||
+      t.type === 'symbolic_value' ||
+      t.type === 'function';
+
+    if (!isPositional) break;
+
+    const kwd = kwdList[posIdx++];
+    outVals[i] = `${kwd}(${t.value})`;
+    i++;
+  }
+
+  return outVals.join('');
+}
+
+//////////
+// A "throwaway" parameter should never be prompted or used for positionals.
+// - Constant attribute present (any value, including empty) → throwaway
+// - Type === 'NULL' (case-insensitive) → throwaway
+function isThrowawayMeta(m: any): boolean {
+  const type = String(m?.Type ?? '').toUpperCase();
+  const hasConstantAttr =
+    (m != null && Object.prototype.hasOwnProperty.call(m, 'Constant')) ||
+    m?.Constant !== undefined; // presence is enough
+  return type === 'NULL' || hasConstantAttr;
+}
+
+// Ensure rewriteLeadingPositionals filters with isThrowawayMeta
+export function rewriteLeadingPositionals(fullCmd: string, parmMetas: any[], cmdMaxPos?: number): string {
+  const tokens = tokenizeCL(fullCmd);
+  if (!tokens.length) return fullCmd;
+
+  const cmdIdx = tokens.findIndex(t => t.type === 'command');
+  if (cmdIdx < 0) return fullCmd;
+
+  // Exclude Constant/NULL parms from positional keyword list
+  const metasWithIdx = (parmMetas ?? [])
+    .filter(m => !isThrowawayMeta(m))
+    .map((m, idx) => ({
+      m,
+      idx,
+      pos: (() => {
+        const raw = m?.PosNbr ?? m?.Pos ?? m?.Position ?? m?.PosNum ?? m?.PosNumber;
+        const n = Number.parseInt(String(raw), 10);
+        return Number.isFinite(n) && n > 0 ? n : Number.POSITIVE_INFINITY;
+      })()
+    }))
+    .sort((a, b) => {
+      const aHas = a.pos !== Number.POSITIVE_INFINITY;
+      const bHas = b.pos !== Number.POSITIVE_INFINITY;
+      if (aHas && bHas) return a.pos - b.pos;   // PosNbr first, ascending
+      if (aHas && !bHas) return -1;             // with PosNbr before no-pos
+      if (!aHas && bHas) return 1;              // no-pos after PosNbr
+      return a.idx - b.idx;                     // stable among no-pos
+    });
+
+  const limit =
+    Number.isFinite(cmdMaxPos as number) && (cmdMaxPos as number) >= 0
+      ? Math.min(metasWithIdx.length, cmdMaxPos as number)
+      : metasWithIdx.length;
+
+  const positionalKwds = metasWithIdx
+    .slice(0, limit)
+    .map(x => String(x.m?.Kwd ?? '').toUpperCase())
+    .filter(Boolean);
+
+  if (positionalKwds.length === 0) return fullCmd;
+
+  const outVals = tokens.map(t => t.value);
+  const isNamedAt = (idx: number) =>
+    tokens[idx]?.type === 'keyword' && tokens[idx + 1]?.type === 'paren_open';
+
+  let i = cmdIdx + 1;
+  let posIdx = 0;
+
+  while (i < tokens.length && posIdx < positionalKwds.length) {
+    const t = tokens[i];
+    if (t.type === 'space') { i++; continue; }
+    if (isNamedAt(i)) break;
+
+    const isBareKeyword = t.type === 'keyword' && tokens[i + 1]?.type !== 'paren_open';
+    const isPositional =
+      isBareKeyword ||
+      t.type === 'value' ||
+      t.type === 'string' ||
+      t.type === 'variable' ||
+      t.type === 'symbolic_value' ||
+      t.type === 'function';
+
+    if (!isPositional) break;
+
+    const kwd = positionalKwds[posIdx++];
+    outVals[i] = `${kwd}(${t.value})`;
+    i++;
+  }
+
+  return outVals.join('');
+}
+
+// Optional: debug the token stream if needed
+export function debugTokenStream(fullCmd: string): void {
+    const toks = tokenizeCL(fullCmd);
+    console.log('[clPrompter::rewriteLeadingPositionals] TOKENS:', toks.map((t: any) => `${t.type}:${t.value}`).join(' | '));
+}
+
+// Depth-aware helpers (same logic as in extension.ts)
+function skipQuoted(str: string, i: number): number {
+    const quote = str[i];
+    i++;
+    while (i < str.length) {
+        if (str[i] === quote) {
+            if (str[i + 1] === quote) {
+                i += 2;
+                continue;
+            }
+            return i + 1;
+        }
+        i++;
+    }
+    return i;
+}
+
+function findMatchingParen(str: string, openIdx: number): number {
+    let i = openIdx;
+    let depth = 0;
+    while (i < str.length) {
+        const ch = str[i];
+        if (ch === "'" || ch === '"') {
+            i = skipQuoted(str, i);
+            continue;
+        }
+        if (ch === '(') depth++;
+        else if (ch === ')') {
+            depth--;
+            if (depth === 0) return i;
+        }
+        i++;
+    }
+    return -1;
+}
+
+// Extracts KW(value) pairs, preserving nested parens inside value
+function extractParms(parmStr: string): Array<{ kwd: string; value: string }> {
+    const out: Array<{ kwd: string; value: string }> = [];
+    const re = /\b([A-Z0-9$#@_]+)\s*\(/gi;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(parmStr))) {
+        const kwd = m[1].toUpperCase();
+        const openIdx = m.index + m[0].lastIndexOf('(');
+        const closeIdx = findMatchingParen(parmStr, openIdx);
+        if (closeIdx > openIdx) {
+            const value = parmStr.slice(openIdx + 1, closeIdx);
+            out.push({ kwd, value });
+            re.lastIndex = closeIdx + 1;
+        } else {
+            break;
+        }
+    }
+    return out;
+}
+
+
+export function formatCLCmd(label: string | undefined, cmdName: string, parmStr: string): string {
+    // Tokenize and parse the full command (command name + params)
+    const tokens = tokenizeCL(`${cmdName} ${parmStr}`);
     const ast = parseCL(tokens);
 
-    // Set the command name from the known value
+    // Ensure command name is set as provided
     ast.name = cmdName;
 
-    // Format with SEU-style indentation
+    // SEU-style formatter preserves nested parens (e.g., (1 64))
     return formatCL_SEU(ast, label);
 }
 
@@ -226,18 +492,24 @@ export function formatCL(node: CLNode,
             return value;
         }
         if (Array.isArray(value)) {
-            // Handle Max > 1 ELEM: array of arrays
+            // NEW: array of expressions (each may have wrapped=true/false)
+            if (value.length > 0 && value.every(isExpression)) {
+                return value
+                    .map((v) => {
+                        const inner = formatValue(v, currentIndent + indentStep);
+                        const wrapped = (v as any).wrapped === true;
+                        return wrapped ? `(${inner})` : inner;
+                    })
+                    .join(' ');
+            }
+            // Legacy: array of arrays (Max>1 ELEM as nested arrays)
             if (value.length > 0 && Array.isArray(value[0])) {
-                // Each v is an array representing an ELEM group, already formatted with parens
                 return value.map((v) => formatValue(v, currentIndent + indentStep)).join(' ');
             }
-            // Single ELEM group
-            return (
-                '(' +
-                value.map((v) => formatValue(v, currentIndent + indentStep)).join(' ') +
-                ')'
-            );
+            // Single grouped value
+            return '(' + value.map((v) => formatValue(v, currentIndent + indentStep)).join(' ') + ')';
         }
+
         if ('function' in value) {
             const args = value.args.map((a) => formatValue(a, currentIndent + indentStep));
             const inner = args.join(' ');
@@ -287,14 +559,14 @@ export function formatCL(node: CLNode,
     let currentLine = pad(indent) + node.name;
     const collectedLines: string[] = [];
 
-    for (const param of node.parameters) {
+    for (const parm of node.parameters) {
         const formattedValue = formatValue(
-            param.value,
-            indent + indentStep + param.name.length + 1
+            parm.value,
+            indent + indentStep + parm.name.length + 1
         );
-        const formatted = param.name.startsWith('__pos')
+        const formatted = parm.name.startsWith('__pos')
             ? `${pad(indent + indentStep)}${formattedValue}`
-            : `${pad(indent + indentStep)}${param.name}(${formattedValue})`;
+            : `${pad(indent + indentStep)}${parm.name}(${formattedValue})`;
 
         const trimmed = formatted.trim();
 
@@ -317,7 +589,7 @@ export function formatCL(node: CLNode,
     return finalLines.join('\n');
 }
 
-// --- Add this helper near the top of the file ---
+
 /**
  * Joins CL tokens for an expression, preserving original spacing and allowing line breaks at spaces.
  * Returns an array of "chunks" (strings) that can be joined or wrapped as needed.
@@ -377,26 +649,32 @@ export function formatCL_SEU(
     let wrapped = false;
     const lines: string[] = [];
     const atomicValues = collectAtomicValues(node);
-
+    console.log('[clPrompter] formatCL_SEU');
     // 🔹 ADD atomic keyword+parens here:
-    for (const param of node.parameters) {
-        const keywordWithParen = applyCase(param.name, keywordCase) + '(';
+    for (const parm of node.parameters) {
+        const keywordWithParen = applyCase(parm.name, keywordCase) + '(';
         atomicValues.add(keywordWithParen);
     }
-
+    console.log(`[clPrompter] formatCL_SEU found ${atomicValues.size} atomic values`);
     const formatValue = (value: CLValue, indentPos: number): string => {
         if (typeof value === 'string') return value;
 
         if (Array.isArray(value)) {
-            // Handle Max > 1 ELEM: array of expressions (each group is an expression)
+            // NEW: array of expressions (each may have wrapped=true/false)
             if (value.length > 0 && value.every(isExpression)) {
-                return value.map((v) => '(' + formatValue(v, indentPos + 1) + ')').join(' ');
+                return value
+                    .map((v) => {
+                        const inner = formatValue(v, indentPos + 1);
+                        const wrapped = (v as any).wrapped === true;
+                        return wrapped ? `(${inner})` : inner;
+                    })
+                    .join(' ');
             }
-            // Handle Max > 1 ELEM: array of arrays (legacy)
+            // Legacy: array of arrays (Max>1 ELEM as nested arrays)
             if (value.length > 0 && Array.isArray(value[0])) {
                 return value.map((v) => '(' + formatValue(v, indentPos + 1) + ')').join(' ');
             }
-            // Single ELEM group
+            // Single grouped value
             return '(' + value.map(v => formatValue(v, indentPos + 1)).join(' ') + ')';
         }
 
@@ -451,29 +729,29 @@ export function formatCL_SEU(
     const linesOut: string[] = [];
     let firstParam = true;
 
-    for (const [idx, param] of node.parameters.entries()) {
+    for (const [idx, parm] of node.parameters.entries()) {
+
         const indentPos = idx === 0 ? FIRST_PARAM_COL : CONT_LINE_COL;
-        const formattedValue = formatValue(param.value, indentPos);
+        const formattedValue = formatValue(parm.value, indentPos);
         const valueLines = formattedValue.split('\n');
         const firstValueLine = valueLines[0];
-        const keywordText = applyCase(param.name, keywordCase);
-        const paramStrFirstLine =
+        const keywordText = applyCase(parm.name, keywordCase);
+        const parmStrFirstLine =
             keywordText + '(' +
             (firstValueLine.startsWith("'") ? firstValueLine : applyCase(firstValueLine, keywordCase));
 
-        // let paramText = firstParam ? paramStrFirstLine : ' ' + paramStrFirstLine;
+        // let parmText = firstParam ? parmStrFirstLine : ' ' + parmStrFirstLine;
         // space between parameters
-        let paramText = '';  // (currentLine.length === FIRST_PARAM_COL ? '' : ' ') + paramStrFirstLine;
-        if (currentLine && currentLine.endsWith(' ') || wrapped) {
-            paramText = paramStrFirstLine;
+        let parmText = '';
+        if (firstParam) {
+            parmText = parmStrFirstLine;
+        } else {
+            parmText = ' ' + parmStrFirstLine;
         }
-        else {
-            paramText = ' ' + paramStrFirstLine;
-        }
-        wrapped = false;
+
         const result = appendWrappedCLLine(
             currentLine,
-            paramText,
+            parmText,
             linesOut,
             rightMargin,
             indentPos,
@@ -481,14 +759,12 @@ export function formatCL_SEU(
             atomicValues
         );
         if (result.lineWrap && !wrapped) {
-            // remove the blank padding we added before calling appendWrappedCLLine
             if (result.currentLine.startsWith(' ')) {
                 currentLine = result.currentLine.slice(1);
             } else {
                 currentLine = result.currentLine;
             }
-        }
-        else {
+        } else {
             currentLine = result.currentLine;
         }
         wrapped = result.lineWrap;
@@ -595,188 +871,180 @@ function collectAtomicValues(node: CLNode | CLValue): Set<string> {
     return values;
 }
 
+// ...existing code...
+
 function appendWrappedCLLine(
-    initialLine: string,
-    text: string,
-    linesOut: string[],
-    rightMargin: number,
-    indentCol: number,
-    continuationChar: string,
-    atomicValues: Set<string>
+  initialLine: string,
+  text: string,
+  linesOut: string[],
+  rightMargin: number,
+  indentCol: number,
+  continuationChar: string,
+  atomicValues: Set<string>
 ): { currentLine: string, lineWrap: boolean } {
-    let currentLine = initialLine;
-    let remaining = text;
-    let iteration = 0;
-    const MAX_ITER = 1000;
-    let wrappedLine = false;
-    while (remaining.length > 0) {
-        const available = rightMargin - currentLine.length;
-        if (!remaining.trim()) break;
-        iteration++;
-        if (iteration > MAX_ITER) {
-            console.error('appendWrappedCLLine: Exceeded max iterations, breaking to avoid infinite loop.');
-            break;
-        }
-        if (iteration > 900) {
-            console.warn('Iteration:', iteration, 'remaining starts with:', remaining.slice(0, 40));
-        }
-        // --- NEW: If the start of remaining is an atomic value longer than available, emit it as-is ---
-        let atomicAtStart = false;
-        for (const val of atomicValues) {
-            if (!val) continue;
-            if (remaining.startsWith(val) && val.length > available) {
-                atomicAtStart = true;
-                currentLine += val;
-                remaining = remaining.slice(val.length).replace(/^ /, '');
-                // Also block breaking immediately after keyword(
-                if (val.endsWith('(') && currentLine.trim().endsWith(val)) {
-                    linesOut.push(currentLine + ' ' + continuationChar);
-                    currentLine = padTo(indentCol, 0);
-                    continue;
-                }
-                break;
-            }
-        }
-        if (atomicAtStart) {
-            remaining = '';
-            break;
-        }
-        // If the rest fits, just append
-        if (remaining.length <= available) {
-            currentLine += remaining;
-            remaining = '';
-            break;
-        }
+  let currentLine = initialLine;
+  let remaining = text;
+  let wrappedLine = false;
 
-        // Find the last space within the allowed width
-        let breakAt = remaining.lastIndexOf(' ', available);
-        // Prevent breaking immediately after KEYWORD(
-        for (const val of atomicValues) {
-            if (!val.endsWith('(')) continue;
-            const idx = remaining.indexOf(val);
-            if (idx !== -1 && breakAt === idx + val.length - 1) {
-                // We're about to break right after KEYWORD(
-                linesOut.push(currentLine + ' ' + continuationChar);
-                currentLine = padTo(indentCol, 0);
-                wrappedLine = true;
-                continue;
-            }
-        }
-        // Prevent breaking immediately after a KEYWORD(
-        const parenIdx = currentLine.lastIndexOf('(');
-        if (parenIdx !== -1) {
-            const maybeKeyword = currentLine.slice(0, parenIdx).trim().split(/\s+/).pop();
-            if (maybeKeyword && atomicValues.has(`${maybeKeyword}(`)) {
-                // Prevent breaking right after KEYWORD(
-                linesOut.push(currentLine + ' ' + continuationChar);
-                currentLine = padTo(indentCol, 0);
-                wrappedLine = true;
-                continue;
-            }
-        }
+  const padTo = (col: number, fill = 0) =>
+    (currentLine.length >= col ? '' : ' '.repeat(col - currentLine.length + fill));
 
-        // Prevent breaking immediately after any opening parenthesis
-        if (
-            breakAt > 0 &&
-            remaining[breakAt - 1] === '('
-        ) {
-            // Look ahead for the next non-space character
-            let k = breakAt;
-            while (k < remaining.length && remaining[k] === ' ') k++;
-            // Only allow break if next non-space is another '(' (for ELEM/Max>1)
-            if (remaining[k] !== '(') {
-                // Don't break here for simple values or QUALs
-                linesOut.push(currentLine + ' ' + continuationChar);
-                currentLine = padTo(indentCol, 0);
-                wrappedLine = true;
-                continue;
-            }
-        }
-
-        // Prevent breaking inside atomic values
-        let breakWouldSplitAtomic = false;
-        for (const val of atomicValues) {
-            if (!val) continue;
-            let idx = remaining.indexOf(val);
-            if (idx !== -1 && breakAt > idx && breakAt < idx + val.length) {
-                breakWouldSplitAtomic = true;
-                break;
-            }
-        }
-        if (breakWouldSplitAtomic) {
-            linesOut.push(currentLine + ' ' + continuationChar);
-            currentLine = padTo(indentCol, 0);
-            wrappedLine = true;
-            continue;
-        }
-
-        // If breakAt is after a '(' and KEYWORD( is atomic, move the whole atomic value to the next line
-        // If breakAt is after a '(' and the next non-space is NOT another '(', move the whole atomic value to the next line
-        if (breakAt > 0 && remaining[breakAt - 1] === '(') {
-            // Look ahead for the next non-space character
-            let k = breakAt;
-            while (k < remaining.length && remaining[k] === ' ') k++;
-            if (remaining[k] !== '(') {
-                // Don't break here for simple values
-                linesOut.push(currentLine + ' ' + continuationChar);
-                currentLine = padTo(indentCol, 0);
-                wrappedLine = true;
-                continue;
-            }
-            // If the next non-space is '(', allow the break (for ELEM/Max>1)
-        }
-
-        // If no space found, or break would split an atomic value, move the next atomic value to the next line
-        if (breakAt === -1 || breakAt === 0) {
-            let nextAtomic = null;
-            let nextAtomicIdx = -1;
-            for (const val of atomicValues) {
-                if (!val) continue;
-                let idx = remaining.indexOf(val);
-                if (idx !== -1 && (nextAtomicIdx === -1 || idx < nextAtomicIdx)) {
-                    nextAtomic = val;
-                    nextAtomicIdx = idx;
-                }
-            }
-            if (nextAtomicIdx === 0 && nextAtomic) {
-                if (currentLine.trim().length > 0) {
-                    linesOut.push(currentLine + ' ' + continuationChar);
-                    currentLine = padTo(indentCol, 0);
-                    wrappedLine = true;
-                }
-                currentLine += nextAtomic;
-                remaining = remaining.slice(nextAtomic.length).replace(/^ /, '');
-                continue;
-            } else if (nextAtomicIdx > 0) {
-                breakAt = nextAtomicIdx;
-            } else {
-                breakAt = available;
-                if (breakAt <= 0) breakAt = 1; // Always make progress
-            }
-        }
-
-        // Normal break at space (including inside quoted strings)
-        // Don't break immediately after KEYWORD(
-
-        let chunk = remaining.slice(0, breakAt);
-        if (chunk.length === 0) {
-            chunk = remaining.slice(0, 1);
-        }
-        // Only add a space if needed (not after '(' or if already a space)
-        if (
-            currentLine.length > 0 &&
-            !currentLine.endsWith('(') &&
-            !currentLine.endsWith(' ') &&
-            !chunk.startsWith(' ')
-        ) {
-            currentLine += ' ';
-        }
-        currentLine += chunk;
-
-        linesOut.push(currentLine + ' ' + continuationChar);
-        wrappedLine = true;
-        currentLine = padTo(indentCol, 0);
-        remaining = remaining.slice(chunk.length).replace(/^ /, '');
+  const lastNonSpaceChar = (s: string): string => {
+    for (let i = s.length - 1; i >= 0; i--) {
+      const ch = s[i];
+      if (ch !== ' ' && ch !== '\t') return ch;
     }
-    return { currentLine, lineWrap: wrappedLine };
+    return '';
+  };
+
+  // Insert one boundary space when needed before appending remaining to currentLine
+  const ensureBoundarySpace = (): void => {
+    const tail = lastNonSpaceChar(currentLine);
+    const head = remaining[0];
+    if (!head) return;
+    // Don’t add space at line start, after '(', or if a space already exists
+    if (!tail || tail === '(' || tail === ' ' || head === ' ') return;
+    remaining = ' ' + remaining;
+  };
+
+  // Before we start appending this chunk, normalize the boundary
+  ensureBoundarySpace();
+
+  while (remaining.length > 0) {
+    const available = rightMargin - currentLine.length;
+
+    // If it fits, append whole chunk
+    if (remaining.length <= available) {
+      currentLine += remaining;
+      remaining = '';
+      break;
+    }
+
+    // Find last space within width
+    let breakAt = remaining.lastIndexOf(' ', available);
+    // Avoid breaking immediately after KEYWORD(
+    for (const val of atomicValues) {
+      if (!val.endsWith('(')) continue;
+      const idx = remaining.indexOf(val);
+      if (idx !== -1 && breakAt === idx + val.length - 1) {
+        // emit line and continue on next
+        linesOut.push(currentLine + ' ' + continuationChar);
+        currentLine = ' '.repeat(indentCol);
+        wrappedLine = true;
+        ensureBoundarySpace();
+        breakAt = -2; // signal to continue
+        break;
+      }
+    }
+    if (breakAt === -2) continue;
+
+    // If no safe space found, push current and continue
+    if (breakAt === -1 || breakAt === 0) {
+      // Hard wrap: push current line, continue building on next
+      linesOut.push(currentLine + ' ' + continuationChar);
+      currentLine = ' '.repeat(indentCol);
+      wrappedLine = true;
+      ensureBoundarySpace();
+      continue;
+    }
+
+    // Normal break at a space
+    const chunk = remaining.slice(0, breakAt);     // left side (no trailing space)
+    currentLine += chunk;
+
+    linesOut.push(currentLine + ' ' + continuationChar);
+    wrappedLine = true;
+
+    // Start next line
+    currentLine = ' '.repeat(indentCol);
+
+    // Keep remainder AFTER the split space, and ensure separation at boundary
+    remaining = remaining.slice(breakAt + 1);
+    ensureBoundarySpace();
+  }
+
+  return { currentLine, lineWrap: wrappedLine };
+}
+
+// Quote-aware scan for KWD(...), skipping matches inside quoted strings and
+// balancing parentheses so ')' inside strings don’t terminate the argument.
+export function safeExtractKwdArg(cmd: string, kwd: string): string | null {
+  const s = String(cmd ?? '');
+  const kwdUpper = kwd.toUpperCase();
+
+  // Walk once to find KWD( outside of quotes
+  let inStr = false;
+  let quote: "'" | '"' | '' = '';
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i];
+
+    // Handle CL quoting: single quotes double to escape inside single-quoted strings
+    if (inStr) {
+      if (ch === quote) {
+        // For single quotes, a doubled '' stays inside string
+        if (quote === "'" && s[i + 1] === "'") {
+          i++; // skip the escaped quote
+        } else {
+          inStr = false;
+          quote = '';
+        }
+      }
+      continue;
+    } else {
+      if (ch === "'" || ch === '"') {
+        inStr = true;
+        quote = ch as "'" | '"';
+        continue;
+      }
+    }
+
+    // Try to match KWD (case-insensitive) at this position, outside of strings
+    if (ch.toUpperCase() === kwdUpper[0]) {
+      let k = 0;
+      while (k < kwdUpper.length && s[i + k] && s[i + k].toUpperCase() === kwdUpper[k]) k++;
+      if (k === kwdUpper.length) {
+        // Consume optional spaces then require '('
+        let j = i + k;
+        while (j < s.length && (s[j] === ' ' || s[j] === '\t')) j++;
+        if (s[j] === '(') {
+          // Extract balanced argument from j+1 to matching ')', skipping ')' inside strings
+          let depth = 1;
+          inStr = false;
+          quote = '';
+          let p = j + 1;
+          while (p < s.length && depth > 0) {
+            const c = s[p];
+            if (inStr) {
+              if (c === quote) {
+                if (quote === "'" && s[p + 1] === "'") {
+                  p += 2; // skip doubled single-quote
+                  continue;
+                } else {
+                  inStr = false;
+                  quote = '';
+                }
+              }
+            } else {
+              if (c === "'" || c === '"') {
+                inStr = true;
+                quote = c as "'" | '"';
+              } else if (c === '(') {
+                depth++;
+              } else if (c === ')') {
+                depth--;
+                if (depth === 0) {
+                  const arg = s.slice(j + 1, p);
+                  return arg;
+                }
+              }
+            }
+            p++;
+          }
+          // Unbalanced: give up
+          return null;
+        }
+      }
+    }
+  }
+  return null;
 }

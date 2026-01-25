@@ -1,5 +1,3 @@
-
-import * as vscode from 'vscode';
 // (c) Copyright 2025 by Robert Cozzi, Jr.
 // All rights reserved. Reproduction in whole or part is prohibited.
 
@@ -15,38 +13,28 @@ interface QlgPathName {
     Path_Name: string; // up to 4096 chars
 }
 
-function toUTF16BE(str: string, length: number): Buffer {
-    // Encode as UTF-16LE, then swap bytes for BE
-    const le = Buffer.from(str, 'utf16le');
-    const be = Buffer.alloc(length);
-    for (let i = 0; i < Math.min(le.length, length); i += 2) {
-        be[i] = le[i + 1];
-        be[i + 1] = le[i];
-    }
-    // Pad with zeros if needed
-    if (be.length > le.length) {
-        be.fill(0, le.length);
-    }
-    return be;
+// Replace Buffer-based helpers with browser-safe encoders
+
+// Encode a JS string as UTF-16BE (no BOM), returns 2*length bytes
+function encodeUTF16BE(str: string): Uint8Array {
+  const out = new Uint8Array(str.length * 2);
+  let o = 0;
+  for (let i = 0; i < str.length; i++) {
+    const code = str.charCodeAt(i); // UCS-2 code unit
+    out[o++] = (code >> 8) & 0xFF;  // high byte first (BE)
+    out[o++] = code & 0xFF;         // low byte
+  }
+  return out;
 }
 
-function serializeQlgPathNameBE(obj: QlgPathName): Buffer {
-    const buf = Buffer.alloc(4 + 2 + 3 + 3 + 4 + 4 + 2 + 10 + 4096);
-
-    let offset = 0;
-    buf.writeInt32BE(obj.CCSID, offset); offset += 4;
-    buf.write(obj.Country_ID.padEnd(2, '\0'), offset, 2, 'ascii'); offset += 2;
-    buf.write(obj.Language_ID.padEnd(3, '\0'), offset, 3, 'ascii'); offset += 3;
-    buf.write(obj.Reserved.padEnd(3, '\0'), offset, 3, 'ascii'); offset += 3;
-    buf.writeUInt32BE(obj.Path_Type, offset); offset += 4;
-    buf.writeInt32BE(obj.Path_Length, offset); offset += 4;
-    // Path_Name_Delimiter as UTF-16BE (2 bytes)
-    toUTF16BE(obj.Path_Name_Delimiter, 2).copy(buf, offset); offset += 2;
-    buf.write(obj.Reserved2.padEnd(10, '\0'), offset, 10, 'ascii'); offset += 10;
-    // Path_Name as UTF-16BE (up to 4096 bytes)
-    toUTF16BE(obj.Path_Name, 4096).copy(buf, offset); offset += 4096;
-    return buf;
+// Write ASCII (or NULs) of a fixed length into buf at offset
+function writeAsciiFixed(buf: Uint8Array, offset: number, s: string, len: number): number {
+  const n = Math.min(len, s.length);
+  for (let i = 0; i < n; i++) buf[offset + i] = s.charCodeAt(i) & 0x7F;
+  for (let i = n; i < len; i++) buf[offset + i] = 0x00;
+  return offset + len;
 }
+
 
 // Helper function to insure that a qualified object name
 // is in true CL command qualified name format.
@@ -73,74 +61,98 @@ export function buildQualName(input: string): string {
     }
 }
 
-export function buildAPI2PartName(cmdString: string): Buffer {
-    // Parse a CL command string into tokens
-    // and return the command/object and library name
-    // as a 20-byte API-friendly Qualified Object Name.
-    let cmdName = '';
-    let libName = '';
+export function buildAPI2PartName(cmdString: string): Uint8Array {
+  let cmdName = '';
+  let libName = '';
 
-    // Trim and split into tokens
-    let tokens = cmdString.trim().split(/\s+/);
+  let tokens = cmdString.trim().split(/\s+/);
 
-    // Check for a label (first token ends with a colon)
-    if (tokens.length > 1 && tokens[0].endsWith(':')) {
-        tokens.shift(); // Remove the label
-    }
+  if (tokens.length > 1 && tokens[0].endsWith(':')) {
+    tokens.shift();
+  }
 
-    // The first token is now the command (possibly qualified)
-    if (tokens.length > 0) {
-        cmdName = tokens[0];
-    }
+  if (tokens.length > 0) {
+    cmdName = tokens[0];
+  }
 
-    if (cmdName.includes('/')) {
-        let [lib, name] = cmdName.split('/');
-        name = name?.startsWith('"') && name.endsWith('"') ? name : name.toUpperCase();
-        lib = lib?.startsWith('"') && lib.endsWith('"') ? lib : lib.toUpperCase();
-        cmdName = (name || '').padEnd(10, ' ');
-        libName = (lib || '').padEnd(10, ' ');
-    } else {
-        let name = cmdName;
-        name = name.startsWith('"') && name.endsWith('"') ? name : name.toUpperCase();
-        cmdName = name.padEnd(10, ' ');
-        libName = '*LIBL'.padEnd(10, ' ');
-    }
+  if (cmdName.includes('/')) {
+    let [lib, name] = cmdName.split('/');
+    name = name?.startsWith('"') && name.endsWith('"') ? name : name.toUpperCase();
+    lib = lib?.startsWith('"') && lib.endsWith('"') ? lib : lib.toUpperCase();
+    cmdName = (name || '').padEnd(10, ' ');
+    libName = (lib || '').padEnd(10, ' ');
+  } else {
+    let name = cmdName;
+    name = name.startsWith('"') && name.endsWith('"') ? name : name.toUpperCase();
+    cmdName = name.padEnd(10, ' ');
+    libName = '*LIBL'.padEnd(10, ' ');
+  }
 
-    return Buffer.from(cmdName + libName, 'ascii');
+  // Return ASCII bytes (20 bytes total)
+  const out = new Uint8Array(20);
+  for (let i = 0; i < 10; i++) out[i] = (cmdName.charCodeAt(i) || 0x20) & 0x7F;
+  for (let i = 0; i < 10; i++) out[10 + i] = (libName.charCodeAt(i) || 0x20) & 0x7F;
+  return out;
 }
 
-// Accepts ASCII/UTF-8 path name and populates an IBM i-compatible Qlg_Path_Name structure
-// that may be passed to host (i.e., IBM i) API calls.
+// Accepts ASCII/UTF-8 path name and builds an IBM i Qlg_Path_Name as hex (CCSID 1200, BE, no BOM)
 export function buildQlgPathNameHex(pathAndCmd: string): string {
-    // Prepare fields
-    const CCSID = 1200;
-    const Country_ID = '\0\0';
-    const Language_ID = '\0\0\0';
-    const Reserved = '\0\0\0';
-    const Path_Type = 2; // QLG_CHAR_DOUBLE
-    const Path_Name_Delimiter = '/';
-    const Reserved2 = '\0'.repeat(10);
-    console.log(`Outfile: "${pathAndCmd}"`);
-    // Path_Name as UTF-16BE, up to 4096 bytes
-    const Path_Length = Buffer.from(pathAndCmd, 'utf16le').length;
-    const pathNameBufferBE = toUTF16BE(pathAndCmd, Path_Length);
+  // Constants per Qlg_Path_Name
+  const CCSID = 1200;          // UTF-16, big-endian
+  const Country_ID = '\0\0';   // 2 bytes
+  const Language_ID = '\0\0\0';// 3 bytes
+  const Reserved = '\0\0\0';   // 3 bytes
+  const Path_Type = 2;         // QLG_CHAR_DOUBLE
+  const delimiter = '/';
 
-    // Build structure with just enough space for the path name
-    const buf = Buffer.alloc(4 + 2 + 3 + 3 + 4 + 4 + 2 + 10 + Path_Length);
-    let offset = 0;
-    buf.writeInt32BE(CCSID, offset); offset += 4;
-    buf.write(Country_ID, offset, 2, 'ascii'); offset += 2;
-    buf.write(Language_ID, offset, 3, 'ascii'); offset += 3;
-    buf.write(Reserved, offset, 3, 'ascii'); offset += 3;
-    buf.writeUInt32BE(Path_Type, offset); offset += 4;
-    buf.writeInt32BE(Path_Length, offset); offset += 4;
-    // Path_Name_Delimiter as UTF-16BE (2 bytes)
-    toUTF16BE(Path_Name_Delimiter, 2).copy(buf, offset); offset += 2;
-    buf.write(Reserved2, offset, 10, 'ascii'); offset += 10;
-    // Path_Name as UTF-16BE (only Path_Length bytes)
-    pathNameBufferBE.copy(buf, offset, 0, Path_Length);
-    offset += Path_Length;
+  // Encode pieces
+  const pathBytesFull = encodeUTF16BE(pathAndCmd);
+  const Path_Length = Math.min(pathBytesFull.length, 4096); // bytes
+  const delimBytes = encodeUTF16BE(delimiter); // 2 bytes
 
-    return buf.toString('hex').toUpperCase();
+  // Compute total struct size
+  const total =
+    4   // CCSID (int32 BE)
+    + 2 // Country_ID
+    + 3 // Language_ID
+    + 3 // Reserved
+    + 4 // Path_Type (uint32 BE)
+    + 4 // Path_Length (int32 BE)
+    + 2 // Path_Name_Delimiter (UTF-16BE wchar)
+    + 10// Reserved2
+    + Path_Length; // Path_Name (UTF-16BE)
+
+  const buf = new Uint8Array(total);
+  let off = 0;
+
+  // Write CCSID (int32 BE)
+  new DataView(buf.buffer, off, 4).setInt32(0, CCSID, false); off += 4;
+
+  // Country_ID (2), Language_ID (3), Reserved (3)
+  off = writeAsciiFixed(buf, off, Country_ID, 2);
+  off = writeAsciiFixed(buf, off, Language_ID, 3);
+  off = writeAsciiFixed(buf, off, Reserved, 3);
+
+  // Path_Type (uint32 BE)
+  new DataView(buf.buffer, off, 4).setUint32(0, Path_Type, false); off += 4;
+
+  // Path_Length (int32 BE) in bytes of UTF-16BE path
+  new DataView(buf.buffer, off, 4).setInt32(0, Path_Length, false); off += 4;
+
+  // Path_Name_Delimiter (UTF-16BE, 2 bytes)
+  buf.set(delimBytes.subarray(0, 2), off); off += 2;
+
+  // Reserved2 (10 bytes zeros)
+  for (let i = 0; i < 10; i++) buf[off + i] = 0x00; off += 10;
+
+  // Path_Name (UTF-16BE)
+  buf.set(pathBytesFull.subarray(0, Path_Length), off); off += Path_Length;
+
+  // Convert to uppercase hex
+  let hex = '';
+  for (let i = 0; i < buf.length; i++) {
+    hex += buf[i].toString(16).padStart(2, '0').toUpperCase();
+  }
+  return hex;
 }
 

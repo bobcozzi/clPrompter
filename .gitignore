@@ -6,3 +6,4 @@ out/
 *.vsix
 .DS_Store
 bfg-*.jar
+cmdDefn.xml

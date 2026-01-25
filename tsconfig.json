@@ -1,17 +1,28 @@
 // File: tsconfig.json
 {
   "compilerOptions": {
-
-    "module": "commonjs",
+    "module": "commonjs",  // Node.js modules for extension
     "target": "es2020",
-    "lib": ["es2020","dom"],
-    "outDir": "out",
+    "lib": [
+      "es2020"
+    ],
+    "outDir": "out",  // Output to out/ for extension
     "sourceMap": true,
     "rootDir": "src",
     "strict": true,
     "esModuleInterop": true,
+    "moduleResolution": "node",  // Node.js resolution
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true
   },
-  "exclude": ["node_modules", ".vscode-test",  "out", "backup"],
+  "include": [
+    "src"
+  ],
+  "exclude": [
+    "node_modules",
+    ".vscode-test",
+    "out",
+    "backup",
+    "src/prompter.ts"  // Exclude webview files
+  ]
 }

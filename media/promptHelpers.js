@@ -155,19 +155,13 @@ export function getLengthClass(effectiveLen) {
 // --- CL Prompter formatting settings ---
 // These should be settable in the extension's config UI and used in formatCL.ts
 export function getCLPrompterFormatSettings() {
-    let settings = {
+    // Default settings; extension can send updates via webview messages
+    return {
         cmdLabelIndent: 2,
         cmdIndent: 14,
         cmdContIndent: 27,
         cmdRightMargin: 72
     };
-    if (typeof window !== 'undefined' && window.vscodeApi && typeof window.vscodeApi.getState === 'function') {
-        const state = window.vscodeApi.getState();
-        if (state && state.clPrompterFormatSettings) {
-            settings = { ...settings, ...state.clPrompterFormatSettings };
-        }
-    }
-    return settings;
 }
 // Flatten parameter value (for QUAL nodes)
 export function flattenParmValue(val) {
@@ -214,3 +208,56 @@ export function parseSpaceSeparatedValues(str) {
     }
     return values;
 }
+export function parseCLCmd(cmd) {
+    // Remove command name
+    const parts = cmd.trim().split(/\s+/);
+    parts.shift();
+    const result = {};
+    let i = 0;
+    while (i < parts.length) {
+        let part = parts[i];
+        const eqIdx = part.indexOf('(');
+        if (eqIdx > 0) {
+            // Parameter with parenthesis value
+            const param = part.substring(0, eqIdx);
+            let val = part.substring(eqIdx);
+            // If value is split across tokens, join until closing paren
+            while (val.split('(').length > val.split(')').length && i + 1 < parts.length) {
+                i++;
+                val += ' ' + parts[i];
+            }
+            val = val.replace(/^\(/, '').replace(/\)$/, '');
+            // Split by spaces, but keep quoted strings together
+            const vals = val.match(/'[^']*'|"[^"]*"|\S+/g) || [];
+            result[param] = vals.map(v => v.replace(/^['"]|['"]$/g, ''));
+        }
+        else if (part.includes('(')) {
+            // Handles case where param and value are split
+            const param = part.replace(/\(.*/, '');
+            let val = part.substring(part.indexOf('('));
+            while (val.split('(').length > val.split(')').length && i + 1 < parts.length) {
+                i++;
+                val += ' ' + parts[i];
+            }
+            val = val.replace(/^\(/, '').replace(/\)$/, '');
+            const vals = val.match(/'[^']*'|"[^"]*"|\S+/g) || [];
+            result[param] = vals.map(v => v.replace(/^['"]|['"]$/g, ''));
+        }
+        else if (part.includes('=')) {
+            // Not standard CL, but just in case
+            const [param, val] = part.split('=');
+            result[param] = [val];
+        }
+        else {
+            // Parameter with single value
+            const param = part;
+            if (i + 1 < parts.length && !parts[i + 1].includes('(') && !parts[i + 1].includes('=')) {
+                i++;
+                result[param] = [parts[i].replace(/^['"]|['"]$/g, '')];
+            }
+        }
+        i++;
+    }
+    return result;
+}
+//# sourceMappingURL=promptHelpers.js.map

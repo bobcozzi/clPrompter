@@ -1,129 +1,1774 @@
-import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
-import { buildQlgPathNameHex, buildAPI2PartName, buildQualName } from './QlgPathName';
+import { buildQlgPathNameHex, buildAPI2PartName, buildQualName } from './QlgPathName.js';
 
-function logMessage(...args: any[]): void {
-  const message = args.map(arg => (typeof arg === 'object' ? JSON.stringify(arg, null, 2) : arg)).join(' ');
+import {
+  splitCLQual,
+  getDefaultLengthForType,
+  flattenParmValue,
+  parseSpaceSeparatedValues,
+  getLengthClass,
+  parseCLCmd,
+  isValidDataType,
+  isContainerType
+} from './promptHelpers.js';
 
-  // Use a fallback for development mode detection
-  const isDevelopmentMode = vscode.env.appName.includes('Code - OSS') || vscode.env.appName.includes('Insiders');
+import {
+  ParmElement,
+  ElemElement,
+  QualElement,
+  ParmMeta,
+  ParmMetaMap,
+  ParmValue,  // Add this
+  PrompterState,
+  ParmMap,
+  WebviewMessage,
+  FormDataMessage,
+  SubmitMessage,
+  CancelMessage
+} from './types.js';
 
-  if (isDevelopmentMode) {
-    console.log(message);
-  } else {
-    vscode.window.showWarningMessage(message);
+// Global state (typed)
+let state: PrompterState = {
+  xmlDoc: null,
+  parms: [],
+  allowedValsMap: {},
+  originalParmMap: {},
+  cmdName: '',
+  hasProcessedFormData: false,
+  controlsWired: false,
+  parmMetas: {}
+};
+
+// VS Code API
+declare global {
+  interface Window {
+    vscodeApi?: { postMessage: (msg: WebviewMessage) => void; getState: () => any };
+  }
+}
+const vscode = typeof window !== 'undefined' ? window.vscodeApi : undefined;
+
+// Helper: Check if restricted
+function isRestricted(el: Element | null): boolean {
+  const rstd = el?.getAttribute('Rstd');
+  return rstd === 'YES' || rstd === 'Y' || rstd === '*YES' || rstd === '1' || rstd === 'TRUE';
+}
+
+
+// Ensure inputs are wide enough to display content and XML sizing hints.
+// Uses 'ch' units so width matches character counts.
+function ensureMinInputWidth(
+  el: HTMLElement,
+  opts: { len?: number; inlPmtLen?: number; valueLen?: number } = {}
+): void {
+  const anyEl = el as any;
+  const tag = String(anyEl.tagName || '').toLowerCase();
+  const type = String(anyEl.type || '').toLowerCase();
+
+  const current = String(anyEl.value ?? '');
+  const valueLen = Math.max(opts.valueLen ?? 0, current.length);
+  const len = Number.isFinite(opts.len as number) ? (opts.len as number) : 0;
+  const inl = Number.isFinite(opts.inlPmtLen as number) ? (opts.inlPmtLen as number) : 0;
+  const minCh = Math.max(4, len, inl, valueLen);
+
+  // Only set 'size' for text-like inputs, NEVER for <select> (setting size > 1 turns it into a list box)
+  if (tag === 'input' && (type === 'text' || type === 'search' || type === 'email' || type === 'url')) {
+    if ('size' in anyEl && typeof anyEl.size === 'number') {
+      anyEl.size = minCh;
+    }
+  }
+
+  // Width hint for all controls (select, input, etc.)
+  (el as HTMLElement).style.minWidth = `calc(${minCh}ch + 2px)`;
+}
+
+// Call once after receiving formData to apply the configured keyword and value colors (if provided)
+function applyConfigStyles(config?: { keywordColor?: string, valueColor?: string, autoAdjust?: boolean }) {
+  if (!config) return;
+
+  const { keywordColor, valueColor, autoAdjust = true } = config;
+
+  if (keywordColor) {
+    if (autoAdjust) {
+      // Apply theme-aware keyword color
+      document.documentElement.style.setProperty('--clp-kwd-color', keywordColor);
+      document.documentElement.style.setProperty('--clp-kwd-color-light', adjustColorForTheme(keywordColor, 'light'));
+      document.documentElement.style.setProperty('--clp-kwd-color-dark', adjustColorForTheme(keywordColor, 'dark'));
+      document.documentElement.style.setProperty('--clp-kwd-color-hc', adjustColorForTheme(keywordColor, 'high-contrast'));
+    } else {
+      // Use exact color for all themes
+      document.documentElement.style.setProperty('--clp-kwd-color', keywordColor);
+      document.documentElement.style.setProperty('--clp-kwd-color-light', keywordColor);
+      document.documentElement.style.setProperty('--clp-kwd-color-dark', keywordColor);
+      document.documentElement.style.setProperty('--clp-kwd-color-hc', keywordColor);
+    }
+  }
+
+  if (valueColor) {
+    if (autoAdjust) {
+      // Apply theme-aware value color
+      document.documentElement.style.setProperty('--clp-value-color', valueColor);
+      document.documentElement.style.setProperty('--clp-value-color-light', adjustColorForTheme(valueColor, 'light'));
+      document.documentElement.style.setProperty('--clp-value-color-dark', adjustColorForTheme(valueColor, 'dark'));
+      document.documentElement.style.setProperty('--clp-value-color-hc', adjustColorForTheme(valueColor, 'high-contrast'));
+    } else {
+      // Use exact color for all themes
+      document.documentElement.style.setProperty('--clp-value-color', valueColor);
+      document.documentElement.style.setProperty('--clp-value-color-light', valueColor);
+      document.documentElement.style.setProperty('--clp-value-color-dark', valueColor);
+      document.documentElement.style.setProperty('--clp-value-color-hc', valueColor);
+    }
   }
 }
 
-export function getHtmlForPrompter(
-  webview: vscode.Webview,
-  extensionUri: vscode.Uri,
-  TwoPartCmdName: string,
-  xml: string,
-  nonce: string
-): Promise<string> {
+// Adjust color brightness for different themes
+function adjustColorForTheme(color: string, theme: 'light' | 'dark' | 'high-contrast'): string {
+  // Parse color to RGB
+  const rgb = parseColor(color);
+  if (!rgb) return color;
 
-  const htmlPath = path.join(__dirname, '..', 'media', 'prompter.html');
-  let mainJs = webview.asWebviewUri(
-    vscode.Uri.joinPath(extensionUri, 'media', 'main.js')
-  ).toString();
+  const { r, g, b } = rgb;
+  const brightness = (r * 299 + g * 587 + b * 114) / 1000;
 
-  let styleUri = webview.asWebviewUri(
-    vscode.Uri.joinPath(extensionUri, 'media', 'style.css')
-  ).toString();
+  // For light themes, darken bright colors; for dark themes, lighten dark colors
+  if (theme === 'light') {
+    if (brightness > 180) {
+      // Color is too bright for light background, darken it
+      return `rgb(${Math.floor(r * 0.5)}, ${Math.floor(g * 0.5)}, ${Math.floor(b * 0.5)})`;
+    }
+  } else if (theme === 'dark') {
+    if (brightness < 100) {
+      // Color is too dark for dark background, lighten it
+      return `rgb(${Math.min(255, Math.floor(r * 1.8))}, ${Math.min(255, Math.floor(g * 1.8))}, ${Math.min(255, Math.floor(b * 1.8))})`;
+    }
+  } else if (theme === 'high-contrast') {
+    // For high contrast, ensure maximum visibility
+    if (brightness < 128) {
+      return `rgb(${Math.min(255, Math.floor(r * 2))}, ${Math.min(255, Math.floor(g * 2))}, ${Math.min(255, Math.floor(b * 2))})`;
+    }
+  }
 
-  // styleUri = styleUri.replace('file%2B.', 'file+.');
-  // mainJs = mainJs.replace('file%2B.', 'file+.');
+  return color; // Use original color if no adjustment needed
+}
 
-  console.log(`[clPrompter] extensionUri: ${htmlPath}`);
-  console.log(`[clPrompter] htmlPath: ${htmlPath}`);
-  console.log(`[clPrompter] main.js: ${mainJs}`);
-  console.log(`[clPrompter] styleUri: ${styleUri}`);
+// Parse CSS color to RGB
+function parseColor(color: string): { r: number, g: number, b: number } | null {
+  // Handle hex colors
+  if (color.startsWith('#')) {
+    const hex = color.slice(1);
+    if (hex.length === 3) {
+      return {
+        r: parseInt(hex[0] + hex[0], 16),
+        g: parseInt(hex[1] + hex[1], 16),
+        b: parseInt(hex[2] + hex[2], 16)
+      };
+    } else if (hex.length === 6) {
+      return {
+        r: parseInt(hex.slice(0, 2), 16),
+        g: parseInt(hex.slice(2, 4), 16),
+        b: parseInt(hex.slice(4, 6), 16)
+      };
+    }
+  }
 
+  // Handle rgb() colors
+  const rgbMatch = color.match(/rgb\((\d+),\s*(\d+),\s*(\d+)\)/);
+  if (rgbMatch) {
+    return {
+      r: parseInt(rgbMatch[1]),
+      g: parseInt(rgbMatch[2]),
+      b: parseInt(rgbMatch[3])
+    };
+  }
 
-  return new Promise((resolve, reject) => {
-    fs.readFile(htmlPath, { encoding: 'utf8' }, (err, html) => {
-      if (err) {
-        reject(new Error(`[clPrompter] Failed to read HTML file: ${err.message}`));
-        return;
-      }
-      const qualCmdName = buildQualName(TwoPartCmdName);
-      // No longer logging vsElements; now using main.js only
-      // Replace placeholders with escaped or safe values
-      const replacedHtml = html
-        .replace(/{{nonce}}/g, nonce)
-        .replace(/{{cspSource}}/g, webview.cspSource)
-        .replace(/{{mainJs}}/g, mainJs)
-        .replace(/{{styleUri}}/g, styleUri)
-        .replace(/{{cmdName}}/g, qualCmdName)
-        .replace(/{{xml}}/g, xml.replace(/"/g, '&quot;')); // Escape double quotes for safety
+  // Handle named colors (basic set)
+  const namedColors: Record<string, string> = {
+    'yellow': '#FFFF00',
+    'blue': '#0000FF',
+    'red': '#FF0000',
+    'green': '#008000',
+    'white': '#FFFFFF',
+    'black': '#000000',
+    'orange': '#FFA500',
+    'purple': '#800080'
+  };
 
-      try {
-        const now = new Date();
-        const yy = String(now.getFullYear()).slice(-2);
-        const mm = String(now.getMonth() + 1).padStart(2, '0');
-        const dd = String(now.getDate()).padStart(2, '0');
-        const dateStr = `${yy}${mm}${dd}`;
-        const debugPath = path.join(__dirname, `../../clPrompter-${dateStr}.html`);
-        fs.writeFileSync(debugPath, replacedHtml, { encoding: 'utf8' });
-      } catch (err) {
-        console.error('Continuing after Failed to write debug HTML file:', err);
-      }
+  if (namedColors[color.toLowerCase()]) {
+    return parseColor(namedColors[color.toLowerCase()]);
+  }
 
-      resolve(replacedHtml);
-    });
-  });
+  return null;
 }
 
 
-export function parseCLCmd(cmd: string): Record<string, string[]> {
-  // Remove command name
-  const parts = cmd.trim().split(/\s+/);
-  parts.shift();
+function createInputForType(type: string, name: string, dft: string, len: string, suggestions: string[]): HTMLElement {
+  const effectiveLen = len ? parseInt(len, 10) : getDefaultLengthForType(type);
 
-  const result: Record<string, string[]> = {};
-  let i = 0;
-  while (i < parts.length) {
-    let part = parts[i];
-    const eqIdx = part.indexOf('(');
-    if (eqIdx > 0) {
-      // Parameter with parenthesis value
-      const param = part.substring(0, eqIdx);
-      let val = part.substring(eqIdx);
-      // If value is split across tokens, join until closing paren
-      while (val.split('(').length > val.split(')').length && i + 1 < parts.length) {
-        i++;
-        val += ' ' + parts[i];
+  console.log(`[createInputForType] name=${name}, suggestions:`, suggestions, 'dft:', dft);
+
+  // If there are suggestions, create a combo box (select + custom option)
+  if (suggestions.length > 0) {
+    const container = document.createElement('div');
+    container.style.display = 'flex';
+    container.style.gap = '5px';
+    container.style.alignItems = 'center';
+
+    const select = document.createElement('select');
+    select.id = `${name}_select`;
+    select.style.minWidth = '150px';
+
+    // Add suggestion options
+    suggestions.forEach(val => {
+      const option = document.createElement('option');
+      option.value = val;
+      option.textContent = val;
+      if (val === dft) {
+        option.selected = true;
       }
-      val = val.replace(/^\(/, '').replace(/\)$/, '');
-      // Split by spaces, but keep quoted strings together
-      const vals = val.match(/'[^']*'|"[^"]*"|\S+/g) || [];
-      result[param] = vals.map(v => v.replace(/^['"]|['"]$/g, ''));
-    } else if (part.includes('(')) {
-      // Handles case where param and value are split
-      const param = part.replace(/\(.*/, '');
-      let val = part.substring(part.indexOf('('));
-      while (val.split('(').length > val.split(')').length && i + 1 < parts.length) {
-        i++;
-        val += ' ' + parts[i];
+      select.appendChild(option);
+    });
+
+    // Add "Custom..." option
+    const customOption = document.createElement('option');
+    customOption.value = '__CUSTOM__';
+    customOption.textContent = '(Custom...)';
+    select.appendChild(customOption);
+
+    // Create hidden text input for custom values
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.name = name;
+    input.classList.add(getLengthClass(effectiveLen));
+    input.style.display = 'none';
+
+    // Set initial value
+    if (dft && !suggestions.includes(dft)) {
+      // Custom value - show input
+      select.value = '__CUSTOM__';
+      input.value = dft;
+      input.style.display = '';
+    } else if (dft) {
+      // Suggestion value - store in hidden input
+      input.value = dft;
+    }
+
+    // Handle selection change
+    select.addEventListener('change', (e: any) => {
+      const selectedValue = e.target.value;
+      if (selectedValue === '__CUSTOM__') {
+        input.style.display = '';
+        input.focus();
+        input.value = '';
+      } else {
+        input.style.display = 'none';
+        input.value = selectedValue;
       }
-      val = val.replace(/^\(/, '').replace(/\)$/, '');
-      const vals = val.match(/'[^']*'|"[^"]*"|\S+/g) || [];
-      result[param] = vals.map(v => v.replace(/^['"]|['"]$/g, ''));
-    } else if (part.includes('=')) {
-      // Not standard CL, but just in case
-      const [param, val] = part.split('=');
-      result[param] = [val];
+    });
+
+    container.appendChild(select);
+    container.appendChild(input);
+    return container;
+  }
+
+  // No suggestions - regular input
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.name = name;
+  input.value = dft || '';
+  input.classList.add(getLengthClass(effectiveLen));
+  return input;
+}
+
+// Create parm input (dropdown or textfield)
+function createParmInput(name: string, suggestions: string[], isRestricted: boolean, dft: string): HTMLElement {
+  console.log('[clPrompter] ', 'createParmInput start');
+  if (isRestricted && suggestions.length > 0) {
+    // Use standard select for restricted dropdowns
+    const select = document.createElement('select');
+    select.name = name;
+    select.style.minWidth = '150px';
+    suggestions.forEach(val => {
+      const option = document.createElement('option');
+      option.value = val;
+      option.textContent = val;
+      if (val === dft) {
+        option.selected = true;
+      }
+      select.appendChild(option);
+    });
+    console.log('[clPrompter] ', 'createParmInput end1');
+    return select;
+  } else {
+    console.log('[clPrompter] ', 'createParmInput end2');
+    return createInputForType('CHAR', name, dft, '', suggestions);
+  }
+}
+
+function createQualInput(
+  parentParm: Element,
+  qual: Element | null,
+  qualName: string,
+  qualType: string,
+  qualLen: string,
+  qualDft: string,
+  isFirstPart: boolean
+): HTMLElement {
+  // Build allowed values: parent SngVal/SpcVal (first part only) + this Qual's SpcVal/SngVal/Values
+  const xmlVals: string[] = [];
+
+  if (isFirstPart) {
+    parentParm.querySelectorAll(':scope > SngVal > Value').forEach(v => {
+      const val = (v as Element).getAttribute('Val');
+      if (val && val !== '*NULL') xmlVals.push(val);
+    });
+    parentParm.querySelectorAll(':scope > SpcVal > Value').forEach(v => {
+      const val = (v as Element).getAttribute('Val');
+      if (val && val !== '*NULL') xmlVals.push(val);
+    });
+  }
+
+  if (qual) {
+    qual.querySelectorAll('SpcVal > Value, SngVal > Value, Values > Value').forEach(v => {
+      const val = (v as Element).getAttribute('Val');
+      if (val && val !== '*NULL') xmlVals.push(val);
+    });
+  }
+
+  const fromMap = (state.allowedValsMap || {})[qualName] || [];
+  const allowedVals = Array.from(new Set(fromMap.concat(xmlVals)));
+  const restricted = isRestricted(qual);
+
+  // Default: for first part, prefer parent Dft if it’s among parent SngVal
+  let dft = qualDft || '';
+  if (isFirstPart) {
+    const parentDft = String(parentParm.getAttribute('Dft') || '');
+    const parentSng = new Set<string>();
+    parentParm.querySelectorAll(':scope > SngVal > Value').forEach(v => {
+      const pv = (v as Element).getAttribute('Val');
+      if (pv) parentSng.add(pv.toUpperCase());
+    });
+    if (parentDft && parentSng.has(parentDft.toUpperCase())) {
+      dft = parentDft;
+    }
+  }
+
+  const input = createParmInput(qualName, allowedVals, restricted, dft);
+  // Size: prefer Qual Len and InlPmtLen; expand later on populate if value grows
+  const inl = Number.parseInt(String(qual?.getAttribute('InlPmtLen') || ''), 10) || undefined;
+  const len = Number.parseInt(String(qual?.getAttribute('Len') || ''), 10) || undefined;
+  ensureMinInputWidth(input as HTMLElement, { len, inlPmtLen: inl });
+
+  return input;
+}
+
+// Create elem input (textfield)
+function createElemInput(
+  parentParm: Element,
+  elem: Element | null,
+  elemName: string,
+  elemType: string,
+  elemLen: string,
+  elemDft: string,
+  isFirstTopLevelElem: boolean
+): HTMLElement {
+  // Build allowed values: this Elem’s SpcVal/SngVal/Values (+ parent SngVal/SpcVal for first top-level)
+  const xmlVals: string[] = [];
+
+  if (elem) {
+    elem.querySelectorAll('SpcVal > Value, SngVal > Value, Values > Value').forEach(v => {
+      const val = (v as Element).getAttribute('Val');
+      if (val && val !== '*NULL') xmlVals.push(val);
+    });
+  }
+  if (isFirstTopLevelElem) {
+    parentParm.querySelectorAll(':scope > SngVal > Value').forEach(v => {
+      const val = (v as Element).getAttribute('Val');
+      if (val && val !== '*NULL') xmlVals.push(val);
+    });
+    parentParm.querySelectorAll(':scope > SpcVal > Value').forEach(v => {
+      const val = (v as Element).getAttribute('Val');
+      if (val && val !== '*NULL') xmlVals.push(val);
+    });
+  }
+
+  const fromMap = (state.allowedValsMap || {})[elemName] || [];
+  const allowedVals = Array.from(new Set(fromMap.concat(xmlVals)));
+  const restricted = isRestricted(elem);
+
+  // Default: for first top-level elem, prefer parent Dft when it’s among parent SngVal
+  let dft = elemDft || '';
+  if (isFirstTopLevelElem) {
+    const parentDft = String(parentParm.getAttribute('Dft') || '');
+    const parentSng = new Set<string>();
+    parentParm.querySelectorAll(':scope > SngVal > Value').forEach(v => {
+      const pv = (v as Element).getAttribute('Val');
+      if (pv) parentSng.add(pv.toUpperCase());
+    });
+    if (parentDft && parentSng.has(parentDft.toUpperCase())) {
+      dft = parentDft;
+    }
+  }
+
+  const input = createParmInput(elemName, allowedVals, restricted, dft);
+  const inl = Number.parseInt(String(elem?.getAttribute('InlPmtLen') || ''), 10) || undefined;
+  const len = Number.parseInt(String(elem?.getAttribute('Len') || ''), 10) || undefined;
+  ensureMinInputWidth(input as HTMLElement, { len, inlPmtLen: inl });
+
+  return input;
+}
+
+// Render simple parm
+function renderSimpleParm(parm: ParmElement, kwd: string, container: HTMLElement, dft: string, required: boolean, instanceId: string): void {
+  const div = document.createElement('div');
+  div.className = 'parm simple-parm';
+
+  // Header with Prompt and KWD (colored)
+  const header = document.createElement('div');
+  header.className = 'parm-header';
+
+  const promptSpan = document.createElement('span');
+  const promptText = String(parm.getAttribute('Prompt') || kwd);
+  promptSpan.textContent = promptText;
+
+  const kwdSpan = document.createElement('span');
+  kwdSpan.className = 'parm-kwd';
+  kwdSpan.textContent = ` (${kwd})`;
+  // Color applied via CSS using .parm-kwd class with theme-aware variables
+
+  header.appendChild(promptSpan);
+  header.appendChild(kwdSpan);
+  div.appendChild(header);
+
+  // Input
+  const type = String(parm.getAttribute('Type') || 'CHAR');
+  const lenAttr = String(parm.getAttribute('Len') || '');
+  const inl = Number.parseInt(String(parm.getAttribute('InlPmtLen') || ''), 10) || undefined;
+
+  const inputName = kwd;
+  const allowedVals = (state.allowedValsMap || {})[inputName] || [];
+  const restricted = isRestricted(parm as unknown as Element);
+
+  const input = createParmInput(inputName, allowedVals, restricted, dft);
+
+  const len = Number.parseInt(lenAttr, 10) || undefined;
+  ensureMinInputWidth(input as HTMLElement, { len, inlPmtLen: inl });
+
+  // Wrap input in a div for indentation
+  const inputWrapper = document.createElement('div');
+  inputWrapper.className = 'simple-parm-input-wrapper';
+  inputWrapper.appendChild(input);
+
+  div.appendChild(inputWrapper);
+  container.appendChild(div);
+}
+
+// Render QUAL parm
+function renderQualParm(parm: ParmElement, kwd: string, container: HTMLElement, prompt: string, idx: number, max: number): void {
+  console.log('[clPrompter] ', 'renderQualParm start');
+
+  const fieldset = document.createElement('fieldset');
+  fieldset.className = 'qual-group';
+  const legend = document.createElement('legend');
+
+  const promptSpan = document.createElement('span');
+  promptSpan.textContent = prompt;
+  legend.appendChild(promptSpan);
+
+  const kwdSpan = document.createElement('span');
+  kwdSpan.className = 'parm-kwd';
+  kwdSpan.textContent = ` (${kwd})`;
+  // Color applied via CSS using .parm-kwd class with theme-aware variables
+  legend.appendChild(kwdSpan);
+
+  fieldset.appendChild(legend);
+
+  const qualParts = parm.querySelectorAll(':scope > Qual');
+  const numParts = qualParts.length || 2;
+
+  for (let i = 0; i < numParts; i++) {
+    const qual = qualParts[i] as Element | null;
+
+    const qualDiv = document.createElement('div');
+    qualDiv.className = 'form-div';
+
+    // Label: use Qual Prompt for each part (legend already shows parent prompt)
+    const label = document.createElement('label');
+    const qualPrompt = String(qual?.getAttribute('Prompt') || (i === 0 ? 'Name' : `Qualifier ${i}`));
+    label.textContent = `${qualPrompt}:`;
+    qualDiv.appendChild(label);
+
+    const qualType = String(qual?.getAttribute('Type') || 'NAME');
+    const qualLen = String(qual?.getAttribute('Len') || '');
+    const qualDft = String(qual?.getAttribute('Dft') || '');
+    const input = createQualInput(
+      parm as unknown as Element,
+      qual,
+      `${kwd}_QUAL${i}`,
+      qualType,
+      qualLen,
+      qualDft,
+      i === 0
+    );
+
+    qualDiv.appendChild(input);
+    fieldset.appendChild(qualDiv);
+  }
+
+  container.appendChild(fieldset);
+  console.log('[clPrompter] ', 'renderQualParm end');
+}
+
+function populateSimpleParm(kwd: string, parm: Element, value: string) {
+  const input = document.querySelector(`[name="${kwd}"]`) as any;
+  if (input) {
+    input.value = value;
+    const len = Number.parseInt(String(parm.getAttribute('Len') || ''), 10) || undefined;
+    const inl = Number.parseInt(String(parm.getAttribute('InlPmtLen') || ''), 10) || undefined;
+    ensureMinInputWidth(input as HTMLElement, { len, inlPmtLen: inl, valueLen: value.length });
+  }
+}
+
+// Render ELEM parm
+function renderElemParm(parm: ParmElement, kwd: string, idx: number, container: HTMLElement, prompt: string, dft: string, max: number): void {
+  console.log('[clPrompter] ', 'renderElemParm start');
+  const isMultiInstance = max > 1; // Don't pre-fill defaults for multi-instance
+  const fieldset = document.createElement('fieldset');
+  fieldset.className = 'elem-group';
+  const legend = document.createElement('legend');
+
+  const promptSpan = document.createElement('span');
+  promptSpan.textContent = prompt;
+  legend.appendChild(promptSpan);
+
+  const kwdSpan = document.createElement('span');
+  kwdSpan.className = 'parm-kwd';
+  kwdSpan.textContent = ` (${kwd})`;
+  // Color applied via CSS using .parm-kwd class with theme-aware variables
+  legend.appendChild(kwdSpan);
+
+  fieldset.appendChild(legend);
+
+  const elemParts = parm.querySelectorAll(':scope > Elem');
+  elemParts.forEach((elem, i) => {
+    const elemDiv = document.createElement('div');
+    elemDiv.className = 'form-div';
+
+    const elemType = String(elem.getAttribute('Type') || 'CHAR');
+
+    if (elemType === 'QUAL') {
+      const qualParts = elem.querySelectorAll(':scope > Qual');
+      qualParts.forEach((qual, j) => {
+        const qualDiv = document.createElement('div');
+        qualDiv.className = 'form-div';
+
+        // Label: use Qual Prompt when available
+        const label = document.createElement('label');
+        const qPrompt = String(qual.getAttribute('Prompt') || `Qualifier ${j}`);
+        label.textContent = `${qPrompt}:`;
+        qualDiv.appendChild(label);
+
+        const qualType = String(qual.getAttribute('Type') || 'NAME');
+        const qualLen = String(qual.getAttribute('Len') || '');
+        const qualDft = String(qual.getAttribute('Dft') || '');
+        const inputName = max > 1 ? `${kwd}_INST${idx}_ELEM${i}_QUAL${j}` : `${kwd}_ELEM${i}_QUAL${j}`;
+        const input = createQualInput(
+          parm,
+          qual as Element,
+          inputName,
+          qualType,
+          qualLen,
+          qualDft,
+          i === 0 && j === 0 // only first qual of first top-level elem inherits parent lists/dft
+        );
+
+        qualDiv.appendChild(input);
+        elemDiv.appendChild(qualDiv);
+      });
     } else {
-      // Parameter with single value
-      const param = part;
-      if (i + 1 < parts.length && !parts[i + 1].includes('(') && !parts[i + 1].includes('=')) {
-        i++;
-        result[param] = [parts[i].replace(/^['"]|['"]$/g, '')];
+      const subElems = elem.querySelectorAll(':scope > Elem');
+      if (subElems.length > 0) {
+        subElems.forEach((subElem, j) => {
+          const subDiv = document.createElement('div');
+          subDiv.className = 'form-div';
+
+          const label = document.createElement('label');
+          const subPrompt = String(subElem.getAttribute('Prompt') || `Element ${i}.${j}`);
+          label.textContent = `${subPrompt}:`;
+          subDiv.appendChild(label);
+
+          const subType = String(subElem.getAttribute('Type') || 'CHAR');
+          const subLen = String(subElem.getAttribute('Len') || '');
+          const subDft = isMultiInstance ? '' : String(subElem.getAttribute('Dft') || '');
+          const inputName = max > 1 ? `${kwd}_INST${idx}_ELEM${i}_SUB${j}` : `${kwd}_ELEM${i}_SUB${j}`;
+          const input = createElemInput(
+            parm,
+            subElem as Element,
+            inputName,
+            subType,
+            subLen,
+            subDft,
+            false
+          );
+
+          subDiv.appendChild(input);
+          elemDiv.appendChild(subDiv);
+        });
+      } else {
+        const label = document.createElement('label');
+        const ePrompt = String(elem.getAttribute('Prompt') || `Element ${i}`);
+        label.textContent = `${ePrompt}:`;
+        elemDiv.appendChild(label);
+
+        const elemLen = String(elem.getAttribute('Len') || '');
+        const elemDft = isMultiInstance ? '' : String(elem.getAttribute('Dft') || '');
+        const inputName = max > 1 ? `${kwd}_INST${idx}_ELEM${i}` : `${kwd}_ELEM${i}`;
+        const input = createElemInput(
+          parm,
+          elem as Element,
+          inputName,
+          elemType,
+          elemLen,
+          elemDft,
+          i === 0
+        );
+
+        elemDiv.appendChild(input);
       }
     }
-    i++;
-  }
-  return result;
+
+    fieldset.appendChild(elemDiv);
+  });
+  container.appendChild(fieldset);
+  console.log('[clPrompter] ', 'renderElemParm end');
 }
+
+// Render parm instance
+function renderParmInstance(parm: ParmElement, kwd: string, idx: number, max: number, multiGroupDiv: HTMLElement | null): HTMLElement {
+  console.log('[clPrompter] ', 'renderParmInstance start');
+  const instDiv = document.createElement('div');
+  instDiv.className = 'parm-instance';
+  instDiv.dataset.kwd = kwd;
+
+  const type = parm.getAttribute('Type') || '';
+  const prompt = parm.getAttribute('Prompt') || kwd;
+  const isMultiInstance = max > 1;
+
+  // For multi-instance parameters, still need proper default for restricted fields
+  let dft = parm.getAttribute('Dft') || '';
+  if (isMultiInstance && !dft && isRestricted(parm as unknown as Element)) {
+    // For multi-instance restricted fields with no explicit default, use first allowed value
+    dft = getFirstAllowedValue(parm as unknown as Element);
+  }
+
+  const required = parm.getAttribute('Min') === '1';
+  const instanceId = `${kwd}_INST${idx}`;
+
+  const hasElem = !!parm.querySelector(':scope > Elem');
+  const hasQual = !!parm.querySelector(':scope > Qual');
+
+  // Note: renderSimpleParm creates its own header with prompt, so no label needed here
+
+  if (hasElem || type === 'ELEM') {
+    renderElemParm(parm, kwd, idx, instDiv, prompt, dft, max);
+  } else if (hasQual || type === 'QUAL') {
+    renderQualParm(parm, kwd, instDiv, prompt, idx, max);
+  } else {
+    renderSimpleParm(parm, kwd, instDiv, dft, required, instanceId);
+  }
+
+  if (max > 1 && multiGroupDiv) {
+    addMultiInstanceControls(instDiv, parm, kwd, idx, max, multiGroupDiv);
+  }
+  console.log('[clPrompter] ', 'renderParmInstance end');
+  return instDiv;
+}
+
+// Add multi-instance controls
+function addMultiInstanceControls(container: HTMLElement, parm: ParmElement, kwd: string, idx: number, max: number, multiGroupDiv: HTMLElement): void {
+  console.log('[clPrompter] ', 'addMultiInstanceControls start');
+  const btnBar = document.createElement('div');
+  btnBar.className = 'multi-inst-controls';
+
+  if (idx === 0) {
+    const addBtn = document.createElement('button');
+    addBtn.type = 'button';
+    addBtn.className = 'add-parm-btn';
+    addBtn.textContent = '+';
+    addBtn.onclick = () => {
+      const instances = multiGroupDiv.querySelectorAll('.parm-instance');
+      if (instances.length < max) {
+        const newIdx = instances.length;
+        const newInst = renderParmInstance(parm, kwd, newIdx, max, multiGroupDiv);
+        multiGroupDiv.appendChild(newInst);
+      }
+    };
+    btnBar.appendChild(addBtn);
+  } else {
+    const removeBtn = document.createElement('button');
+    removeBtn.type = 'button';
+    removeBtn.className = 'remove-parm-btn';
+    removeBtn.textContent = '-';
+    removeBtn.onclick = () => container.remove();
+    btnBar.appendChild(removeBtn);
+  }
+  container.appendChild(btnBar);
+  console.log('[clPrompter] ', 'addMultiInstanceControls end');
+}
+
+// Main form renderer
+function loadForm(): void {
+  console.log('[clPrompter] ', 'loadForm start');
+  if (!state.xmlDoc) return;
+  const form = document.getElementById('clForm');
+  if (!form) return;
+  form.innerHTML = '';
+
+  state.parms.forEach(parm => {
+    const kwd = parm.getAttribute('Kwd');
+    if (!kwd) return;
+    const constant = parm.getAttribute('Constant');
+    const type = parm.getAttribute('Type');
+    const max = parseInt(parm.getAttribute('Max') || '1', 10);
+
+    if (constant || type?.toLowerCase() === 'null') return;
+
+    if (max > 1) {
+      const multiGroupDiv = document.createElement('div');
+      multiGroupDiv.className = 'parm-multi-group';
+      multiGroupDiv.dataset.kwd = kwd;
+      multiGroupDiv.dataset.max = max.toString();
+      multiGroupDiv.appendChild(renderParmInstance(parm, kwd, 0, max, multiGroupDiv));
+      form.appendChild(multiGroupDiv);
+    } else {
+      form.appendChild(renderParmInstance(parm, kwd, 0, 1, null));
+    }
+  });
+  console.log('[clPrompter] ', 'loadForm end');
+}
+
+function getParentSngVals(parm: Element): Set<string> {
+  const set = new Set<string>();
+  const nodes = parm.querySelectorAll(':scope > SngVal > Value');
+  nodes.forEach(n => {
+    const v = (n as Element).getAttribute('Val');
+    if (v) set.add(v.toUpperCase());
+  });
+  return set;
+}
+
+// Helper: Get SpcVals from an ELEM (these act as single values for ELEM children)
+function getElemSpcVals(elem: Element): Set<string> {
+  const set = new Set<string>();
+  const nodes = elem.querySelectorAll(':scope > SpcVal > Value');
+  nodes.forEach(n => {
+    const v = (n as Element).getAttribute('Val');
+    if (v) set.add(v.toUpperCase());
+  });
+  return set;
+}
+
+/**
+ * Check if a nested ELEM group (with sub-elements) is entirely at default values
+ */
+function isNestedElemAtDefault(parm: Element, elemIndex: number, selector: (subIndex: number) => HTMLInputElement | null): boolean {
+  const elemParts = parm.querySelectorAll(':scope > Elem');
+  if (elemIndex >= elemParts.length) return true;
+
+  const elem = elemParts[elemIndex] as Element;
+  const subElems = elem.querySelectorAll(':scope > Elem');
+  if (subElems.length === 0) return true; // Not a nested ELEM
+
+  // Check each sub-element against its default
+  for (let j = 0; j < subElems.length; j++) {
+    const subElem = subElems[j] as Element;
+    const subDefault = String(subElem.getAttribute('Dft') || '');
+    // For nested ELEMs, only use explicit Dft attribute, no implicit defaults
+
+    const input = selector(j);
+    const value = (input?.value || '').trim();
+    console.log(`[DEBUG nested] SUB${j} value: "${value}", default: "${subDefault}"`);
+
+    // If value exists and doesn't match default, this nested ELEM is not at default
+    if (value && !matchesDefault(value, subDefault)) {
+      console.log(`[DEBUG nested] SUB${j} NON-DEFAULT (value doesn't match)`);
+      return false;
+    }
+    // If value is empty and default is not empty, also not at default
+    if (!value && subDefault) {
+      console.log(`[DEBUG nested] SUB${j} NON-DEFAULT (empty value but has default)`);
+      return false;
+    }
+  }
+
+  console.log(`[DEBUG nested] All subs at defaults`);
+  return true;
+}
+
+// Helper: safely join qualifier parts (omit empties, no leading/trailing '/')
+function joinQualParts(parts: string[]): string {
+  const clean = parts.map(p => (p ?? '').trim()).filter(p => p.length > 0);
+  if (clean.length === 0) return '';
+  if (clean.length === 1) return clean[0];
+  return clean.join('/');
+}
+
+// Helper: Get default value for a QUAL at given index
+function getQualDefault(parm: Element, qualIndex: number): string {
+  const qualParts = parm.querySelectorAll(':scope > Qual');
+  if (qualIndex < qualParts.length) {
+    const qual = qualParts[qualIndex] as Element;
+    const qualDft = String(qual.getAttribute('Dft') || '');
+    if (qualDft) return qualDft;
+
+    // If no explicit default but field is restricted, use first allowed value
+    if (isRestricted(qual)) {
+      return getFirstAllowedValue(qual);
+    }
+  }
+  return '';
+}
+
+// Helper: Get default value for a parameter element
+function getElemDefault(parm: Element, elemIndex: number): string {
+  const elemParts = parm.querySelectorAll(':scope > Elem');
+  if (elemIndex < elemParts.length) {
+    const elem = elemParts[elemIndex] as Element;
+    const elemDft = String(elem.getAttribute('Dft') || '');
+    if (elemDft) return elemDft;
+  }
+
+  // If no default on the Elem, check if parent Parm has a composite default
+  const parmDft = String(parm.getAttribute('Dft') || '');
+  if (parmDft) {
+    // Parse defaults like "SRCSEQ(1.00 1.00)" or "(1.00 1.00)"
+    let trimmed = parmDft.trim();
+
+    // Strip keyword prefix like "SRCSEQ("
+    const keywordMatch = trimmed.match(/^[A-Z][A-Z0-9]*\(/i);
+    if (keywordMatch) {
+      trimmed = trimmed.substring(keywordMatch[0].length - 1);
+    }
+
+    // Strip outer parentheses
+    if (trimmed.startsWith('(') && trimmed.endsWith(')')) {
+      trimmed = trimmed.slice(1, -1);
+    }
+
+    // Split on spaces to get individual elem defaults
+    const parts = trimmed.split(/\s+/);
+    if (elemIndex < parts.length) {
+      return parts[elemIndex];
+    }
+  }
+
+  // For ELEM children, NO implicit default from "first allowed value"
+  // That rule only applies to simple multi-instance PARM (not ELEM groups)
+  return '';
+}
+
+// Helper: Get the FORM default (what the UI pre-fills) for an ELEM
+// This is used to detect if user left the field at its pre-filled value
+function getElemFormDefault(parm: Element, elemIndex: number): string {
+  // First check for explicit defaults
+  const explicitDefault = getElemDefault(parm, elemIndex);
+  if (explicitDefault) return explicitDefault;
+
+  // For restricted fields without explicit default, form pre-fills with first allowed value
+  const elemParts = parm.querySelectorAll(':scope > Elem');
+  if (elemIndex < elemParts.length) {
+    const elem = elemParts[elemIndex] as Element;
+    if (isRestricted(elem)) {
+      const firstAllowed = getFirstAllowedValue(elem);
+      if (firstAllowed) return firstAllowed;
+    }
+  }
+
+  return '';
+}
+
+// Helper: Get first allowed value from SpcVal/SngVal/Values for a restricted field
+function getFirstAllowedValue(elem: Element): string {
+  const vals: string[] = [];
+  elem.querySelectorAll('SpcVal > Value, SngVal > Value, Values > Value').forEach(v => {
+    const val = (v as Element).getAttribute('Val');
+    if (val && val !== '*NULL') vals.push(val);
+  });
+  return vals.length > 0 ? vals[0] : '';
+}
+
+// Helper: Check if a value matches its default (case-insensitive)
+function matchesDefault(value: string, defaultVal: string): boolean {
+  if (!defaultVal) return false;
+  return value.trim().toUpperCase() === defaultVal.trim().toUpperCase();
+}
+
+// New: split a qualified value left→right (LIB/OBJ), trimming surrounding quotes/paren
+function splitQualLeftToRight(val: string): string[] {
+  let s = (val ?? '').trim();
+  if (!s) return [];
+  // Strip surrounding parentheses
+  if (s.startsWith('(') && s.endsWith(')')) s = s.slice(1, -1);
+  // Strip matching surrounding quotes
+  if ((s.startsWith("'") && s.endsWith("'")) || (s.startsWith('"') && s.endsWith('"'))) {
+    s = s.slice(1, -1);
+  }
+  return s.split('/').map(p => p.trim()).filter(p => p.length > 0);
+}
+
+// Populate form from values
+function populateFormFromValues(values: ParmMap): void {
+  console.log('[clPrompter] populateFormFromValues start, values:', values);
+  Object.entries(values).forEach(([kwd, val]) => {
+    console.log(`[clPrompter] Populating ${kwd} with val:`, val);
+    const parm = state.parms.find(p => p.getAttribute('Kwd') === kwd);
+    if (!parm) {
+      console.log(`[clPrompter] Parm not found for ${kwd}`);
+      return;
+    }
+    const max = parseInt(parm.getAttribute('Max') || '1', 10);
+    const hasElem = !!parm.querySelector(':scope > Elem');
+    const hasQual = !!parm.querySelector(':scope > Qual');
+
+    if (max > 1) {
+      const group = document.querySelector(`.parm-multi-group[data-kwd="${kwd}"]`) as HTMLElement;
+      if (!group) return;
+      const splitValsArr = flattenParmValue(val);
+      for (let i = 0; i < splitValsArr.length; i++) {
+        ensureInstanceCount(group, parm, kwd, i + 1, max);
+        const inst = group.querySelectorAll('.parm-instance')[i] as HTMLElement;
+        if (!inst) continue;
+        if (hasElem) {
+          populateElemInputs(parm, state.parmMetas[kwd] || {}, kwd, splitValsArr[i], i, inst);
+        } else if (hasQual) {
+          populateQualInputs(parm, state.parmMetas[kwd] || {}, kwd, splitValsArr[i], i, inst);
+        } else {
+          const input = inst.querySelector(`[name="${kwd}"]`) as HTMLInputElement;
+          if (input) input.value = splitValsArr[i] as string;
+        }
+      }
+    } else {
+      if (hasElem) {
+        populateElemInputs(parm, state.parmMetas[kwd] || {}, kwd, val, 0, document);
+      } else if (hasQual) {
+        populateQualInputs(parm, state.parmMetas[kwd] || {}, kwd, val, 0, document);
+      } else {
+        const input = document.querySelector(`[name="${kwd}"]`) as HTMLInputElement;
+        console.log(`[clPrompter] Input for ${kwd}:`, input);
+        if (input) {
+          console.log(`[clPrompter] Setting ${kwd} from "${input.value}" to "${val}"`);
+          input.value = val as string;
+          console.log(`[clPrompter] Set ${kwd} to "${input.value}"`);
+        } else {
+          console.log(`[clPrompter] Input not found for ${kwd}`);
+        }
+      }
+    }
+  });
+  console.log('[clPrompter] populateFormFromValues end');
+}
+
+// Helpers for population (simplified; expand as needed)
+function populateElemInputs(parm: ParmElement, parmMeta: ParmMetaMap[string], kwd: string, val: any, idx: number, container: HTMLElement | Document): void {
+  console.log('[clPrompter] populateElemInputs start for ${kwd}, val:', val);
+  const parts = Array.isArray(val) ? val : parseSpaceSeparatedValues(val as string);
+  console.log('[clPrompter] Parts:', parts);
+  const elemParts = parm.querySelectorAll(':scope > Elem');
+
+  parts.forEach((part, i) => {
+    const elem = elemParts[i] as Element | undefined;
+    if (!elem) return;
+    const elemType = String(elem.getAttribute('Type') || 'CHAR');
+
+    if (elemType === 'QUAL') {
+      populateQualInputs(elem as unknown as ParmElement, parmMeta, `${kwd}_ELEM${i}`, part, idx, container);
+    } else {
+      const subElems = elem.querySelectorAll(':scope > Elem');
+      if (subElems.length > 0) {
+        const subParts = Array.isArray(part) ? part : [part];
+        subParts.forEach((subPart, j) => {
+          let trimmedSubPart = subPart;
+          if (j === 0 && typeof trimmedSubPart === 'string' && trimmedSubPart.startsWith('(')) {
+            trimmedSubPart = trimmedSubPart.substring(1);
+          }
+          if (j === subParts.length - 1 && typeof trimmedSubPart === 'string' && trimmedSubPart.endsWith(')')) {
+            trimmedSubPart = trimmedSubPart.substring(0, trimmedSubPart.length - 1);
+          }
+          const input = container.querySelector(`[name="${kwd}_ELEM${i}_SUB${j}"]`) as any;
+          console.log(`[clPrompter] Input ${kwd}_ELEM${i}_SUB${j}:`, input);
+          if (input) {
+            console.log(`[clPrompter] Setting ${kwd}_ELEM${i}_SUB${j} from "${input.value}" to "${trimmedSubPart}"`);
+            input.value = trimmedSubPart;
+            console.log(`[clPrompter] Set ${kwd}_ELEM${i}_SUB${j} to "${input.value}"`);
+            const sNode = subElems[j] as Element | null;
+            const len = Number.parseInt(String(sNode?.getAttribute('Len') || ''), 10) || undefined;
+            const inl = Number.parseInt(String(sNode?.getAttribute('InlPmtLen') || ''), 10) || undefined;
+            ensureMinInputWidth(input as HTMLElement, { len, inlPmtLen: inl, valueLen: String(trimmedSubPart ?? '').length });
+          } else {
+            console.log(`[clPrompter] Input not found for ${kwd}_ELEM${i}_SUB${j}`);
+          }
+        });
+      } else {
+        let trimmedPart = part;
+        if (typeof trimmedPart === 'string') {
+          if (i === 0 && trimmedPart.startsWith('(')) {
+            trimmedPart = trimmedPart.substring(1);
+          }
+          if (i === parts.length - 1 && trimmedPart.endsWith(')')) {
+            trimmedPart = trimmedPart.substring(0, trimmedPart.length - 1);
+          }
+        }
+        const input = container.querySelector(`[name="${kwd}_ELEM${i}"]`) as any;
+        console.log(`[clPrompter] Input ${kwd}_ELEM${i}:`, input);
+        if (input) {
+          console.log(`[clPrompter] Setting ${kwd}_ELEM${i} from "${input.value}" to "${trimmedPart}"`);
+          input.value = trimmedPart;
+          console.log(`[clPrompter] Set ${kwd}_ELEM${i} to "${input.value}"`);
+          const len = Number.parseInt(String(elem.getAttribute('Len') || ''), 10) || undefined;
+          const inl = Number.parseInt(String(elem.getAttribute('InlPmtLen') || ''), 10) || undefined;
+          ensureMinInputWidth(input as HTMLElement, { len, inlPmtLen: inl, valueLen: String(trimmedPart ?? '').length });
+        } else {
+          console.log(`[clPrompter] Input not found for ${kwd}_ELEM${i}`);
+        }
+      }
+    }
+  });
+  console.log('[clPrompter] populateElemInputs end');
+}
+
+
+function populateQualInputs(parm: ParmElement, parmMeta: ParmMetaMap[string], kwd: string, val: any, idx: number, container: HTMLElement | Document): void {
+  console.log('[clPrompter] ', 'populateQualInputs start');
+  const parts = Array.isArray(val) ? (val as string[]) : splitQualLeftToRight(String(val));
+
+  const qualNodes = parm.querySelectorAll(':scope > Qual');
+
+  // FIFO into inputs: QUAL0 ← parts[0], QUAL1 ← parts[1], ...
+  let i = 0;
+  for (;; i++) {
+    const input = container.querySelector(`[name="${kwd}_QUAL${i}"]`) as any;
+    if (!input) break;
+    const newVal = parts[i] ?? '';
+    console.log(`[clPrompter] Input ${kwd}_QUAL${i}:`, input);
+
+    // Check if this is a combo box (has a corresponding select)
+    const select = container.querySelector(`#${kwd}_QUAL${i}_select`) as HTMLSelectElement | null;
+
+    if (select) {
+      // This is a combo box - check if value is in suggestions
+      const isInSuggestions = Array.from(select.options).some(opt => opt.value === newVal && opt.value !== '__CUSTOM__');
+
+      if (isInSuggestions) {
+        // Value is a suggestion - select it and hide custom input
+        select.value = newVal;
+        input.style.display = 'none';
+        input.value = newVal;
+      } else if (newVal) {
+        // Custom value - select "Custom..." and show input
+        select.value = '__CUSTOM__';
+        input.style.display = '';
+        input.value = newVal;
+      } else {
+        // Empty value - reset to first option
+        select.selectedIndex = 0;
+        input.style.display = 'none';
+        input.value = select.value !== '__CUSTOM__' ? select.value : '';
+      }
+      console.log(`[clPrompter] Set combo ${kwd}_QUAL${i} to "${newVal}" (select="${select.value}", input="${input.value}", visible=${input.style.display !== 'none'})`);
+    } else {
+      // Regular input - set value directly
+      if (input.value !== newVal) {
+        console.log(`[clPrompter] Setting ${kwd}_QUAL${i} from "${input.value}" to "${newVal}"`);
+        input.value = newVal;
+        console.log(`[clPrompter] Set ${kwd}_QUAL${i} to "${input.value}"`);
+      }
+    }
+
+    const qNode = qualNodes[i] as Element | null;
+    const len = Number.parseInt(String(qNode?.getAttribute('Len') || ''), 10) || undefined;
+    const inl = Number.parseInt(String(qNode?.getAttribute('InlPmtLen') || ''), 10) || undefined;
+    ensureMinInputWidth(input as HTMLElement, { len, inlPmtLen: inl, valueLen: newVal.length });
+  }
+  console.log('[clPrompter] ', 'populateQualInputs end');
+}
+
+async function ensureInstanceCount(group: HTMLElement, parm: ParmElement, kwd: string, targetCount: number, max: number): Promise<void> {
+  console.log('[clPrompter] ', 'ensureInstanceCount start');
+  while (group.querySelectorAll('.parm-instance').length < targetCount && group.querySelectorAll('.parm-instance').length < max) {
+    const addBtn = group.querySelector('.add-parm-btn') as HTMLButtonElement;
+    if (addBtn) addBtn.click();
+    else {
+      const currentCount = group.querySelectorAll('.parm-instance').length;
+      const newInst = renderParmInstance(parm, kwd, currentCount, max, group);
+      group.appendChild(newInst);
+    }
+    await new Promise(r => setTimeout(r, 10));
+  }
+  console.log('[clPrompter] ', 'ensureInstanceCount end');
+}
+///////
+// Assemble current values
+//////////
+
+function assembleCurrentParmMap(): ParmMap {
+  const map: ParmMap = {};
+
+  state.parms.forEach(parm => {
+    const kwd = parm.getAttribute('Kwd');
+    if (!kwd) return;
+
+    const max = parseInt(parm.getAttribute('Max') || '1', 10);
+    const hasElem = !!parm.querySelector(':scope > Elem');
+    const hasQual = !!parm.querySelector(':scope > Qual');
+    const parentSngVals = getParentSngVals(parm);
+
+    if (max > 1) {
+      const group = document.querySelector(`.parm-multi-group[data-kwd="${kwd}"]`);
+      const instances = group ? Array.from(group.querySelectorAll('.parm-instance')) : [];
+      const arr: any[] = [];
+
+      instances.forEach((inst, instIdx) => {
+        if (hasElem) {
+          const elemParts = parm.querySelectorAll(':scope > Elem');
+
+          // Check parent SngVal or first ELEM SpcVal
+          const firstElemInput = inst.querySelector(`[name="${kwd}_INST${instIdx}_ELEM0"]`) as HTMLInputElement | null;
+          const firstElemVal = (firstElemInput?.value || '').trim();
+          console.log(`[DEBUG] ${kwd} instance ELEM0 value: "${firstElemVal}"`);
+
+          // Skip instance if first ELEM is empty (user never filled it)
+          if (!firstElemVal) {
+            console.log(`[DEBUG] ${kwd} instance SKIPPED - empty ELEM0`);
+            return;
+          }
+
+          // For parent SngVal exclusivity check, use parent PARM's default
+          const parentParmDefault = String(parm.getAttribute('Dft') || '');
+          let isFirstElemSpecialAndDefault = false;
+
+          // Check if value matches parent SngVal (PARM-level, can replace entire parameter)
+          if (firstElemVal && parentSngVals.has(firstElemVal.toUpperCase())) {
+            console.log(`[DEBUG] ${kwd} ELEM0 matches parent SngVal: ${firstElemVal}`);
+            if (matchesDefault(firstElemVal, parentParmDefault)) {
+              console.log(`[DEBUG] ${kwd} ELEM0 matches parent default: ${parentParmDefault}`);
+              // First ELEM matches SngVal AND default - check if other ELEMs have non-default values
+              isFirstElemSpecialAndDefault = true;
+            } else {
+              console.log(`[DEBUG] ${kwd} ELEM0 does NOT match parent default: ${parentParmDefault}`);
+              // SngVal but not default - return just this value
+              arr.push(firstElemVal);
+              return;
+            }
+          }
+
+          // If first ELEM matches special value AND default, check if ANY other ELEM has non-default value
+          if (isFirstElemSpecialAndDefault) {
+            console.log(`[DEBUG] ${kwd} checking other ELEMs for non-default values...`);
+            let hasOtherNonDefault = false;
+            for (let i = 1; i < elemParts.length; i++) {
+              const elem = elemParts[i] as Element;
+              const elemType = elem.getAttribute('Type') || 'CHAR';
+              const elemDefault = getElemFormDefault(parm, i); // Use form default
+              console.log(`[DEBUG] ${kwd} ELEM${i} form default: "${elemDefault}"`);
+
+              if (elemType === 'QUAL') {
+                const parts: string[] = [];
+                for (let j = 0; ; j++) {
+                  const q = inst.querySelector(`[name="${kwd}_ELEM${i}_QUAL${j}"]`) as HTMLInputElement | null;
+                  if (!q) break;
+                  parts.push((q.value || '').trim());
+                }
+                const joined = joinQualParts([...parts].reverse());
+                if (joined && !matchesDefault(joined, elemDefault)) {
+                  hasOtherNonDefault = true;
+                  break;
+                }
+              } else {
+                const subElems = elem.querySelectorAll(':scope > Elem');
+                if (subElems.length > 0) {
+                  // Nested ELEM group - check if all sub-elements are at defaults
+                  const isAtDefault = isNestedElemAtDefault(parm, i, (j) =>
+                    inst.querySelector(`[name="${kwd}_INST${instIdx}_ELEM${i}_SUB${j}"]`) as HTMLInputElement | null
+                  );
+                  if (!isAtDefault) {
+                    hasOtherNonDefault = true;
+                    break;
+                  }
+                } else {
+                  const input = inst.querySelector(`[name="${kwd}_INST${instIdx}_ELEM${i}"]`) as HTMLInputElement | null;
+                  const v = (input?.value || '').trim();
+                  console.log(`[DEBUG] ${kwd} ELEM${i} value: "${v}"`);
+                  if (v && !matchesDefault(v, elemDefault)) {
+                    console.log(`[DEBUG] ${kwd} ELEM${i} is NON-DEFAULT`);
+                    hasOtherNonDefault = true;
+                    break;
+                  }
+                }
+              }
+            }
+
+            // If no other ELEM has non-default value, omit entire parameter
+            if (!hasOtherNonDefault) {
+              console.log(`[DEBUG] ${kwd} instance SKIPPED - all ELEMs at defaults`);
+              return;
+            }
+            console.log(`[DEBUG] ${kwd} instance INCLUDED - has non-default ELEM`);
+            // Otherwise fall through to assemble full ELEM group
+          }
+
+          // Even if first ELEM is not a special value, check if ALL ELEMs are at defaults
+          if (!isFirstElemSpecialAndDefault) {
+            console.log(`[DEBUG] ${kwd} checking if ALL ELEMs are at defaults...`);
+            let allAtDefaults = true;
+            for (let i = 0; i < elemParts.length; i++) {
+              const elem = elemParts[i] as Element;
+              const elemType = elem.getAttribute('Type') || 'CHAR';
+              const elemDefault = getElemFormDefault(parm, i); // Use form default for this check
+
+              if (elemType === 'QUAL') {
+                const parts: string[] = [];
+                for (let j = 0; ; j++) {
+                  const q = inst.querySelector(`[name="${kwd}_ELEM${i}_QUAL${j}"]`) as HTMLInputElement | null;
+                  if (!q) break;
+                  parts.push((q.value || '').trim());
+                }
+                const joined = joinQualParts([...parts].reverse());
+                if (joined && !matchesDefault(joined, elemDefault)) {
+                  allAtDefaults = false;
+                  break;
+                }
+              } else {
+                const subElems = elem.querySelectorAll(':scope > Elem');
+                if (subElems.length > 0) {
+                  const isAtDefault = isNestedElemAtDefault(parm, i, (j) =>
+                    inst.querySelector(`[name="${kwd}_INST${instIdx}_ELEM${i}_SUB${j}"]`) as HTMLInputElement | null
+                  );
+                  if (!isAtDefault) {
+                    allAtDefaults = false;
+                    break;
+                  }
+                } else {
+                  const input = inst.querySelector(`[name="${kwd}_INST${instIdx}_ELEM${i}"]`) as HTMLInputElement | null;
+                  const v = (input?.value || '').trim();
+                  if (v && !matchesDefault(v, elemDefault)) {
+                    allAtDefaults = false;
+                    break;
+                  }
+                }
+              }
+            }
+
+            if (allAtDefaults) {
+              console.log(`[DEBUG] ${kwd} instance SKIPPED - all ELEMs at defaults`);
+              return;
+            }
+          }
+
+          // Assemble each top-level ELEM
+          const elemVals: string[] = [];
+          let lastNonDefaultIndex = -1;
+          console.log(`[DEBUG] ${kwd} assembling elemVals, elemParts.length=${elemParts.length}`);
+
+          elemParts.forEach((elem, i) => {
+            const elemType = (elem as Element).getAttribute('Type') || 'CHAR';
+            const elemDefault = getElemFormDefault(parm, i); // Use form default for output assembly
+            console.log(`[DEBUG] ${kwd} ELEM${i}: type=${elemType}, formDefault="${elemDefault}"`);
+
+            if (elemType === 'QUAL') {
+              // Collect QUAL parts (UI order), then LIFO back out and join safely
+              const parts: string[] = [];
+              for (let j = 0; ; j++) {
+                const q = inst.querySelector(`[name="${kwd}_INST${instIdx}_ELEM${i}_QUAL${j}"]`) as HTMLInputElement | null;
+                if (!q) break;
+                parts.push((q.value || '').trim());
+              }
+              const joined = joinQualParts([...parts].reverse()); // omit empties, no stray '/'
+              if (joined) {
+                elemVals.push(joined);
+                if (!matchesDefault(joined, elemDefault)) {
+                  lastNonDefaultIndex = i;
+                }
+              } else {
+                elemVals.push(''); // placeholder to maintain index alignment
+              }
+            } else {
+              const subElems = (elem as Element).querySelectorAll(':scope > Elem');
+              if (subElems.length > 0) {
+                // Nested ELEM group - find last non-default sub and include values up to that point
+                const subVals: string[] = [];
+                let lastNonDefaultSub = -1;
+                subElems.forEach((subElem, j) => {
+                  const input = inst.querySelector(`[name="${kwd}_INST${instIdx}_ELEM${i}_SUB${j}"]`) as HTMLInputElement | null;
+                  const v = (input?.value || '').trim();
+                  subVals.push(v);
+                  const subDefault = String((subElem as Element).getAttribute('Dft') || '');
+                  // For nested ELEMs, only use explicit Dft attribute, no implicit defaults
+                  if (v && !matchesDefault(v, subDefault)) {
+                    lastNonDefaultSub = j;
+                  }
+                });
+                // Only include sub-values up to last non-default, wrap in parens
+                if (lastNonDefaultSub >= 0) {
+                  const trimmedSubs = subVals.slice(0, lastNonDefaultSub + 1).filter(v => v.length > 0);
+                  const joined = '(' + trimmedSubs.join(' ') + ')';
+                  elemVals.push(joined);
+                  lastNonDefaultIndex = i;
+                } else {
+                  elemVals.push(''); // All subs at default
+                }
+              } else {
+                const input = inst.querySelector(`[name="${kwd}_INST${instIdx}_ELEM${i}"]`) as HTMLInputElement | null;
+                const v = (input?.value || '').trim();
+                console.log(`[DEBUG] ${kwd} ELEM${i}: input value="${v}", default="${elemDefault}"`);
+                if (v) {
+                  elemVals.push(v);
+                  const matches = matchesDefault(v, elemDefault);
+                  console.log(`[DEBUG] ${kwd} ELEM${i}: matchesDefault=${matches}`);
+                  if (!matches) {
+                    lastNonDefaultIndex = i;
+                    console.log(`[DEBUG] ${kwd} ELEM${i}: updated lastNonDefaultIndex to ${i}`);
+                  }
+                } else {
+                  elemVals.push(''); // placeholder to maintain index alignment
+                  console.log(`[DEBUG] ${kwd} ELEM${i}: empty, pushed placeholder`);
+                }
+              }
+            }
+          });
+
+          // Only include ELEMs up to the last non-default ELEM
+          console.log(`[DEBUG] ${kwd} lastNonDefaultIndex=${lastNonDefaultIndex}, elemVals:`, elemVals);
+          if (lastNonDefaultIndex >= 0) {
+            const trimmedVals = elemVals.slice(0, lastNonDefaultIndex + 1).filter(v => v.length > 0);
+            const joined = trimmedVals.join(' ');
+            console.log(`[DEBUG] ${kwd} trimmedVals:`, trimmedVals, `joined="${joined}"`);
+            if (joined) {
+              arr.push(joined);
+            }
+          }
+        } else if (hasQual) {
+          // Collect QUAL inputs (UI order: QUAL0, QUAL1, QUAL2...)
+          const parts: string[] = [];
+          const qualParts = parm.querySelectorAll(':scope > Qual');
+          for (let i = 0; i < qualParts.length; i++) {
+            const input = inst.querySelector(`[name="${kwd}_QUAL${i}"]`) as HTMLInputElement | null;
+            if (!input) break;
+            parts.push((input.value || '').trim());
+          }
+
+          // If the first QUAL input equals a parent SngVal → only return that single value
+          const firstVal = parts[0] || '';
+          if (firstVal && parentSngVals.has(firstVal.toUpperCase())) {
+            arr.push(firstVal);
+          } else {
+            // IBM i Rule #3: Find last user-modified QUAL and include all QUALs up to that point
+            let lastModifiedIndex = -1;
+            for (let i = 0; i < parts.length; i++) {
+              const qualDft = getQualDefault(parm, i);
+              const userVal = parts[i];
+              // A QUAL is considered "modified" if user entered something different from default
+              if (userVal && !matchesDefault(userVal, qualDft)) {
+                lastModifiedIndex = i;
+              }
+            }
+
+            // If any QUAL was modified, output all QUALs up to and including the last modified one
+            if (lastModifiedIndex >= 0) {
+              const outputParts: string[] = [];
+              for (let i = 0; i <= lastModifiedIndex; i++) {
+                const userVal = parts[i];
+                const qualDft = getQualDefault(parm, i);
+                // Use user value if provided, otherwise use default
+                outputParts.push(userVal || qualDft);
+              }
+              // Reverse for output (QUAL2/QUAL1/QUAL0 format)
+              const partsOut = outputParts.reverse().filter(p => p.length > 0);
+              if (partsOut.length > 0) arr.push(partsOut);
+            }
+            // If no QUAL was modified, don't output the parameter at all
+          }
+        } else {
+          // Simple multi-instance parameter - check against default
+          const input = inst.querySelector(`[name="${kwd}"]`) as HTMLInputElement | null;
+          const v = (input?.value || '').trim();
+          let parmDefault = String(parm.getAttribute('Dft') || '');
+          console.log(`[DEBUG] ${kwd} Dft attribute: "${parmDefault}"`);
+          console.log(`[DEBUG] ${kwd} isRestricted: ${isRestricted(parm)}`);
+
+          // For restricted fields, the form pre-fills with first allowed value, so check against that
+          if (isRestricted(parm)) {
+            const vals: string[] = [];
+            parm.querySelectorAll('SpcVal > Value, SngVal > Value, Values > Value').forEach(val => {
+              const v = (val as Element).getAttribute('Val');
+              if (v && v !== '*NULL') vals.push(v);
+            });
+            console.log(`[DEBUG] ${kwd} allowed values: ${JSON.stringify(vals)}`);
+            if (vals.length > 0) parmDefault = vals[0];
+          }
+
+          console.log(`[DEBUG] ${kwd} effective default: "${parmDefault}"`);
+          console.log(`[DEBUG] ${kwd} current value: "${v}"`);
+          console.log(`[DEBUG] ${kwd} matchesDefault: ${matchesDefault(v, parmDefault)}`);
+
+          // Only include if value differs from default
+          if (v && !matchesDefault(v, parmDefault)) {
+            console.log(`[DEBUG] ${kwd} INCLUDED - differs from default`);
+            arr.push(v);
+          } else {
+            console.log(`[DEBUG] ${kwd} SKIPPED - matches default`);
+          }
+        }
+      });
+
+      // Only include multi-instance parameter if there are non-default values
+      if (arr.length > 0) {
+        map[kwd] = arr;
+      }
+    } else {
+      if (hasElem) {
+        const elemParts = parm.querySelectorAll(':scope > Elem');
+
+        // Check parent SngVal or first ELEM SpcVal
+        const firstElemInput = document.querySelector(`[name="${kwd}_ELEM0"]`) as HTMLInputElement | null;
+        const firstElemVal = (firstElemInput?.value || '').trim();
+
+        // For parent SngVal exclusivity check, use parent PARM's default
+        const parentParmDefault = String(parm.getAttribute('Dft') || '');
+        let isFirstElemSpecialAndDefault = false;
+
+        // Check if value matches parent SngVal
+        if (firstElemVal && parentSngVals.has(firstElemVal.toUpperCase())) {
+          if (matchesDefault(firstElemVal, parentParmDefault)) {
+            // First ELEM matches SngVal AND default - check if other ELEMs have non-default values
+            isFirstElemSpecialAndDefault = true;
+          } else {
+            // SngVal but not default - return just this value
+            map[kwd] = firstElemVal;
+            return;
+          }
+        } else if (elemParts.length > 0) {
+          // Check if value matches first ELEM's SpcVal (acts as single value)
+          const firstElem = elemParts[0] as Element;
+          const firstElemSpcVals = getElemSpcVals(firstElem);
+          if (firstElemVal && firstElemSpcVals.has(firstElemVal.toUpperCase())) {
+            if (matchesDefault(firstElemVal, parentParmDefault)) {
+              // First ELEM matches SpcVal AND default - check if other ELEMs have non-default values
+              isFirstElemSpecialAndDefault = true;
+            } else {
+              // SpcVal but not default - return just this value
+              map[kwd] = firstElemVal;
+              return;
+            }
+          }
+        }
+
+        // If first ELEM matches special value AND default, check if ANY other ELEM has non-default value
+        if (isFirstElemSpecialAndDefault) {
+          let hasOtherNonDefault = false;
+          for (let i = 1; i < elemParts.length; i++) {
+            const elem = elemParts[i] as Element;
+            const elemType = elem.getAttribute('Type') || 'CHAR';
+            const elemDefault = getElemFormDefault(parm, i); // Use form default
+
+            if (elemType === 'QUAL') {
+              const parts: string[] = [];
+              for (let j = 0; ; j++) {
+                const q = document.querySelector(`[name="${kwd}_ELEM${i}_QUAL${j}"]`) as HTMLInputElement | null;
+                if (!q) break;
+                parts.push((q.value || '').trim());
+              }
+              const joined = joinQualParts([...parts].reverse());
+              // Empty or matching default is considered at-default
+              if (joined && !matchesDefault(joined, elemDefault)) {
+                hasOtherNonDefault = true;
+                break;
+              }
+            } else {
+              const subElems = elem.querySelectorAll(':scope > Elem');
+              if (subElems.length > 0) {
+                // Nested ELEM group - check if all sub-elements are at defaults
+                const isAtDefault = isNestedElemAtDefault(parm, i, (j) =>
+                  document.querySelector(`[name="${kwd}_ELEM${i}_SUB${j}"]`) as HTMLInputElement | null
+                );
+                if (!isAtDefault) {
+                  hasOtherNonDefault = true;
+                  break;
+                }
+              } else {
+                const input = document.querySelector(`[name="${kwd}_ELEM${i}"]`) as HTMLInputElement | null;
+                const v = (input?.value || '').trim();
+                // Check if value exists AND differs from default
+                // Empty value is considered at-default
+                if (v) {
+                  // If there's a value, check if it's different from default
+                  if (!matchesDefault(v, elemDefault)) {
+                    hasOtherNonDefault = true;
+                    break;
+                  }
+                }
+              }
+            }
+          }
+
+          // If no other ELEM has non-default value, omit entire parameter
+          if (!hasOtherNonDefault) {
+            return;
+          }
+          // Otherwise fall through to assemble full ELEM group
+        }
+
+        // Assemble single-instance ELEM parameter
+        const elemVals: string[] = [];
+        let lastNonDefaultIndex = -1;
+
+        elemParts.forEach((elem, i) => {
+          const elemType = (elem as Element).getAttribute('Type') || 'CHAR';
+          const elemDefault = getElemFormDefault(parm, i); // Use form default for output assembly
+
+          if (elemType === 'QUAL') {
+            const parts: string[] = [];
+            for (let j = 0; ; j++) {
+              const q = document.querySelector(`[name="${kwd}_ELEM${i}_QUAL${j}"]`) as HTMLInputElement | null;
+              if (!q) break;
+              parts.push((q.value || '').trim());
+            }
+            const joined = joinQualParts([...parts].reverse());
+            if (joined) {
+              elemVals.push(joined);
+              if (!matchesDefault(joined, elemDefault)) {
+                lastNonDefaultIndex = i;
+              }
+            } else {
+              elemVals.push(''); // placeholder to maintain index alignment
+            }
+          } else {
+            const subElems = (elem as Element).querySelectorAll(':scope > Elem');
+            if (subElems.length > 0) {
+              // Nested ELEM group - find last non-default sub and include values up to that point
+              const subVals: string[] = [];
+              let lastNonDefaultSub = -1;
+              subElems.forEach((subElem, j) => {
+                const input = document.querySelector(`[name="${kwd}_ELEM${i}_SUB${j}"]`) as HTMLInputElement | null;
+                const v = (input?.value || '').trim();
+                subVals.push(v);
+                const subDefault = String((subElem as Element).getAttribute('Dft') || '');
+                // For nested ELEMs, only use explicit Dft attribute, no implicit defaults
+                if (v && !matchesDefault(v, subDefault)) {
+                  lastNonDefaultSub = j;
+                }
+              });
+              // Only include sub-values up to last non-default, wrap in parens
+              if (lastNonDefaultSub >= 0) {
+                const trimmedSubs = subVals.slice(0, lastNonDefaultSub + 1).filter(v => v.length > 0);
+                const joined = '(' + trimmedSubs.join(' ') + ')';
+                elemVals.push(joined);
+                lastNonDefaultIndex = i;
+              } else {
+                elemVals.push(''); // All subs at default
+              }
+            } else {
+              const input = document.querySelector(`[name="${kwd}_ELEM${i}"]`) as HTMLInputElement | null;
+              const v = (input?.value || '').trim();
+              if (v) {
+                elemVals.push(v);
+                if (!matchesDefault(v, elemDefault)) {
+                  lastNonDefaultIndex = i;
+                }
+              } else {
+                elemVals.push(''); // placeholder to maintain index alignment
+              }
+            }
+          }
+        });
+
+        // Only include ELEMs up to the last non-default ELEM
+        if (lastNonDefaultIndex >= 0) {
+          const trimmedVals = elemVals.slice(0, lastNonDefaultIndex + 1).filter(v => v.length > 0);
+          const joined = trimmedVals.join(' ');
+          if (joined) {
+            map[kwd] = `(${joined})`;
+          }
+        }
+      } else if (hasQual) {
+        // Collect QUAL inputs (UI order)
+        const parts: string[] = [];
+        for (let i = 0; ; i++) {
+          const input = document.querySelector(`[name="${kwd}_QUAL${i}"]`) as HTMLInputElement | null;
+          if (!input) break;
+          parts.push((input.value || '').trim());
+        }
+
+        const firstVal = parts[0] || '';
+        if (firstVal && parentSngVals.has(firstVal.toUpperCase())) {
+          map[kwd] = firstVal; // only the single value
+        } else {
+          // IBM i Rule #3: Find last user-modified QUAL and include all QUALs up to that point
+          let lastModifiedIndex = -1;
+          for (let i = 0; i < parts.length; i++) {
+            const qualDft = getQualDefault(parm, i);
+            const userVal = parts[i];
+            // A QUAL is considered "modified" if user entered something different from default
+            if (userVal && !matchesDefault(userVal, qualDft)) {
+              lastModifiedIndex = i;
+            }
+          }
+
+          console.log(`[DEBUG] ${kwd} QUAL lastModifiedIndex:`, lastModifiedIndex);
+
+          // If any QUAL was modified, output all QUALs up to and including the last modified one
+          if (lastModifiedIndex >= 0) {
+            // Skip if first (required) QUAL is empty (Min=1)
+            const qualParts = parm.querySelectorAll(':scope > Qual');
+            const firstQualMin = parseInt((qualParts[0] as Element)?.getAttribute('Min') || '0', 10);
+            if (firstQualMin > 0 && (!parts[0] || parts[0].trim() === '')) {
+              console.log(`[DEBUG] ${kwd} SKIPPED - empty required first QUAL`);
+              return; // Don't output parameter if required first QUAL is empty
+            }
+
+            const outputParts: string[] = [];
+            for (let i = 0; i <= lastModifiedIndex; i++) {
+              const userVal = parts[i];
+              const qualDft = getQualDefault(parm, i);
+              // Use user value if provided, otherwise use default
+              outputParts.push(userVal || qualDft);
+            }
+            // Reverse for output (QUAL2/QUAL1/QUAL0 format)
+            const partsOut = outputParts.reverse().filter(p => p.length > 0);
+            if (partsOut.length > 0) {
+              map[kwd] = partsOut;
+            }
+          }
+          // If no QUAL was modified, don't output the parameter at all
+        }
+      } else {
+        // Simple parameter - check against default
+        const input = document.querySelector(`[name="${kwd}"]`) as HTMLInputElement | null;
+        const value = (input?.value || '').trim();
+        const parmDefault = String(parm.getAttribute('Dft') || '');
+
+        // Only include if value is non-empty and differs from default
+        if (value && !matchesDefault(value, parmDefault)) {
+          map[kwd] = value;
+        }
+      }
+    }
+  });
+
+  return map;
+}
+//////////
+
+// Event handlers
+function onSubmit(): void {
+  console.log('[clPrompter] ', 'onSubmit (Enter) start');
+  const values = assembleCurrentParmMap();
+  const cmdName = state.xmlDoc?.querySelector('Cmd')?.getAttribute('CmdName') || state.cmdName;
+  vscode?.postMessage({ type: 'submit', cmdName, values } as SubmitMessage);
+  console.log('[clPrompter] ', 'onSubmit (Enter) end');
+}
+
+function onCancel(): void {
+  console.log('[clPrompter] ', 'onCancel (F3=Cancel) start');
+  const cmdName = state.xmlDoc?.querySelector('Cmd')?.getAttribute('CmdName') || state.cmdName;
+  vscode?.postMessage({ type: 'cancel', cmdName } as CancelMessage);
+  console.log('[clPrompter] ', 'onCancel (F3=Cancel) end');
+}
+
+function wirePrompterControls(): void {
+  console.log('[clPrompter] ', 'wirePrompterControls start');
+  if (state.controlsWired) return;
+  console.log('[clPrompter] ', 'wirePrompterControls continuing...');
+  const form = document.getElementById('clForm');
+  const submitBtn = document.getElementById('submitBtn');
+  const cancelBtn = document.getElementById('cancelBtn');
+
+  if (submitBtn) {
+    submitBtn.addEventListener('click', onSubmit);
+  }
+  if (cancelBtn) {
+    cancelBtn.addEventListener('click', onCancel);
+  }
+  if (form) {
+    form.addEventListener('submit', e => {
+      e.preventDefault();
+      onSubmit();
+    });
+  }
+
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      onSubmit();
+    } else if (e.key === 'Escape' || e.key === 'F3') {
+      e.preventDefault();
+      onCancel();
+    }
+  });
+
+  state.controlsWired = true;
+  console.log('[clPrompter] ', 'wirePrompterControls end');
+}
+
+function resetPrompterState(): void {
+  console.log('[clPrompter] ', 'resetPrompterState start (never called?)');
+  state.xmlDoc = null;
+  state.parms = [];
+  state.allowedValsMap = {};
+  state.originalParmMap = {};
+  state.cmdName = '';
+  state.hasProcessedFormData = false;
+  state.controlsWired = false;
+  const form = document.getElementById('clForm');
+  if (form) form.innerHTML = '';
+  console.log('[clPrompter] ', 'resetPrompterState end');
+}
+
+// Message handler
+window.addEventListener('message', event => {
+  console.log('[clPrompter] ', 'addEventListener(\'message\') start');
+  console.log('[clPrompter] Received message:', event.data);  // Add this
+  const message = event.data as WebviewMessage;
+  if (message.type === 'formData') {
+    console.log('[clPrompter] Processing formData');  // Add this
+    if (state.hasProcessedFormData) return;
+    state.hasProcessedFormData = true;
+    const parser = new DOMParser();
+    state.xmlDoc = parser.parseFromString(message.xml, 'text/xml');
+    state.parms = Array.from(state.xmlDoc.querySelectorAll('Parm')) as ParmElement[];
+    console.log('[clPrompter] Parsed parms:', state.parms.length);  // Add this
+    state.allowedValsMap = message.allowedValsMap || {};
+    state.cmdName = message.cmdName || '';
+    state.originalParmMap = message.paramMap || message.parmMap || {};
+    state.parmMetas = message.parmMetas || {};
+
+    // Apply configured colors (if provided)
+    const config = (message as any).config;
+    applyConfigStyles(config);
+
+    loadForm();
+    wirePrompterControls();
+    if (Object.keys(state.originalParmMap).length > 0) {
+      requestAnimationFrame(() => populateFormFromValues(state.originalParmMap));
+    }
+  }
+  console.log('[clPrompter] ', 'addEventListener(\'message\') end');
+});
+
+// Handshake
+(function postHandshake() {
+  ['ready', 'loaded', 'webviewReady', 'requestFormData'].forEach(type => {
+    vscode?.postMessage({ type });
+  });
+})();
+
+// ...add once near top-level (after helpers), guarded to avoid duplicates...
+(function injectKwdCss() {
+  if (document.getElementById('clp-kwd-css')) return;
+  const style = document.createElement('style');
+  style.id = 'clp-kwd-css';
+  style.textContent = `
+    .parm-header { display: flex; gap: .5rem; align-items: baseline; }
+    .parm-kwd { font-family: var(--vscode-font-family, monospace); opacity: 0.9; }
+    .form-div > label { display: inline-block; min-width: 8ch; margin-right: .5rem; }
+  `;
+  document.head.appendChild(style);
+})();

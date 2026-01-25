@@ -96,18 +96,30 @@ export function collectCLCmd(
         nextContent = nextLine.substring(0, nextCommentIdx);
       }
       nextContent = nextContent.replace(/[ \t]+$/, '');
+
+      // Check if the continuation line itself has a continuation character
+      let nextHasCont = false;
       if (nextContent.length > 0 && (nextContent[nextContent.length - 1] === '+' || nextContent[nextContent.length - 1] === '-')) {
+        nextHasCont = true;
         nextContent = nextContent.slice(0, -1);
       }
+
       if (contChar === '+') {
         let firstNonBlank = nextContent.search(/\S/);
         if (firstNonBlank === -1) firstNonBlank = nextContent.length;
         nextContent = nextContent.slice(firstNonBlank);
       }
       command += nextContent;
-      lineIndex += 2;
-      endLine = lineIndex - 1;
-      continue;
+      lineIndex++;
+      endLine = lineIndex;
+
+      // Only continue if the continuation line itself has a continuation
+      if (nextHasCont) {
+        lineIndex++;
+        continue;
+      } else {
+        break;
+      }
     } else {
       command += lineContent;
       endLine = lineIndex;

@@ -1,5 +1,5 @@
+import { CLParm, CLElem, CLQual, ParmMeta, ParmValues, QualPartsMap } from './types';
 
-import { CLParm, CLElem, CLQual, ParmValues, QualPartsMap } from './cltypes';
 import * as promptHelpers from './promptHelpers.js';
 
 export function isContainerType(type: string | null | undefined): boolean {
@@ -8,62 +8,59 @@ export function isContainerType(type: string | null | undefined): boolean {
     return t === 'ELEM' || t === 'QUAL' || t === 'CONTAINER';
 }
 
+// ...existing code...
 export function populateQualInputs(
     parm: Element | null,
+    parmMeta: ParmMeta,
     kwd: string,
     vals: string | string[] | null | undefined,
+    instanceIdx: number = 0,
     container: Document = document
 ): void {
-    const quals = parm ? parm.getElementsByTagName("Qual") : [];
+    const quals = parmMeta.Quals || [];
     let parts: string[] = [];
 
-    // Parse input values into parts array
     if (Array.isArray(vals)) {
         parts = vals as string[];
     } else if (typeof vals === "string") {
-        // Use your promptHelpers.splitCLQual if available, otherwise fallback to .split("/")
         parts = (promptHelpers && typeof promptHelpers.splitCLQual === "function")
             ? promptHelpers.splitCLQual(vals)
             : vals.split("/");
     }
 
-    // Log parts for debugging
     for (let i = 0; i < parts.length; i++) {
-        const part = parts[i];
-        console.log(`${kwd} Parts Dump: Parts[${i}] = ${part}`);
+        console.log(`${kwd} Parts Dump: Parts[${i}] = ${parts[i]}`);
     }
 
-    // Left-pad so rightmost value goes to QUAL0
-    while (parts.length < quals.length) {
-        parts.unshift("");
-    }
+    // Left-pad so the rightmost token maps to QUAL0
+    while (parts.length < quals.length) parts.unshift("");
 
-    // Assign values to QUAL inputs (QUAL0 = file/object, QUAL1 = library, etc.)
     for (let q = 0; q < quals.length; q++) {
-        // IBM i convention: QUAL0 gets rightmost value
-        const value = parts[q];
-        const partIdx = parts.length - 1 - q;
+        const partIdx = parts.length - 1 - q;         // compute index first
+        const value = parts[partIdx] ?? "";           // then read it
 
-        let input = container.querySelector(`[name="${kwd}_QUAL${q}"]`) as HTMLInputElement | HTMLSelectElement | null;
-        if (!input) {
-            if (!input) {
-                input = container.querySelector(`vscode-single-select[name="${kwd}_QUAL${q}"]`);
-            }
-            if (!input) {
-                input = container.querySelector(`select[name="${kwd}_QUAL${q}"]`);
-            }
-            if (!input) {
-                input = container.querySelector(`#${kwd}_QUAL${q}_custom`);
-            }
-        }
+        const qualName = instanceIdx > 0 ? `${kwd}_QUAL${q}_${instanceIdx}` : `${kwd}_QUAL${q}`;
+        let input = container.querySelector(`[name="${qualName}"]`) as HTMLInputElement | HTMLSelectElement | Element | null;
+        if (!input) input = container.querySelector(`vscode-single-select[name="${qualName}"]`);
+        if (!input) input = container.querySelector(`select[name="${qualName}"]`);
+        if (!input) input = container.querySelector(`#${qualName}_custom`);
 
-        // Debug output
-        console.log(`[clPrompter] QUAL Value Applied: kwd=${kwd}, q=${q}, partIdx=${partIdx}, parts[q]=value="${value}"`);
+        console.log(`[clPrompter] QUAL Value Applied: kwd=${qualName}, q=${q}, partIdx=${partIdx}, value="${value}"`);
 
         if (input) {
-            const tag = input.tagName ? input.tagName.toLowerCase() : "";
+            const tag = (input as Element).tagName ? (input as Element).tagName.toLowerCase() : "";
             if (tag === 'vscode-single-select') {
-                (input as any).value = value;
+                // Ensure custom value sticks in the combobox
+                const selectEl = input as Element;
+                const exists = !!selectEl.querySelector(`vscode-option[value="${value}"]`);
+                if (!exists && value) {
+                    const opt = document.createElement("vscode-option");
+                    opt.setAttribute("value", value);
+                    opt.textContent = value;
+                    opt.setAttribute("data-custom", "true");
+                    selectEl.appendChild(opt);
+                }
+                (selectEl as any).value = value;
             } else if (tag === 'select') {
                 let foundIdx = -1;
                 const selectElem = input as HTMLSelectElement;
@@ -75,11 +72,11 @@ export function populateQualInputs(
                 }
                 if (foundIdx !== -1) {
                     selectElem.selectedIndex = foundIdx;
-                    const customInput = container.querySelector(`#${kwd}_QUAL${q}_custom`) as HTMLInputElement | null;
+                    const customInput = container.querySelector(`#${qualName}_custom`) as HTMLInputElement | null;
                     if (customInput) customInput.value = "";
                 } else {
                     selectElem.selectedIndex = -1;
-                    const customInput = container.querySelector(`#${kwd}_QUAL${q}_custom`) as HTMLInputElement | null;
+                    const customInput = container.querySelector(`#${qualName}_custom`) as HTMLInputElement | null;
                     if (customInput) customInput.value = value;
                 }
             } else {
@@ -89,73 +86,61 @@ export function populateQualInputs(
     }
 }
 
-// Populate ELEM inputs for a parameter, including nested ELEM/QUAL and SngVal support
+
+
 export function populateElemInputs(
     parm: CLParm,
+    parmMeta: ParmMeta,
     kwd: string,
-    vals: string | string[],
-    instanceIdx: number,
+    vals: any,
+    instanceIdx: number = 0,
     container: Document = document
 ): void {
-    const elems = parm.Elems || [];
-    let splitVals: string[] = Array.isArray(vals)
-        ? vals
-        : (typeof vals === "string" ? vals.split(" ") : []);
+    // Helper: Recursively populate ELEM/QUAL fields
+    function populate(elems: any[], baseName: string, values: any, depth = 0) {
+        console.log(`[clPrompter] populate: baseName=${baseName}, depth=${depth}, elems=`, elems, 'values=', values);
 
-    // SngVal support: If SngVal is present and selected, set only that value
-    const sngValInput = container.querySelector(`[name="${kwd}_SNGVAL"]`) as HTMLSelectElement | null;
-    if (sngValInput && sngValInput.value) {
-        const selectedOption = sngValInput.selectedOptions[0];
-        if (selectedOption && selectedOption.getAttribute("data-sngval") === "true") {
-            // SngVal selected, assign and return
-            const input = container.querySelector(`[name="${kwd}_SNGVAL"]`) as HTMLInputElement | null;
-            if (input) input.value = sngValInput.value;
+        if (depth > 3) {
+            console.warn(`[clPrompter] Max ELEM recursion depth reached for ${baseName}`);
             return;
         }
-    }
-
-    // Multi-instance support: If MAX > 1, handle repeated groups
-    const max = parm.Max ?? 1;
-    const numInstances = Math.max(1, max);
-
-    // For each ELEM child, assign value (recursively for nested ELEM/QUAL)
-    for (let e = 0; e < elems.length; e++) {
-        const elem = elems[e];
-        // Compose the input name for this ELEM instance
-        const elemName = `${kwd}_ELEM${e}_${instanceIdx}`;
-        const value = splitVals[e] ?? elem.Dft ?? "";
-
-        // QUAL child: delegate to populateQualInputs
-        if (elem.Type === "QUAL" && elem.Quals) {
-            // If you have XML Element for this ELEM, pass it; otherwise, pass null
-            populateQualInputs(
-                null,
-                elemName,
-                value,
-                container
-            );
-        }
-        // Nested ELEM child: recurse
-        else if (elem.Type === "ELEM" && elem.Elems) {
-            populateElemInputs(
-                elem as CLParm,
-                elemName,
-                value,
-                0,
-                container
-            );
-        }
-        // Basic input: assign value directly
-        else {
-            const input = container.querySelector(`[name="${elemName}"]`) as HTMLInputElement | HTMLSelectElement | null;
-            if (input) input.value = value;
+        if (!Array.isArray(elems) || elems.length === 0) return;
+        // Defensive: If values is not array, make it one
+        if (!Array.isArray(values)) values = [values];
+        for (let e = 0; e < elems.length; e++) {
+            const elem = elems[e];
+            const elemType = (elem.Type || '').toUpperCase();
+            const elemName = baseName + `_ELEM${e}` + (instanceIdx > 0 ? `_${instanceIdx}` : '');
+            const value = values[e] !== undefined ? values[e] : elem.Dft ?? '';
+            if (elemType === "QUAL" && Array.isArray(elem.Quals)) {
+                // QUAL: value is array or string
+                populateQualInputs(
+                    null,
+                    elem,      // pass the actual QUAL meta
+                    elemName,
+                    value,
+                    instanceIdx,
+                    container
+                );
+            } else if (elemType === "ELEM" && Array.isArray(elem.Elems)) {
+                // Nested ELEM: value is array or string
+                populate(elem.Elems, elemName, value, depth + 1);
+            } else {
+                // Simple value: assign directly
+                const input = container.querySelector(`[name="${elemName}"]`) as HTMLInputElement | HTMLSelectElement | null;
+                if (input) input.value = value;
+            }
         }
     }
 
-    // Remove trailing unchanged defaults (for command assembly, not population)
-    // If you want to skip this for population, you can omit this block
-    // Otherwise, you can add logic here to clear trailing default values if needed
+    // Start recursion with top-level elems and vals
+    const elems = parm.Elems || parmMeta.Elems || [];
+    populate(elems, kwd, vals, 0);
 }
+
+
+
+// Populate ELEM inputs for a parameter, including nested ELEM/QUAL and SngVal support
 
 /**
  * Assembles qualified parameter values in LIFO order.
@@ -163,7 +148,7 @@ export function populateElemInputs(
  * reverses the order, and joins with '/'.
  * Example: [Q1, Q2, Q3] => "Q3/Q2/Q1" (if all present)
  */
-export function assembleQualParams(
+export function assembleQualParms(
     values: Record<string, any>,
     qualPartsMap: Record<string, (string | undefined | null)[]>
 ): void {
@@ -185,10 +170,10 @@ export function assembleQualParams(
     }
 }
 
-export function assembleElemParams(
+export function assembleElemParms(
     values: ParmValues,
     parms: Element[],
-    originalParamMap?: ParmValues,
+    originalParmMap?: ParmValues,
     getElemOrQualValue?: (elem: Element, elemName: string, container: Document) => string
 ): void {
     if (!Array.isArray(parms) || parms.length === 0) {
@@ -241,8 +226,8 @@ export function assembleElemParams(
             }
             if (elemVals.length > 0) {
                 values[kwd] = elemVals;
-            } else if (originalParamMap && Object.prototype.hasOwnProperty.call(originalParamMap, kwd)) {
-                let orig = originalParamMap[kwd];
+            } else if (originalParmMap && Object.prototype.hasOwnProperty.call(originalParmMap, kwd)) {
+                let orig = originalParmMap[kwd];
                 if (Array.isArray(orig)) {
                     values[kwd] = orig;
                 } else if (typeof orig === "string") {
@@ -258,7 +243,7 @@ export function assembleElemParams(
 export function isUnchangedDefault(
     input: HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement | Element,
     value: string,
-    originalParamMap?: Record<string, any>
+    originalParmMap?: Record<string, any>
 ): boolean {
     // 1. Always include if user modified
     if (input.getAttribute('data-modified') === 'true') return false;
@@ -266,7 +251,7 @@ export function isUnchangedDefault(
     // 2. Always include if present in original command (by full name for ELEM, by base for simple)
     const name = input.getAttribute('name') || input.id;
     const baseName = name.split('_')[0];
-    if (originalParamMap && (originalParamMap.hasOwnProperty(name) || originalParamMap.hasOwnProperty(baseName))) return false;
+    if (originalParmMap && (originalParmMap.hasOwnProperty(name) || originalParmMap.hasOwnProperty(baseName))) return false;
 
     // 3. Compare to default (case-insensitive, trimmed, treat undefined/empty as equal)
     const defaultValue = input.getAttribute('data-default');
@@ -387,3 +372,4 @@ export function getInputValue(
     // Regular input
     return (input as HTMLInputElement).value || '';
 }
+

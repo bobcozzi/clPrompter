@@ -18,10 +18,14 @@ export async function getCMDXML(cmdString: string): Promise<string> {
     // placing it into the cmdName variable as a 20-byte API-friendly qualified object name
     const cmdName = buildAPI2PartName(cmdString);
 
+    // Convert Uint8Array to string for logging and CL command
+    const cmdNameStr = new TextDecoder().decode(cmdName);
+    console.log(`[clPrompter] Getting XML for: ${cmdNameStr}`);
+
     // Now we need to pull out the command name from the up to first 10 characters.
     // and the library name (LIB) from positions 11 to 20 (if they exist).
-    const OBJNAME = cmdName.toString('utf8', 0, 10).trim();
-    let LIBNAME = cmdName.length >= 20 ? cmdName.toString('utf8', 10, 20).trim() : '';
+    const OBJNAME = new TextDecoder().decode(cmdName.subarray(0, 10)).trim();
+    let LIBNAME = cmdName.length >= 20 ? new TextDecoder().decode(cmdName.subarray(10, 20)).trim() : '';
     if (!LIBNAME) {
         LIBNAME = '*LIBL';
     }
@@ -29,7 +33,7 @@ export async function getCMDXML(cmdString: string): Promise<string> {
     // Use up to the first 10 non-blank characters of cmdName for the filename
     // If the command is qualified, use the library name in the xml file name for uniqueness.
     // If the commadn is unqualied, then use just the command name.
-    const trimmedCmdName = cmdName.toString().trim().substring(0, 10).replace(/\s+$/, '');
+    const trimmedCmdName = cmdNameStr.trim().substring(0, 10).replace(/\s+$/, '');
     let cmdXMLName = '';
     if (LIBNAME.length > 0 && LIBNAME !== '*LIBL') {
         cmdXMLName = `${LIBNAME}_`;
@@ -39,8 +43,8 @@ export async function getCMDXML(cmdString: string): Promise<string> {
     const fileParm = buildQlgPathNameHex(outFile);  // Create an QlgPathName_T for this outfile
 
 
-    console.log(`[clPrompter] Getting XML for: ${cmdName}`);
-    const QCDRCMDD = `CALL QCDRCMDD PARM('${cmdName}' X'${fileParm}' 'DEST0200' ' ' 'CMDD0200' X'000000000000')`;
+    const QCDRCMDD = `CALL QCDRCMDD PARM('${cmdNameStr}' X'${fileParm}' 'DEST0200' ' ' 'CMDD0200' X'000000000000')`;
+    console.log(`[clPrompter] Calling API: ${QCDRCMDD}`);
 
     // Use VSCODEforIBMi to get the Command Definition XML file from the IFS
     const result = await connection.runCommand({
@@ -61,5 +65,5 @@ export async function getCMDXML(cmdString: string): Promise<string> {
         vscode.window.showWarningMessage(`Command completed with code ${result.code}: ${result.stderr || result.stdout}`);
     }
     // Placeholder for unknown commands
-    return `<QcdCLCmd><Cmd CmdName="${cmdName}"></Cmd></QcdCLCmd>`;
+    return `<QcdCLCmd><Cmd CmdName="${cmdNameStr}"></Cmd></QcdCLCmd>`;
 }
