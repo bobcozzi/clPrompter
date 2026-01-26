@@ -10,7 +10,9 @@ import { ParmMeta, ParmMetaMap } from './types';
 import {
     extractAllowedValsAndTypes,
     quoteIfNeeded,
-    buildCLCommand
+    buildCLCommand,
+    formatCLSource,
+    FormatOptions
 } from "./formatCL";
 
 import {
@@ -55,6 +57,99 @@ export async function activate(context: vscode.ExtensionContext) {
                     return;
                 }
                 await ClPromptPanel.createOrShow(context.extensionUri);
+            })
+        );
+
+        // Register Format CL Current Command
+        context.subscriptions.push(
+            vscode.commands.registerCommand('clPrompter.formatCurrentCommand', async () => {
+                const editor = vscode.window.activeTextEditor;
+                if (!editor) {
+                    vscode.window.showInformationMessage('No active editor');
+                    return;
+                }
+
+                const document = editor.document;
+
+                // Extract the current command range
+                const commandInfo = collectCLCmd(editor);
+                if (!commandInfo || !commandInfo.command) {
+                    vscode.window.showInformationMessage('No CL command found at cursor');
+                    return;
+                }
+
+                // Get format options from configuration
+                const config = vscode.workspace.getConfiguration('clPrompter');
+                const formatOptions: FormatOptions = {
+                    cvtcase: config.get('formatCase', '*UPPER') as '*UPPER' | '*LOWER' | '*NONE',
+                    indrmks: config.get('formatIndentRemarks', '*YES') as '*NO' | '*YES',
+                    bgncol: config.get('formatBeginColumn', 12),
+                    indcol: config.get('formatIndentColumn', 15),
+                    indcont: config.get('formatIndentContinuation', 20)
+                };
+
+                // Get the lines for the command
+                const allLines: string[] = [];
+                for (let i = commandInfo.startLine; i <= commandInfo.endLine; i++) {
+                    allLines.push(document.lineAt(i).text);
+                }
+
+                // Format the command
+                const formatted = formatCLSource(allLines, formatOptions, 0);
+
+                // Replace in the editor
+                await editor.edit(editBuilder => {
+                    const range = new vscode.Range(
+                        commandInfo.startLine, 0,
+                        commandInfo.endLine, document.lineAt(commandInfo.endLine).text.length
+                    );
+                    editBuilder.replace(range, formatted.join('\n'));
+                });
+
+                vscode.window.showInformationMessage('CL command formatted');
+            })
+        );
+
+        // Register Format CL Entire File
+        context.subscriptions.push(
+            vscode.commands.registerCommand('clPrompter.formatEntireFile', async () => {
+                const editor = vscode.window.activeTextEditor;
+                if (!editor) {
+                    vscode.window.showInformationMessage('No active editor');
+                    return;
+                }
+
+                const document = editor.document;
+
+                // Get format options from configuration
+                const config = vscode.workspace.getConfiguration('clPrompter');
+                const formatOptions: FormatOptions = {
+                    cvtcase: config.get('formatCase', '*UPPER') as '*UPPER' | '*LOWER' | '*NONE',
+                    indrmks: config.get('formatIndentRemarks', '*YES') as '*NO' | '*YES',
+                    bgncol: config.get('formatBeginColumn', 12),
+                    indcol: config.get('formatIndentColumn', 15),
+                    indcont: config.get('formatIndentContinuation', 20)
+                };
+
+                // Get all lines
+                const allLines: string[] = [];
+                for (let i = 0; i < document.lineCount; i++) {
+                    allLines.push(document.lineAt(i).text);
+                }
+
+                // Format the entire file
+                const formatted = formatCLSource(allLines, formatOptions, 0);
+
+                // Replace entire document
+                await editor.edit(editBuilder => {
+                    const range = new vscode.Range(
+                        0, 0,
+                        document.lineCount - 1, document.lineAt(document.lineCount - 1).text.length
+                    );
+                    editBuilder.replace(range, formatted.join('\n'));
+                });
+
+                vscode.window.showInformationMessage('CL file formatted');
             })
         );
     } catch (error) {
@@ -164,13 +259,26 @@ export class ClPromptPanel {
             )
             : undefined;
 
+        // Extract command prompt from XML for panel title
+        let cmdPrompt = '';
+        try {
+            const parser = new DOMParser();
+            const xmlDoc = parser.parseFromString(xml, 'application/xml');
+            const cmdNodes = xmlDoc.getElementsByTagName('Cmd');
+            if (cmdNodes.length > 0) {
+                cmdPrompt = cmdNodes[0].getAttribute('Prompt') || '';
+            }
+        } catch (err) {
+            console.error('[clPrompter] Failed to parse XML for command prompt:', err);
+        }
+
         if (ClPromptPanel.currentPanel) {
             ClPromptPanel.currentPanel._panel.reveal(column);
-            await ClPromptPanel.currentPanel.setXML(cmdName, xml, editor, selection);
+            await ClPromptPanel.currentPanel.setXML(cmdName, xml, editor, selection, cmdPrompt);
         } else {
             const panel = vscode.window.createWebviewPanel(
                 'clPrompter',
-                'CL Prompt',
+                cmdName ? `${cmdName} Prompt` : 'CL Prompt',
                 column,
                 {
                     enableScripts: true,
@@ -279,6 +387,29 @@ export class ClPromptPanel {
                     return;
                 }
                 console.log('[clPrompter] Sending processed data to webview');
+
+                // Extract command prompt from XML
+                let cmdPrompt = '';
+                try {
+                    const parser = new DOMParser();
+                    const xmlDoc = parser.parseFromString(xml, 'application/xml');
+                    const cmdNodes = xmlDoc.getElementsByTagName('Cmd');
+                    console.log('[clPrompter] webviewReady: Found', cmdNodes.length, 'Cmd nodes');
+                    if (cmdNodes.length > 0) {
+                        const cmdNode = cmdNodes[0];
+                        console.log('[clPrompter] webviewReady: Cmd attributes:', {
+                            CmdName: cmdNode.getAttribute('CmdName'),
+                            Prompt: cmdNode.getAttribute('Prompt'),
+                            prompt: cmdNode.getAttribute('prompt')
+                        });
+                        cmdPrompt = cmdNode.getAttribute('Prompt') || '';
+                    }
+                } catch (err) {
+                    console.error('[clPrompter] webviewReady: Failed to parse XML for command prompt:', err);
+                }
+
+                console.log('[clPrompter] webviewReady: Extracted cmdPrompt:', cmdPrompt);
+
                 const allowedValsMap = buildAllowedValsMap(xml);
                 const config = vscode.workspace.getConfiguration('clPrompter');
                 const keywordColor = config.get('kwdColor');
@@ -290,6 +421,7 @@ export class ClPromptPanel {
                     xml,
                     allowedValsMap,
                     cmdName,
+                    cmdPrompt: cmdPrompt,
                     paramMap: this._parmMap,
                     parmMap: this._parmMap,
                     parmMetas: this._parmMetas,
@@ -442,7 +574,31 @@ export class ClPromptPanel {
                             console.log('[clPrompter] loadForm ignored; formData already sent');
                             break;
                         }
-                        this._panel.webview.postMessage({ type: 'formXml', xml: this._xml, cmdName: this._cmdName });
+
+                        // Extract command prompt from XML BEFORE sending messages
+                        let cmdPrompt = '';
+                        try {
+                            const parser = new DOMParser();
+                            const xmlDoc = parser.parseFromString(this._xml, 'application/xml');
+                            const cmdNodes = xmlDoc.getElementsByTagName('Cmd');
+                            console.log('[clPrompter] Found', cmdNodes.length, 'Cmd nodes');
+                            if (cmdNodes.length > 0) {
+                                const cmdNode = cmdNodes[0];
+                                console.log('[clPrompter] Cmd attributes:', {
+                                    CmdName: cmdNode.getAttribute('CmdName'),
+                                    Prompt: cmdNode.getAttribute('Prompt'),
+                                    prompt: cmdNode.getAttribute('prompt')
+                                });
+                                cmdPrompt = cmdNode.getAttribute('Prompt') || '';
+                            }
+                        } catch (err) {
+                            console.error('[clPrompter] Failed to parse XML for command prompt:', err);
+                        }
+
+                        console.log('[clPrompter] Extracted cmdPrompt:', cmdPrompt);
+                        console.log('[clPrompter] About to send formData with cmdName:', this._cmdName, 'cmdPrompt:', cmdPrompt);
+
+                        this._panel.webview.postMessage({ type: 'formXml', xml: this._xml, cmdName: this._cmdName, cmdPrompt: cmdPrompt });
                         this._panel.webview.postMessage({ type: 'setLabel', label: this._cmdLabel });
 
                         const allowedValsMap = buildAllowedValsMap(this._xml);
@@ -458,6 +614,7 @@ export class ClPromptPanel {
                             xml: this._xml,
                             allowedValsMap,
                             cmdName: this._cmdName,
+                            cmdPrompt: cmdPrompt,
                             parmMap: this._parmMap,
                             paramMap: this._parmMap,
                             parmMetas: this._parmMetas,
@@ -474,7 +631,7 @@ export class ClPromptPanel {
     }
 
     // ✅ Update setXML to handle multi-line commands
-    public async setXML(cmdName: string, xml: string, editor?: vscode.TextEditor, selection?: vscode.Selection) {
+    public async setXML(cmdName: string, xml: string, editor?: vscode.TextEditor, selection?: vscode.Selection, cmdPrompt?: string) {
         console.log('[clPrompter] setXML called - resetting state');
         this.resetWebviewState();
         this._sentFormData = false; // allow new formData send
@@ -487,6 +644,11 @@ export class ClPromptPanel {
 
         // ✅ Update document URI to current editor
         this._documentUri = editor?.document.uri;
+
+        // Update panel title
+        if (cmdName) {
+            this._panel.title = `${cmdName} Prompt`;
+        }
 
         const html = await this.getHtmlForPrompter(this._panel.webview, this._cmdName, this._xml);
         this._panel.webview.html = html;

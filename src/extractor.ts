@@ -22,33 +22,24 @@ export interface ExtractedValues {
 
 
 /**
- * Extracts a full CL (Command Language) command from a list of lines, starting from a given line index.
+ * Extracts a full CL (Command Language) command from a document starting from a given line index.
  * Handles line continuations indicated by trailing `+` or `-` characters, and ignores trailing comments.
  *
  * The function scans upwards to find the start of the command (handling continuations),
  * then concatenates all relevant lines, removing continuation characters and comments as needed.
  * For `+` continuations, leading whitespace on the next line is trimmed; for `-`, the next line is appended as-is.
  *
- *           const editor = vscode.window.activeTextEditor;
- *           if (editor) {
- *            const doc = editor.document;
- *            const currentLine = editor.selection.active.line;
- *            const cmdResult = extractFullCLCmd(doc, currentLine);
- *           }
- * @param doc - The active text editor's document
+ * @param doc - The text document
  * @param currentLine - The index of the line where the command extraction should start.
  * @returns An object containing:
  *   - `command`: The extracted full command as a single string.
  *   - `startLine`: The index of the first line of the command.
  *   - `endLine`: The index of the last line of the command.
  */
-
-export function collectCLCmd(
-  editor: vscode.TextEditor
+export function collectCLCmdFromLine(
+  doc: vscode.TextDocument,
+  currentLine: number
 ): { command: string; startLine: number; endLine: number } {
-
-    const doc = editor.document;
-    const currentLine = editor.selection.active.line;
 
   let startLine = currentLine;
   let endLine = currentLine;
@@ -67,9 +58,11 @@ export function collectCLCmd(
   let command = '';
   let lineIndex = startLine;
   const totalLines = doc.lineCount;
+  let prevContChar = '';
 
   while (lineIndex < totalLines) {
     let line = doc.lineAt(lineIndex).text;
+
     let codePart = line;
     const commentIdx = line.indexOf('/*');
     if (commentIdx !== -1) {
@@ -84,47 +77,24 @@ export function collectCLCmd(
       lineContent = codePart.slice(0, -1);
     }
 
-    if (contChar) {
-      command += lineContent;
-      endLine = lineIndex;
-      // Prepare to concatenate the next line
-      if (lineIndex + 1 >= totalLines) break;
-      let nextLine = doc.lineAt(lineIndex + 1).text;
-      let nextContent = nextLine;
-      const nextCommentIdx = nextLine.indexOf('/*');
-      if (nextCommentIdx !== -1) {
-        nextContent = nextLine.substring(0, nextCommentIdx);
-      }
-      nextContent = nextContent.replace(/[ \t]+$/, '');
+    // Trim leading whitespace if previous line had '+' continuation
+    if (prevContChar === '+') {
+      lineContent = lineContent.trimStart();
+    }
 
-      // Check if the continuation line itself has a continuation character
-      let nextHasCont = false;
-      if (nextContent.length > 0 && (nextContent[nextContent.length - 1] === '+' || nextContent[nextContent.length - 1] === '-')) {
-        nextHasCont = true;
-        nextContent = nextContent.slice(0, -1);
-      }
+    command += lineContent;
+    endLine = lineIndex;
 
-      if (contChar === '+') {
-        let firstNonBlank = nextContent.search(/\S/);
-        if (firstNonBlank === -1) firstNonBlank = nextContent.length;
-        nextContent = nextContent.slice(firstNonBlank);
-      }
-      command += nextContent;
-      lineIndex++;
-      endLine = lineIndex;
-
-      // Only continue if the continuation line itself has a continuation
-      if (nextHasCont) {
-        lineIndex++;
-        continue;
-      } else {
-        break;
-      }
-    } else {
-      command += lineContent;
-      endLine = lineIndex;
+    // If no continuation character, we're done
+    if (!contChar) {
       break;
     }
+
+    // Remember this line's continuation character for next iteration
+    prevContChar = contChar;
+
+    // Move to next line to continue processing
+    lineIndex++;
   }
 
   command = command.replace(/\s{2,}/g, ' ').trim();
@@ -132,8 +102,20 @@ export function collectCLCmd(
   return { command, startLine, endLine };
 }
 
-
-
+/**
+ * Convenience wrapper for collectCLCmdFromLine that works with the active editor.
+ * Extracts the CL command at the current cursor position.
+ *
+ * @param editor - The active text editor
+ * @returns An object containing the command string, startLine, and endLine
+ */
+export function collectCLCmd(
+  editor: vscode.TextEditor
+): { command: string; startLine: number; endLine: number } {
+  const doc = editor.document;
+  const currentLine = editor.selection.active.line;
+  return collectCLCmdFromLine(doc, currentLine);
+}
 
 /**
  * Extract all allowed values from a parameter element including Range, Values, SpcVal, SngVal

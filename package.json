@@ -37,6 +37,14 @@
       {
         "command": "clPrompter.clPrompter",
         "title": "CL Prompter"
+      },
+      {
+        "command": "clPrompter.formatCurrentCommand",
+        "title": "Format CL (current)"
+      },
+      {
+        "command": "clPrompter.formatEntireFile",
+        "title": "Format CL (file)"
       }
     ],
     "keybindings": [
@@ -117,6 +125,43 @@
             1
           ],
           "description": "Controls case conversion for CL command parameter names (keywords): 0 = UPPERCASE, 1 = lowercase."
+        },
+        "clPrompter.formatCase": {
+          "type": "string",
+          "default": "*UPPER",
+          "enum": [
+            "*UPPER",
+            "*LOWER",
+            "*NONE"
+          ],
+          "description": "Format: Case conversion for CL source. *UPPER = uppercase, *LOWER = lowercase, *NONE = no change."
+        },
+        "clPrompter.formatIndentRemarks": {
+          "type": "string",
+          "default": "*YES",
+          "enum": [
+            "*YES",
+            "*NO"
+          ],
+          "description": "Format: Indent remarks (comments). *YES = indent comments, *NO = leave at column 1."
+        },
+        "clPrompter.formatBeginColumn": {
+          "type": "number",
+          "default": 12,
+          "minimum": 1,
+          "description": "Format: Starting column for CL commands. Default: 12 (SEU classic)."
+        },
+        "clPrompter.formatIndentColumn": {
+          "type": "number",
+          "default": 15,
+          "minimum": 1,
+          "description": "Format: Indentation column for nested commands (DO blocks). Default: 15."
+        },
+        "clPrompter.formatIndentContinuation": {
+          "type": "number",
+          "default": 20,
+          "minimum": 1,
+          "description": "Format: Continuation line indent column. Default: 20."
         }
       }
     },
@@ -126,6 +171,16 @@
           "command": "clPrompter.clPrompter",
           "when": "editorLangId == clle || editorLangId == clp || editorLangId == cmd || editorLangId == cl",
           "group": "navigation"
+        },
+        {
+          "command": "clPrompter.formatCurrentCommand",
+          "when": "editorTextFocus && (editorLangId == clle || editorLangId == clp || editorLangId == cl)",
+          "group": "1_modification"
+        },
+        {
+          "command": "clPrompter.formatEntireFile",
+          "when": "editorTextFocus && (editorLangId == clle || editorLangId == clp || editorLangId == cl)",
+          "group": "1_modification"
         }
       ]
     }

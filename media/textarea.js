@@ -3,7 +3,8 @@ export function createTextareaWithCombobox(name, value, maxLength, allowedVals) 
     const textarea = document.createElement('vscode-textarea');
     textarea.name = name;
     textarea.value = value || '';
-    textarea.setAttribute('maxlength', maxLength);
+    // Remove maxlength restriction for long CL expressions with concatenations
+    // textarea.setAttribute('maxlength', maxLength);
 
     if (allowedVals && allowedVals.length > 1) {
         const combo = document.createElement('vscode-single-select');

@@ -159,10 +159,21 @@ function parseSimpleParam(cmd: string, i: number, meta: ParmMeta) {
     // Parenthesized value
     let depth = 1;
     i++; // skip '('
+    let inSQ = false; // single quote
+    let inDQ = false; // double quote
     while (i < cmd.length && depth > 0) {
       const c = cmd[i];
-      if (c === '(') depth++;
-      else if (c === ')') depth--;
+
+      // Handle quotes
+      if (c === "'" && !inDQ) inSQ = !inSQ;
+      else if (c === '"' && !inSQ) inDQ = !inDQ;
+
+      // Only count parens when not inside quotes
+      if (!inSQ && !inDQ) {
+        if (c === '(') depth++;
+        else if (c === ')') depth--;
+      }
+
       if (depth > 0) val += c;
       i++;
     }
@@ -188,10 +199,21 @@ function parseQualParam(cmd: string, i: number, meta: ParmMeta) {
     // Parenthesized value
     let depth = 1;
     i++; // skip '('
+    let inSQ = false; // single quote
+    let inDQ = false; // double quote
     while (i < cmd.length && depth > 0) {
       const c = cmd[i];
-      if (c === '(') depth++;
-      else if (c === ')') depth--;
+
+      // Handle quotes
+      if (c === "'" && !inDQ) inSQ = !inSQ;
+      else if (c === '"' && !inSQ) inDQ = !inDQ;
+
+      // Only count parens when not inside quotes
+      if (!inSQ && !inDQ) {
+        if (c === '(') depth++;
+        else if (c === ')') depth--;
+      }
+
       if (depth > 0) val += c;
       i++;
       // Prevent infinite loop if parentheses are unbalanced

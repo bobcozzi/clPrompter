@@ -1564,6 +1564,14 @@ window.addEventListener('message', event => {
         console.log('[clPrompter] Parsed parms:', state.parms.length); // Add this
         state.allowedValsMap = message.allowedValsMap || {};
         state.cmdName = message.cmdName || '';
+        // Update main title with command name and prompt
+        const cmdPrompt = message.cmdPrompt || '';
+        console.log('[clPrompter] cmdName:', state.cmdName, 'cmdPrompt:', cmdPrompt);
+        const mainTitle = document.getElementById('mainTitle');
+        if (mainTitle && state.cmdName) {
+            mainTitle.textContent = cmdPrompt ? `${state.cmdName} (${cmdPrompt})` : state.cmdName;
+            console.log('[clPrompter] Set mainTitle to:', mainTitle.textContent);
+        }
         state.originalParmMap = message.paramMap || message.parmMap || {};
         state.parmMetas = message.parmMetas || {};
         // Apply configured colors (if provided)

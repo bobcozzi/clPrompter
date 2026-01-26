@@ -1,19 +1,19 @@
-
 // VS Code config import
 import * as vscode from 'vscode';
 
 import { DOMParser } from '@xmldom/xmldom';
 import { ParmMeta } from './types';
-import { tokenizeCL } from './tokenizeCL'; // ← add this import
+import { tokenizeCL, formatCL_SEU, parseCL } from './tokenizeCL'; // ← add parseCL
+import { collectCLCmdFromLine } from './extractor'; // ← add this import
 
 // Type aliases must be declared before use
 type AllowedValsMap = Record<string, string[]>; // e.g. { OBJTYPE: ["*ALL", "*FILE", ...], ... }
 type ParmTypeMap = Record<string, string>;      // e.g. { OBJTYPE: "NAME", ... }
 
-type CaseOption = '*UPPER' | '*LOWER' | '*NONE';
-type IndentRemarks = '*NO' | '*YES';
+export type CaseOption = '*UPPER' | '*LOWER' | '*NONE';
+export type IndentRemarks = '*NO' | '*YES';
 
-interface FormatOptions {
+export interface FormatOptions {
   cvtcase: CaseOption;
   indrmks: IndentRemarks;
   bgncol: number;
@@ -660,6 +660,46 @@ export function extractAllowedValsAndTypes(xml: string): { allowedValsMap: Allow
   return { allowedValsMap, parmTypeMap };
 }
 
+// Helper function to wrap comment content across continuation lines with + symbols
+function wrapCommentOnContinuationLines(
+  formattedLines: string[],
+  commentContent: string,
+  commentIndent: string,
+  rightMargin: number
+): void {
+  const words = commentContent.split(/\s+/);
+  let currentContent = '';
+
+  for (let i = 0; i < words.length; i++) {
+    const word = words[i];
+    const testContent = currentContent ? currentContent + ' ' + word : word;
+    const isFirstWord = i === 0;
+    const isLastWord = i === words.length - 1;
+
+    // For first line, use "/* " prefix, for others no prefix
+    const prefix = isFirstWord ? '/* ' : '';
+    const suffix = isLastWord ? ' */' : ' +';
+
+    const testLine = commentIndent + prefix + testContent + suffix;
+
+    if (testLine.length <= rightMargin || !currentContent) {
+      currentContent = testContent;
+    } else {
+      // Current line is full, push it and start new line
+      const linePrefix = currentContent === testContent ? '/* ' : '';
+      formattedLines.push(commentIndent + linePrefix + currentContent + ' +');
+      currentContent = word;
+    }
+  }
+
+  // Push final line with closing */
+  if (currentContent) {
+    const hasOpening = currentContent === words.join(' '); // All words fit on one line
+    const prefix = hasOpening ? '/* ' : '';
+    formattedLines.push(commentIndent + prefix + currentContent + ' */');
+  }
+}
+
 export function formatCLSource(
   allLines: string[],
   options: FormatOptions,
@@ -688,58 +728,221 @@ export function formatCLSource(
   const outputLines: string[] = [];
   let idx = startIndex;
 
+  // Create a simple document-like object for collectCLCmdFromLine
+  const mockDoc = {
+    lineCount: allLines.length,
+    lineAt: (index: number) => ({
+      text: allLines[index] || ''
+    })
+  } as vscode.TextDocument;
+
   while (idx < allLines.length) {
-    const source_record = allLines[idx++];
-    if (!source_record) { break; }
-
-    const sequence = source_record.substring(0, 6);
-    const date = source_record.substring(6, 12);
-    let source_data = source_record.substring(12, 92);
-
-    // Handle CL tags (ending with :)
-    const [tag, ...rest] = source_data.trim().split(/\s+/);
-    const statement = rest.join(' ');
-    if (tag.endsWith(':')) {
-      let tagOut = tag;
-      if (options.cvtcase !== '*NONE') {
-        tagOut = translateCase(tag, fromCase, toCase);
-      }
-      outputLines.push(sequence + date + tagOut + ' +');
-      if (statement.startsWith('+')) {
-        continue;
-      }
-      source_data = statement;
-    }
-
-    // Write comments as-is if indrmks = '*NO'
-    if (source_data.trim().startsWith('/*') && options.indrmks === '*NO') {
-      outputLines.push(sequence + date + source_data);
+    const currentLine = allLines[idx];
+    if (!currentLine) {
+      idx++;
       continue;
     }
 
-    // Build command string (handle continuations)
-    const input = buildCommandString(source_data, allLines, idx);
-    idx += input.linesConsumed;
+    const trimmedLine = currentLine.trim();
 
-    // Convert case if requested and not a comment
-    if (options.cvtcase !== '*NONE' && !input.value.trim().startsWith('/*')) {
-      input.value = convertCaseWithQuotes(input.value, fromCase, toCase);
+    // Handle empty lines
+    if (trimmedLine.length === 0) {
+      outputLines.push('');
+      idx++;
+      continue;
     }
 
-    // Format DCLs to align parameters vertically
-    if (input.value.trim().toUpperCase().startsWith('DCL')) {
-      input.value = formatDCL(input.value);
+    // Handle comment lines
+    if (trimmedLine.startsWith('/*')) {
+      if (options.indrmks === '*NO') {
+        // Keep comment at original position
+        outputLines.push(currentLine);
+      } else {
+        // Indent comment to current level
+        const commentIndent = level > 1 ? ' '.repeat(options.indcol * (level - 1)) : '';
+        outputLines.push(commentIndent + trimmedLine);
+      }
+      idx++;
+      continue;
     }
 
-    // Write formatted command string
-    outputLines.push(...writeFormatted(input.value, sequence, date, level, options));
+    // First, peek ahead to find the end of this command and extract any trailing comment
+    let trailingComment: string | undefined;
+    let peekIdx = idx;
 
-    const upperInput = input.value.toUpperCase();
-    if (upperInput.includes('DO')) {
-      level++;
+    // Find the last line of this command by checking for continuation characters
+    while (peekIdx < allLines.length) {
+      const peekLine = allLines[peekIdx];
+      if (!peekLine) break;
+
+      const codePart = peekLine.replace(/\/\*.*\*\//g, '').trimEnd();
+      const hasContinuation = codePart.endsWith('+') || codePart.endsWith('-');
+
+      // Check for trailing comment on this line
+      const commentMatch = peekLine.match(/\/\*.*?\*\/\s*$/);
+      if (commentMatch && !hasContinuation) {
+        // This is the last line and it has a trailing comment
+        trailingComment = commentMatch[0].trim();
+        break;
+      }
+
+      if (!hasContinuation) {
+        break;
+      }
+      peekIdx++;
     }
-    if (upperInput.includes('ENDDO')) {
-      level = Math.max(1, level - 1);
+
+    // Use collectCLCmdFromLine to get the complete command (comments already stripped)
+    const cmdResult = collectCLCmdFromLine(mockDoc, idx);
+    let command = cmdResult.command;
+    idx = cmdResult.endLine + 1; // Move past the command
+
+    // Handle CL tags (labels ending with :)
+    let label: string | undefined;
+    if (command.includes(':')) {
+      const colonIdx = command.indexOf(':');
+      const possibleTag = command.substring(0, colonIdx + 1).trim();
+      if (/^[A-Z_][A-Z0-9_]*:$/.test(possibleTag)) {
+        // Extract label
+        label = possibleTag.slice(0, -1); // Remove the colon
+        if (options.cvtcase !== '*NONE') {
+          label = translateCase(label, fromCase, toCase);
+        }
+
+        // Get the rest after the tag
+        command = command.substring(colonIdx + 1).trim();
+        if (!command) {
+          // Just a label line
+          outputLines.push(label + ':');
+          continue;
+        }
+      }
+    }
+
+    // Tokenize and format the command using formatCL_SEU
+    try {
+      const tokens = tokenizeCL(command);
+      const node = parseCL(tokens);
+
+      // Apply case conversion to the command name if needed
+      if (options.cvtcase !== '*NONE' && node.name) {
+        node.name = translateCase(node.name, fromCase, toCase);
+      }
+
+      // Format using the proper CL formatter
+      const formatted = formatCL_SEU(node, label);
+
+      // Split into lines
+      const formattedLines = formatted.split('\n');
+
+      // If there's a trailing comment, handle it with word wrapping and continuation characters
+      if (trailingComment) {
+        const config = vscode.workspace.getConfiguration('clPrompter');
+        const rightMargin = config.get<number>('cmdRightMargin', 72);
+        const contCol = config.get<number>('cmdContIndent', 27);
+
+        const lastLineIdx = formattedLines.length - 1;
+        let lastLine = formattedLines[lastLineIdx];
+        const lastLineEndsWithCont = lastLine.trimEnd().endsWith('+') || lastLine.trimEnd().endsWith('-');
+
+        // Extract comment content between /* and */
+        const commentMatch = trailingComment.match(/^\/\*\s*(.*?)\s*\*\/$/);
+        if (!commentMatch) {
+          // Malformed comment, just append as-is
+          if (!lastLineEndsWithCont) {
+            formattedLines[lastLineIdx] = lastLine + ' ' + trailingComment;
+          } else {
+            formattedLines.push(' '.repeat(contCol) + trailingComment);
+          }
+        } else {
+          const commentContent = commentMatch[1];
+          const commentIndent = ' '.repeat(contCol);
+
+          if (!lastLineEndsWithCont) {
+            // Try to fit comment on the last line
+            const testLine = lastLine + ' /* ' + commentContent + ' */';
+
+            if (testLine.length <= rightMargin) {
+              // Fits on same line
+              formattedLines[lastLineIdx] = testLine;
+            } else {
+              // Need to wrap - start comment on same line if there's room
+              const availableOnLastLine = rightMargin - lastLine.length - 4; // -4 for ' /* '
+
+              if (availableOnLastLine > 10) { // At least some room for content
+                // Start comment on this line
+                const words = commentContent.split(/\s+/);
+                let firstLineContent = '';
+                let remainingWords: string[] = [];
+
+                // Fill first line
+                for (let i = 0; i < words.length; i++) {
+                  const word = words[i];
+                  const testContent = firstLineContent ? firstLineContent + ' ' + word : word;
+
+                  if ((' /* ' + testContent + ' +').length <= rightMargin - lastLine.length) {
+                    firstLineContent = testContent;
+                  } else {
+                    remainingWords = words.slice(i);
+                    break;
+                  }
+                }
+
+                if (firstLineContent) {
+                  formattedLines[lastLineIdx] = lastLine + ' /* ' + firstLineContent + ' +';
+
+                  // Continue on next line(s)
+                  let currentContent = '';
+                  for (const word of remainingWords) {
+                    const testContent = currentContent ? currentContent + ' ' + word : word;
+                    const isLastWord = word === remainingWords[remainingWords.length - 1];
+                    const suffix = isLastWord ? ' */' : ' +';
+
+                    if ((commentIndent + testContent + suffix).length <= rightMargin || !currentContent) {
+                      currentContent = testContent;
+                    } else {
+                      // Current line is full
+                      formattedLines.push(commentIndent + currentContent + ' +');
+                      currentContent = word;
+                    }
+                  }
+
+                  if (currentContent) {
+                    formattedLines.push(commentIndent + currentContent + ' */');
+                  }
+                } else {
+                  // Can't fit anything on first line, put entire comment on continuation lines
+                  wrapCommentOnContinuationLines(formattedLines, commentContent, commentIndent, rightMargin);
+                }
+              } else {
+                // Not enough room on last line, put entire comment on continuation lines
+                wrapCommentOnContinuationLines(formattedLines, commentContent, commentIndent, rightMargin);
+              }
+            }
+          } else {
+            // Last line ends with continuation - put comment on next line(s)
+            wrapCommentOnContinuationLines(formattedLines, commentContent, commentIndent, rightMargin);
+          }
+        }
+      }
+
+      outputLines.push(...formattedLines);
+
+      // Update nesting level based on command
+      const upperCmd = command.toUpperCase();
+      if (upperCmd.includes(' DO ') || upperCmd.startsWith('DO ') || upperCmd.endsWith(' DO')) {
+        level++;
+      }
+      if (upperCmd.includes('ENDDO')) {
+        level = Math.max(1, level - 1);
+      }
+    } catch (error) {
+      // If tokenization fails, fall back to simple formatting
+      console.error('[formatCLSource] Tokenization failed:', error);
+      if (label) {
+        outputLines.push(label + ':');
+      }
+      outputLines.push(...writeFormatted(command, level, options));
     }
   }
 
@@ -755,40 +958,6 @@ function translateCase(str: string, fromCase: string, toCase: string): string {
     result += idx >= 0 ? toCase[idx] : ch;
   }
   return result;
-}
-
-function buildCommandString(
-  source_data: string,
-  allLines: string[],
-  idx: number
-): { value: string; linesConsumed: number } {
-  // Trim trailing whitespace (keep any leading spaces meaningful to expressions)
-  let input = source_data.replace(/[ \t]+$/, '');
-  let linesConsumed = 0;
-
-  // Always insert exactly one space at each continuation join
-  while (input.endsWith('+') || input.endsWith('-')) {
-    // Drop the continuation marker
-    input = input.slice(0, -1);
-
-    const nextLine = allLines[idx + linesConsumed];
-    if (!nextLine) break;
-
-    // CL source data columns
-    const nextData = nextLine.substring(12, 92);
-    // Remove leading indentation on the next physical line
-    const nextTrim = nextData.replace(/^[ \t]+/, '');
-
-    // Ensure a single separator space at the join if not already present
-    if (input.length > 0 && input[input.length - 1] !== ' ') {
-      input += ' ';
-    }
-
-    input += nextTrim;
-    linesConsumed++;
-  }
-
-  return { value: input, linesConsumed };
 }
 
 function convertCaseWithQuotes(input: string, fromCase: string, toCase: string): string {
@@ -827,12 +996,10 @@ function formatDCL(input: string): string {
 
 function writeFormatted(
   input: string,
-  sequence: string,
-  date: string,
   level: number,
   options: FormatOptions
 ): string[] {
-  // Indent only the first 10 levels
+  // Indent based on nesting level
   let indent = '';
   if (level <= 10) {
     indent = ' '.repeat(options.indcol * (level - 1) + options.bgncol);
@@ -890,9 +1057,9 @@ function writeFormatted(
 
       // Push this wrapped line now
       if (continued) {
-        lines.push(sequence + date + indent + ' '.repeat(options.indcont) + chunk);
+        lines.push(indent + ' '.repeat(options.indcont) + chunk);
       } else {
-        lines.push(sequence + date + indent + chunk);
+        lines.push(indent + chunk);
       }
       continued = true;
 
@@ -907,12 +1074,10 @@ function writeFormatted(
 
     // Push the final/non-wrapped chunk
     if (continued) {
-      lines.push(sequence + date + indent + ' '.repeat(options.indcont) + chunk);
+      lines.push(indent + ' '.repeat(options.indcont) + chunk);
     } else {
-      lines.push(sequence + date + indent + chunk);
+      lines.push(indent + chunk);
     }
-    prevTail = lastNonSpaceChar(chunk.replace(/[ ]\+$/,''));
-    continued = true;
   }
   return lines;
 }
