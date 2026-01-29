@@ -65,6 +65,11 @@ function ensureMinInputWidth(
   const tag = String(anyEl.tagName || '').toLowerCase();
   const type = String(anyEl.type || '').toLowerCase();
 
+  // Skip width adjustments for textareas - they have their own CSS sizing
+  if (tag === 'textarea') {
+    return;
+  }
+
   const current = String(anyEl.value ?? '');
   const valueLen = Math.max(opts.valueLen ?? 0, current.length);
   const len = Number.isFinite(opts.len as number) ? (opts.len as number) : 0;
@@ -203,10 +208,66 @@ function parseColor(color: string): { r: number, g: number, b: number } | null {
 
 function createInputForType(type: string, name: string, dft: string, len: string, suggestions: string[]): HTMLElement {
   const effectiveLen = len ? parseInt(len, 10) : getDefaultLengthForType(type);
+  const dftLen = (dft || '').length;
+  const useLongInput = effectiveLen > 80 || dftLen > 80;
 
-  console.log(`[createInputForType] name=${name}, suggestions:`, suggestions, 'dft:', dft);
+  console.log(`[createInputForType] name=${name}, effectiveLen=${effectiveLen}, dftLen=${dftLen}, useLongInput=${useLongInput}, suggestions:`, suggestions, 'dft:', dft);
 
-  // If there are suggestions, create a combo box (select + custom option)
+  // If there are suggestions AND it's a long input, use dropdown + textarea
+  if (suggestions.length > 0 && useLongInput) {
+    const container = document.createElement('div');
+    container.style.display = 'flex';
+    container.style.flexDirection = 'column';
+    container.style.alignItems = 'flex-start'; // Prevent stretching
+    container.style.gap = '8px';
+
+    const select = document.createElement('select');
+    select.id = `${name}_select`;
+    select.style.width = 'auto';  // Auto-size to content
+    select.style.minWidth = '150px'; // Minimum readable size
+    select.style.maxWidth = '400px'; // Don't get too wide
+
+    // Add prompt option
+    const promptOption = document.createElement('option');
+    promptOption.value = '';
+    promptOption.textContent = '-- Select a value --';
+    select.appendChild(promptOption);
+
+    // Add suggestion options
+    suggestions.forEach(val => {
+      const option = document.createElement('option');
+      option.value = val;
+      option.textContent = val;
+      // Pre-select if it matches the default
+      if (val === dft) {
+        option.selected = true;
+      }
+      select.appendChild(option);
+    });
+
+    // Textarea (always visible)
+    const textarea = document.createElement('textarea');
+    textarea.name = name;
+    textarea.value = dft || '';
+    textarea.rows = 3;
+    textarea.classList.add('long-text-input');
+
+    // Selection handler - replace textarea content when user selects a value
+    select.addEventListener('change', () => {
+      const selectedValue = select.value;
+      if (selectedValue) {
+        // Replace entire textarea content with selected value
+        textarea.value = selectedValue;
+        textarea.focus();
+      }
+    });
+
+    container.appendChild(select);
+    container.appendChild(textarea);
+    return container;
+  }
+
+  // If there are suggestions (but not long input), create standard combo box
   if (suggestions.length > 0) {
     const container = document.createElement('div');
     container.style.display = 'flex';
@@ -270,17 +331,26 @@ function createInputForType(type: string, name: string, dft: string, len: string
     return container;
   }
 
-  // No suggestions - regular input
-  const input = document.createElement('input');
-  input.type = 'text';
-  input.name = name;
-  input.value = dft || '';
-  input.classList.add(getLengthClass(effectiveLen));
-  return input;
+  // No suggestions - regular input or textarea for long values
+  if (useLongInput) {
+    const textarea = document.createElement('textarea');
+    textarea.name = name;
+    textarea.value = dft || '';
+    textarea.rows = 3;
+    textarea.classList.add('long-text-input');
+    return textarea;
+  } else {
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.name = name;
+    input.value = dft || '';
+    input.classList.add(getLengthClass(effectiveLen));
+    return input;
+  }
 }
 
-// Create parm input (dropdown or textfield)
-function createParmInput(name: string, suggestions: string[], isRestricted: boolean, dft: string): HTMLElement {
+// Create parm input (dropdown, textfield, or textarea for long values)
+function createParmInput(name: string, suggestions: string[], isRestricted: boolean, dft: string, len?: string): HTMLElement {
   console.log('[clPrompter] ', 'createParmInput start');
   if (isRestricted && suggestions.length > 0) {
     // Use standard select for restricted dropdowns
@@ -300,7 +370,7 @@ function createParmInput(name: string, suggestions: string[], isRestricted: bool
     return select;
   } else {
     console.log('[clPrompter] ', 'createParmInput end2');
-    return createInputForType('CHAR', name, dft, '', suggestions);
+    return createInputForType('CHAR', name, dft, len || '', suggestions);
   }
 }
 
@@ -352,10 +422,10 @@ function createQualInput(
     }
   }
 
-  const input = createParmInput(qualName, allowedVals, restricted, dft);
   // Size: prefer Qual Len and InlPmtLen; expand later on populate if value grows
   const inl = Number.parseInt(String(qual?.getAttribute('InlPmtLen') || ''), 10) || undefined;
   const len = Number.parseInt(String(qual?.getAttribute('Len') || ''), 10) || undefined;
+  const input = createParmInput(qualName, allowedVals, restricted, dft, qualLen);
   ensureMinInputWidth(input as HTMLElement, { len, inlPmtLen: inl });
 
   return input;
@@ -409,9 +479,9 @@ function createElemInput(
     }
   }
 
-  const input = createParmInput(elemName, allowedVals, restricted, dft);
   const inl = Number.parseInt(String(elem?.getAttribute('InlPmtLen') || ''), 10) || undefined;
   const len = Number.parseInt(String(elem?.getAttribute('Len') || ''), 10) || undefined;
+  const input = createParmInput(elemName, allowedVals, restricted, dft, elemLen);
   ensureMinInputWidth(input as HTMLElement, { len, inlPmtLen: inl });
 
   return input;
@@ -422,65 +492,53 @@ function renderSimpleParm(parm: ParmElement, kwd: string, container: HTMLElement
   const div = document.createElement('div');
   div.className = 'parm simple-parm';
 
-  // Header with Prompt and KWD (colored)
-  const header = document.createElement('div');
-  header.className = 'parm-header';
-
-  const promptSpan = document.createElement('span');
-  const promptText = String(parm.getAttribute('Prompt') || kwd);
-  promptSpan.textContent = promptText;
-
-  const kwdSpan = document.createElement('span');
-  kwdSpan.className = 'parm-kwd';
-  kwdSpan.textContent = ` (${kwd})`;
-  // Color applied via CSS using .parm-kwd class with theme-aware variables
-
-  header.appendChild(promptSpan);
-  header.appendChild(kwdSpan);
-  div.appendChild(header);
-
   // Input
   const type = String(parm.getAttribute('Type') || 'CHAR');
   const lenAttr = String(parm.getAttribute('Len') || '');
-  const inl = Number.parseInt(String(parm.getAttribute('InlPmtLen') || ''), 10) || undefined;
+  const inlPmtLen = String(parm.getAttribute('InlPmtLen') || '');
+  // Use Len if available, otherwise fall back to InlPmtLen (for types like CMD, PNAME, etc.)
+  const effectiveLenAttr = lenAttr || inlPmtLen;
 
   const inputName = kwd;
   const allowedVals = (state.allowedValsMap || {})[inputName] || [];
   const restricted = isRestricted(parm as unknown as Element);
 
-  const input = createParmInput(inputName, allowedVals, restricted, dft);
-
   const len = Number.parseInt(lenAttr, 10) || undefined;
+  const inl = Number.parseInt(inlPmtLen, 10) || undefined;
+  const input = createParmInput(inputName, allowedVals, restricted, dft, effectiveLenAttr);
   ensureMinInputWidth(input as HTMLElement, { len, inlPmtLen: inl });
 
-  // Wrap input in a div for indentation
-  const inputWrapper = document.createElement('div');
-  inputWrapper.className = 'simple-parm-input-wrapper';
-  inputWrapper.appendChild(input);
+  // Wrap in form-group for 5250-style grid layout with prompt and keyword in label
+  const formGroup = document.createElement('div');
+  formGroup.className = 'form-group simple-parm-group';
 
-  div.appendChild(inputWrapper);
+  const label = document.createElement('label');
+  const promptText = String(parm.getAttribute('Prompt') || kwd);
+
+  // Create prompt text span
+  const promptSpan = document.createElement('span');
+  promptSpan.textContent = promptText;
+
+  // Create keyword span with styling
+  const kwdSpan = document.createElement('span');
+  kwdSpan.className = 'parm-kwd';
+  kwdSpan.textContent = ` (${kwd})`;
+
+  label.appendChild(promptSpan);
+  label.appendChild(kwdSpan);
+  label.appendChild(document.createTextNode(':'));
+  label.htmlFor = inputName;
+
+  formGroup.appendChild(label);
+  formGroup.appendChild(input);
+
+  div.appendChild(formGroup);
   container.appendChild(div);
 }
 
 // Render QUAL parm
 function renderQualParm(parm: ParmElement, kwd: string, container: HTMLElement, prompt: string, idx: number, max: number): void {
   console.log('[clPrompter] ', 'renderQualParm start');
-
-  const fieldset = document.createElement('fieldset');
-  fieldset.className = 'qual-group';
-  const legend = document.createElement('legend');
-
-  const promptSpan = document.createElement('span');
-  promptSpan.textContent = prompt;
-  legend.appendChild(promptSpan);
-
-  const kwdSpan = document.createElement('span');
-  kwdSpan.className = 'parm-kwd';
-  kwdSpan.textContent = ` (${kwd})`;
-  // Color applied via CSS using .parm-kwd class with theme-aware variables
-  legend.appendChild(kwdSpan);
-
-  fieldset.appendChild(legend);
 
   const qualParts = parm.querySelectorAll(':scope > Qual');
   const numParts = qualParts.length || 2;
@@ -489,12 +547,24 @@ function renderQualParm(parm: ParmElement, kwd: string, container: HTMLElement, 
     const qual = qualParts[i] as Element | null;
 
     const qualDiv = document.createElement('div');
-    qualDiv.className = 'form-div';
+    qualDiv.className = 'form-group';
 
-    // Label: use Qual Prompt for each part (legend already shows parent prompt)
+    // Label: First QUAL uses parent (PARM) prompt, subsequent QUALs use their own Prompt attribute
     const label = document.createElement('label');
-    const qualPrompt = String(qual?.getAttribute('Prompt') || (i === 0 ? 'Name' : `Qualifier ${i}`));
-    label.textContent = `${qualPrompt}:`;
+    let qualPrompt: string;
+    if (i === 0) {
+      // First QUAL inherits prompt from parent PARM
+      qualPrompt = prompt;
+    } else {
+      // Subsequent QUALs use their own Prompt attribute
+      qualPrompt = String(qual?.getAttribute('Prompt') || `Qualifier ${i}`);
+    }
+
+    // Add keyword to first QUAL label
+    const labelText = i === 0 ? `${qualPrompt} (${kwd}):` : `${qualPrompt}:`;
+    label.textContent = labelText;
+    const qualName = `${kwd}_QUAL${i}`;
+    label.htmlFor = qualName;
     qualDiv.appendChild(label);
 
     const qualType = String(qual?.getAttribute('Type') || 'NAME');
@@ -503,7 +573,7 @@ function renderQualParm(parm: ParmElement, kwd: string, container: HTMLElement, 
     const input = createQualInput(
       parm as unknown as Element,
       qual,
-      `${kwd}_QUAL${i}`,
+      qualName,
       qualType,
       qualLen,
       qualDft,
@@ -511,10 +581,9 @@ function renderQualParm(parm: ParmElement, kwd: string, container: HTMLElement, 
     );
 
     qualDiv.appendChild(input);
-    fieldset.appendChild(qualDiv);
+    container.appendChild(qualDiv);
   }
 
-  container.appendChild(fieldset);
   console.log('[clPrompter] ', 'renderQualParm end');
 }
 
@@ -550,27 +619,35 @@ function renderElemParm(parm: ParmElement, kwd: string, idx: number, container: 
 
   const elemParts = parm.querySelectorAll(':scope > Elem');
   elemParts.forEach((elem, i) => {
-    const elemDiv = document.createElement('div');
-    elemDiv.className = 'form-div';
-
     const elemType = String(elem.getAttribute('Type') || 'CHAR');
 
     if (elemType === 'QUAL') {
+      // ELEM with Type="QUAL" - render QUAL children directly without nested fieldset
+      const elemPrompt = String(elem.getAttribute('Prompt') || `Element ${i}`);
+
       const qualParts = elem.querySelectorAll(':scope > Qual');
       qualParts.forEach((qual, j) => {
         const qualDiv = document.createElement('div');
-        qualDiv.className = 'form-div';
+        qualDiv.className = 'form-group';
 
-        // Label: use Qual Prompt when available
+        // Label: First QUAL uses parent (ELEM) prompt, subsequent QUALs use their own Prompt attribute
         const label = document.createElement('label');
-        const qPrompt = String(qual.getAttribute('Prompt') || `Qualifier ${j}`);
+        let qPrompt: string;
+        if (j === 0) {
+          // First QUAL inherits prompt from parent ELEM
+          qPrompt = elemPrompt;
+        } else {
+          // Subsequent QUALs use their own Prompt attribute
+          qPrompt = String(qual.getAttribute('Prompt') || `Qualifier ${j}`);
+        }
         label.textContent = `${qPrompt}:`;
+        const inputName = max > 1 ? `${kwd}_INST${idx}_ELEM${i}_QUAL${j}` : `${kwd}_ELEM${i}_QUAL${j}`;
+        label.htmlFor = inputName;
         qualDiv.appendChild(label);
 
         const qualType = String(qual.getAttribute('Type') || 'NAME');
         const qualLen = String(qual.getAttribute('Len') || '');
         const qualDft = String(qual.getAttribute('Dft') || '');
-        const inputName = max > 1 ? `${kwd}_INST${idx}_ELEM${i}_QUAL${j}` : `${kwd}_ELEM${i}_QUAL${j}`;
         const input = createQualInput(
           parm,
           qual as Element,
@@ -582,24 +659,29 @@ function renderElemParm(parm: ParmElement, kwd: string, idx: number, container: 
         );
 
         qualDiv.appendChild(input);
-        elemDiv.appendChild(qualDiv);
+        fieldset.appendChild(qualDiv);
       });
     } else {
+      // Regular ELEM (not QUAL type)
+      const elemDiv = document.createElement('div');
+      elemDiv.className = 'form-group';
+
       const subElems = elem.querySelectorAll(':scope > Elem');
       if (subElems.length > 0) {
         subElems.forEach((subElem, j) => {
           const subDiv = document.createElement('div');
-          subDiv.className = 'form-div';
+          subDiv.className = 'form-group';
 
           const label = document.createElement('label');
           const subPrompt = String(subElem.getAttribute('Prompt') || `Element ${i}.${j}`);
           label.textContent = `${subPrompt}:`;
+          const inputName = max > 1 ? `${kwd}_INST${idx}_ELEM${i}_SUB${j}` : `${kwd}_ELEM${i}_SUB${j}`;
+          label.htmlFor = inputName;
           subDiv.appendChild(label);
 
           const subType = String(subElem.getAttribute('Type') || 'CHAR');
           const subLen = String(subElem.getAttribute('Len') || '');
           const subDft = isMultiInstance ? '' : String(subElem.getAttribute('Dft') || '');
-          const inputName = max > 1 ? `${kwd}_INST${idx}_ELEM${i}_SUB${j}` : `${kwd}_ELEM${i}_SUB${j}`;
           const input = createElemInput(
             parm,
             subElem as Element,
@@ -617,11 +699,12 @@ function renderElemParm(parm: ParmElement, kwd: string, idx: number, container: 
         const label = document.createElement('label');
         const ePrompt = String(elem.getAttribute('Prompt') || `Element ${i}`);
         label.textContent = `${ePrompt}:`;
+        const inputName = max > 1 ? `${kwd}_INST${idx}_ELEM${i}` : `${kwd}_ELEM${i}`;
+        label.htmlFor = inputName;
         elemDiv.appendChild(label);
 
         const elemLen = String(elem.getAttribute('Len') || '');
         const elemDft = isMultiInstance ? '' : String(elem.getAttribute('Dft') || '');
-        const inputName = max > 1 ? `${kwd}_INST${idx}_ELEM${i}` : `${kwd}_ELEM${i}`;
         const input = createElemInput(
           parm,
           elem as Element,
@@ -634,9 +717,9 @@ function renderElemParm(parm: ParmElement, kwd: string, idx: number, container: 
 
         elemDiv.appendChild(input);
       }
-    }
 
-    fieldset.appendChild(elemDiv);
+      fieldset.appendChild(elemDiv);
+    }
   });
   container.appendChild(fieldset);
   console.log('[clPrompter] ', 'renderElemParm end');
@@ -743,7 +826,33 @@ function loadForm(): void {
       form.appendChild(renderParmInstance(parm, kwd, 0, 1, null));
     }
   });
+
+  // Calculate and apply optimal label width after all parameters are rendered
+  optimizeLabelWidth();
+
   console.log('[clPrompter] ', 'loadForm end');
+}
+
+// Calculate the longest label and set a CSS custom property for optimal grid sizing
+function optimizeLabelWidth(): void {
+  // Only select labels inside the #clForm (exclude the Label field and title)
+  const labels = document.querySelectorAll('#clForm .form-group label, #clForm .qual-group .form-group label, #clForm .elem-group .form-group label');
+  let maxLength = 0;
+
+  labels.forEach(label => {
+    const text = label.textContent || '';
+    if (text.length > maxLength) {
+      maxLength = text.length;
+    }
+  });
+
+  // Add 2ch padding, but cap at 50ch (don't exceed current max)
+  const optimalWidth = Math.min(maxLength + 2, 50);
+
+  // Set CSS custom property on the document root
+  document.documentElement.style.setProperty('--clp-label-width', `${optimalWidth}ch`);
+
+  console.log(`[clPrompter] Optimized label width: ${optimalWidth}ch (max label: ${maxLength} chars)`);
 }
 
 function getParentSngVals(parm: Element): Set<string> {

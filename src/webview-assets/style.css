@@ -205,6 +205,51 @@ body[data-vscode-theme-kind="vscode-high-contrast"] .keyword-highlight {
 }
 
 /* 81+ chars (long text/commands) */
+
+/* Textarea for long parameters (> 80 chars) */
+textarea.long-text-input {
+  width: 80ch;
+  max-width: 80ch;
+  min-height: calc(3 * 1.4em + 10px); /* 3 rows minimum */
+  max-height: calc(20 * 1.4em + 10px); /* 20 rows maximum */
+  resize: vertical;
+  font-family: var(--vscode-editor-font-family, 'Consolas', 'Courier New', monospace);
+  font-size: var(--vscode-editor-font-size, 13px);
+  padding: 5px;
+  border: 1px solid var(--vscode-input-border, #ccc);
+  background: var(--vscode-input-background, #fff);
+  color: var(--vscode-input-foreground, #000);
+  line-height: 1.4;
+}
+
+/* Theme-aware colors for textarea in light mode */
+body[data-vscode-theme-kind="vscode-light"] textarea.long-text-input {
+  color: var(--vscode-input-foreground, #000);
+  background: var(--vscode-input-background, #fff);
+}
+
+/* Theme-aware colors for textarea in dark mode */
+body[data-vscode-theme-kind="vscode-dark"] textarea.long-text-input {
+  color: var(--vscode-input-foreground, #fff);
+  background: var(--vscode-input-background, #1e1e1e);
+}
+
+/* Theme-aware colors for textarea in high contrast mode */
+body[data-vscode-theme-kind="vscode-high-contrast"] textarea.long-text-input {
+  color: var(--vscode-input-foreground, #fff);
+  background: var(--vscode-input-background, #000);
+}
+
+textarea.long-text-input:focus {
+  outline: none;
+  border-color: var(--vscode-focusBorder, #0066cc);
+}
+
+/* Adjust form-group for textarea */
+.form-group:has(textarea.long-text-input) {
+  align-items: flex-start;
+}
+
 @keyframes shake {
 
   0%,
@@ -287,6 +332,43 @@ body[data-vscode-theme-kind="vscode-high-contrast"] .keyword-highlight {
   border-color: #0078d4;
 }
 
+/* 5250-style form group with grid layout */
+.form-group {
+  display: grid;
+  grid-template-columns: var(--clp-label-width, 50ch) 1fr;
+  align-items: center;
+  margin-bottom: 15px;
+  gap: 10px;
+}
+
+.form-group label {
+  text-align: left;
+  padding-right: 10px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.form-group input[type="text"],
+.form-group select,
+.form-group vscode-textfield,
+.form-group vscode-single-select {
+  padding: 5px;
+  justify-self: start;
+  width: auto;
+}
+
+/* Textareas in form-group should maintain their own width */
+.form-group textarea {
+  justify-self: start;
+}
+
+.form-group:focus-within label {
+  font-weight: bold;
+  color: var(--vscode-focusBorder, #0066cc);
+}
+
+/* Legacy support for existing form-div */
 .form-label {
   display: inline-block;
   width: 43ch;
@@ -314,11 +396,25 @@ button {
   width: 16ch;
 }
 
-.qual-group .form-label {
-  width: auto;
-  min-width: 10ch;
-  margin-bottom: 0;
-  vertical-align: middle;
+/* QUAL fieldset styling */
+.qual-group {
+  border: 1.5px solid var(--vscode-editorWidget-border, #bbb);
+  border-radius: 6px;
+  margin-bottom: 0.2em;
+  padding: 0.8em 1em 0.2em 1em;
+  background: var(--vscode-editorWidget-background, #ffe);
+}
+
+.qual-group legend {
+  font-weight: bold;
+  color: var(--vscode-editor-foreground, #333);
+  padding: 0 0.2em;
+}
+
+/* QUAL form-groups have adjusted label width to account for fieldset indent */
+.qual-group .form-group {
+  margin-bottom: 10px;
+  grid-template-columns: calc(var(--clp-label-width, 50ch) - 2ch) 1fr;
 }
 
 .elem-group {
@@ -335,12 +431,9 @@ button {
   padding: 0 0.2em;
 }
 
-.qual-group>div {
-  display: flex;
-  align-items: center;
-  margin-bottom: 0.2em;
-  border: 1px dashed var(--vscode-editorWidget-border, red);
-  background: var(--vscode-editorWidget-background, #ffe);
+/* ELEM form-groups have adjusted label width to account for fieldset indent */
+.elem-group .form-group {
+  grid-template-columns: calc(var(--clp-label-width, 50ch) - 2ch) 1fr;
 }
 
 /*
