@@ -226,29 +226,41 @@ export function buildCLCommand(
     // ✅ Use grouped values instead of raw values
     let value = groupedValues[key];
 
-    if (
-      value === undefined ||
-      value === null ||
-      value === '' ||
-      (Array.isArray(value) && value.every(v => v === undefined || v === null || v === '')) ||
-      (!presentParms?.has(key) && defaults && deepEqual(normalizeValue(value), normalizeValue(defaults[key])))
-    ) {
-      continue;
-    }
     const hasElemChildren = meta.Elems && meta.Elems.length > 0;
     const hasQualChildren = meta.Quals && meta.Quals.length > 0;
     const isMultiInstance = meta.Max ? (+meta.Max > 1) : false;
 
-    // Always flatten single-element arrays for simple, single-instance parameters
-    if (!hasElemChildren && !hasQualChildren && !isMultiInstance && Array.isArray(value) && value.length === 1) {
-      value = value[0];
-    }
-
-    // --- NEW: Skip logic for simple and multi-instance parameters ---
-    if (!hasElemChildren && !hasQualChildren && isMultiInstance) {
+    // --- ELEM/QUAL/SIMPLE parameter skip logic ---
+    // For ELEM parameters: only include if presentParms (touched or present in original command)
+    if (hasElemChildren) {
+      if (!presentParms?.has(key)) {
+        // Not touched and not present in original command, skip
+        continue;
+      }
+      // If value is undefined/null/empty, skip
+      if (
+        value === undefined ||
+        value === null ||
+        value === '' ||
+        (Array.isArray(value) && value.every(v => v === undefined || v === null || v === ''))
+      ) {
+        continue;
+      }
+    } else if (hasQualChildren) {
+      // For QUAL parameters: skip if not touched and matches default
+      const defaultVal = defaults && defaults[key];
+      const userChanged = presentParms?.has(key);
+      if (
+        value === undefined ||
+        value === null ||
+        value === '' ||
+        (!userChanged && defaultVal && deepEqual(normalizeValue(value), normalizeValue(defaultVal)))
+      ) {
+        continue;
+      }
+    } else if (isMultiInstance) {
       // Multi-instance, non-ELEM/QUAL parameter (e.g. PRINT, FMTOPT, SRCOPT)
       const defaultVal = defaults && defaults[key];
-      // If value is undefined/null/empty array, skip
       if (
         value === undefined ||
         value === null ||
@@ -256,7 +268,6 @@ export function buildCLCommand(
       ) {
         continue;
       }
-      // If value is array of length 1, and that value matches the default, and not presentParms, skip
       if (
         Array.isArray(value) &&
         value.length === 1 &&
@@ -264,10 +275,9 @@ export function buildCLCommand(
         !presentParms?.has(key) &&
         value[0].toString().trim().toUpperCase() === (Array.isArray(defaultVal) ? defaultVal[0] : defaultVal || '').toString().trim().toUpperCase()
       ) {
-        console.log(`[buildCLCommand] Skipping multi-instance parameter ${key} (single default: "${value[0]}")`);
         continue;
       }
-    } else if (!hasElemChildren && !hasQualChildren && !isMultiInstance) {
+    } else {
       // Simple, single-instance parameter
       const defaultVal = defaults && defaults[key];
       const valNorm = (Array.isArray(value) ? value[0] : value) || '';
@@ -280,29 +290,6 @@ export function buildCLCommand(
           defNorm !== undefined &&
           valNorm.toString().trim().toUpperCase() === defNorm.toString().trim().toUpperCase())
       ) {
-        console.log(`[buildCLCommand] Skipping simple parameter ${key} (unchanged default: "${valNorm}")`);
-        continue;
-      }
-    } else {
-      // For non-simple parameters (ELEM/QUAL), use the old skip logic
-      const defaultVal = defaults && defaults[key];
-      const userChanged = presentParms?.has(key);
-
-      console.log(`[buildCLCommand] Checking ${key}: hasElem=${hasElemChildren}, hasQual=${hasQualChildren}`);
-      console.log(`[buildCLCommand]   value=${JSON.stringify(value)}`);
-      console.log(`[buildCLCommand]   default=${JSON.stringify(defaultVal)}`);
-      console.log(`[buildCLCommand]   userChanged=${userChanged}`);
-      console.log(`[buildCLCommand]   normalized value=${JSON.stringify(normalizeValue(value))}`);
-      console.log(`[buildCLCommand]   normalized default=${JSON.stringify(normalizeValue(defaultVal))}`);
-      console.log(`[buildCLCommand]   deepEqual=${deepEqual(normalizeValue(value), normalizeValue(defaultVal))}`);
-
-      if (
-        value === undefined ||
-        value === null ||
-        value === '' ||
-        (!userChanged && defaultVal && deepEqual(normalizeValue(value), normalizeValue(defaultVal)))
-      ) {
-        console.log(`[buildCLCommand] Skipping ${key} (matches default or empty)`);
         continue;
       }
     }
@@ -310,22 +297,16 @@ export function buildCLCommand(
     const allowedVals = allowedValsMap[key] || [];
     const parmType = updatedTypeMap[key] || "";
 
-    console.log(`[buildCLCommand] Processing ${key}: value=${JSON.stringify(value)}, type=${parmType}`);
-
     // --- BEGIN ELEM-EMIT ---
     if (hasElemChildren && Array.isArray(value)) {
-      // ✅ ELEM parameter with complex structure
       if (parmType === 'ELEM') {
-        // Expect: [ ['LIB','OBJ'], ['1','64'] ] for DTAARA
         const elemParts: string[] = [];
         for (const [i, elemValue] of value.entries()) {
           if (Array.isArray(elemValue)) {
             if (i === 0 && elemValue.length === 2) {
-              // First top-level Elem is QUAL → join as LIB/OBJ (reverse UI order)
               const quoted = elemValue.map(v => quoteIfNeeded(v, allowedVals, parmType)).reverse();
               elemParts.push(`${quoted[0]}/${quoted[1]}`);
             } else {
-              // Other Elem groups → wrap in parentheses
               const quoted = elemValue.map(v => quoteIfNeeded(v, allowedVals, parmType));
               elemParts.push(`(${quoted.join(' ')})`);
             }
@@ -333,8 +314,6 @@ export function buildCLCommand(
             elemParts.push(quoteIfNeeded(elemValue, allowedVals, parmType));
           }
         }
-        // Multi-instance ELEM: wrap each group in parens
-        // Single-instance ELEM: wrap overall once
         if (isMultiInstance && elemParts.length > 0) {
           const wrappedParts = elemParts.map(part => `(${part})`);
           cmd += ` ${key}(${wrappedParts.join(' ')})`;
@@ -342,7 +321,6 @@ export function buildCLCommand(
           cmd += ` ${key}(${elemParts.join(' ')})`;
         }
       } else {
-        // ✅ Regular ELEM parameter (array of parts)
         const elemParts = value.map((vArr: any) =>
           Array.isArray(vArr)
             ? vArr.map((v: string) => quoteIfNeeded(v, allowedVals, parmType)).join(' ')
@@ -356,11 +334,8 @@ export function buildCLCommand(
         }
       }
     } else if (hasQualChildren && Array.isArray(value)) {
-      // Skip if all parts are empty or default and not changed by user
       const defaultVal = defaults && defaults[key];
       const userChanged = presentParms?.has(key);
-
-      // For multi-instance QUAL, value is array of arrays; for single, array of parts
       const allEmptyOrDefault = Array.isArray(value[0])
         ? value.every((vArr: any, idx: number) =>
           Array.isArray(vArr)
@@ -394,57 +369,40 @@ export function buildCLCommand(
         continue;
       }
 
-      // ✅ QUAL parameter (array of parts)
       if (Array.isArray(value[0])) {
-        // Each vArr is an array of QUAL parts (e.g., ['OBJ', 'LIB'])
         const qualParts = value.map((vArr: any) =>
           Array.isArray(vArr)
             ? vArr.slice().filter((x: any) => x !== undefined && x !== null && x !== '').map((v: string) => quoteIfNeeded(v, allowedVals, parmType)).join('/')
-            : quoteIfNeeded(vArr, allowedVals, parmType) // treat as atomic string
+            : quoteIfNeeded(vArr, allowedVals, parmType)
         );
-
-        // Always wrap each instance in parentheses for QUAL with Max > 1
         if (isMultiInstance) {
           const wrappedParts = qualParts.map(part => `(${part})`);
           cmd += ` ${key}(${wrappedParts.join(' ')})`;
-          console.log(`[buildCLCommand] Added QUAL (always parens per instance): ${key}(${wrappedParts.join(' ')})`);
         } else {
           cmd += ` ${key}(${qualParts.join(' ')})`;
         }
       } else {
-        // Reverse QUAL parts for single instance as well
         const qualPart = value.slice().filter((x: any) => x !== undefined && x !== null && x !== '').map((v: string) => quoteIfNeeded(v, allowedVals, parmType)).join('/');
         cmd += ` ${key}(${qualPart})`;
       }
     } else if (Array.isArray(value)) {
-      // ✅ Multi-instance parameter (Max > 1) - regardless of type
       if (isMultiInstance) {
-        // Always wrap each value in parens if the parameter has ELEM or QUAL children
         if (hasElemChildren || hasQualChildren) {
-          // For multi-instance ELEM/QUAL, wrap each part in parentheses
           const wrappedValues = value.map(v => `(${quoteIfNeeded(v, allowedVals, parmType)})`);
           cmd += ` ${key}(${wrappedValues.join(' ')})`;
-          console.log(`[buildCLCommand] Added parameter (ELEM/QUAL, always parens per instance): ${key}(${wrappedValues.join(' ')})`);
         } else {
-          // For regular multi-instance parameters, do NOT wrap each value in parens
-          // Remove trailing blanks from each quoted string part to avoid extra blanks in continued quoted strings
-          // For continued quoted strings, do not trim or alter the quoted parts; just join as-is
           const quotedParts = value.map(v => quoteIfNeeded(v, allowedVals, parmType));
           cmd += ` ${key}(${quotedParts.join(' ')})`;
-          console.log(`[buildCLCommand] Added multi-instance parameter (simple type, no trim): ${key}(${quotedParts.join(' ')})`);
         }
       } else {
-        // Single instance or single value - no extra parentheses needed
         const quotedParts = value.map(v => quoteIfNeeded(v, allowedVals, parmType));
         cmd += ` ${key}(${quotedParts.join(' ')})`;
       }
     } else {
-      // ✅ Simple parameter
       let q = quoteIfNeeded(value, allowedVals, parmType);
       cmd += ` ${key}(${q})`;
     }
   }
-  console.log('[clPrompter::buildCLCommand] cmd: ', cmd);
   return cmd;
 }
 
@@ -551,58 +509,63 @@ export function quoteIfNeeded(val: string, allowedVals: string[] = [], parmType:
     return trimmed;
   }
 
-  // 2. Do not quote allowed keywords or values (e.g. *YES, *FILE)
+  // 2. Do not quote hexadecimal notation: X'...' (case-insensitive)
+  if (/^[xX]'[0-9A-Fa-f]*'$/.test(trimmed)) {
+    return trimmed;
+  }
+
+  // 3. Do not quote allowed keywords or values (e.g. *YES, *FILE)
   if (allowedVals.some(v => v.toUpperCase() === trimmed.toUpperCase()) || trimmed.startsWith("*")) {
     return trimmed;
   }
 
-  // 3. Already a properly quoted CL string
+  // 4. Already a properly quoted CL string
   if (isCLQuotedString(trimmed)) {
     return trimmed;
   }
 
-  // 4. Double-quoted string from user input
+  // 5. Double-quoted string from user input
   if (trimmed.startsWith('"') && trimmed.endsWith('"')) {
     return trimmed;
   }
 
-  // 5. Library-qualified name like QGPL/CUST
+  // 6. Library-qualified name like QGPL/CUST
   if (/^[A-Z0-9$#@_]+\/[A-Z0-9$#@_]+$/i.test(trimmed)) {
     return trimmed;
   }
 
-  // 6. Unqualified valid CL name
+  // 7. Unqualified valid CL name
   if (/^[A-Z$#@][A-Z0-9$#@_]{0,10}$/i.test(trimmed)) {
     return trimmed;
   }
 
-  // 7. If type hints at NAME-like field and it's valid
+  // 8. If type hints at NAME-like field and it's valid
   if (["NAME", "PNAME", "CNAME"].includes(type) && isValidName(trimmed)) {
     return trimmed;
   }
 
-  // 8. CL expression (e.g., *IF &X = &Y)
+  // 9. CL expression (e.g., *IF &X = &Y)
   if (isCLExpression(trimmed)) {
     return val;
   }
 
-  // 9. Special case: empty quoted or blank
+  // 10. Special case: empty quoted or blank
   if (trimmed === "''" || trimmed === "") {
     return "";
   }
 
-  // 10. Numeric literal
+  // 11. Numeric literal
   if (/^-?\d+(\.\d+)?$/.test(trimmed)) {
     return trimmed;
   }
 
-  // 11. Recover unescaped single-quoted string
+  // 12. Recover unescaped single-quoted string
   if (trimmed.startsWith("'") && trimmed.endsWith("'")) {
     const inner = trimmed.slice(1, -1).replace(/'/g, "''");
     return `'${inner}'`;
   }
 
-  // 12. Default: Quote and escape embedded single quotes
+  // 13. Default: Quote and escape embedded single quotes
   return `'${trimmed.replace(/'/g, "''")}'`;
 }
 

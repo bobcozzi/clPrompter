@@ -114,7 +114,7 @@ export function splitCLQual(val: string): string[] {
 // Default field lengths for IBM i CL data types (when no Len= attribute is present)
 export const CL_TYPE_DEFAULT_LENGTHS: Record<string, number> = {
     'DEC': 15,
-    'LGL': 1,
+    'LGL': 80,  // Logical expressions can be complex, default to 80
     'CHAR': 32,
     'NAME': 10,
     'SNAME': 10,

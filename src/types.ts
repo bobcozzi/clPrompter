@@ -161,6 +161,9 @@ export interface PrompterState {
   hasProcessedFormData: boolean;
   controlsWired: boolean;
   parmMetas: ParmMetaMap;  // Include this if not already present
+  touchedFields: Set<string>; // Track which fields the user has interacted with
+  isInitializing: boolean; // Flag to prevent touch tracking during form initialization
+  elementsToTrack: HTMLElement[]; // Elements to attach listeners to after initialization
 }
 
 // Utility types

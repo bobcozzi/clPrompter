@@ -37,7 +37,10 @@ let state: PrompterState = {
   cmdName: '',
   hasProcessedFormData: false,
   controlsWired: false,
-  parmMetas: {}
+  parmMetas: {},
+  touchedFields: new Set<string>(),
+  isInitializing: false,
+  elementsToTrack: [] // Elements to attach listeners to after initialization
 };
 
 // VS Code API
@@ -205,13 +208,101 @@ function parseColor(color: string): { r: number, g: number, b: number } | null {
   return null;
 }
 
+// Helper: Mark a field as touched by the user
+function markFieldTouched(fieldName: string): void {
+  const ts = new Date().toISOString().substring(11, 23);
+  if (state.isInitializing) {
+    console.log(`[${ts}] [markFieldTouched] ${fieldName} IGNORED - form is initializing`);
+    return;
+  }
+  state.touchedFields.add(fieldName);
+  console.log(`[${ts}] [markFieldTouched] ${fieldName} MARKED as touched (total: ${state.touchedFields.size})`);
+}
 
-function createInputForType(type: string, name: string, dft: string, len: string, suggestions: string[]): HTMLElement {
+// Helper: Check if a field was touched (user interacted with it)
+function isFieldTouched(fieldName: string): boolean {
+  return state.touchedFields.has(fieldName);
+}
+
+// Helper: Check if a field was in the original command
+function wasInOriginalCommand(fieldName: string): boolean {
+  return state.originalParmMap && state.originalParmMap[fieldName] !== undefined;
+}
+
+// Helper: Normalize value against allowed values (case-insensitive match)
+function normalizeValue(value: string, allowedValues: string[], parm: Element | null): string {
+  if (!value || allowedValues.length === 0) return value;
+
+  // Check if this parameter has Case=MONO (most parameters do)
+  const caseAttr = parm?.getAttribute('Case');
+  const isMono = !caseAttr || caseAttr.toUpperCase() === 'MONO';
+
+  // Try case-insensitive match against allowed values
+  const valueUpper = value.toUpperCase();
+  const match = allowedValues.find(allowed => allowed.toUpperCase() === valueUpper);
+
+  if (match) {
+    // Found a match - return the canonical form
+    return match;
+  }
+
+  // No match in allowed values - apply Case attribute
+  if (isMono) {
+    return value.toUpperCase();
+  }
+
+  return value;
+}
+
+// Attach touch tracking to an input element
+function attachTouchTracking(element: HTMLElement): void {
+  const fieldName = (element as any).name;
+  if (!fieldName) return;
+
+  const ts = new Date().toISOString().substring(11, 23);
+  if (state.isInitializing) {
+    // During initialization, just store the element for later
+    console.log(`[${ts}] [attachTouchTracking] ${fieldName} STORED (queue: ${state.elementsToTrack.length + 1})`);
+    state.elementsToTrack.push(element);
+    return;
+  }
+
+  // After initialization, attach listeners immediately
+  console.log(`[${ts}] [attachTouchTracking] ${fieldName} ATTACHED immediately`);
+  const markTouched = () => markFieldTouched(fieldName);
+  element.addEventListener('change', markTouched);
+  element.addEventListener('input', markTouched);
+}
+
+// Attach listeners to all stored elements after initialization
+function attachStoredListeners(): void {
+  const ts = new Date().toISOString().substring(11, 23);
+  console.log(`[${ts}] [attachStoredListeners] START - ${state.elementsToTrack.length} elements queued`);
+  console.log(`[${ts}] [attachStoredListeners] isInitializing = ${state.isInitializing}`);
+  console.log(`[${ts}] [attachStoredListeners] touchedFields.size = ${state.touchedFields.size}`);
+
+  state.elementsToTrack.forEach(element => {
+    const fieldName = (element as any).name;
+    if (fieldName) {
+      console.log(`[${ts}] [attachStoredListeners] Attaching '${fieldName}'`);
+      const markTouched = () => markFieldTouched(fieldName);
+      element.addEventListener('change', markTouched);
+      element.addEventListener('input', markTouched);
+    }
+  });
+  state.elementsToTrack = [];
+  console.log(`[${ts}] [attachStoredListeners] COMPLETE - listeners attached, queue cleared`);
+}
+
+
+function createInputForType(type: string, name: string, dft: string, len: string, suggestions: string[], isRestricted: boolean = false): HTMLElement {
   const effectiveLen = len ? parseInt(len, 10) : getDefaultLengthForType(type);
   const dftLen = (dft || '').length;
-  const useLongInput = effectiveLen > 80 || dftLen > 80;
+  // LGL type should use textarea for CL expressions, but only when NOT restricted (Rstd=NO)
+  const isLglType = !isRestricted && (type.toUpperCase() === 'LGL' || type.toUpperCase() === '*LGL');
+  const useLongInput = isLglType || effectiveLen > 80 || dftLen > 80;
 
-  console.log(`[createInputForType] name=${name}, effectiveLen=${effectiveLen}, dftLen=${dftLen}, useLongInput=${useLongInput}, suggestions:`, suggestions, 'dft:', dft);
+  console.log(`[createInputForType] name=${name}, type=${type}, effectiveLen=${effectiveLen}, dftLen=${dftLen}, isRestricted=${isRestricted}, isLglType=${isLglType}, useLongInput=${useLongInput}, suggestions:`, suggestions, 'dft:', dft);
 
   // If there are suggestions AND it's a long input, use dropdown + textarea
   if (suggestions.length > 0 && useLongInput) {
@@ -251,6 +342,7 @@ function createInputForType(type: string, name: string, dft: string, len: string
     textarea.value = dft || '';
     textarea.rows = 3;
     textarea.classList.add('long-text-input');
+    attachTouchTracking(textarea);
 
     // Selection handler - replace textarea content when user selects a value
     select.addEventListener('change', () => {
@@ -301,6 +393,7 @@ function createInputForType(type: string, name: string, dft: string, len: string
     input.name = name;
     input.classList.add(getLengthClass(effectiveLen));
     input.style.display = 'none';
+    attachTouchTracking(input);
 
     // Set initial value
     if (dft && !suggestions.includes(dft)) {
@@ -338,6 +431,7 @@ function createInputForType(type: string, name: string, dft: string, len: string
     textarea.value = dft || '';
     textarea.rows = 3;
     textarea.classList.add('long-text-input');
+    attachTouchTracking(textarea);
     return textarea;
   } else {
     const input = document.createElement('input');
@@ -345,12 +439,13 @@ function createInputForType(type: string, name: string, dft: string, len: string
     input.name = name;
     input.value = dft || '';
     input.classList.add(getLengthClass(effectiveLen));
+    attachTouchTracking(input);
     return input;
   }
 }
 
 // Create parm input (dropdown, textfield, or textarea for long values)
-function createParmInput(name: string, suggestions: string[], isRestricted: boolean, dft: string, len?: string): HTMLElement {
+function createParmInput(name: string, suggestions: string[], isRestricted: boolean, dft: string, len?: string, type?: string): HTMLElement {
   console.log('[clPrompter] ', 'createParmInput start');
   if (isRestricted && suggestions.length > 0) {
     // Use standard select for restricted dropdowns
@@ -366,11 +461,12 @@ function createParmInput(name: string, suggestions: string[], isRestricted: bool
       }
       select.appendChild(option);
     });
+    attachTouchTracking(select);
     console.log('[clPrompter] ', 'createParmInput end1');
     return select;
   } else {
     console.log('[clPrompter] ', 'createParmInput end2');
-    return createInputForType('CHAR', name, dft, len || '', suggestions);
+    return createInputForType(type || 'CHAR', name, dft, len || '', suggestions, isRestricted);
   }
 }
 
@@ -425,7 +521,7 @@ function createQualInput(
   // Size: prefer Qual Len and InlPmtLen; expand later on populate if value grows
   const inl = Number.parseInt(String(qual?.getAttribute('InlPmtLen') || ''), 10) || undefined;
   const len = Number.parseInt(String(qual?.getAttribute('Len') || ''), 10) || undefined;
-  const input = createParmInput(qualName, allowedVals, restricted, dft, qualLen);
+  const input = createParmInput(qualName, allowedVals, restricted, dft, qualLen, qualType);
   ensureMinInputWidth(input as HTMLElement, { len, inlPmtLen: inl });
 
   return input;
@@ -481,7 +577,7 @@ function createElemInput(
 
   const inl = Number.parseInt(String(elem?.getAttribute('InlPmtLen') || ''), 10) || undefined;
   const len = Number.parseInt(String(elem?.getAttribute('Len') || ''), 10) || undefined;
-  const input = createParmInput(elemName, allowedVals, restricted, dft, elemLen);
+  const input = createParmInput(elemName, allowedVals, restricted, dft, elemLen, elemType);
   ensureMinInputWidth(input as HTMLElement, { len, inlPmtLen: inl });
 
   return input;
@@ -505,7 +601,7 @@ function renderSimpleParm(parm: ParmElement, kwd: string, container: HTMLElement
 
   const len = Number.parseInt(lenAttr, 10) || undefined;
   const inl = Number.parseInt(inlPmtLen, 10) || undefined;
-  const input = createParmInput(inputName, allowedVals, restricted, dft, effectiveLenAttr);
+  const input = createParmInput(inputName, allowedVals, restricted, dft, effectiveLenAttr, type);
   ensureMinInputWidth(input as HTMLElement, { len, inlPmtLen: inl });
 
   // Wrap in form-group for 5250-style grid layout with prompt and keyword in label
@@ -590,10 +686,14 @@ function renderQualParm(parm: ParmElement, kwd: string, container: HTMLElement, 
 function populateSimpleParm(kwd: string, parm: Element, value: string) {
   const input = document.querySelector(`[name="${kwd}"]`) as any;
   if (input) {
-    input.value = value;
+    // Get allowed values and normalize
+    const allowedVals = (state.allowedValsMap || {})[kwd] || [];
+    const normalizedValue = normalizeValue(value, allowedVals, parm);
+
+    input.value = normalizedValue;
     const len = Number.parseInt(String(parm.getAttribute('Len') || ''), 10) || undefined;
     const inl = Number.parseInt(String(parm.getAttribute('InlPmtLen') || ''), 10) || undefined;
-    ensureMinInputWidth(input as HTMLElement, { len, inlPmtLen: inl, valueLen: value.length });
+    ensureMinInputWidth(input as HTMLElement, { len, inlPmtLen: inl, valueLen: normalizedValue.length });
   }
 }
 
@@ -794,13 +894,17 @@ function addMultiInstanceControls(container: HTMLElement, parm: ParmElement, kwd
     removeBtn.onclick = () => container.remove();
     btnBar.appendChild(removeBtn);
   }
-  container.appendChild(btnBar);
   console.log('[clPrompter] ', 'addMultiInstanceControls end');
 }
 
 // Main form renderer
 function loadForm(): void {
-  console.log('[clPrompter] ', 'loadForm start');
+  const ts = new Date().toISOString().substring(11, 23);
+  console.log(`[${ts}] [loadForm] START`);
+  state.isInitializing = true;
+  state.touchedFields.clear();
+  state.elementsToTrack = [];
+  console.log(`[${ts}] [loadForm] isInitializing = true, touchedFields cleared, queue cleared`);
   if (!state.xmlDoc) return;
   const form = document.getElementById('clForm');
   if (!form) return;
@@ -830,7 +934,13 @@ function loadForm(): void {
   // Calculate and apply optimal label width after all parameters are rendered
   optimizeLabelWidth();
 
-  console.log('[clPrompter] ', 'loadForm end');
+  // Form initialization complete - now track user touches
+  const ts2 = new Date().toISOString().substring(11, 23);
+  console.log(`[${ts2}] [loadForm] Setting isInitializing = false`);
+  state.isInitializing = false;
+  console.log(`[${ts2}] [loadForm] About to call attachStoredListeners()`);
+  attachStoredListeners();
+  console.log(`[${ts2}] [loadForm] END - Form ready for user interaction`);
 }
 
 // Calculate the longest label and set a CSS custom property for optimal grid sizing
@@ -978,18 +1088,24 @@ function getElemDefault(parm: Element, elemIndex: number): string {
 // Helper: Get the FORM default (what the UI pre-fills) for an ELEM
 // This is used to detect if user left the field at its pre-filled value
 function getElemFormDefault(parm: Element, elemIndex: number): string {
-  // First check for explicit defaults
-  const explicitDefault = getElemDefault(parm, elemIndex);
-  if (explicitDefault) return explicitDefault;
-
-  // For restricted fields without explicit default, form pre-fills with first allowed value
   const elemParts = parm.querySelectorAll(':scope > Elem');
-  if (elemIndex < elemParts.length) {
-    const elem = elemParts[elemIndex] as Element;
-    if (isRestricted(elem)) {
-      const firstAllowed = getFirstAllowedValue(elem);
-      if (firstAllowed) return firstAllowed;
-    }
+  if (elemIndex >= elemParts.length) return '';
+
+  const elem = elemParts[elemIndex] as Element;
+
+  // First check for explicit Dft attribute on the ELEM itself
+  const explicitElemDft = String(elem.getAttribute('Dft') || '');
+  if (explicitElemDft) return explicitElemDft;
+
+  // Then check parent PARM for composite default (e.g., "SRCSEQ(1.00 1.00)")
+  const compositeDefault = getElemDefault(parm, elemIndex);
+  if (compositeDefault) return compositeDefault;
+
+  // For restricted fields without explicit default, the first allowed value becomes the default
+  // This is both what the form pre-fills AND what should be considered the "unchanged" state
+  if (isRestricted(elem)) {
+    const firstAllowed = getFirstAllowedValue(elem);
+    if (firstAllowed) return firstAllowed;
   }
 
   return '';
@@ -1007,6 +1123,12 @@ function getFirstAllowedValue(elem: Element): string {
 
 // Helper: Check if a value matches its default (case-insensitive)
 function matchesDefault(value: string, defaultVal: string): boolean {
+  // DEPRECATED: This function should no longer be used for assembly logic.
+  // Touch tracking has replaced default value comparison.
+  const caller = new Error().stack?.split('\n')[2]?.trim() || 'unknown';
+  console.warn(`[DEPRECATED] matchesDefault() called from: ${caller}`);
+  console.warn(`[DEPRECATED]   value="${value}", default="${defaultVal}"`);
+
   if (!defaultVal) return false;
   return value.trim().toUpperCase() === defaultVal.trim().toUpperCase();
 }
@@ -1027,8 +1149,10 @@ function splitQualLeftToRight(val: string): string[] {
 // Populate form from values
 function populateFormFromValues(values: ParmMap): void {
   console.log('[clPrompter] populateFormFromValues start, values:', values);
+  state.isInitializing = true;
   Object.entries(values).forEach(([kwd, val]) => {
     console.log(`[clPrompter] Populating ${kwd} with val:`, val);
+
     const parm = state.parms.find(p => p.getAttribute('Kwd') === kwd);
     if (!parm) {
       console.log(`[clPrompter] Parm not found for ${kwd}`);
@@ -1073,6 +1197,8 @@ function populateFormFromValues(values: ParmMap): void {
       }
     }
   });
+  state.isInitializing = false;
+  attachStoredListeners();
   console.log('[clPrompter] populateFormFromValues end');
 }
 
@@ -1393,8 +1519,13 @@ function assembleCurrentParmMap(): ParmMap {
               const joined = joinQualParts([...parts].reverse()); // omit empties, no stray '/'
               if (joined) {
                 elemVals.push(joined);
-                if (!matchesDefault(joined, elemDefault)) {
-                  lastNonDefaultIndex = i;
+                // Check if any QUAL in this ELEM was touched
+                for (let j = 0; j < parts.length; j++) {
+                  const fieldName = `${kwd}_INST${instIdx}_ELEM${i}_QUAL${j}`;
+                  if (isFieldTouched(fieldName)) {
+                    lastNonDefaultIndex = i;
+                    break;
+                  }
                 }
               } else {
                 elemVals.push(''); // placeholder to maintain index alignment
@@ -1402,39 +1533,38 @@ function assembleCurrentParmMap(): ParmMap {
             } else {
               const subElems = (elem as Element).querySelectorAll(':scope > Elem');
               if (subElems.length > 0) {
-                // Nested ELEM group - find last non-default sub and include values up to that point
+                // Nested ELEM group - check if any sub was touched
                 const subVals: string[] = [];
-                let lastNonDefaultSub = -1;
+                let anySubTouched = false;
                 subElems.forEach((subElem, j) => {
                   const input = inst.querySelector(`[name="${kwd}_INST${instIdx}_ELEM${i}_SUB${j}"]`) as HTMLInputElement | null;
                   const v = (input?.value || '').trim();
                   subVals.push(v);
-                  const subDefault = String((subElem as Element).getAttribute('Dft') || '');
-                  // For nested ELEMs, only use explicit Dft attribute, no implicit defaults
-                  if (v && !matchesDefault(v, subDefault)) {
-                    lastNonDefaultSub = j;
+                  const fieldName = `${kwd}_INST${instIdx}_ELEM${i}_SUB${j}`;
+                  if (isFieldTouched(fieldName)) {
+                    anySubTouched = true;
                   }
                 });
-                // Only include sub-values up to last non-default, wrap in parens
-                if (lastNonDefaultSub >= 0) {
-                  const trimmedSubs = subVals.slice(0, lastNonDefaultSub + 1).filter(v => v.length > 0);
+                // If any sub was touched, include this nested ELEM group
+                if (anySubTouched) {
+                  const trimmedSubs = subVals.filter(v => v.length > 0);
                   const joined = '(' + trimmedSubs.join(' ') + ')';
                   elemVals.push(joined);
                   lastNonDefaultIndex = i;
                 } else {
-                  elemVals.push(''); // All subs at default
+                  elemVals.push(''); // All subs untouched
                 }
               } else {
                 const input = inst.querySelector(`[name="${kwd}_INST${instIdx}_ELEM${i}"]`) as HTMLInputElement | null;
                 const v = (input?.value || '').trim();
-                console.log(`[DEBUG] ${kwd} ELEM${i}: input value="${v}", default="${elemDefault}"`);
+                const fieldName = `${kwd}_INST${instIdx}_ELEM${i}`;
+                console.log(`[DEBUG] ${kwd} ELEM${i}: input value="${v}", touched=${isFieldTouched(fieldName)}`);
                 if (v) {
                   elemVals.push(v);
-                  const matches = matchesDefault(v, elemDefault);
-                  console.log(`[DEBUG] ${kwd} ELEM${i}: matchesDefault=${matches}`);
-                  if (!matches) {
+                  // ELEM is "modified" if user touched it
+                  if (isFieldTouched(fieldName)) {
                     lastNonDefaultIndex = i;
-                    console.log(`[DEBUG] ${kwd} ELEM${i}: updated lastNonDefaultIndex to ${i}`);
+                    console.log(`[DEBUG] ${kwd} ELEM${i}: updated lastNonDefaultIndex to ${i} (touched)`);
                   }
                 } else {
                   elemVals.push(''); // placeholder to maintain index alignment
@@ -1444,12 +1574,26 @@ function assembleCurrentParmMap(): ParmMap {
             }
           });
 
-          // Only include ELEMs up to the last non-default ELEM
+          // Only include ELEMs if any were touched OR parent parameter was in original command
           console.log(`[DEBUG] ${kwd} lastNonDefaultIndex=${lastNonDefaultIndex}, elemVals:`, elemVals);
-          if (lastNonDefaultIndex >= 0) {
-            const trimmedVals = elemVals.slice(0, lastNonDefaultIndex + 1).filter(v => v.length > 0);
-            const joined = trimmedVals.join(' ');
-            console.log(`[DEBUG] ${kwd} trimmedVals:`, trimmedVals, `joined="${joined}"`);
+          const parentInOriginal = wasInOriginalCommand(kwd);
+          console.log(`[DEBUG] ${kwd} wasInOriginalCommand=${parentInOriginal}`);
+          if (lastNonDefaultIndex >= 0 || parentInOriginal) {
+            let valsToInclude: string[];
+            if (lastNonDefaultIndex >= 0) {
+              // Only include touched ELEM values
+              valsToInclude = elemVals.filter((v, i) => {
+                const fieldName = `${kwd}_INST${instIdx}_ELEM${i}`;
+                return isFieldTouched(fieldName) && v.length > 0;
+              });
+            } else if (parentInOriginal) {
+              // Include all values as-is if parent was in original command
+              valsToInclude = elemVals.filter(v => v.length > 0);
+            } else {
+              valsToInclude = [];
+            }
+            const joined = valsToInclude.join(' ');
+            console.log(`[DEBUG] ${kwd} valsToInclude:`, valsToInclude, `joined="${joined}"`);
             if (joined) {
               arr.push(joined);
             }
@@ -1471,12 +1615,14 @@ function assembleCurrentParmMap(): ParmMap {
           } else {
             // IBM i Rule #3: Find last user-modified QUAL and include all QUALs up to that point
             let lastModifiedIndex = -1;
+            const parentInOriginal = wasInOriginalCommand(kwd);
             for (let i = 0; i < parts.length; i++) {
-              const qualDft = getQualDefault(parm, i);
+              const fieldName = `${kwd}_QUAL${i}`;
               const userVal = parts[i];
-              // A QUAL is considered "modified" if user entered something different from default
-              if (userVal && !matchesDefault(userVal, qualDft)) {
+              // A QUAL is considered "modified" if user touched it OR parent parameter was in original command
+              if (userVal && (isFieldTouched(fieldName) || parentInOriginal)) {
                 lastModifiedIndex = i;
+                console.log(`[DEBUG] ${kwd} QUAL${i}: modified (touched=${isFieldTouched(fieldName)} or parentInOriginal=${parentInOriginal})`);
               }
             }
 
@@ -1496,34 +1642,19 @@ function assembleCurrentParmMap(): ParmMap {
             // If no QUAL was modified, don't output the parameter at all
           }
         } else {
-          // Simple multi-instance parameter - check against default
+          // Simple multi-instance parameter - use touch tracking only
           const input = inst.querySelector(`[name="${kwd}"]`) as HTMLInputElement | null;
           const v = (input?.value || '').trim();
-          let parmDefault = String(parm.getAttribute('Dft') || '');
-          console.log(`[DEBUG] ${kwd} Dft attribute: "${parmDefault}"`);
-          console.log(`[DEBUG] ${kwd} isRestricted: ${isRestricted(parm)}`);
-
-          // For restricted fields, the form pre-fills with first allowed value, so check against that
-          if (isRestricted(parm)) {
-            const vals: string[] = [];
-            parm.querySelectorAll('SpcVal > Value, SngVal > Value, Values > Value').forEach(val => {
-              const v = (val as Element).getAttribute('Val');
-              if (v && v !== '*NULL') vals.push(v);
-            });
-            console.log(`[DEBUG] ${kwd} allowed values: ${JSON.stringify(vals)}`);
-            if (vals.length > 0) parmDefault = vals[0];
-          }
-
-          console.log(`[DEBUG] ${kwd} effective default: "${parmDefault}"`);
           console.log(`[DEBUG] ${kwd} current value: "${v}"`);
-          console.log(`[DEBUG] ${kwd} matchesDefault: ${matchesDefault(v, parmDefault)}`);
+          console.log(`[DEBUG] ${kwd} isFieldTouched: ${isFieldTouched(kwd)}`);
+          console.log(`[DEBUG] ${kwd} wasInOriginalCommand: ${wasInOriginalCommand(kwd)}`);
 
-          // Only include if value differs from default
-          if (v && !matchesDefault(v, parmDefault)) {
-            console.log(`[DEBUG] ${kwd} INCLUDED - differs from default`);
+          // Include only if: touched OR was in original command
+          if (v && (isFieldTouched(kwd) || wasInOriginalCommand(kwd))) {
+            console.log(`[DEBUG] ${kwd} INCLUDED - touched=${isFieldTouched(kwd)} or wasInOriginal=${wasInOriginalCommand(kwd)}`);
             arr.push(v);
           } else {
-            console.log(`[DEBUG] ${kwd} SKIPPED - matches default`);
+            console.log(`[DEBUG] ${kwd} SKIPPED - not touched and not in original command`);
           }
         }
       });
@@ -1571,59 +1702,7 @@ function assembleCurrentParmMap(): ParmMap {
         }
 
         // If first ELEM matches special value AND default, check if ANY other ELEM has non-default value
-        if (isFirstElemSpecialAndDefault) {
-          let hasOtherNonDefault = false;
-          for (let i = 1; i < elemParts.length; i++) {
-            const elem = elemParts[i] as Element;
-            const elemType = elem.getAttribute('Type') || 'CHAR';
-            const elemDefault = getElemFormDefault(parm, i); // Use form default
-
-            if (elemType === 'QUAL') {
-              const parts: string[] = [];
-              for (let j = 0; ; j++) {
-                const q = document.querySelector(`[name="${kwd}_ELEM${i}_QUAL${j}"]`) as HTMLInputElement | null;
-                if (!q) break;
-                parts.push((q.value || '').trim());
-              }
-              const joined = joinQualParts([...parts].reverse());
-              // Empty or matching default is considered at-default
-              if (joined && !matchesDefault(joined, elemDefault)) {
-                hasOtherNonDefault = true;
-                break;
-              }
-            } else {
-              const subElems = elem.querySelectorAll(':scope > Elem');
-              if (subElems.length > 0) {
-                // Nested ELEM group - check if all sub-elements are at defaults
-                const isAtDefault = isNestedElemAtDefault(parm, i, (j) =>
-                  document.querySelector(`[name="${kwd}_ELEM${i}_SUB${j}"]`) as HTMLInputElement | null
-                );
-                if (!isAtDefault) {
-                  hasOtherNonDefault = true;
-                  break;
-                }
-              } else {
-                const input = document.querySelector(`[name="${kwd}_ELEM${i}"]`) as HTMLInputElement | null;
-                const v = (input?.value || '').trim();
-                // Check if value exists AND differs from default
-                // Empty value is considered at-default
-                if (v) {
-                  // If there's a value, check if it's different from default
-                  if (!matchesDefault(v, elemDefault)) {
-                    hasOtherNonDefault = true;
-                    break;
-                  }
-                }
-              }
-            }
-          }
-
-          // If no other ELEM has non-default value, omit entire parameter
-          if (!hasOtherNonDefault) {
-            return;
-          }
-          // Otherwise fall through to assemble full ELEM group
-        }
+        // Exclusivity logic removed: Only include parameter if any field was touched or parent was in original command.
 
         // Assemble single-instance ELEM parameter
         const elemVals: string[] = [];
@@ -1643,8 +1722,13 @@ function assembleCurrentParmMap(): ParmMap {
             const joined = joinQualParts([...parts].reverse());
             if (joined) {
               elemVals.push(joined);
-              if (!matchesDefault(joined, elemDefault)) {
-                lastNonDefaultIndex = i;
+              // Check if any QUAL in this ELEM was touched
+              for (let j = 0; j < parts.length; j++) {
+                const fieldName = `${kwd}_ELEM${i}_QUAL${j}`;
+                if (isFieldTouched(fieldName)) {
+                  lastNonDefaultIndex = i;
+                  break;
+                }
               }
             } else {
               elemVals.push(''); // placeholder to maintain index alignment
@@ -1652,34 +1736,35 @@ function assembleCurrentParmMap(): ParmMap {
           } else {
             const subElems = (elem as Element).querySelectorAll(':scope > Elem');
             if (subElems.length > 0) {
-              // Nested ELEM group - find last non-default sub and include values up to that point
+              // Nested ELEM group - check if any sub was touched
               const subVals: string[] = [];
-              let lastNonDefaultSub = -1;
+              let anySubTouched = false;
               subElems.forEach((subElem, j) => {
                 const input = document.querySelector(`[name="${kwd}_ELEM${i}_SUB${j}"]`) as HTMLInputElement | null;
                 const v = (input?.value || '').trim();
                 subVals.push(v);
-                const subDefault = String((subElem as Element).getAttribute('Dft') || '');
-                // For nested ELEMs, only use explicit Dft attribute, no implicit defaults
-                if (v && !matchesDefault(v, subDefault)) {
-                  lastNonDefaultSub = j;
+                const fieldName = `${kwd}_ELEM${i}_SUB${j}`;
+                if (isFieldTouched(fieldName)) {
+                  anySubTouched = true;
                 }
               });
-              // Only include sub-values up to last non-default, wrap in parens
-              if (lastNonDefaultSub >= 0) {
-                const trimmedSubs = subVals.slice(0, lastNonDefaultSub + 1).filter(v => v.length > 0);
+              // If any sub was touched, include this nested ELEM group
+              if (anySubTouched) {
+                const trimmedSubs = subVals.filter(v => v.length > 0);
                 const joined = '(' + trimmedSubs.join(' ') + ')';
                 elemVals.push(joined);
                 lastNonDefaultIndex = i;
               } else {
-                elemVals.push(''); // All subs at default
+                elemVals.push(''); // All subs untouched
               }
             } else {
               const input = document.querySelector(`[name="${kwd}_ELEM${i}"]`) as HTMLInputElement | null;
               const v = (input?.value || '').trim();
+              const fieldName = `${kwd}_ELEM${i}`;
               if (v) {
                 elemVals.push(v);
-                if (!matchesDefault(v, elemDefault)) {
+                // Mark as modified if user touched this ELEM field
+                if (isFieldTouched(fieldName)) {
                   lastNonDefaultIndex = i;
                 }
               } else {
@@ -1689,13 +1774,34 @@ function assembleCurrentParmMap(): ParmMap {
           }
         });
 
-        // Only include ELEMs up to the last non-default ELEM
+        // Only include ELEMs if any were touched OR parent parameter was in original command
+        const parentInOriginal = wasInOriginalCommand(kwd);
         if (lastNonDefaultIndex >= 0) {
+          // Usual case: user touched something, include up to last touched
           const trimmedVals = elemVals.slice(0, lastNonDefaultIndex + 1).filter(v => v.length > 0);
           const joined = trimmedVals.join(' ');
           if (joined) {
             map[kwd] = `(${joined})`;
           }
+        } else if (parentInOriginal) {
+          // Special case: present in original command, include all original subfields (even if empty)
+          // Find the number of subfields in the original command
+          let origVals: string[] = [];
+          if (state.originalParmMap && state.originalParmMap[kwd]) {
+            const orig = state.originalParmMap[kwd];
+            if (typeof orig === 'string' && orig.startsWith('(') && orig.endsWith(')')) {
+              origVals = orig.slice(1, -1).split(' ');
+            } else if (Array.isArray(orig)) {
+              origVals = orig;
+            } else if (typeof orig === 'string') {
+              origVals = orig.split(' ');
+            }
+          }
+          // Output as many subfields as were present in the original command
+          const valsToInclude = elemVals.slice(0, Math.max(origVals.length, 1));
+          // Do not filter out empty subfields
+          const joined = valsToInclude.join(' ');
+          map[kwd] = `(${joined})`;
         }
       } else if (hasQual) {
         // Collect QUAL inputs (UI order)
@@ -1749,14 +1855,29 @@ function assembleCurrentParmMap(): ParmMap {
           // If no QUAL was modified, don't output the parameter at all
         }
       } else {
-        // Simple parameter - check against default
+        // Simple parameter - use touch tracking only
         const input = document.querySelector(`[name="${kwd}"]`) as HTMLInputElement | null;
-        const value = (input?.value || '').trim();
-        const parmDefault = String(parm.getAttribute('Dft') || '');
+        let value = (input?.value || '').trim();
 
-        // Only include if value is non-empty and differs from default
-        if (value && !matchesDefault(value, parmDefault)) {
+        // Include only if: touched OR was in original command
+        const touched = isFieldTouched(kwd);
+        const inOriginal = wasInOriginalCommand(kwd);
+
+        // If parameter was in original command but current value is empty,
+        // use the original value (handles cases where original value wasn't valid for the form)
+        if (!value && inOriginal && state.originalParmMap) {
+          const origVal = state.originalParmMap[kwd];
+          if (origVal) {
+            value = String(origVal);
+            console.log(`[assembleCommand] ${kwd} using original value: ${value} (form value was empty)`);
+          }
+        }
+
+        if (value && (touched || inOriginal)) {
+          console.log(`[assembleCommand] ${kwd}=${value} INCLUDED (touched=${touched}, inOriginal=${inOriginal})`);
           map[kwd] = value;
+        } else {
+          console.log(`[assembleCommand] ${kwd}=${value || '(empty)'} SKIPPED (touched=${touched}, inOriginal=${inOriginal})`);
         }
       }
     }
