@@ -30,6 +30,7 @@
     "onLanguage:clle",
     "onLanguage:clp",
     "onLanguage:cl",
+    "onLanguage:bnd",
     "onCommand:clPrompter.clPrompter"
   ],
   "contributes": {
@@ -51,7 +52,7 @@
       {
         "command": "clPrompter.clPrompter",
         "key": "f4",
-        "when": "editorTextFocus && (editorLangId == clle || editorLangId == clp || editorLangId == cl)"
+        "when": "editorTextFocus && (editorLangId == clle || editorLangId == clp || editorLangId == cl || editorLangId == bnd)"
       }
     ],
     "configuration": {
@@ -169,17 +170,17 @@
       "editor/context": [
         {
           "command": "clPrompter.clPrompter",
-          "when": "editorLangId == clle || editorLangId == clp || editorLangId == cmd || editorLangId == cl",
+          "when": "editorLangId == clle || editorLangId == clp || editorLangId == cmd || editorLangId == cl || editorLangId == bnd",
           "group": "navigation"
         },
         {
           "command": "clPrompter.formatCurrentCommand",
-          "when": "editorTextFocus && (editorLangId == clle || editorLangId == clp || editorLangId == cl)",
+          "when": "editorTextFocus && (editorLangId == clle || editorLangId == clp || editorLangId == cl || editorLangId == bnd)",
           "group": "1_modification"
         },
         {
           "command": "clPrompter.formatEntireFile",
-          "when": "editorTextFocus && (editorLangId == clle || editorLangId == clp || editorLangId == cl)",
+          "when": "editorTextFocus && (editorLangId == clle || editorLangId == clp || editorLangId == cl || editorLangId == bnd)",
           "group": "1_modification"
         }
       ]

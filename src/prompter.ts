@@ -77,7 +77,8 @@ function ensureMinInputWidth(
   const valueLen = Math.max(opts.valueLen ?? 0, current.length);
   const len = Number.isFinite(opts.len as number) ? (opts.len as number) : 0;
   const inl = Number.isFinite(opts.inlPmtLen as number) ? (opts.inlPmtLen as number) : 0;
-  const minCh = Math.max(4, len, inl, valueLen);
+  // Add extra padding to prevent truncation of the last character
+  const minCh = Math.max(4, len, inl, valueLen) + 1;
 
   // Only set 'size' for text-like inputs, NEVER for <select> (setting size > 1 turns it into a list box)
   if (tag === 'input' && (type === 'text' || type === 'search' || type === 'email' || type === 'url')) {
@@ -87,7 +88,8 @@ function ensureMinInputWidth(
   }
 
   // Width hint for all controls (select, input, etc.)
-  (el as HTMLElement).style.minWidth = `calc(${minCh}ch + 2px)`;
+  // Add more px padding to account for font and border/margin
+  (el as HTMLElement).style.minWidth = `calc(${minCh}ch + 8px)`;
 }
 
 // Call once after receiving formData to apply the configured keyword and value colors (if provided)
@@ -608,26 +610,39 @@ function renderSimpleParm(parm: ParmElement, kwd: string, container: HTMLElement
   const formGroup = document.createElement('div');
   formGroup.className = 'form-group simple-parm-group';
 
-  const label = document.createElement('label');
-  const promptText = String(parm.getAttribute('Prompt') || kwd);
+  // For multi-instance, only show label for the first instance (instanceId ends with _INST0)
+  let showLabel = true;
+  if (instanceId && /_INST\d+$/.test(instanceId)) {
+    const idx = Number(instanceId.replace(/.*_INST/, ''));
+    if (idx > 0) showLabel = false;
+  }
 
-  // Create prompt text span
-  const promptSpan = document.createElement('span');
-  promptSpan.textContent = promptText;
+  if (showLabel) {
+    const label = document.createElement('label');
+    const promptText = String(parm.getAttribute('Prompt') || kwd);
 
-  // Create keyword span with styling
-  const kwdSpan = document.createElement('span');
-  kwdSpan.className = 'parm-kwd';
-  kwdSpan.textContent = ` (${kwd})`;
+    // Create prompt text span
+    const promptSpan = document.createElement('span');
+    promptSpan.textContent = promptText;
 
-  label.appendChild(promptSpan);
-  label.appendChild(kwdSpan);
-  label.appendChild(document.createTextNode(':'));
-  label.htmlFor = inputName;
+    // Create keyword span with styling
+    const kwdSpan = document.createElement('span');
+    kwdSpan.className = 'parm-kwd';
+    kwdSpan.textContent = ` (${kwd})`;
 
-  formGroup.appendChild(label);
+    label.appendChild(promptSpan);
+    label.appendChild(kwdSpan);
+    label.appendChild(document.createTextNode(':'));
+    label.htmlFor = inputName;
+    formGroup.appendChild(label);
+  } else {
+    // Insert an empty label to preserve grid alignment
+    const emptyLabel = document.createElement('label');
+    emptyLabel.textContent = '';
+    formGroup.appendChild(emptyLabel);
+  }
+
   formGroup.appendChild(input);
-
   div.appendChild(formGroup);
   container.appendChild(div);
 }
@@ -877,6 +892,7 @@ function addMultiInstanceControls(container: HTMLElement, parm: ParmElement, kwd
     addBtn.type = 'button';
     addBtn.className = 'add-parm-btn';
     addBtn.textContent = '+';
+    addBtn.title = 'Add entry';
     addBtn.onclick = () => {
       const instances = multiGroupDiv.querySelectorAll('.parm-instance');
       if (instances.length < max) {
@@ -890,10 +906,12 @@ function addMultiInstanceControls(container: HTMLElement, parm: ParmElement, kwd
     const removeBtn = document.createElement('button');
     removeBtn.type = 'button';
     removeBtn.className = 'remove-parm-btn';
-    removeBtn.textContent = '-';
+    removeBtn.textContent = '—'; // em dash
+    removeBtn.title = 'Remove entry';
     removeBtn.onclick = () => container.remove();
     btnBar.appendChild(removeBtn);
   }
+  container.appendChild(btnBar);
   console.log('[clPrompter] ', 'addMultiInstanceControls end');
 }
 

@@ -71,6 +71,13 @@ export async function activate(context: vscode.ExtensionContext) {
 
                 const document = editor.document;
 
+                // Only activate for supported languages
+                const supportedLangs = ['clle', 'clp', 'cl', 'bnd'];
+                if (!supportedLangs.includes(document.languageId)) {
+                    vscode.window.showInformationMessage('CL Prompter: Not a supported IBM i source type.');
+                    return;
+                }
+
                 // Extract the current command range
                 const commandInfo = collectCLCmd(editor);
                 if (!commandInfo || !commandInfo.command) {
@@ -120,6 +127,13 @@ export async function activate(context: vscode.ExtensionContext) {
                 }
 
                 const document = editor.document;
+
+                // Only activate for supported languages
+                const supportedLangs = ['clle', 'clp', 'cl', 'bnd'];
+                if (!supportedLangs.includes(document.languageId)) {
+                    vscode.window.showInformationMessage('CL Prompter: Not a supported IBM i source type.');
+                    return;
+                }
 
                 // Get format options from configuration
                 const config = vscode.workspace.getConfiguration('clPrompter');

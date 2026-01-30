@@ -305,7 +305,8 @@ textarea.long-text-input:focus {
 .parm-instance {
   margin-bottom: 0.2em;
   padding-bottom: 0.2em;
-  border-bottom: 1px dotted #ddd;
+  /* border-bottom removed to eliminate line under button bar */
+  /* border-bottom: 1px dotted #ddd; */
 }
 
 .add-parm-btn,
@@ -317,13 +318,17 @@ textarea.long-text-input:focus {
   height: 1.5em;
   min-width: 0;
   min-height: 0;
-  line-height: 1;
+  line-height: 1.5em;
   vertical-align: middle;
-  display: inline-block;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   margin: 0 0.2em 0 0;
   box-sizing: border-box;
   border: 1px solid #888;
   background: #f5f5f5;
+  overflow: visible;
+  pointer-events: auto;
 }
 
 .add-parm-btn:focus,

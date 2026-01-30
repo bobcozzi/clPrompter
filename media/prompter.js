@@ -33,7 +33,8 @@ function ensureMinInputWidth(el, opts = {}) {
     const valueLen = Math.max(opts.valueLen ?? 0, current.length);
     const len = Number.isFinite(opts.len) ? opts.len : 0;
     const inl = Number.isFinite(opts.inlPmtLen) ? opts.inlPmtLen : 0;
-    const minCh = Math.max(4, len, inl, valueLen);
+    // Add extra padding to prevent truncation of the last character
+    const minCh = Math.max(4, len, inl, valueLen) + 1;
     // Only set 'size' for text-like inputs, NEVER for <select> (setting size > 1 turns it into a list box)
     if (tag === 'input' && (type === 'text' || type === 'search' || type === 'email' || type === 'url')) {
         if ('size' in anyEl && typeof anyEl.size === 'number') {
@@ -41,7 +42,8 @@ function ensureMinInputWidth(el, opts = {}) {
         }
     }
     // Width hint for all controls (select, input, etc.)
-    el.style.minWidth = `calc(${minCh}ch + 2px)`;
+    // Add more px padding to account for font and border/margin
+    el.style.minWidth = `calc(${minCh}ch + 8px)`;
 }
 // Call once after receiving formData to apply the configured keyword and value colors (if provided)
 function applyConfigStyles(config) {
@@ -501,20 +503,35 @@ function renderSimpleParm(parm, kwd, container, dft, required, instanceId) {
     // Wrap in form-group for 5250-style grid layout with prompt and keyword in label
     const formGroup = document.createElement('div');
     formGroup.className = 'form-group simple-parm-group';
-    const label = document.createElement('label');
-    const promptText = String(parm.getAttribute('Prompt') || kwd);
-    // Create prompt text span
-    const promptSpan = document.createElement('span');
-    promptSpan.textContent = promptText;
-    // Create keyword span with styling
-    const kwdSpan = document.createElement('span');
-    kwdSpan.className = 'parm-kwd';
-    kwdSpan.textContent = ` (${kwd})`;
-    label.appendChild(promptSpan);
-    label.appendChild(kwdSpan);
-    label.appendChild(document.createTextNode(':'));
-    label.htmlFor = inputName;
-    formGroup.appendChild(label);
+    // For multi-instance, only show label for the first instance (instanceId ends with _INST0)
+    let showLabel = true;
+    if (instanceId && /_INST\d+$/.test(instanceId)) {
+        const idx = Number(instanceId.replace(/.*_INST/, ''));
+        if (idx > 0)
+            showLabel = false;
+    }
+    if (showLabel) {
+        const label = document.createElement('label');
+        const promptText = String(parm.getAttribute('Prompt') || kwd);
+        // Create prompt text span
+        const promptSpan = document.createElement('span');
+        promptSpan.textContent = promptText;
+        // Create keyword span with styling
+        const kwdSpan = document.createElement('span');
+        kwdSpan.className = 'parm-kwd';
+        kwdSpan.textContent = ` (${kwd})`;
+        label.appendChild(promptSpan);
+        label.appendChild(kwdSpan);
+        label.appendChild(document.createTextNode(':'));
+        label.htmlFor = inputName;
+        formGroup.appendChild(label);
+    }
+    else {
+        // Insert an empty label to preserve grid alignment
+        const emptyLabel = document.createElement('label');
+        emptyLabel.textContent = '';
+        formGroup.appendChild(emptyLabel);
+    }
     formGroup.appendChild(input);
     div.appendChild(formGroup);
     container.appendChild(div);
@@ -702,6 +719,7 @@ function addMultiInstanceControls(container, parm, kwd, idx, max, multiGroupDiv)
         addBtn.type = 'button';
         addBtn.className = 'add-parm-btn';
         addBtn.textContent = '+';
+        addBtn.title = 'Add entry';
         addBtn.onclick = () => {
             const instances = multiGroupDiv.querySelectorAll('.parm-instance');
             if (instances.length < max) {
@@ -716,10 +734,12 @@ function addMultiInstanceControls(container, parm, kwd, idx, max, multiGroupDiv)
         const removeBtn = document.createElement('button');
         removeBtn.type = 'button';
         removeBtn.className = 'remove-parm-btn';
-        removeBtn.textContent = '-';
+        removeBtn.textContent = '—'; // em dash
+        removeBtn.title = 'Remove entry';
         removeBtn.onclick = () => container.remove();
         btnBar.appendChild(removeBtn);
     }
+    container.appendChild(btnBar);
     console.log('[clPrompter] ', 'addMultiInstanceControls end');
 }
 // Main form renderer
