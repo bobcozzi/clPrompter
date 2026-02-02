@@ -16,6 +16,7 @@ export type IndentRemarks = '*NO' | '*YES';
 export interface FormatOptions {
   cvtcase: CaseOption;
   indrmks: IndentRemarks;
+  labelpos: number;
   bgncol: number;
   indcol: number;
   indcont: number;
@@ -231,12 +232,8 @@ export function buildCLCommand(
     const isMultiInstance = meta.Max ? (+meta.Max > 1) : false;
 
     // --- ELEM/QUAL/SIMPLE parameter skip logic ---
-    // For ELEM parameters: only include if presentParms (touched or present in original command)
+    // For ELEM parameters: include if value exists (webview already filtered based on touch/original)
     if (hasElemChildren) {
-      if (!presentParms?.has(key)) {
-        // Not touched and not present in original command, skip
-        continue;
-      }
       // If value is undefined/null/empty, skip
       if (
         value === undefined ||
@@ -246,6 +243,7 @@ export function buildCLCommand(
       ) {
         continue;
       }
+      // Otherwise include it - webview already determined it should be returned
     } else if (hasQualChildren) {
       // For QUAL parameters: skip if not touched and matches default
       const defaultVal = defaults && defaults[key];
@@ -303,7 +301,8 @@ export function buildCLCommand(
         const elemParts: string[] = [];
         for (const [i, elemValue] of value.entries()) {
           if (Array.isArray(elemValue)) {
-            if (i === 0 && elemValue.length === 2) {
+            // Only use slash notation for first ELEM in single-instance parameters
+            if (i === 0 && elemValue.length === 2 && !isMultiInstance) {
               const quoted = elemValue.map(v => quoteIfNeeded(v, allowedVals, parmType)).reverse();
               elemParts.push(`${quoted[0]}/${quoted[1]}`);
             } else {
@@ -391,15 +390,15 @@ export function buildCLCommand(
           const wrappedValues = value.map(v => `(${quoteIfNeeded(v, allowedVals, parmType)})`);
           cmd += ` ${key}(${wrappedValues.join(' ')})`;
         } else {
-          const quotedParts = value.map(v => quoteIfNeeded(v, allowedVals, parmType));
+          const quotedParts = value.filter(v => v !== undefined && v !== null && v !== '').map(v => quoteIfNeeded(v, allowedVals, parmType));
           cmd += ` ${key}(${quotedParts.join(' ')})`;
         }
       } else {
-        const quotedParts = value.map(v => quoteIfNeeded(v, allowedVals, parmType));
+        const quotedParts = value.filter(v => v !== undefined && v !== null && v !== '').map(v => quoteIfNeeded(v, allowedVals, parmType));
         cmd += ` ${key}(${quotedParts.join(' ')})`;
       }
     } else {
-      let q = quoteIfNeeded(value, allowedVals, parmType);
+      let q = quoteIfNeeded(String(value).trim(), allowedVals, parmType);
       cmd += ` ${key}(${q})`;
     }
   }
@@ -801,8 +800,8 @@ export function formatCLSource(
       // If there's a trailing comment, handle it with word wrapping and continuation characters
       if (trailingComment) {
         const config = vscode.workspace.getConfiguration('clPrompter');
-        const rightMargin = config.get<number>('cmdRightMargin', 72);
-        const contCol = config.get<number>('cmdContIndent', 27);
+        const rightMargin = config.get<number>('formatRightMargin', 72);
+        const contCol = config.get<number>('formatContinuePosition', 27);
 
         const lastLineIdx = formattedLines.length - 1;
         let lastLine = formattedLines[lastLineIdx];

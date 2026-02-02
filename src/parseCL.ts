@@ -183,12 +183,14 @@ function parseSimpleParam(cmd: string, i: number, meta: ParmMeta) {
     while (i < cmd.length && !/[\s]/.test(cmd[i])) i++;
     val = cmd.slice(start, i).trim();
   }
-  // Handle multi-instance
+  // Always return string[][] format:
+  // - Max=1: [[value]]
+  // - Max>1: [[val1], [val2], ...]
   if (meta.Max && meta.Max > 1) {
     const vals = splitCLMultiInstance(val);
-    return { result: vals.map(v => v.trim()), nextIdx: i };
+    return { result: vals.map(v => [v.trim()]), nextIdx: i };
   }
-  return { result: val.trim(), nextIdx: i };
+  return { result: [[val.trim()]], nextIdx: i };
 }
 
 // --- Helper: Parse a QUAL parameter ---
@@ -228,12 +230,14 @@ function parseQualParam(cmd: string, i: number, meta: ParmMeta) {
     while (i < cmd.length && !/[\s]/.test(cmd[i])) i++;
     val = cmd.slice(start, i).trim();
   }
-  // Handle multi-instance
+  // Always return string[][] format:
+  // - Max=1: [[qual0, qual1]]
+  // - Max>1: [[inst0_qual0, inst0_qual1], [inst1_qual0, inst1_qual1], ...]
   if (meta.Max && meta.Max > 1) {
     const vals = splitCLMultiInstance(val);
     return { result: vals.map(v => splitQualValue(v, meta.Quals!.length)), nextIdx: i };
   }
-  return { result: splitQualValue(val, meta.Quals!.length), nextIdx: i };
+  return { result: [splitQualValue(val, meta.Quals!.length)], nextIdx: i };
 }
 
 // Local helpers kept private to this file to avoid collisions
@@ -311,7 +315,7 @@ function parseElemParam(cmd: string, i: number, meta: ParmMeta | ElemMeta, level
   while (i < cmd.length && /\s/.test(cmd[i])) i++;
 
   // Expect a parenthesized group for ELEM
-  if (cmd[i] !== '(') return { result: '', nextIdx: i };
+  if (cmd[i] !== '(') return { result: [['']], nextIdx: i };
 
   // Extract the top-level (...) content
   let depth = 1;
@@ -324,9 +328,39 @@ function parseElemParam(cmd: string, i: number, meta: ParmMeta | ElemMeta, level
   }
   const inner = cmd.slice(start, i - 1).trim();
 
+  // Check if this is a Max>1 parameter (only at top level, level=1)
+  const isMultiInstance = level === 1 && (meta as ParmMeta).Max && (meta as ParmMeta).Max! > 1;
+
+  if (isMultiInstance) {
+    // Split into instances first: (*BEFORE 'text') (*AFTER 'text') -> ["(*BEFORE 'text')", "(*AFTER 'text')"]
+    const instances = clp_splitTopLevelInstances(inner);
+    const results: string[][] = [];
+
+    for (const inst of instances) {
+      // Parse each instance recursively (strip outer parens first)
+      const instContent = inst.trim().startsWith('(') && inst.trim().endsWith(')')
+        ? inst.trim().slice(1, -1).trim()
+        : inst.trim();
+
+      // Parse this single instance
+      const singleResult = parseElemParamSingle(instContent, meta);
+      results.push(singleResult);
+    }
+
+    return { result: results, nextIdx: i };
+  }
+
+  // Single instance - parse and wrap in array
+  const singleResult = parseElemParamSingle(inner, meta);
+  return { result: [singleResult], nextIdx: i };
+}
+
+// Helper: Parse a single ELEM instance (not multi-instance)
+// Helper: Parse a single ELEM instance (not multi-instance)
+function parseElemParamSingle(inner: string, meta: ParmMeta | ElemMeta): string[] {
   // If no children meta, split as plain tokens
   if (!meta || !Array.isArray((meta as any).Elems) || (meta as any).Elems.length === 0) {
-    return { result: splitCLMultiInstance ? splitCLMultiInstance(inner) : clp_splitTopLevelTokens(inner), nextIdx: i };
+    return splitCLMultiInstance ? splitCLMultiInstance(inner) : clp_splitTopLevelTokens(inner);
   }
 
   const children = (meta as any).Elems as any[];
@@ -338,7 +372,7 @@ function parseElemParam(cmd: string, i: number, meta: ParmMeta | ElemMeta, level
   // Simple flat ELEM: split by spaces inside the single paren
   if (!hasQualChild && !hasNestedElemChild) {
     const flat = splitCLMultiInstance ? splitCLMultiInstance(inner) : clp_splitTopLevelTokens(inner);
-    return { result: flat, nextIdx: i };
+    return flat;
   }
 
   // Mixed-list (QUAL and/or nested ELEM children): walk children in order
@@ -403,9 +437,9 @@ function parseElemParam(cmd: string, i: number, meta: ParmMeta | ElemMeta, level
         const tokens = splitCLMultiInstance ? splitCLMultiInstance(subInner) : clp_splitTopLevelTokens(subInner);
         results.push(tokens);
       } else {
-        // Recurse by wrapping to look like "( ... )"
-        const rec = parseElemParam(`(${subInner})`, 0, child, level + 1);
-        results.push(rec.result);
+        // Recurse for nested ELEM
+        const rec = parseElemParamSingle(subInner, child);
+        results.push(rec);
       }
 
       groupStr = groupStr.slice(endIdx).trim();
@@ -422,7 +456,53 @@ function parseElemParam(cmd: string, i: number, meta: ParmMeta | ElemMeta, level
     }
   }
 
-  return { result: results, nextIdx: i };
+  return results;
+}
+
+// Helper: Split top-level parenthesized instances
+// e.g., "(*BEFORE 'text') (*AFTER 'text')" -> ["(*BEFORE 'text')", "(*AFTER 'text')"]
+function clp_splitTopLevelInstances(s: string): string[] {
+  const out: string[] = [];
+  let buf = '';
+  let depth = 0;
+  let inSQ = false, inDQ = false;
+
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i];
+    if (ch === "'" && !inDQ) { inSQ = !inSQ; buf += ch; continue; }
+    if (ch === '"' && !inSQ) { inDQ = !inDQ; buf += ch; continue; }
+    if (!inSQ && !inDQ) {
+      if (ch === '(') {
+        if (depth === 0 && buf.trim().length > 0) {
+          out.push(buf.trim());
+          buf = '';
+        }
+        depth++;
+        buf += ch;
+        continue;
+      }
+      if (ch === ')') {
+        depth = Math.max(0, depth - 1);
+        buf += ch;
+        if (depth === 0 && buf.trim().length > 0) {
+          out.push(buf.trim());
+          buf = '';
+        }
+        continue;
+      }
+      if (/\s/.test(ch) && depth === 0) {
+        if (buf.trim().length > 0) {
+          out.push(buf.trim());
+          buf = '';
+        }
+        continue;
+      }
+    }
+    buf += ch;
+  }
+
+  if (buf.trim().length > 0) out.push(buf.trim());
+  return out;
 }
 
 

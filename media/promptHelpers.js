@@ -157,10 +157,11 @@ export function getLengthClass(effectiveLen) {
 export function getCLPrompterFormatSettings() {
     // Default settings; extension can send updates via webview messages
     return {
-        cmdLabelIndent: 2,
-        cmdIndent: 14,
-        cmdContIndent: 27,
-        cmdRightMargin: 72
+        formatLabelPosition: 2,
+        formatCmdPosition: 14,
+        formatKwdPosition: 25,
+        formatContinuePosition: 27,
+        formatRightMargin: 72
     };
 }
 // Flatten parameter value (for QUAL nodes)
@@ -207,6 +208,68 @@ export function parseSpaceSeparatedValues(str) {
         values.push(current.trim());
     }
     return values;
+}
+/**
+ * Parse ELEM values, respecting parentheses and quotes.
+ * For simple values like "0 0 *SECLVL", splits on spaces.
+ * For nested values like "(*BEFORE 'text') (*AFTER 'text')", preserves groups.
+ */
+export function parseElemValues(str) {
+    const values = [];
+    let current = '';
+    let parenDepth = 0;
+    let inQuotes = false;
+    let quoteChar = '';
+    for (let i = 0; i < str.length; i++) {
+        const char = str[i];
+        // Track quote state
+        if (!inQuotes && (char === "'" || char === '"')) {
+            inQuotes = true;
+            quoteChar = char;
+            current += char;
+        }
+        else if (inQuotes && char === quoteChar) {
+            inQuotes = false;
+            current += char;
+        }
+        // Track parentheses depth (only when not in quotes)
+        else if (!inQuotes && char === '(') {
+            parenDepth++;
+            current += char;
+        }
+        else if (!inQuotes && char === ')') {
+            parenDepth--;
+            current += char;
+        }
+        // Split on space only when not in quotes and at depth 0
+        else if (!inQuotes && parenDepth === 0 && /\s/.test(char)) {
+            if (current.trim()) {
+                values.push(current.trim());
+                current = '';
+            }
+        }
+        else {
+            current += char;
+        }
+    }
+    if (current.trim()) {
+        values.push(current.trim());
+    }
+    return values;
+}
+/**
+ * Parse the content inside parentheses for nested ELEM groups.
+ * E.g., "(*BEFORE 'text')" -> ["*BEFORE", "'text'"]
+ * Strips outer parens and splits on spaces respecting quotes.
+ */
+export function parseParenthesizedContent(str) {
+    let trimmed = str.trim();
+    // Strip outer parentheses if present
+    if (trimmed.startsWith('(') && trimmed.endsWith(')')) {
+        trimmed = trimmed.substring(1, trimmed.length - 1).trim();
+    }
+    // Now split on spaces, respecting quotes
+    return parseElemValues(trimmed);
 }
 export function parseCLCmd(cmd) {
     // Remove command name

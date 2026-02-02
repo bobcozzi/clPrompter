@@ -30,6 +30,7 @@
     "onLanguage:clle",
     "onLanguage:clp",
     "onLanguage:cl",
+    "onLanguage:cmd",
     "onLanguage:bnd",
     "onCommand:clPrompter.clPrompter"
   ],
@@ -41,7 +42,7 @@
       },
       {
         "command": "clPrompter.formatCurrentCommand",
-        "title": "Format CL (current)"
+        "title": "Format CL (stmt)"
       },
       {
         "command": "clPrompter.formatEntireFile",
@@ -52,7 +53,7 @@
       {
         "command": "clPrompter.clPrompter",
         "key": "f4",
-        "when": "editorTextFocus && (editorLangId == clle || editorLangId == clp || editorLangId == cl || editorLangId == bnd)"
+        "when": "editorTextFocus && (editorLangId == clle || editorLangId == clp || editorLangId == cl || editorLangId == bnd || editorLangId == cmd)"
       }
     ],
     "configuration": {
@@ -82,11 +83,6 @@
           "default": true,
           "description": "Parameter keyword color Auto-adjust for best contrast in dark/light/high-contrast themes. If false, uses your color exactly as specified."
         },
-        "clPrompter.cmdLabelIndent": {
-          "type": "number",
-          "default": 2,
-          "description": "Location of the Label (if any) for the CL Command after prompting. Default: 2 (SEU classic)."
-        },
         "clPrompter.enableDebugXml": {
           "type": "boolean",
           "default": false,
@@ -97,36 +93,6 @@
           "default": "${tmpdir}",
           "description": "Directory where cmdDefn.xml debug file is written. Use ${tmpdir} for system temp, ${userHome} for home directory, or an absolute path."
         },
-        "clPrompter.cmdIndent": {
-          "type": "number",
-          "default": 14,
-          "description": "First line command name indent after prompting. Default: 14 (SEU classic)."
-        },
-        "clPrompter.cmdIndentParm": {
-          "type": "number",
-          "default": 25,
-          "minimum": 0,
-          "description": "Location of parameter that follows the command name. 0 = single space after command, otherwise column (min 25, SEU classic: 27)."
-        },
-        "clPrompter.cmdContIndent": {
-          "type": "number",
-          "default": 27,
-          "description": "Secondary CL command line parameter indent after prompting. Default: 27 (SEU classic)."
-        },
-        "clPrompter.cmdRightMargin": {
-          "type": "number",
-          "default": 72,
-          "description": "Right margin for command formatting. Default: 72 (SEU classic)."
-        },
-        "clPrompter.cmdKwdCase": {
-          "type": "number",
-          "default": 0,
-          "enum": [
-            0,
-            1
-          ],
-          "description": "Controls case conversion for CL command parameter names (keywords): 0 = UPPERCASE, 1 = lowercase."
-        },
         "clPrompter.formatCase": {
           "type": "string",
           "default": "*UPPER",
@@ -135,34 +101,46 @@
             "*LOWER",
             "*NONE"
           ],
-          "description": "Format: Case conversion for CL source. *UPPER = uppercase, *LOWER = lowercase, *NONE = no change."
+          "description": "Case conversion for CL source. *UPPER = uppercase, *LOWER = lowercase, *NONE = no change."
         },
-        "clPrompter.formatIndentRemarks": {
+        "clPrompter.formatIndentComments": {
           "type": "string",
           "default": "*YES",
           "enum": [
             "*YES",
             "*NO"
           ],
-          "description": "Format: Indent remarks (comments). *YES = indent comments, *NO = leave at column 1."
+          "description": "Indent comments. *YES = indent comments, *NO = leave at column 1."
         },
-        "clPrompter.formatBeginColumn": {
+        "clPrompter.formatLabelPosition": {
           "type": "number",
-          "default": 12,
+          "default": 2,
           "minimum": 1,
-          "description": "Format: Starting column for CL commands. Default: 12 (SEU classic)."
+          "description": "Position of the optional command label (1-10 characters followed by colon). Default: 2."
         },
-        "clPrompter.formatIndentColumn": {
+        "clPrompter.formatCmdPosition": {
           "type": "number",
-          "default": 15,
+          "default": 14,
           "minimum": 1,
-          "description": "Format: Indentation column for nested commands (DO blocks). Default: 15."
+          "description": "Position where the CL command name starts. Must be at least 1 space after the label. Default: 14."
         },
-        "clPrompter.formatIndentContinuation": {
+        "clPrompter.formatKwdPosition": {
           "type": "number",
-          "default": 20,
+          "default": 25,
+          "minimum": 0,
+          "description": "Position where the first parameter/keyword starts. Use 0 for one space after command name. Default: 25."
+        },
+        "clPrompter.formatContinuePosition": {
+          "type": "number",
+          "default": 27,
           "minimum": 1,
-          "description": "Format: Continuation line indent column. Default: 20."
+          "description": "Position where continuation lines start. Normally 2 positions after formatKwdPosition. Default: 27."
+        },
+        "clPrompter.formatRightMargin": {
+          "type": "number",
+          "default": 70,
+          "minimum": 40,
+          "description": "Last position where data or continuation symbols (+ or -) may appear. Default: 72."
         }
       }
     },
@@ -170,17 +148,17 @@
       "editor/context": [
         {
           "command": "clPrompter.clPrompter",
-          "when": "editorLangId == clle || editorLangId == clp || editorLangId == cmd || editorLangId == cl || editorLangId == bnd",
+          "when": "editorLangId == clle || editorLangId == clp || editorLangId == cmd || editorLangId == cl || editorLangId == bnd || editorLangId == cmd",
           "group": "navigation"
         },
         {
           "command": "clPrompter.formatCurrentCommand",
-          "when": "editorTextFocus && (editorLangId == clle || editorLangId == clp || editorLangId == cl || editorLangId == bnd)",
+          "when": "editorTextFocus && (editorLangId == clle || editorLangId == clp || editorLangId == cl || editorLangId == bnd || editorLangId == cmd)",
           "group": "1_modification"
         },
         {
           "command": "clPrompter.formatEntireFile",
-          "when": "editorTextFocus && (editorLangId == clle || editorLangId == clp || editorLangId == cl || editorLangId == bnd)",
+          "when": "editorTextFocus && (editorLangId == clle || editorLangId == clp || editorLangId == cl || editorLangId == bnd || editorLangId == cmd)",
           "group": "1_modification"
         }
       ]
@@ -204,10 +182,9 @@
   },
   "dependencies": {
     "@halcyontech/vscode-ibmi-types": "^2.16.0",
-    "@vscode-elements/elements": "^1.16.1",
+    "@vscode-elements/elements": "^2.4.0",
     "@vscode/webview-ui-toolkit": "^1.4.0",
     "@xmldom/xmldom": "^0.9.8",
-    "xml2js": "^0.6.2",
-    "xmldom": "^0.6.0"
+    "xml2js": "^0.6.2"
   }
 }

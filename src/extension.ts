@@ -72,7 +72,7 @@ export async function activate(context: vscode.ExtensionContext) {
                 const document = editor.document;
 
                 // Only activate for supported languages
-                const supportedLangs = ['clle', 'clp', 'cl', 'bnd'];
+                const supportedLangs = ['clle', 'clp', 'cl','cmd', 'bnd'];
                 if (!supportedLangs.includes(document.languageId)) {
                     vscode.window.showInformationMessage('CL Prompter: Not a supported IBM i source type.');
                     return;
@@ -89,10 +89,11 @@ export async function activate(context: vscode.ExtensionContext) {
                 const config = vscode.workspace.getConfiguration('clPrompter');
                 const formatOptions: FormatOptions = {
                     cvtcase: config.get('formatCase', '*UPPER') as '*UPPER' | '*LOWER' | '*NONE',
-                    indrmks: config.get('formatIndentRemarks', '*YES') as '*NO' | '*YES',
-                    bgncol: config.get('formatBeginColumn', 12),
-                    indcol: config.get('formatIndentColumn', 15),
-                    indcont: config.get('formatIndentContinuation', 20)
+                    indrmks: config.get('formatIndentComments', '*YES') as '*NO' | '*YES',
+                    labelpos: config.get('formatLabelPosition', 2),
+                    bgncol: config.get('formatCmdPosition', 14),
+                    indcol: config.get('formatKwdPosition', 25),
+                    indcont: config.get('formatContinuePosition', 27)
                 };
 
                 // Get the lines for the command
@@ -139,10 +140,11 @@ export async function activate(context: vscode.ExtensionContext) {
                 const config = vscode.workspace.getConfiguration('clPrompter');
                 const formatOptions: FormatOptions = {
                     cvtcase: config.get('formatCase', '*UPPER') as '*UPPER' | '*LOWER' | '*NONE',
-                    indrmks: config.get('formatIndentRemarks', '*YES') as '*NO' | '*YES',
-                    bgncol: config.get('formatBeginColumn', 12),
-                    indcol: config.get('formatIndentColumn', 15),
-                    indcont: config.get('formatIndentContinuation', 20)
+                    indrmks: config.get('formatIndentComments', '*YES') as '*NO' | '*YES',
+                    labelpos: config.get('formatLabelPosition', 2),
+                    bgncol: config.get('formatCmdPosition', 14),
+                    indcol: config.get('formatKwdPosition', 25),
+                    indcont: config.get('formatContinuePosition', 27)
                 };
 
                 // Get all lines
@@ -199,12 +201,75 @@ export class ClPromptPanel {
         }
     }
 
+    /**
+     * Creates a nested prompter for CMD/CMDSTR parameters
+     * Returns a promise that resolves with the completed command string (unformatted)
+     */
+    public static async promptNestedCommand(extensionUri: vscode.Uri, commandString: string, parentPanel: ClPromptPanel): Promise<string | null> {
+        return new Promise<string | null>(async (resolve) => {
+            const column = vscode.window.activeTextEditor?.viewColumn ?? vscode.ViewColumn.Beside;
+
+            let cmdName = extractCmdName(commandString);
+            if (!cmdName) {
+                cmdName = (await askUserForCMDToPrompt(commandString)).toString();
+            }
+            if (!cmdName || cmdName.trim() === '') {
+                resolve(null);
+                return;
+            }
+
+            console.log(`[clPrompter] Nested prompt for: ${cmdName}`);
+            const xml = await getCMDXML(cmdName);
+            const cmdLabel = extractCmdLabel(commandString);
+
+            // Extract command prompt from XML for panel title
+            let cmdPrompt = '';
+            try {
+                const parser = new DOMParser();
+                const xmlDoc = parser.parseFromString(xml, 'application/xml');
+                const cmdNodes = xmlDoc.getElementsByTagName('Cmd');
+                if (cmdNodes.length > 0) {
+                    cmdPrompt = cmdNodes[0].getAttribute('Prompt') || '';
+                }
+            } catch (err) {
+                console.error('[clPrompter] Failed to parse XML for command prompt:', err);
+            }
+
+            const panel = vscode.window.createWebviewPanel(
+                'clPrompterNested',
+                `${cmdName} Prompt (nested)`,
+                column,
+                {
+                    enableScripts: true,
+                    localResourceRoots: [vscode.Uri.joinPath(extensionUri, 'media')]
+                }
+            );
+
+            console.log('[promptNestedCommand] Creating nested panel instance');
+            const nestedPanel = new ClPromptPanel(
+                panel, extensionUri, cmdName, cmdLabel, xml, undefined, undefined, commandString, undefined, true, resolve);
+
+            // Ensure promise resolves if panel is disposed without submitting
+            panel.onDidDispose(() => {
+                console.log('[promptNestedCommand] Panel disposed, checking if already resolved');
+                // If not already resolved, resolve with null
+                try {
+                    resolve(null);
+                } catch (e) {
+                    // Promise already resolved, ignore
+                    console.log('[promptNestedCommand] Promise already resolved');
+                }
+            });
+        });
+    }
+
     // ✅ Update createOrShow method around line 85
     public static async createOrShow(extensionUri: vscode.Uri): Promise<void> {
         const column = vscode.window.activeTextEditor?.viewColumn ?? vscode.ViewColumn.One;
 
         let fullCmd = '';
         let commandRange: { startLine: number; endLine: number } | undefined;
+        let cmdComment: string | undefined;
 
         const editor = vscode.window.activeTextEditor;
         if (editor) {
@@ -212,10 +277,14 @@ export class ClPromptPanel {
             const cmdResult = collectCLCmd(editor);
             fullCmd = cmdResult.command;
             commandRange = { startLine: cmdResult.startLine, endLine: cmdResult.endLine };
+            cmdComment = cmdResult.comment;
 
             // ✅ Optional: Verify both methods agree on the range
             console.log(`[clPrompter] Command range: ${commandRange.startLine}-${commandRange.endLine}`);
             console.log(`[clPrompter] Extract result: ${cmdResult.startLine}-${cmdResult.endLine}`);
+            if (cmdComment) {
+                console.log(`[clPrompter] Extracted comment: ${cmdComment}`);
+            }
         }
 
         let cmdName = extractCmdName(fullCmd);
@@ -300,17 +369,20 @@ export class ClPromptPanel {
                 }
             );
             ClPromptPanel.currentPanel = new ClPromptPanel(
-                panel, extensionUri, cmdName, cmdLabel, xml, editor, selection, fullCmd);
+                panel, extensionUri, cmdName, cmdLabel, xml, editor, selection, fullCmd, cmdComment);
         }
     }
 
     private _cmdName: string;
     private _cmdLabel: string;
+    private _cmdComment: string | undefined;
     private _xml: string;
     private _parmMetas: ParmMeta[] = [];
     private _parmMap: any = [];
     private _presentParms: Set<string> = new Set();
     private _sentFormData = false;
+    private _isNested: boolean = false;
+    private _nestedResolver?: (value: string | null) => void;
 
     constructor(
         panel: vscode.WebviewPanel,
@@ -320,15 +392,21 @@ export class ClPromptPanel {
         xml: string,
         editor?: vscode.TextEditor,
         selection?: vscode.Selection,
-        fullCmd?: string
+        fullCmd?: string,
+        cmdComment?: string,
+        isNested?: boolean,
+        nestedResolver?: (value: string | null) => void
     ) {
         this._panel = panel;
         this._extensionUri = extensionUri;
         this._cmdName = cmdName;
         this._cmdLabel = cmdLabel;
+        this._cmdComment = cmdComment;
         this._xml = xml;
         this._editor = editor;
         this._selection = selection;
+        this._isNested = isNested || false;
+        this._nestedResolver = nestedResolver;
 
         // In constructor and setXML:
         this._documentUri = editor?.document.uri;
@@ -392,6 +470,9 @@ export class ClPromptPanel {
         }
 
         console.log('[clPrompter] Parameter Map:', this._parmMap);
+        if (this._parmMap['EXTRA']) {
+            console.log('[clPrompter] EXTRA parameter parsed value:', JSON.stringify(this._parmMap['EXTRA'], null, 2));
+        }
 
         panel.webview.onDidReceiveMessage(message => {
             if (message.type === 'webviewReady') {
@@ -441,7 +522,7 @@ export class ClPromptPanel {
                     parmMetas: this._parmMetas,
                     config: { keywordColor, valueColor, autoAdjust }
                 });
-                panel.webview.postMessage({ type: "setLabel", label: cmdLabel });
+                panel.webview.postMessage({ type: "setLabel", label: cmdLabel, comment: cmdComment });
                 this._sentFormData = true;
             }
         });
@@ -473,7 +554,7 @@ export class ClPromptPanel {
 
         // ...inside the ClPromptPanel class constructor...
         this._panel.webview.onDidReceiveMessage(
-            message => {
+            async message => {
                 switch (message.type) {
                     case 'submit': {
 
@@ -518,7 +599,10 @@ export class ClPromptPanel {
                             console.log('[submit] INCREL value from form:', message.values['INCREL']);
                         }
 
-                        const cmd = buildCLCommand(
+                        // Extract comment from values if present
+                        const submittedComment = message.values['comment'] as string | undefined;
+
+                        let cmd = buildCLCommand(
                             this._cmdName,
                             message.values,
                             defaults,
@@ -528,10 +612,25 @@ export class ClPromptPanel {
                             this._presentParms,
                             undefined
                         );
+
+                        // Append comment if present
+                        const finalComment = submittedComment || this._cmdComment;
+                        if (finalComment && finalComment.trim()) {
+                            cmd += ' ' + finalComment.trim();
+                        }
                         console.log(`Post Prompter CL Cmd: ${cmd}`);
                         const parts = extractParms(cmd);
                         for (const p of parts) {
                             console.log(`PARM: ${p.kwd} VALUE: ${p.value}`); // p.value preserves inner (1 64)
+                        }
+
+                        // Extract trailing comment from cmd if present
+                        let trailingComment: string | undefined;
+                        const commentMatch = cmd.match(/\s*(\/\*.*?\*\/)\s*$/);
+                        if (commentMatch) {
+                            trailingComment = commentMatch[1];
+                            // Remove comment from cmd for parameter extraction
+                            cmd = cmd.substring(0, cmd.lastIndexOf(trailingComment)).trim();
                         }
 
                         // Extract label and param string for formatting
@@ -546,11 +645,18 @@ export class ClPromptPanel {
                             parmStr = parmStr.substring(cmdName.length).trim();
                         }
 
-                        // Import formatCLCmd lazily to avoid circular import issues
-                        // (If you already import it at the top, just use it directly)
+                        // If this is a nested prompter, resolve with unformatted command and close
+                        if (this._isNested && this._nestedResolver) {
+                            console.log('[submit] Nested prompter resolving with:', cmd);
+                            this._nestedResolver(cmd);
+                            this._panel.dispose();
+                            break;
+                        }
+
+                        // Format the command - the formatter now preserves CMD/CMDSTR parameter spacing
                         // eslint-disable-next-line @typescript-eslint/no-var-requires
                         const { formatCLCmd } = require('./tokenizeCL');
-                        const formatted = formatCLCmd(label, cmdName, parmStr);
+                        const formatted = formatCLCmd(label, cmdName, parmStr, trailingComment);
 
                         // Use the active document's EOL
                         if (this._documentUri && this._selection) {
@@ -579,7 +685,33 @@ export class ClPromptPanel {
                         break;
                     }
                     case 'cancel': {
+                        // If this is a nested prompter, resolve with null
+                        if (this._isNested && this._nestedResolver) {
+                            this._nestedResolver(null);
+                        }
                         this._panel.dispose();
+                        break;
+                    }
+                    case 'promptNested': {
+                        console.log('[promptNested] Request to prompt nested command:', message.commandString);
+                        console.log('[promptNested] Field ID:', message.fieldId);
+                        const result = await ClPromptPanel.promptNestedCommand(
+                            this._extensionUri,
+                            message.commandString,
+                            this
+                        );
+                        console.log('[promptNested] Result from nested prompt:', result);
+                        if (result) {
+                            console.log('[promptNested] Sending result back to parent webview for field:', message.fieldId);
+                            // Send result back to webview
+                            this._panel.webview.postMessage({
+                                type: 'nestedResult',
+                                fieldId: message.fieldId,
+                                commandString: result
+                            });
+                        } else {
+                            console.log('[promptNested] No result (cancelled or empty)');
+                        }
                         break;
                     }
                     case 'loadForm': {
@@ -613,7 +745,7 @@ export class ClPromptPanel {
                         console.log('[clPrompter] About to send formData with cmdName:', this._cmdName, 'cmdPrompt:', cmdPrompt);
 
                         this._panel.webview.postMessage({ type: 'formXml', xml: this._xml, cmdName: this._cmdName, cmdPrompt: cmdPrompt });
-                        this._panel.webview.postMessage({ type: 'setLabel', label: this._cmdLabel });
+                        this._panel.webview.postMessage({ type: 'setLabel', label: this._cmdLabel, comment: this._cmdComment });
 
                         const allowedValsMap = buildAllowedValsMap(this._xml);
                         const config = vscode.workspace.getConfiguration('clPrompter');
@@ -1018,13 +1150,17 @@ export function getHtmlForPrompter(
 ): Promise<string> {
 
     const htmlPath = path.join(__dirname, '..', 'media', 'prompter.html');
+
+    // Add cache-busting timestamp to force reload of webview resources
+    const timestamp = Date.now();
+
     let mainJs = webview.asWebviewUri(
         vscode.Uri.joinPath(extensionUri, 'media', 'main.js')
-    ).toString();
+    ).toString() + `?t=${timestamp}`;
 
     let styleUri = webview.asWebviewUri(
         vscode.Uri.joinPath(extensionUri, 'media', 'style.css')
-    ).toString();
+    ).toString() + `?t=${timestamp}`;
 
     // Read vscode-elements bundle to inject inline (bypasses CSP issues)
     const vscodeElementsPath = path.join(__dirname, '..', 'node_modules', '@vscode-elements', 'elements', 'dist', 'bundled.js');
@@ -1045,7 +1181,7 @@ export function getHtmlForPrompter(
     console.log(`[clPrompter] styleUri: ${styleUri}`);
     console.log('[clPrompter] extensionUri:', extensionUri.toString());
     console.log('[clPrompter] mediaUri:', vscode.Uri.joinPath(extensionUri, 'media').toString());
-    console.log('[clPrompter] mainJsUri:', mainJs);
+    console.log('[clPrompter] vscodeELementsBundle:', vscodeElementsBundle);
 
 
     return new Promise((resolve, reject) => {

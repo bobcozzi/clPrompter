@@ -1,0 +1,1 @@
+CHGVAR VAR(&FROMFILE) VALUE('These are the times to remember, cause they will not last forever. These are the days to hold onto, ''cause we won''t although we''ll want to.')

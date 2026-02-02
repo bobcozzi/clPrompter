@@ -39,7 +39,7 @@ export interface ExtractedValues {
 export function collectCLCmdFromLine(
   doc: vscode.TextDocument,
   currentLine: number
-): { command: string; startLine: number; endLine: number } {
+): { command: string; startLine: number; endLine: number; comment?: string } {
 
   let startLine = currentLine;
   let endLine = currentLine;
@@ -56,6 +56,8 @@ export function collectCLCmdFromLine(
   }
 
   let command = '';
+  let commentParts: string[] = [];
+  let inComment = false;
   let lineIndex = startLine;
   const totalLines = doc.lineCount;
   let prevContChar = '';
@@ -64,10 +66,36 @@ export function collectCLCmdFromLine(
     let line = doc.lineAt(lineIndex).text;
 
     let codePart = line;
-    const commentIdx = line.indexOf('/*');
-    if (commentIdx !== -1) {
-      codePart = line.substring(0, commentIdx);
+    let commentPart = '';
+
+    // Check if we're continuing a multi-line comment
+    if (inComment) {
+      // Entire line is part of the comment
+      commentPart = line.trim();
+      codePart = '';
+
+      // Check if comment ends on this line
+      if (commentPart.includes('*/')) {
+        inComment = false;
+      }
+
+      commentParts.push(commentPart);
+    } else {
+      // Check if comment starts on this line
+      const commentIdx = line.indexOf('/*');
+      if (commentIdx !== -1) {
+        commentPart = line.substring(commentIdx).trim();
+        codePart = line.substring(0, commentIdx);
+
+        // Check if comment ends on same line
+        if (!commentPart.includes('*/')) {
+          inComment = true;
+        }
+
+        commentParts.push(commentPart);
+      }
     }
+
     codePart = codePart.replace(/[ \t]+$/, '');
 
     let contChar = '';
@@ -85,6 +113,13 @@ export function collectCLCmdFromLine(
     command += lineContent;
     endLine = lineIndex;
 
+    // If we're in a multi-line comment, continue to next line
+    if (inComment) {
+      prevContChar = '+'; // Treat as continuation
+      lineIndex++;
+      continue;
+    }
+
     // If no continuation character, we're done
     if (!contChar) {
       break;
@@ -99,7 +134,25 @@ export function collectCLCmdFromLine(
 
   command = command.replace(/\s{2,}/g, ' ').trim();
 
-  return { command, startLine, endLine };
+  // Reconstruct the full comment from accumulated parts
+  let fullComment: string | undefined;
+  if (commentParts.length > 0) {
+    // Join all comment parts, removing continuation characters and extra whitespace
+    const commentContent = commentParts
+      .map(part => {
+        // Remove /* from beginning and */ from end, and trim
+        part = part.replace(/^\/\*\s*/, '').replace(/\s*\*\/\s*$/, '').replace(/\s*\+\s*$/, '').trim();
+        return part;
+      })
+      .filter(part => part.length > 0)
+      .join(' ');
+
+    if (commentContent.length > 0) {
+      fullComment = '/* ' + commentContent + ' */';
+    }
+  }
+
+  return { command, startLine, endLine, comment: fullComment };
 }
 
 /**
@@ -107,11 +160,11 @@ export function collectCLCmdFromLine(
  * Extracts the CL command at the current cursor position.
  *
  * @param editor - The active text editor
- * @returns An object containing the command string, startLine, and endLine
+ * @returns An object containing the command string, startLine, endLine, and optional comment
  */
 export function collectCLCmd(
   editor: vscode.TextEditor
-): { command: string; startLine: number; endLine: number } {
+): { command: string; startLine: number; endLine: number; comment?: string } {
   const doc = editor.document;
   const currentLine = editor.selection.active.line;
   return collectCLCmdFromLine(doc, currentLine);

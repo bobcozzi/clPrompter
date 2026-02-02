@@ -20,11 +20,17 @@
 
   <h2 id="mainTitle" class="main-title"></h2>
   <div class="form-group">
-    <label for="clLabel">Label (optional):</label>
+    <label for="clLabel">Label:</label>
     <input type="text" id="clLabel" maxlength="10" />
   </div>
 
   <form id="clForm"></form>
+
+  <div class="form-group">
+    <label for="cmdComment">Comment:</label>
+    <textarea id="cmdComment" maxlength="6000" rows="5"></textarea>
+  </div>
+
   <button id="cancelBtn">Cancel</button>
   <button id="submitBtn">Enter</button>
 
@@ -38,6 +44,10 @@
         labelInput.focus();
       }
     });
+  </script>
+  <!-- VSCode Elements web components -->
+  <script nonce="{{nonce}}">
+    {{vscodeElementsBundle}}
   </script>
   <!-- Use a single main.js entry point for all module logic -->
   <script type="module" src="{{mainJs}}" nonce="{{nonce}}"></script>

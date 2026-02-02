@@ -1,4 +1,5 @@
-import { getDefaultLengthForType, flattenParmValue, parseSpaceSeparatedValues, getLengthClass } from './promptHelpers.js';
+import { createCBInput } from './webview-assets/cbinput.js';
+import { getDefaultLengthForType, parseParenthesizedContent, getLengthClass } from './promptHelpers.js';
 // Global state (typed)
 let state = {
     xmlDoc: null,
@@ -6,6 +7,8 @@ let state = {
     allowedValsMap: {},
     originalParmMap: {},
     cmdName: '',
+    cmdLabel: '',
+    cmdComment: '',
     hasProcessedFormData: false,
     controlsWired: false,
     parmMetas: {},
@@ -19,8 +22,26 @@ function isRestricted(el) {
     const rstd = el?.getAttribute('Rstd');
     return rstd === 'YES' || rstd === 'Y' || rstd === '*YES' || rstd === '1' || rstd === 'TRUE';
 }
+// Create a label with prompt text and keyword styling
+// Returns a label element with properly styled prompt and keyword spans
+function createPromptLabel(promptText, kwd, inputName) {
+    const label = document.createElement('label');
+    // Create prompt text span
+    const promptSpan = document.createElement('span');
+    promptSpan.textContent = promptText;
+    // Create keyword span with styling
+    const kwdSpan = document.createElement('span');
+    kwdSpan.className = 'parm-kwd';
+    kwdSpan.textContent = ` (${kwd})`;
+    label.appendChild(promptSpan);
+    label.appendChild(kwdSpan);
+    label.appendChild(document.createTextNode(':'));
+    label.htmlFor = inputName;
+    return label;
+}
 // Ensure inputs are wide enough to display content and XML sizing hints.
 // Uses 'ch' units so width matches character counts.
+// Automatically expands to fit CL variable names (e.g., &OUTPUTPTY).
 function ensureMinInputWidth(el, opts = {}) {
     const anyEl = el;
     const tag = String(anyEl.tagName || '').toLowerCase();
@@ -33,8 +54,13 @@ function ensureMinInputWidth(el, opts = {}) {
     const valueLen = Math.max(opts.valueLen ?? 0, current.length);
     const len = Number.isFinite(opts.len) ? opts.len : 0;
     const inl = Number.isFinite(opts.inlPmtLen) ? opts.inlPmtLen : 0;
+    // Check for CL variables in the value (&VARIABLE_NAME)
+    // Match &followed by any valid CL variable name characters
+    const clVarMatch = current.match(/&[A-Z_][A-Z0-9_]*/gi);
+    const clVarLen = clVarMatch ? Math.max(...clVarMatch.map(v => v.length)) : 0;
+    // Use the longest of: parameter length, inline prompt length, current value length, or CL variable length
     // Add extra padding to prevent truncation of the last character
-    const minCh = Math.max(4, len, inl, valueLen) + 1;
+    const minCh = Math.max(4, len, inl, valueLen, clVarLen) + 1;
     // Only set 'size' for text-like inputs, NEVER for <select> (setting size > 1 turns it into a list box)
     if (tag === 'input' && (type === 'text' || type === 'search' || type === 'email' || type === 'url')) {
         if ('size' in anyEl && typeof anyEl.size === 'number') {
@@ -234,116 +260,101 @@ function attachStoredListeners() {
 function createInputForType(type, name, dft, len, suggestions, isRestricted = false) {
     const effectiveLen = len ? parseInt(len, 10) : getDefaultLengthForType(type);
     const dftLen = (dft || '').length;
+    const typeUpper = type.toUpperCase();
     // LGL type should use textarea for CL expressions, but only when NOT restricted (Rstd=NO)
-    const isLglType = !isRestricted && (type.toUpperCase() === 'LGL' || type.toUpperCase() === '*LGL');
-    const useLongInput = isLglType || effectiveLen > 80 || dftLen > 80;
-    console.log(`[createInputForType] name=${name}, type=${type}, effectiveLen=${effectiveLen}, dftLen=${dftLen}, isRestricted=${isRestricted}, isLglType=${isLglType}, useLongInput=${useLongInput}, suggestions:`, suggestions, 'dft:', dft);
-    // If there are suggestions AND it's a long input, use dropdown + textarea
+    const isLglType = !isRestricted && (typeUpper === 'LGL' || typeUpper === '*LGL');
+    // CMD/CMDSTR types should always use textarea for command strings (can be up to 20000 chars)
+    // CMD is IBM-reserved for inline commands (IF, ELSE, etc), CMDSTR is user-available equivalent
+    const isCmdType = typeUpper === 'CMD' || typeUpper === 'CMDSTR';
+    const useLongInput = isLglType || isCmdType || effectiveLen > 80 || dftLen > 80;
+    console.log(`[createInputForType] name=${name}, type=${type}, effectiveLen=${effectiveLen}, dftLen=${dftLen}, isRestricted=${isRestricted}, isLglType=${isLglType}, isCmdType=${isCmdType}, useLongInput=${useLongInput}, suggestions:`, suggestions, 'dft:', dft);
+    // If there are suggestions AND it's a long input, use combobox + textarea
+    // The combobox provides quick selection, textarea allows manual editing
     if (suggestions.length > 0 && useLongInput) {
         const container = document.createElement('div');
         container.style.display = 'flex';
         container.style.flexDirection = 'column';
-        container.style.alignItems = 'flex-start'; // Prevent stretching
+        container.style.alignItems = 'flex-start';
         container.style.gap = '8px';
-        const select = document.createElement('select');
-        select.id = `${name}_select`;
-        select.style.width = 'auto'; // Auto-size to content
-        select.style.minWidth = '150px'; // Minimum readable size
-        select.style.maxWidth = '400px'; // Don't get too wide
-        // Add prompt option
-        const promptOption = document.createElement('option');
-        promptOption.value = '';
-        promptOption.textContent = '-- Select a value --';
-        select.appendChild(promptOption);
+        const combobox = document.createElement('vsc-combobox');
+        combobox.id = `${name}_combobox`;
+        combobox.style.width = 'auto';
+        combobox.style.minWidth = '150px';
+        combobox.style.maxWidth = '400px';
+        combobox.placeholder = '-- Select or type a value --';
         // Add suggestion options
         suggestions.forEach(val => {
-            const option = document.createElement('option');
+            const option = document.createElement('vsc-option');
             option.value = val;
             option.textContent = val;
-            // Pre-select if it matches the default
-            if (val === dft) {
-                option.selected = true;
-            }
-            select.appendChild(option);
+            combobox.appendChild(option);
         });
-        // Textarea (always visible)
+        // Set initial value
+        if (dft) {
+            combobox.value = dft;
+        }
+        // Textarea (always visible for manual editing)
         const textarea = document.createElement('textarea');
         textarea.name = name;
         textarea.value = dft || '';
         textarea.rows = 3;
         textarea.classList.add('long-text-input');
         attachTouchTracking(textarea);
-        // Selection handler - replace textarea content when user selects a value
-        select.addEventListener('change', () => {
-            const selectedValue = select.value;
+        // Add F4 handler for CMD/CMDSTR textareas
+        console.log(`[createInputForType] Checking F4 for ${name}, isCmdType=${isCmdType}, type=${type}`);
+        if (isCmdType) {
+            console.log(`[createInputForType] ✓ F4 handler ENABLED for ${name}`);
+            textarea.addEventListener('keydown', (e) => {
+                console.log(`[F4] Key: ${e.key} on ${name}`);
+                if (e.key === 'F4') {
+                    console.log(`[F4] ✓ F4 detected on ${name}, value: "${textarea.value}"`);
+                    e.preventDefault();
+                    const commandString = textarea.value.trim();
+                    if (commandString) {
+                        console.log(`[F4] ✓ Sending promptNested for: ${commandString}`);
+                        vscode?.postMessage({
+                            type: 'promptNested',
+                            fieldId: name,
+                            commandString: commandString
+                        });
+                    }
+                    else {
+                        console.log(`[F4] ✗ Empty command string, ignoring`);
+                    }
+                }
+            });
+        }
+        else {
+            console.log(`[createInputForType] ✗ F4 handler NOT enabled for ${name}`);
+        }
+        // Combobox change handler - replace textarea content when user selects a value
+        combobox.addEventListener('change', () => {
+            const selectedValue = combobox.value;
             if (selectedValue) {
-                // Replace entire textarea content with selected value
                 textarea.value = selectedValue;
                 textarea.focus();
             }
         });
-        container.appendChild(select);
+        container.appendChild(combobox);
         container.appendChild(textarea);
         return container;
     }
-    // If there are suggestions (but not long input), create standard combo box
+    // If there are suggestions (but not long input), use custom CBInput component
     if (suggestions.length > 0) {
-        const container = document.createElement('div');
-        container.style.display = 'flex';
-        container.style.gap = '5px';
-        container.style.alignItems = 'center';
-        const select = document.createElement('select');
-        select.id = `${name}_select`;
-        select.style.minWidth = '150px';
-        // Add suggestion options
-        suggestions.forEach(val => {
-            const option = document.createElement('option');
-            option.value = val;
-            option.textContent = val;
-            if (val === dft) {
-                option.selected = true;
-            }
-            select.appendChild(option);
+        // Calculate width based on longest suggestion to prevent truncation
+        const maxLength = Math.max(dft?.length || 0, ...suggestions.map(s => s.length));
+        const inputWidth = Math.max(15, maxLength + 3);
+        const cbinput = createCBInput({
+            name: name,
+            id: name,
+            value: dft || '',
+            options: suggestions,
+            width: `${inputWidth}ch`,
+            minWidth: '150px'
         });
-        // Add "Custom..." option
-        const customOption = document.createElement('option');
-        customOption.value = '__CUSTOM__';
-        customOption.textContent = '(Custom...)';
-        select.appendChild(customOption);
-        // Create hidden text input for custom values
-        const input = document.createElement('input');
-        input.type = 'text';
-        input.name = name;
-        input.classList.add(getLengthClass(effectiveLen));
-        input.style.display = 'none';
-        attachTouchTracking(input);
-        // Set initial value
-        if (dft && !suggestions.includes(dft)) {
-            // Custom value - show input
-            select.value = '__CUSTOM__';
-            input.value = dft;
-            input.style.display = '';
-        }
-        else if (dft) {
-            // Suggestion value - store in hidden input
-            input.value = dft;
-        }
-        // Handle selection change
-        select.addEventListener('change', (e) => {
-            const selectedValue = e.target.value;
-            if (selectedValue === '__CUSTOM__') {
-                input.style.display = '';
-                input.focus();
-                input.value = '';
-            }
-            else {
-                input.style.display = 'none';
-                input.value = selectedValue;
-            }
-        });
-        container.appendChild(select);
-        container.appendChild(input);
-        return container;
+        const inputElement = cbinput.getInputElement();
+        attachTouchTracking(inputElement);
+        return cbinput.getElement();
     }
     // No suggestions - regular input or textarea for long values
     if (useLongInput) {
@@ -353,6 +364,33 @@ function createInputForType(type, name, dft, len, suggestions, isRestricted = fa
         textarea.rows = 3;
         textarea.classList.add('long-text-input');
         attachTouchTracking(textarea);
+        // Add F4 handler for CMD/CMDSTR textareas
+        console.log(`[createInputForType] Checking F4 for ${name}, isCmdType=${isCmdType}, type=${type}`);
+        if (isCmdType) {
+            console.log(`[createInputForType] ✓ F4 handler ENABLED for ${name}`);
+            textarea.addEventListener('keydown', (e) => {
+                console.log(`[F4] Key: ${e.key} on ${name}`);
+                if (e.key === 'F4') {
+                    console.log(`[F4] ✓ F4 detected on ${name}, value: "${textarea.value}"`);
+                    e.preventDefault();
+                    const commandString = textarea.value.trim();
+                    if (commandString) {
+                        console.log(`[F4] ✓ Sending promptNested for: ${commandString}`);
+                        vscode?.postMessage({
+                            type: 'promptNested',
+                            fieldId: name,
+                            commandString: commandString
+                        });
+                    }
+                    else {
+                        console.log(`[F4] ✗ Empty command string, ignoring`);
+                    }
+                }
+            });
+        }
+        else {
+            console.log(`[createInputForType] ✗ F4 handler NOT enabled for ${name}`);
+        }
         return textarea;
     }
     else {
@@ -511,19 +549,8 @@ function renderSimpleParm(parm, kwd, container, dft, required, instanceId) {
             showLabel = false;
     }
     if (showLabel) {
-        const label = document.createElement('label');
         const promptText = String(parm.getAttribute('Prompt') || kwd);
-        // Create prompt text span
-        const promptSpan = document.createElement('span');
-        promptSpan.textContent = promptText;
-        // Create keyword span with styling
-        const kwdSpan = document.createElement('span');
-        kwdSpan.className = 'parm-kwd';
-        kwdSpan.textContent = ` (${kwd})`;
-        label.appendChild(promptSpan);
-        label.appendChild(kwdSpan);
-        label.appendChild(document.createTextNode(':'));
-        label.htmlFor = inputName;
+        const label = createPromptLabel(promptText, kwd, inputName);
         formGroup.appendChild(label);
     }
     else {
@@ -546,7 +573,6 @@ function renderQualParm(parm, kwd, container, prompt, idx, max) {
         const qualDiv = document.createElement('div');
         qualDiv.className = 'form-group';
         // Label: First QUAL uses parent (PARM) prompt, subsequent QUALs use their own Prompt attribute
-        const label = document.createElement('label');
         let qualPrompt;
         if (i === 0) {
             // First QUAL inherits prompt from parent PARM
@@ -556,11 +582,23 @@ function renderQualParm(parm, kwd, container, prompt, idx, max) {
             // Subsequent QUALs use their own Prompt attribute
             qualPrompt = String(qual?.getAttribute('Prompt') || `Qualifier ${i}`);
         }
-        // Add keyword to first QUAL label
-        const labelText = i === 0 ? `${qualPrompt} (${kwd}):` : `${qualPrompt}:`;
-        label.textContent = labelText;
         const qualName = `${kwd}_QUAL${i}`;
-        label.htmlFor = qualName;
+        // Create label: first QUAL gets keyword, others don't
+        let label;
+        if (i === 0) {
+            // Check if prompt already contains keyword in parentheses and strip it if present
+            const kwdPattern = /\s*\(([A-Z][A-Z0-9]*)\)\s*$/i;
+            const match = qualPrompt.match(kwdPattern);
+            const promptTextOnly = match ? qualPrompt.substring(0, match.index).trim() : qualPrompt;
+            // Use reusable function to create label with keyword styling
+            label = createPromptLabel(promptTextOnly, kwd, qualName);
+        }
+        else {
+            // Subsequent QUALs - simple label without keyword
+            label = document.createElement('label');
+            label.textContent = `${qualPrompt}:`;
+            label.htmlFor = qualName;
+        }
         qualDiv.appendChild(label);
         const qualType = String(qual?.getAttribute('Type') || 'NAME');
         const qualLen = String(qual?.getAttribute('Len') || '');
@@ -621,7 +659,7 @@ function renderElemParm(parm, kwd, idx, container, prompt, dft, max) {
                     qPrompt = String(qual.getAttribute('Prompt') || `Qualifier ${j}`);
                 }
                 label.textContent = `${qPrompt}:`;
-                const inputName = max > 1 ? `${kwd}_INST${idx}_ELEM${i}_QUAL${j}` : `${kwd}_ELEM${i}_QUAL${j}`;
+                const inputName = `${kwd}_INST${idx}_ELEM${i}_QUAL${j}`;
                 label.htmlFor = inputName;
                 qualDiv.appendChild(label);
                 const qualType = String(qual.getAttribute('Type') || 'NAME');
@@ -645,7 +683,7 @@ function renderElemParm(parm, kwd, idx, container, prompt, dft, max) {
                     const label = document.createElement('label');
                     const subPrompt = String(subElem.getAttribute('Prompt') || `Element ${i}.${j}`);
                     label.textContent = `${subPrompt}:`;
-                    const inputName = max > 1 ? `${kwd}_INST${idx}_ELEM${i}_SUB${j}` : `${kwd}_ELEM${i}_SUB${j}`;
+                    const inputName = `${kwd}_INST${idx}_ELEM${i}_SUB${j}`;
                     label.htmlFor = inputName;
                     subDiv.appendChild(label);
                     const subType = String(subElem.getAttribute('Type') || 'CHAR');
@@ -660,7 +698,7 @@ function renderElemParm(parm, kwd, idx, container, prompt, dft, max) {
                 const label = document.createElement('label');
                 const ePrompt = String(elem.getAttribute('Prompt') || `Element ${i}`);
                 label.textContent = `${ePrompt}:`;
-                const inputName = max > 1 ? `${kwd}_INST${idx}_ELEM${i}` : `${kwd}_ELEM${i}`;
+                const inputName = `${kwd}_INST${idx}_ELEM${i}`;
                 label.htmlFor = inputName;
                 elemDiv.appendChild(label);
                 const elemLen = String(elem.getAttribute('Len') || '');
@@ -988,42 +1026,46 @@ function populateFormFromValues(values) {
         const max = parseInt(parm.getAttribute('Max') || '1', 10);
         const hasElem = !!parm.querySelector(':scope > Elem');
         const hasQual = !!parm.querySelector(':scope > Qual');
+        // All values are now string[][]
+        // instances[instanceIdx][elemIdx or qualIdx]
+        const instances = val;
         if (max > 1) {
             const group = document.querySelector(`.parm-multi-group[data-kwd="${kwd}"]`);
             if (!group)
                 return;
-            const splitValsArr = flattenParmValue(val);
-            for (let i = 0; i < splitValsArr.length; i++) {
+            for (let i = 0; i < instances.length; i++) {
                 ensureInstanceCount(group, parm, kwd, i + 1, max);
                 const inst = group.querySelectorAll('.parm-instance')[i];
                 if (!inst)
                     continue;
                 if (hasElem) {
-                    populateElemInputs(parm, state.parmMetas[kwd] || {}, kwd, splitValsArr[i], i, inst);
+                    populateElemInputs(parm, state.parmMetas[kwd] || {}, kwd, instances[i], i, inst);
                 }
                 else if (hasQual) {
-                    populateQualInputs(parm, state.parmMetas[kwd] || {}, kwd, splitValsArr[i], i, inst);
+                    populateQualInputs(parm, state.parmMetas[kwd] || {}, kwd, instances[i], i, inst);
                 }
                 else {
                     const input = inst.querySelector(`[name="${kwd}"]`);
                     if (input)
-                        input.value = splitValsArr[i];
+                        input.value = instances[i][0]; // Simple param has only one element
                 }
             }
         }
         else {
             if (hasElem) {
-                populateElemInputs(parm, state.parmMetas[kwd] || {}, kwd, val, 0, document);
+                populateElemInputs(parm, state.parmMetas[kwd] || {}, kwd, instances[0], 0, document);
             }
             else if (hasQual) {
-                populateQualInputs(parm, state.parmMetas[kwd] || {}, kwd, val, 0, document);
+                populateQualInputs(parm, state.parmMetas[kwd] || {}, kwd, instances[0], 0, document);
             }
             else {
                 const input = document.querySelector(`[name="${kwd}"]`);
                 console.log(`[clPrompter] Input for ${kwd}:`, input);
                 if (input) {
-                    console.log(`[clPrompter] Setting ${kwd} from "${input.value}" to "${val}"`);
-                    input.value = val;
+                    const newVal = instances[0][0]; // Simple param: first instance, first element
+                    // vsc-combobox handles both suggestions and custom values - just set value directly
+                    console.log(`[clPrompter] Setting ${kwd} from "${input.value}" to "${newVal}"`);
+                    input.value = newVal;
                     console.log(`[clPrompter] Set ${kwd} to "${input.value}"`);
                 }
                 else {
@@ -1037,126 +1079,85 @@ function populateFormFromValues(values) {
     console.log('[clPrompter] populateFormFromValues end');
 }
 // Helpers for population (simplified; expand as needed)
-function populateElemInputs(parm, parmMeta, kwd, val, idx, container) {
-    console.log('[clPrompter] populateElemInputs start for ${kwd}, val:', val);
-    const parts = Array.isArray(val) ? val : parseSpaceSeparatedValues(val);
-    console.log('[clPrompter] Parts:', parts);
+function populateElemInputs(parm, parmMeta, kwd, instance, idx, container) {
+    console.log(`[clPrompter] populateElemInputs for ${kwd}, instance:`, instance);
     const elemParts = parm.querySelectorAll(':scope > Elem');
-    parts.forEach((part, i) => {
+    instance.forEach((elemValue, i) => {
         const elem = elemParts[i];
         if (!elem)
             return;
         const elemType = String(elem.getAttribute('Type') || 'CHAR');
         if (elemType === 'QUAL') {
-            populateQualInputs(elem, parmMeta, `${kwd}_ELEM${i}`, part, idx, container);
+            // elemValue for QUAL should be already split by parser
+            // For now, we need to parse it here since we're passing as string
+            const qualParts = splitQualLeftToRight(elemValue);
+            populateQualInputs(elem, parmMeta, `${kwd}_ELEM${i}`, qualParts, idx, container);
         }
         else {
             const subElems = elem.querySelectorAll(':scope > Elem');
             if (subElems.length > 0) {
-                const subParts = Array.isArray(part) ? part : [part];
+                // Nested ELEM group - parse parenthesized content
+                const subParts = parseParenthesizedContent(elemValue);
+                console.log(`[clPrompter] Nested ELEM ${kwd}_INST${idx}_ELEM${i} subParts:`, subParts);
                 subParts.forEach((subPart, j) => {
-                    let trimmedSubPart = subPart;
-                    if (j === 0 && typeof trimmedSubPart === 'string' && trimmedSubPart.startsWith('(')) {
-                        trimmedSubPart = trimmedSubPart.substring(1);
-                    }
-                    if (j === subParts.length - 1 && typeof trimmedSubPart === 'string' && trimmedSubPart.endsWith(')')) {
-                        trimmedSubPart = trimmedSubPart.substring(0, trimmedSubPart.length - 1);
-                    }
-                    const input = container.querySelector(`[name="${kwd}_ELEM${i}_SUB${j}"]`);
-                    console.log(`[clPrompter] Input ${kwd}_ELEM${i}_SUB${j}:`, input);
+                    const input = container.querySelector(`[name="${kwd}_INST${idx}_ELEM${i}_SUB${j}"]`);
+                    console.log(`[clPrompter] Input ${kwd}_INST${idx}_ELEM${i}_SUB${j}:`, input);
                     if (input) {
-                        console.log(`[clPrompter] Setting ${kwd}_ELEM${i}_SUB${j} from "${input.value}" to "${trimmedSubPart}"`);
-                        input.value = trimmedSubPart;
-                        console.log(`[clPrompter] Set ${kwd}_ELEM${i}_SUB${j} to "${input.value}"`);
+                        console.log(`[clPrompter] Setting ${kwd}_INST${idx}_ELEM${i}_SUB${j} from "${input.value}" to "${subPart}"`);
+                        input.value = subPart;
+                        console.log(`[clPrompter] Set ${kwd}_INST${idx}_ELEM${i}_SUB${j} to "${input.value}"`);
                         const sNode = subElems[j];
                         const len = Number.parseInt(String(sNode?.getAttribute('Len') || ''), 10) || undefined;
                         const inl = Number.parseInt(String(sNode?.getAttribute('InlPmtLen') || ''), 10) || undefined;
-                        ensureMinInputWidth(input, { len, inlPmtLen: inl, valueLen: String(trimmedSubPart ?? '').length });
+                        ensureMinInputWidth(input, { len, inlPmtLen: inl, valueLen: String(subPart ?? '').length });
                     }
                     else {
-                        console.log(`[clPrompter] Input not found for ${kwd}_ELEM${i}_SUB${j}`);
+                        console.log(`[clPrompter] Input not found for ${kwd}_INST${idx}_ELEM${i}_SUB${j}`);
                     }
                 });
             }
             else {
-                let trimmedPart = part;
-                if (typeof trimmedPart === 'string') {
-                    if (i === 0 && trimmedPart.startsWith('(')) {
-                        trimmedPart = trimmedPart.substring(1);
-                    }
-                    if (i === parts.length - 1 && trimmedPart.endsWith(')')) {
-                        trimmedPart = trimmedPart.substring(0, trimmedPart.length - 1);
-                    }
-                }
-                const input = container.querySelector(`[name="${kwd}_ELEM${i}"]`);
-                console.log(`[clPrompter] Input ${kwd}_ELEM${i}:`, input);
+                const input = container.querySelector(`[name="${kwd}_INST${idx}_ELEM${i}"]`);
+                console.log(`[clPrompter] Input ${kwd}_INST${idx}_ELEM${i}:`, input);
                 if (input) {
-                    console.log(`[clPrompter] Setting ${kwd}_ELEM${i} from "${input.value}" to "${trimmedPart}"`);
-                    input.value = trimmedPart;
-                    console.log(`[clPrompter] Set ${kwd}_ELEM${i} to "${input.value}"`);
+                    console.log(`[clPrompter] Setting ${kwd}_INST${idx}_ELEM${i} from "${input.value}" to "${elemValue}"`);
+                    input.value = elemValue;
+                    console.log(`[clPrompter] Set ${kwd}_INST${idx}_ELEM${i} to "${input.value}"`);
                     const len = Number.parseInt(String(elem.getAttribute('Len') || ''), 10) || undefined;
                     const inl = Number.parseInt(String(elem.getAttribute('InlPmtLen') || ''), 10) || undefined;
-                    ensureMinInputWidth(input, { len, inlPmtLen: inl, valueLen: String(trimmedPart ?? '').length });
+                    ensureMinInputWidth(input, { len, inlPmtLen: inl, valueLen: String(elemValue ?? '').length });
                 }
                 else {
-                    console.log(`[clPrompter] Input not found for ${kwd}_ELEM${i}`);
+                    console.log(`[clPrompter] Input not found for ${kwd}_INST${idx}_ELEM${i}`);
                 }
             }
         }
     });
     console.log('[clPrompter] populateElemInputs end');
 }
-function populateQualInputs(parm, parmMeta, kwd, val, idx, container) {
-    console.log('[clPrompter] ', 'populateQualInputs start');
-    const parts = Array.isArray(val) ? val : splitQualLeftToRight(String(val));
+function populateQualInputs(parm, parmMeta, kwd, instance, idx, container) {
+    console.log('[clPrompter] populateQualInputs start, instance:', instance);
     const qualNodes = parm.querySelectorAll(':scope > Qual');
-    // FIFO into inputs: QUAL0 ← parts[0], QUAL1 ← parts[1], ...
+    // FIFO into inputs: QUAL0 ← instance[0], QUAL1 ← instance[1], ...
     let i = 0;
     for (;; i++) {
         const input = container.querySelector(`[name="${kwd}_QUAL${i}"]`);
         if (!input)
             break;
-        const newVal = parts[i] ?? '';
+        const newVal = instance[i] ?? '';
         console.log(`[clPrompter] Input ${kwd}_QUAL${i}:`, input);
-        // Check if this is a combo box (has a corresponding select)
-        const select = container.querySelector(`#${kwd}_QUAL${i}_select`);
-        if (select) {
-            // This is a combo box - check if value is in suggestions
-            const isInSuggestions = Array.from(select.options).some(opt => opt.value === newVal && opt.value !== '__CUSTOM__');
-            if (isInSuggestions) {
-                // Value is a suggestion - select it and hide custom input
-                select.value = newVal;
-                input.style.display = 'none';
-                input.value = newVal;
-            }
-            else if (newVal) {
-                // Custom value - select "Custom..." and show input
-                select.value = '__CUSTOM__';
-                input.style.display = '';
-                input.value = newVal;
-            }
-            else {
-                // Empty value - reset to first option
-                select.selectedIndex = 0;
-                input.style.display = 'none';
-                input.value = select.value !== '__CUSTOM__' ? select.value : '';
-            }
-            console.log(`[clPrompter] Set combo ${kwd}_QUAL${i} to "${newVal}" (select="${select.value}", input="${input.value}", visible=${input.style.display !== 'none'})`);
-        }
-        else {
-            // Regular input - set value directly
-            if (input.value !== newVal) {
-                console.log(`[clPrompter] Setting ${kwd}_QUAL${i} from "${input.value}" to "${newVal}"`);
-                input.value = newVal;
-                console.log(`[clPrompter] Set ${kwd}_QUAL${i} to "${input.value}"`);
-            }
+        // vsc-combobox handles both suggestions and custom values - just set value directly
+        if (input.value !== newVal) {
+            console.log(`[clPrompter] Setting ${kwd}_QUAL${i} from "${input.value}" to "${newVal}"`);
+            input.value = newVal;
+            console.log(`[clPrompter] Set ${kwd}_QUAL${i} to "${input.value}"`);
         }
         const qNode = qualNodes[i];
         const len = Number.parseInt(String(qNode?.getAttribute('Len') || ''), 10) || undefined;
         const inl = Number.parseInt(String(qNode?.getAttribute('InlPmtLen') || ''), 10) || undefined;
         ensureMinInputWidth(input, { len, inlPmtLen: inl, valueLen: newVal.length });
     }
-    console.log('[clPrompter] ', 'populateQualInputs end');
+    console.log('[clPrompter] populateQualInputs end');
 }
 async function ensureInstanceCount(group, parm, kwd, targetCount, max) {
     console.log('[clPrompter] ', 'ensureInstanceCount start');
@@ -1330,22 +1331,27 @@ function assembleCurrentParmMap() {
                         if (elemType === 'QUAL') {
                             // Collect QUAL parts (UI order), then LIFO back out and join safely
                             const parts = [];
+                            let anyQualTouched = false;
                             for (let j = 0;; j++) {
                                 const q = inst.querySelector(`[name="${kwd}_INST${instIdx}_ELEM${i}_QUAL${j}"]`);
                                 if (!q)
                                     break;
                                 parts.push((q.value || '').trim());
+                                if (isFieldTouched(`${kwd}_INST${instIdx}_ELEM${i}_QUAL${j}`)) {
+                                    anyQualTouched = true;
+                                }
                             }
                             const joined = joinQualParts([...parts].reverse()); // omit empties, no stray '/'
+                            console.log(`[DEBUG] ${kwd} ELEM${i} (QUAL): joined="${joined}", anyTouched=${anyQualTouched}`);
                             if (joined) {
                                 elemVals.push(joined);
-                                // Check if any QUAL in this ELEM was touched
-                                for (let j = 0; j < parts.length; j++) {
-                                    const fieldName = `${kwd}_INST${instIdx}_ELEM${i}_QUAL${j}`;
-                                    if (isFieldTouched(fieldName)) {
-                                        lastNonDefaultIndex = i;
-                                        break;
-                                    }
+                                // Mark as modified only if any QUAL field was touched
+                                if (anyQualTouched) {
+                                    lastNonDefaultIndex = i;
+                                    console.log(`[DEBUG] ${kwd} ELEM${i}: set lastNonDefaultIndex=${i} (QUAL was touched)`);
+                                }
+                                else {
+                                    console.log(`[DEBUG] ${kwd} ELEM${i}: QUAL not touched, not marking as modified`);
                                 }
                             }
                             else {
@@ -1355,19 +1361,18 @@ function assembleCurrentParmMap() {
                         else {
                             const subElems = elem.querySelectorAll(':scope > Elem');
                             if (subElems.length > 0) {
-                                // Nested ELEM group - check if any sub was touched
+                                // Nested ELEM group - check if any sub field was touched
                                 const subVals = [];
                                 let anySubTouched = false;
                                 subElems.forEach((subElem, j) => {
                                     const input = inst.querySelector(`[name="${kwd}_INST${instIdx}_ELEM${i}_SUB${j}"]`);
                                     const v = (input?.value || '').trim();
                                     subVals.push(v);
-                                    const fieldName = `${kwd}_INST${instIdx}_ELEM${i}_SUB${j}`;
-                                    if (isFieldTouched(fieldName)) {
+                                    if (v && isFieldTouched(`${kwd}_INST${instIdx}_ELEM${i}_SUB${j}`)) {
                                         anySubTouched = true;
                                     }
                                 });
-                                // If any sub was touched, include this nested ELEM group
+                                // If any sub field was touched, include this nested ELEM group
                                 if (anySubTouched) {
                                     const trimmedSubs = subVals.filter(v => v.length > 0);
                                     const joined = '(' + trimmedSubs.join(' ') + ')';
@@ -1385,10 +1390,13 @@ function assembleCurrentParmMap() {
                                 console.log(`[DEBUG] ${kwd} ELEM${i}: input value="${v}", touched=${isFieldTouched(fieldName)}`);
                                 if (v) {
                                     elemVals.push(v);
-                                    // ELEM is "modified" if user touched it
+                                    // Mark as modified only if field was touched by user
                                     if (isFieldTouched(fieldName)) {
                                         lastNonDefaultIndex = i;
-                                        console.log(`[DEBUG] ${kwd} ELEM${i}: updated lastNonDefaultIndex to ${i} (touched)`);
+                                        console.log(`[DEBUG] ${kwd} ELEM${i}: updated lastNonDefaultIndex to ${i} (field was touched)`);
+                                    }
+                                    else {
+                                        console.log(`[DEBUG] ${kwd} ELEM${i}: not touched, not marking as modified`);
                                     }
                                 }
                                 else {
@@ -1398,30 +1406,24 @@ function assembleCurrentParmMap() {
                             }
                         }
                     });
-                    // Only include ELEMs if any were touched OR parent parameter was in original command
+                    // Only include ELEMs if any were modified (have values)
                     console.log(`[DEBUG] ${kwd} lastNonDefaultIndex=${lastNonDefaultIndex}, elemVals:`, elemVals);
                     const parentInOriginal = wasInOriginalCommand(kwd);
                     console.log(`[DEBUG] ${kwd} wasInOriginalCommand=${parentInOriginal}`);
-                    if (lastNonDefaultIndex >= 0 || parentInOriginal) {
-                        let valsToInclude;
-                        if (lastNonDefaultIndex >= 0) {
-                            // Only include touched ELEM values
-                            valsToInclude = elemVals.filter((v, i) => {
-                                const fieldName = `${kwd}_INST${instIdx}_ELEM${i}`;
-                                return isFieldTouched(fieldName) && v.length > 0;
-                            });
+                    if (lastNonDefaultIndex >= 0) {
+                        // Include all ELEM values up to and including the last one with a value
+                        const valsToInclude = elemVals.slice(0, lastNonDefaultIndex + 1).filter(v => v.length > 0);
+                        console.log(`[DEBUG] ${kwd} valsToInclude:`, valsToInclude);
+                        if (valsToInclude.length > 0) {
+                            arr.push(valsToInclude);
                         }
-                        else if (parentInOriginal) {
-                            // Include all values as-is if parent was in original command
-                            valsToInclude = elemVals.filter(v => v.length > 0);
-                        }
-                        else {
-                            valsToInclude = [];
-                        }
-                        const joined = valsToInclude.join(' ');
-                        console.log(`[DEBUG] ${kwd} valsToInclude:`, valsToInclude, `joined="${joined}"`);
-                        if (joined) {
-                            arr.push(joined);
+                    }
+                    else if (parentInOriginal) {
+                        // Include all values as-is if parent was in original command
+                        const valsToInclude = elemVals.filter(v => v.length > 0);
+                        console.log(`[DEBUG] ${kwd} valsToInclude (parentInOriginal):`, valsToInclude);
+                        if (valsToInclude.length > 0) {
+                            arr.push(valsToInclude);
                         }
                     }
                 }
@@ -1496,20 +1498,31 @@ function assembleCurrentParmMap() {
             if (hasElem) {
                 const elemParts = parm.querySelectorAll(':scope > Elem');
                 // Check parent SngVal or first ELEM SpcVal
-                const firstElemInput = document.querySelector(`[name="${kwd}_ELEM0"]`);
+                const firstElemInput = document.querySelector(`[name="${kwd}_INST0_ELEM0"]`);
                 const firstElemVal = (firstElemInput?.value || '').trim();
                 // For parent SngVal exclusivity check, use parent PARM's default
                 const parentParmDefault = String(parm.getAttribute('Dft') || '');
                 let isFirstElemSpecialAndDefault = false;
                 // Check if value matches parent SngVal
                 if (firstElemVal && parentSngVals.has(firstElemVal.toUpperCase())) {
+                    console.log(`[assembleCommand] ${kwd}: ELEM0="${firstElemVal}" matches parent SngVal`);
                     if (matchesDefault(firstElemVal, parentParmDefault)) {
+                        console.log(`[assembleCommand] ${kwd}: matches default "${parentParmDefault}", checking other ELEMs`);
                         // First ELEM matches SngVal AND default - check if other ELEMs have non-default values
                         isFirstElemSpecialAndDefault = true;
                     }
                     else {
-                        // SngVal but not default - return just this value
-                        map[kwd] = firstElemVal;
+                        // SngVal but not default - check if touched or in original command
+                        const touched = isFieldTouched(`${kwd}_INST0_ELEM0`);
+                        const inOriginal = wasInOriginalCommand(kwd);
+                        console.log(`[assembleCommand] ${kwd}: SngVal "${firstElemVal}" != default, touched=${touched}, inOriginal=${inOriginal}`);
+                        if (touched || inOriginal) {
+                            console.log(`[assembleCommand] ${kwd}="${firstElemVal}" ✅ INCLUDED (SngVal path, touched or in original)`);
+                            map[kwd] = firstElemVal;
+                        }
+                        else {
+                            console.log(`[assembleCommand] ${kwd}="${firstElemVal}" ❌ SKIPPED (SngVal path, not touched and not in original)`);
+                        }
                         return;
                     }
                 }
@@ -1518,13 +1531,24 @@ function assembleCurrentParmMap() {
                     const firstElem = elemParts[0];
                     const firstElemSpcVals = getElemSpcVals(firstElem);
                     if (firstElemVal && firstElemSpcVals.has(firstElemVal.toUpperCase())) {
+                        console.log(`[assembleCommand] ${kwd}: ELEM0="${firstElemVal}" matches ELEM SpcVal`);
                         if (matchesDefault(firstElemVal, parentParmDefault)) {
+                            console.log(`[assembleCommand] ${kwd}: matches default "${parentParmDefault}", checking other ELEMs`);
                             // First ELEM matches SpcVal AND default - check if other ELEMs have non-default values
                             isFirstElemSpecialAndDefault = true;
                         }
                         else {
-                            // SpcVal but not default - return just this value
-                            map[kwd] = firstElemVal;
+                            // SpcVal but not default - check if touched or in original command
+                            const touched = isFieldTouched(`${kwd}_INST0_ELEM0`);
+                            const inOriginal = wasInOriginalCommand(kwd);
+                            console.log(`[assembleCommand] ${kwd}: SpcVal "${firstElemVal}" != default, touched=${touched}, inOriginal=${inOriginal}`);
+                            if (touched || inOriginal) {
+                                console.log(`[assembleCommand] ${kwd}="${firstElemVal}" ✅ INCLUDED (SpcVal path, touched or in original)`);
+                                map[kwd] = firstElemVal;
+                            }
+                            else {
+                                console.log(`[assembleCommand] ${kwd}="${firstElemVal}" ❌ SKIPPED (SpcVal path, not touched and not in original)`);
+                            }
                             return;
                         }
                     }
@@ -1532,6 +1556,7 @@ function assembleCurrentParmMap() {
                 // If first ELEM matches special value AND default, check if ANY other ELEM has non-default value
                 // Exclusivity logic removed: Only include parameter if any field was touched or parent was in original command.
                 // Assemble single-instance ELEM parameter
+                console.log(`[assembleCommand] ${kwd}: Starting ELEM assembly, elemParts.length=${elemParts.length}`);
                 const elemVals = [];
                 let lastNonDefaultIndex = -1;
                 elemParts.forEach((elem, i) => {
@@ -1539,22 +1564,27 @@ function assembleCurrentParmMap() {
                     const elemDefault = getElemFormDefault(parm, i); // Use form default for output assembly
                     if (elemType === 'QUAL') {
                         const parts = [];
+                        let anyQualTouched = false;
                         for (let j = 0;; j++) {
-                            const q = document.querySelector(`[name="${kwd}_ELEM${i}_QUAL${j}"]`);
+                            const q = document.querySelector(`[name="${kwd}_INST0_ELEM${i}_QUAL${j}"]`);
                             if (!q)
                                 break;
                             parts.push((q.value || '').trim());
+                            if (isFieldTouched(`${kwd}_INST0_ELEM${i}_QUAL${j}`)) {
+                                anyQualTouched = true;
+                            }
                         }
                         const joined = joinQualParts([...parts].reverse());
+                        console.log(`[assembleCommand] ${kwd}_ELEM${i} (QUAL): joined="${joined}", anyTouched=${anyQualTouched}`);
                         if (joined) {
                             elemVals.push(joined);
-                            // Check if any QUAL in this ELEM was touched
-                            for (let j = 0; j < parts.length; j++) {
-                                const fieldName = `${kwd}_ELEM${i}_QUAL${j}`;
-                                if (isFieldTouched(fieldName)) {
-                                    lastNonDefaultIndex = i;
-                                    break;
-                                }
+                            // Mark as modified only if any QUAL field was touched
+                            if (anyQualTouched) {
+                                lastNonDefaultIndex = i;
+                                console.log(`[assembleCommand] ${kwd}_ELEM${i}: set lastNonDefaultIndex=${i} (QUAL was touched)`);
+                            }
+                            else {
+                                console.log(`[assembleCommand] ${kwd}_ELEM${i}: QUAL not touched, not marking as modified`);
                             }
                         }
                         else {
@@ -1564,19 +1594,18 @@ function assembleCurrentParmMap() {
                     else {
                         const subElems = elem.querySelectorAll(':scope > Elem');
                         if (subElems.length > 0) {
-                            // Nested ELEM group - check if any sub was touched
+                            // Nested ELEM group - check if any sub field was touched
                             const subVals = [];
                             let anySubTouched = false;
                             subElems.forEach((subElem, j) => {
-                                const input = document.querySelector(`[name="${kwd}_ELEM${i}_SUB${j}"]`);
+                                const input = document.querySelector(`[name="${kwd}_INST0_ELEM${i}_SUB${j}"]`);
                                 const v = (input?.value || '').trim();
                                 subVals.push(v);
-                                const fieldName = `${kwd}_ELEM${i}_SUB${j}`;
-                                if (isFieldTouched(fieldName)) {
+                                if (v && isFieldTouched(`${kwd}_INST0_ELEM${i}_SUB${j}`)) {
                                     anySubTouched = true;
                                 }
                             });
-                            // If any sub was touched, include this nested ELEM group
+                            // If any sub field was touched, include this nested ELEM group
                             if (anySubTouched) {
                                 const trimmedSubs = subVals.filter(v => v.length > 0);
                                 const joined = '(' + trimmedSubs.join(' ') + ')';
@@ -1588,14 +1617,19 @@ function assembleCurrentParmMap() {
                             }
                         }
                         else {
-                            const input = document.querySelector(`[name="${kwd}_ELEM${i}"]`);
+                            const input = document.querySelector(`[name="${kwd}_INST0_ELEM${i}"]`);
                             const v = (input?.value || '').trim();
-                            const fieldName = `${kwd}_ELEM${i}`;
+                            const fieldName = `${kwd}_INST0_ELEM${i}`;
+                            console.log(`[assembleCommand] ${kwd}_ELEM${i}: value="${v}", touched=${isFieldTouched(fieldName)}`);
                             if (v) {
                                 elemVals.push(v);
-                                // Mark as modified if user touched this ELEM field
+                                // Mark as modified only if field was touched by user
                                 if (isFieldTouched(fieldName)) {
                                     lastNonDefaultIndex = i;
+                                    console.log(`[assembleCommand] ${kwd}_ELEM${i}: set lastNonDefaultIndex=${i} (field was touched)`);
+                                }
+                                else {
+                                    console.log(`[assembleCommand] ${kwd}_ELEM${i}: not touched, not marking as modified`);
                                 }
                             }
                             else {
@@ -1606,21 +1640,34 @@ function assembleCurrentParmMap() {
                 });
                 // Only include ELEMs if any were touched OR parent parameter was in original command
                 const parentInOriginal = wasInOriginalCommand(kwd);
+                console.log(`[assembleCommand] ${kwd}: lastNonDefaultIndex=${lastNonDefaultIndex}, parentInOriginal=${parentInOriginal}, elemVals=`, elemVals);
                 if (lastNonDefaultIndex >= 0) {
                     // Usual case: user touched something, include up to last touched
                     const trimmedVals = elemVals.slice(0, lastNonDefaultIndex + 1).filter(v => v.length > 0);
                     const joined = trimmedVals.join(' ');
-                    if (joined) {
-                        map[kwd] = `(${joined})`;
+                    console.log(`[assembleCommand] ${kwd}: ✅ INCLUDING because lastNonDefaultIndex >= 0 (user touched ELEM fields)`);
+                    console.log(`[assembleCommand] ${kwd}: trimmedVals=`, trimmedVals, `joined="${joined}"`);
+                    if (trimmedVals.length > 0) {
+                        // Return as array for proper formatting by extension
+                        map[kwd] = trimmedVals;
+                        console.log(`[assembleCommand] ${kwd}: ADDED to map as array`, trimmedVals);
+                    }
+                    else {
+                        console.log(`[assembleCommand] ${kwd}: ❌ NOT adding - trimmedVals empty after filtering`);
                     }
                 }
                 else if (parentInOriginal) {
                     // Special case: present in original command, include all original subfields (even if empty)
+                    console.log(`[assembleCommand] ${kwd}: ✅ INCLUDING because parentInOriginal=true (was in original command)`);
                     // Find the number of subfields in the original command
                     let origVals = [];
                     if (state.originalParmMap && state.originalParmMap[kwd]) {
                         const orig = state.originalParmMap[kwd];
-                        if (typeof orig === 'string' && orig.startsWith('(') && orig.endsWith(')')) {
+                        // Handle string[][] format (standardized parser output)
+                        if (Array.isArray(orig) && orig.length > 0 && Array.isArray(orig[0])) {
+                            origVals = orig[0]; // First instance for Max=1 parameters
+                        }
+                        else if (typeof orig === 'string' && orig.startsWith('(') && orig.endsWith(')')) {
                             origVals = orig.slice(1, -1).split(' ');
                         }
                         else if (Array.isArray(orig)) {
@@ -1630,11 +1677,18 @@ function assembleCurrentParmMap() {
                             origVals = orig.split(' ');
                         }
                     }
+                    console.log(`[assembleCommand] ${kwd}: origVals from originalParmMap=`, origVals);
                     // Output as many subfields as were present in the original command
                     const valsToInclude = elemVals.slice(0, Math.max(origVals.length, 1));
-                    // Do not filter out empty subfields
-                    const joined = valsToInclude.join(' ');
-                    map[kwd] = `(${joined})`;
+                    console.log(`[assembleCommand] ${kwd}: valsToInclude (${valsToInclude.length} elements)=`, valsToInclude);
+                    // Do not filter out empty subfields - return as array for proper formatting
+                    if (valsToInclude.length > 0) {
+                        map[kwd] = valsToInclude;
+                        console.log(`[assembleCommand] ${kwd}: ADDED to map (parentInOriginal path)`, valsToInclude);
+                    }
+                }
+                else {
+                    console.log(`[assembleCommand] ${kwd}: ❌ NOT including - lastNonDefaultIndex < 0 and not in original command`);
                 }
             }
             else if (hasQual) {
@@ -1720,6 +1774,14 @@ function assembleCurrentParmMap() {
 function onSubmit() {
     console.log('[clPrompter] ', 'onSubmit (Enter) start');
     const values = assembleCurrentParmMap();
+    // Include label in values if present
+    if (state.cmdLabel && state.cmdLabel.trim()) {
+        values['label'] = state.cmdLabel;
+    }
+    // Include comment with delimiters if present
+    if (state.cmdComment && state.cmdComment.trim()) {
+        values['comment'] = '/* ' + state.cmdComment.trim() + ' */';
+    }
     const cmdName = state.xmlDoc?.querySelector('Cmd')?.getAttribute('CmdName') || state.cmdName;
     vscode?.postMessage({ type: 'submit', cmdName, values });
     console.log('[clPrompter] ', 'onSubmit (Enter) end');
@@ -1738,6 +1800,27 @@ function wirePrompterControls() {
     const form = document.getElementById('clForm');
     const submitBtn = document.getElementById('submitBtn');
     const cancelBtn = document.getElementById('cancelBtn');
+    const labelInput = document.getElementById('clLabel');
+    const commentInput = document.getElementById('cmdComment');
+    // Wire up label input
+    if (labelInput) {
+        // Initialize with current state value
+        labelInput.value = state.cmdLabel || '';
+        // Listen for changes
+        labelInput.addEventListener('input', () => {
+            state.cmdLabel = labelInput.value;
+        });
+    }
+    // Wire up comment input
+    if (commentInput) {
+        // Initialize with current state value (already stripped of delimiters)
+        commentInput.value = state.cmdComment || '';
+        // Listen for changes
+        commentInput.addEventListener('input', () => {
+            // Store without delimiters, we'll add them back on submit
+            state.cmdComment = commentInput.value.trim();
+        });
+    }
     if (submitBtn) {
         submitBtn.addEventListener('click', onSubmit);
     }
@@ -1790,6 +1873,12 @@ window.addEventListener('message', event => {
         const parser = new DOMParser();
         state.xmlDoc = parser.parseFromString(message.xml, 'text/xml');
         state.parms = Array.from(state.xmlDoc.querySelectorAll('Parm'));
+        // Sort parameters by PosNbr to ensure correct display order
+        state.parms.sort((a, b) => {
+            const posA = parseInt(a.getAttribute('PosNbr') || '9999', 10);
+            const posB = parseInt(b.getAttribute('PosNbr') || '9999', 10);
+            return posA - posB;
+        });
         console.log('[clPrompter] Parsed parms:', state.parms.length); // Add this
         state.allowedValsMap = message.allowedValsMap || {};
         state.cmdName = message.cmdName || '';
@@ -1798,7 +1887,9 @@ window.addEventListener('message', event => {
         console.log('[clPrompter] cmdName:', state.cmdName, 'cmdPrompt:', cmdPrompt);
         const mainTitle = document.getElementById('mainTitle');
         if (mainTitle && state.cmdName) {
-            mainTitle.textContent = cmdPrompt ? `${state.cmdName} (${cmdPrompt})` : state.cmdName;
+            // Uppercase the command name for consistent display
+            const upperCmdName = state.cmdName.toUpperCase();
+            mainTitle.textContent = cmdPrompt ? `${upperCmdName} (${cmdPrompt})` : upperCmdName;
             console.log('[clPrompter] Set mainTitle to:', mainTitle.textContent);
         }
         state.originalParmMap = message.paramMap || message.parmMap || {};
@@ -1810,6 +1901,47 @@ window.addEventListener('message', event => {
         wirePrompterControls();
         if (Object.keys(state.originalParmMap).length > 0) {
             requestAnimationFrame(() => populateFormFromValues(state.originalParmMap));
+        }
+    }
+    else if (message.type === 'setLabel') {
+        // Handle label and comment message
+        state.cmdLabel = message.label || '';
+        // Strip delimiters from comment before storing in state
+        const incomingComment = message.comment || '';
+        state.cmdComment = incomingComment ? incomingComment.replace(/^\/\*\s*/, '').replace(/\s*\*\/$/, '').trim() : '';
+        console.log('[clPrompter] Set cmdLabel to:', state.cmdLabel);
+        console.log('[clPrompter] Set cmdComment to:', state.cmdComment);
+        // Update the HTML inputs
+        const labelInput = document.getElementById('clLabel');
+        if (labelInput) {
+            labelInput.value = state.cmdLabel;
+        }
+        const commentInput = document.getElementById('cmdComment');
+        if (commentInput) {
+            commentInput.value = state.cmdComment;
+        }
+    }
+    else if (message.type === 'nestedResult') {
+        // Handle nested prompter result - update the field with the returned command string
+        console.log('[clPrompter] Received nested result for field:', message.fieldId, 'value:', message.commandString);
+        const fieldId = message.fieldId;
+        const commandString = message.commandString;
+        if (commandString && fieldId) {
+            const field = document.querySelector(`[name="${fieldId}"]`);
+            if (field && (field.tagName === 'TEXTAREA' || field.tagName === 'INPUT')) {
+                console.log('[clPrompter] Updating field', fieldId, 'with value:', commandString);
+                field.value = commandString;
+                field.focus();
+                // Mark as touched
+                state.touchedFields.add(fieldId);
+                console.log('[clPrompter] Field updated successfully');
+            }
+            else {
+                console.warn('[clPrompter] Could not find field:', fieldId);
+            }
+        }
+        else {
+            console.warn('[clPrompter] Invalid nestedResult message:', { fieldId, commandString });
         }
     }
     console.log('[clPrompter] ', 'addEventListener(\'message\') end');

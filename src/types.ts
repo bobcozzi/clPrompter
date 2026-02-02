@@ -41,6 +41,7 @@ export interface CLNode {
   type: 'command_call';
   name: string;
   parameters: CLParsedParm[];
+  comment?: string;  // Trailing comment like /* Copy file */
 }
 
 export interface CLParsedParm {
@@ -158,6 +159,8 @@ export interface PrompterState {
   allowedValsMap: { [kwd: string]: string[] };
   originalParmMap: { [kwd: string]: any };
   cmdName: string;
+  cmdLabel: string;
+  cmdComment: string;
   hasProcessedFormData: boolean;
   controlsWired: boolean;
   parmMetas: ParmMetaMap;  // Include this if not already present

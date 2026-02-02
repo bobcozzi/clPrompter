@@ -37,6 +37,20 @@ body[data-vscode-theme-kind="vscode-high-contrast"] .parm-kwd {
   color: var(--clp-kwd-color-hc, var(--clp-kwd-color, #ffff00));
 }
 
+/* Comment textarea styling */
+#cmdComment {
+  width: 72ch;
+  max-width: 100%;
+  resize: vertical;
+  color: #00AA00;
+  font-family: var(--vscode-editor-font-family, 'Courier New', monospace);
+}
+/* CL Command Label styling */
+#clLabel {
+  color: #00AA00;
+  font-family: var(--vscode-editor-font-family, 'Courier New', monospace);
+}
+
 /* Theme-aware value colors */
 body[data-vscode-theme-kind="vscode-light"] vscode-textfield,
 body[data-vscode-theme-kind="vscode-light"] vscode-single-select {
