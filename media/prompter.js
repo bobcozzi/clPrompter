@@ -1,5 +1,7 @@
 import { createCBInput } from './webview-assets/cbinput.js';
 import { getDefaultLengthForType, parseParenthesizedContent, getLengthClass } from './promptHelpers.js';
+// 🔥 DIAGNOSTIC: Verify new prompter-v2.js is executing
+console.log('🔥🔥🔥 PROMPTER-V2.JS IS EXECUTING! 🔥🔥🔥');
 // Global state (typed)
 let state = {
     xmlDoc: null,
@@ -192,6 +194,11 @@ function markFieldTouched(fieldName) {
     }
     state.touchedFields.add(fieldName);
     console.log(`[${ts}] [markFieldTouched] ${fieldName} MARKED as touched (total: ${state.touchedFields.size})`);
+    // Apply dark green color to touched field
+    const field = document.querySelector(`[name="${fieldName}"]`);
+    if (field) {
+        field.style.color = '#006400';
+    }
 }
 // Helper: Check if a field was touched (user interacted with it)
 function isFieldTouched(fieldName) {
@@ -199,18 +206,44 @@ function isFieldTouched(fieldName) {
 }
 // Helper: Check if a field was in the original command
 function wasInOriginalCommand(fieldName) {
-    return state.originalParmMap && state.originalParmMap[fieldName] !== undefined;
+    if (!state.originalParmMap)
+        return false;
+    // First check exact match (for simple parameters)
+    if (state.originalParmMap[fieldName] !== undefined) {
+        return true;
+    }
+    // For QUAL/ELEM fields like JOB_QUAL0, JOB_ELEM0, JOB_INST0_ELEM0, etc.
+    // Extract the base parameter name and check if that was in the original command
+    const baseParam = fieldName.split('_')[0];
+    return state.originalParmMap[baseParam] !== undefined;
 }
 // Helper: Normalize value against allowed values (case-insensitive match)
 function normalizeValue(value, allowedValues, parm) {
-    if (!value || allowedValues.length === 0)
+    if (!value) {
         return value;
+    }
+    // NEVER modify quoted strings - they preserve case regardless of Case attribute
+    // Check for surrounding quotes (apostrophes)
+    if ((value.startsWith("'") && value.endsWith("'")) ||
+        (value.startsWith('"') && value.endsWith('"'))) {
+        return value;
+    }
+    // If no allowedValues passed but we have a parm/elem node, extract SpcVal from XML
+    let valuesToCheck = allowedValues;
+    if (valuesToCheck.length === 0 && parm) {
+        const spcValNodes = parm.querySelectorAll(':scope > SpcVal > Value');
+        if (spcValNodes.length > 0) {
+            valuesToCheck = Array.from(spcValNodes).map(v => v.getAttribute('Val') || '');
+        }
+    }
     // Check if this parameter has Case=MONO (most parameters do)
     const caseAttr = parm?.getAttribute('Case');
     const isMono = !caseAttr || caseAttr.toUpperCase() === 'MONO';
+    // Filter out range metadata before matching
+    const displayValues = valuesToCheck.filter(v => !v.startsWith('_RANGE_'));
     // Try case-insensitive match against allowed values
     const valueUpper = value.toUpperCase();
-    const match = allowedValues.find(allowed => allowed.toUpperCase() === valueUpper);
+    const match = displayValues.find(allowed => allowed.toUpperCase() === valueUpper);
     if (match) {
         // Found a match - return the canonical form
         return match;
@@ -220,6 +253,160 @@ function normalizeValue(value, allowedValues, parm) {
         return value.toUpperCase();
     }
     return value;
+}
+// Helper: Parse range metadata from suggestions array
+function parseRange(suggestions) {
+    const rangePattern = /^_RANGE_(.+)_(.+)$/;
+    for (const suggestion of suggestions) {
+        const match = suggestion.match(rangePattern);
+        if (match) {
+            return { min: match[1], max: match[2] };
+        }
+    }
+    return null;
+}
+// Helper: Configure range validation on an input element using native HTML attributes
+function configureRangeValidation(input, suggestions, container) {
+    const range = parseRange(suggestions);
+    if (!range)
+        return;
+    // Get special values (non-range items from suggestions)
+    const specialValues = suggestions.filter(s => !s.startsWith('_RANGE_'));
+    // Try to determine if this is a numeric range
+    const numMin = parseFloat(range.min);
+    const numMax = parseFloat(range.max);
+    const isNumericRange = !isNaN(numMin) && !isNaN(numMax);
+    // Create error message span
+    const errorSpan = document.createElement('span');
+    errorSpan.className = 'range-error-message';
+    errorSpan.style.color = '#ff0000';
+    errorSpan.style.fontSize = '12px';
+    errorSpan.style.marginLeft = '8px';
+    errorSpan.style.display = 'none';
+    errorSpan.style.fontWeight = 'bold';
+    errorSpan.style.whiteSpace = 'nowrap';
+    // Wrap the input (or container) and error span together so they share the same grid cell
+    // This prevents the error span from being pushed outside the CSS grid layout
+    const targetElement = container || input;
+    const parent = targetElement.parentElement || targetElement.parentNode;
+    if (parent) {
+        // Create wrapper div to hold both input/container and error span
+        const wrapper = document.createElement('div');
+        wrapper.style.display = 'flex';
+        wrapper.style.alignItems = 'center';
+        wrapper.style.gap = '8px';
+        wrapper.style.flexWrap = 'wrap';
+        wrapper.className = 'range-validation-wrapper';
+        // Insert wrapper before the target element, then move target into wrapper
+        parent.replaceChild(wrapper, targetElement);
+        wrapper.appendChild(targetElement);
+        wrapper.appendChild(errorSpan);
+        console.log('[configureRangeValidation] Wrapper created and inserted');
+        console.log('[configureRangeValidation] Wrapper parent:', wrapper.parentElement);
+        console.log('[configureRangeValidation] Error span parent after append:', errorSpan.parentElement);
+        console.log('[configureRangeValidation] Target element parent after append:', targetElement.parentElement);
+    }
+    else {
+        // Fallback: append to body if no parent (shouldn't happen but be defensive)
+        console.warn('[configureRangeValidation] No parent element found, cannot wrap input');
+    }
+    // Always use type="text" to allow CL variables (e.g., &NBR, &USER, &JOBNAME)
+    // CL variables can be used in any parameter position
+    input.type = 'text';
+    // Add blur handler for range validation
+    input.addEventListener('blur', () => {
+        if (!input.value) {
+            input.setCustomValidity('');
+            input.style.color = '';
+            errorSpan.style.display = 'none';
+            errorSpan.textContent = '';
+            return;
+        }
+        const valueUpper = input.value.toUpperCase();
+        // Allow CL variables (start with &) - no validation needed
+        if (input.value.startsWith('&')) {
+            input.setCustomValidity('');
+            input.style.color = '#006400'; // Valid - dark green
+            errorSpan.style.display = 'none';
+            errorSpan.textContent = '';
+            return;
+        }
+        // Check if it's a special value (case-insensitive)
+        if (specialValues.some(sv => sv.toUpperCase() === valueUpper)) {
+            input.setCustomValidity('');
+            input.style.color = '#006400'; // Valid - dark green
+            errorSpan.style.display = 'none';
+            errorSpan.textContent = '';
+            return;
+        }
+        // Validate against range
+        if (isNumericRange) {
+            const numValue = parseFloat(input.value);
+            if (!isNaN(numValue) && numValue >= numMin && numValue <= numMax) {
+                input.setCustomValidity('');
+                input.style.color = '#006400'; // Valid - dark green
+                errorSpan.style.display = 'none';
+                errorSpan.textContent = '';
+                return;
+            }
+            else {
+                // Out of range - show error
+                const errorMsg = `Value must be between ${range.min} and ${range.max}`;
+                console.log(`[Range Validation] Out of range! value=${input.value}, numValue=${numValue}, min=${numMin}, max=${numMax}`);
+                console.log(`[Range Validation] Input element:`, input);
+                console.log(`[Range Validation] Input parent:`, input.parentElement);
+                console.log(`[Range Validation] Setting error span display to inline, textContent="${errorMsg}"`);
+                console.log(`[Range Validation] Error span element:`, errorSpan);
+                console.log(`[Range Validation] Error span parent:`, errorSpan.parentElement || errorSpan.parentNode);
+                console.log(`[Range Validation] Looking for wrapper with class range-validation-wrapper...`);
+                const wrapperCheck = input.closest('.range-validation-wrapper');
+                console.log(`[Range Validation] Wrapper found:`, wrapperCheck);
+                input.setCustomValidity(errorMsg);
+                input.style.color = '#ff0000'; // Invalid - red
+                errorSpan.textContent = errorMsg;
+                errorSpan.style.display = 'inline';
+                return;
+            }
+        }
+        else {
+            // Alphanumeric range
+            if (input.value >= range.min && input.value <= range.max) {
+                input.setCustomValidity('');
+                input.style.color = '#006400'; // Valid - dark green
+                errorSpan.style.display = 'none';
+                errorSpan.textContent = '';
+                return;
+            }
+        }
+        // Invalid value - show error message
+        const msg = `Value must be between ${range.min} and ${range.max}${specialValues.length > 0 ? ', or: ' + specialValues.join(', ') : ''}`;
+        console.log(`[Range Validation] Invalid value (alphanumeric)! value="${input.value}", min="${range.min}", max="${range.max}"`);
+        console.log(`[Range Validation] Setting error span display to inline, textContent="${msg}"`);
+        console.log(`[Range Validation] Error span element:`, errorSpan);
+        console.log(`[Range Validation] Error span parent:`, errorSpan.parentElement || errorSpan.parentNode);
+        input.setCustomValidity(msg);
+        input.style.color = '#ff0000'; // Invalid - red
+        errorSpan.textContent = msg;
+        errorSpan.style.display = 'inline';
+    });
+}
+// Helper: Validate all inputs with range validation after form population
+function validateAllRangeInputs() {
+    const inputs = document.querySelectorAll('input[type="text"], textarea');
+    inputs.forEach(input => {
+        const el = input;
+        const fieldName = el.name;
+        if (!fieldName)
+            return;
+        // Check if this field has range validation by looking for _RANGE_ in allowed values
+        const allowedVals = (state.allowedValsMap || {})[fieldName] || [];
+        if (parseRange(allowedVals)) {
+            // Trigger blur validation if field has a value
+            if (el.value) {
+                el.dispatchEvent(new Event('blur'));
+            }
+        }
+    });
 }
 // Attach touch tracking to an input element
 function attachTouchTracking(element) {
@@ -257,6 +444,29 @@ function attachStoredListeners() {
     state.elementsToTrack = [];
     console.log(`[${ts}] [attachStoredListeners] COMPLETE - listeners attached, queue cleared`);
 }
+// Apply dark green color to fields that have non-default values after initialization
+// This runs AFTER form population. Fields that were in the original command get dark green.
+// This mimics the IBM i prompter's ">" indicator for user-specified values.
+function applyInitialFieldColors() {
+    const ts = new Date().toISOString().substring(11, 23);
+    console.log(`[${ts}] [applyInitialFieldColors] START`);
+    const inputs = document.querySelectorAll('input[name], textarea[name]');
+    let coloredCount = 0;
+    inputs.forEach(input => {
+        const fieldName = input.name;
+        // Apply dark green if this field was in the original command
+        // This mimics IBM i's ">" indicator for explicitly specified parameters
+        if (wasInOriginalCommand(fieldName)) {
+            input.style.color = '#006400';
+            coloredCount++;
+            console.log(`[${ts}] [applyInitialFieldColors] ${fieldName}: was in original command → dark green`);
+        }
+        else {
+            console.log(`[${ts}] [applyInitialFieldColors] ${fieldName}: not in original command → default color`);
+        }
+    });
+    console.log(`[${ts}] [applyInitialFieldColors] COMPLETE - ${coloredCount} fields colored dark green`);
+}
 function createInputForType(type, name, dft, len, suggestions, isRestricted = false) {
     const effectiveLen = len ? parseInt(len, 10) : getDefaultLengthForType(type);
     const dftLen = (dft || '').length;
@@ -268,38 +478,38 @@ function createInputForType(type, name, dft, len, suggestions, isRestricted = fa
     const isCmdType = typeUpper === 'CMD' || typeUpper === 'CMDSTR';
     const useLongInput = isLglType || isCmdType || effectiveLen > 80 || dftLen > 80;
     console.log(`[createInputForType] name=${name}, type=${type}, effectiveLen=${effectiveLen}, dftLen=${dftLen}, isRestricted=${isRestricted}, isLglType=${isLglType}, isCmdType=${isCmdType}, useLongInput=${useLongInput}, suggestions:`, suggestions, 'dft:', dft);
-    // If there are suggestions AND it's a long input, use combobox + textarea
-    // The combobox provides quick selection, textarea allows manual editing
+    // If there are suggestions AND it's a long input, use cbInput dropdown + textarea
+    // The cbInput provides quick selection with CL variable support, textarea allows manual editing
     if (suggestions.length > 0 && useLongInput) {
         const container = document.createElement('div');
         container.style.display = 'flex';
         container.style.flexDirection = 'column';
         container.style.alignItems = 'flex-start';
         container.style.gap = '8px';
-        const combobox = document.createElement('vsc-combobox');
-        combobox.id = `${name}_combobox`;
-        combobox.style.width = 'auto';
-        combobox.style.minWidth = '150px';
-        combobox.style.maxWidth = '400px';
-        combobox.placeholder = '-- Select or type a value --';
-        // Add suggestion options
-        suggestions.forEach(val => {
-            const option = document.createElement('vsc-option');
-            option.value = val;
-            option.textContent = val;
-            combobox.appendChild(option);
+        // Use cbInput instead of select to support CL variables
+        const displaySuggestions = suggestions.filter(s => !s.startsWith('_RANGE_'));
+        // Normalize the default value before populating the textarea
+        const normalizedDft = dft ? normalizeValue(dft, displaySuggestions, null) : '';
+        const cbinput = createCBInput({
+            name: `${name}_select`,
+            id: `${name}_select`,
+            value: '',
+            options: displaySuggestions,
+            width: '200px',
+            minWidth: '150px'
         });
-        // Set initial value
-        if (dft) {
-            combobox.value = dft;
-        }
         // Textarea (always visible for manual editing)
         const textarea = document.createElement('textarea');
         textarea.name = name;
-        textarea.value = dft || '';
+        textarea.value = normalizedDft;
+        textarea.dataset.default = normalizedDft;
         textarea.rows = 3;
         textarea.classList.add('long-text-input');
         attachTouchTracking(textarea);
+        // Add range validation if applicable
+        if (parseRange(suggestions)) {
+            configureRangeValidation(textarea, suggestions);
+        }
         // Add F4 handler for CMD/CMDSTR textareas
         console.log(`[createInputForType] Checking F4 for ${name}, isCmdType=${isCmdType}, type=${type}`);
         if (isCmdType) {
@@ -327,33 +537,75 @@ function createInputForType(type, name, dft, len, suggestions, isRestricted = fa
         else {
             console.log(`[createInputForType] ✗ F4 handler NOT enabled for ${name}`);
         }
-        // Combobox change handler - replace textarea content when user selects a value
-        combobox.addEventListener('change', () => {
-            const selectedValue = combobox.value;
+        // cbInput change handler - replace textarea content when user selects a value
+        const cbInputElement = cbinput.getInputElement();
+        cbInputElement.addEventListener('blur', () => {
+            const selectedValue = cbInputElement.value;
             if (selectedValue) {
-                textarea.value = selectedValue;
+                // Normalize value against allowed values (case-insensitive match)
+                const normalizedValue = normalizeValue(selectedValue, displaySuggestions, null);
+                textarea.value = normalizedValue;
+                cbInputElement.value = normalizedValue;
                 textarea.focus();
+                // Clear cbInput after transferring value
+                cbInputElement.value = '';
             }
         });
-        container.appendChild(combobox);
+        container.appendChild(cbinput.getElement());
         container.appendChild(textarea);
         return container;
     }
-    // If there are suggestions (but not long input), use custom CBInput component
+    // If there are suggestions (but not long input), check if they're only range metadata
     if (suggestions.length > 0) {
-        // Calculate width based on longest suggestion to prevent truncation
-        const maxLength = Math.max(dft?.length || 0, ...suggestions.map(s => s.length));
+        // Filter out range metadata from display
+        const displaySuggestions = suggestions.filter(s => !s.startsWith('_RANGE_'));
+        // If only range metadata (no actual special values), use regular input with range validation
+        if (displaySuggestions.length === 0) {
+            const input = document.createElement('input');
+            input.type = 'text';
+            input.name = name;
+            input.value = dft || '';
+            input.dataset.default = dft || '';
+            input.classList.add(getLengthClass(effectiveLen));
+            attachTouchTracking(input);
+            // Add range validation - defer until after DOM insertion
+            if (parseRange(suggestions)) {
+                setTimeout(() => {
+                    configureRangeValidation(input, suggestions);
+                }, 0);
+            }
+            return input;
+        }
+        // Has actual special values - use CBInput but with filtered suggestions
+        // Normalize the default value before populating the input
+        const normalizedDft = dft ? normalizeValue(dft, displaySuggestions, null) : '';
+        const maxLength = Math.max(normalizedDft?.length || 0, ...displaySuggestions.map(s => s.length));
         const inputWidth = Math.max(15, maxLength + 3);
         const cbinput = createCBInput({
             name: name,
             id: name,
-            value: dft || '',
-            options: suggestions,
+            value: normalizedDft,
+            options: displaySuggestions, // Use filtered suggestions
             width: `${inputWidth}ch`,
             minWidth: '150px'
         });
         const inputElement = cbinput.getInputElement();
         attachTouchTracking(inputElement);
+        // Add blur handler to normalize values against allowed values
+        inputElement.addEventListener('blur', () => {
+            if (inputElement.value) {
+                const normalizedValue = normalizeValue(inputElement.value, displaySuggestions, null);
+                inputElement.value = normalizedValue;
+            }
+        });
+        // Add range validation if applicable - pass full suggestions array for validation
+        // Defer until after DOM insertion
+        if (parseRange(suggestions)) {
+            const container = cbinput.getElement();
+            setTimeout(() => {
+                configureRangeValidation(inputElement, suggestions, container);
+            }, 0);
+        }
         return cbinput.getElement();
     }
     // No suggestions - regular input or textarea for long values
@@ -361,9 +613,16 @@ function createInputForType(type, name, dft, len, suggestions, isRestricted = fa
         const textarea = document.createElement('textarea');
         textarea.name = name;
         textarea.value = dft || '';
+        textarea.dataset.default = dft || '';
         textarea.rows = 3;
         textarea.classList.add('long-text-input');
         attachTouchTracking(textarea);
+        // Add range validation if applicable - defer until after DOM insertion
+        if (parseRange(suggestions)) {
+            setTimeout(() => {
+                configureRangeValidation(textarea, suggestions);
+            }, 0);
+        }
         // Add F4 handler for CMD/CMDSTR textareas
         console.log(`[createInputForType] Checking F4 for ${name}, isCmdType=${isCmdType}, type=${type}`);
         if (isCmdType) {
@@ -398,31 +657,56 @@ function createInputForType(type, name, dft, len, suggestions, isRestricted = fa
         input.type = 'text';
         input.name = name;
         input.value = dft || '';
+        input.dataset.default = dft || '';
         input.classList.add(getLengthClass(effectiveLen));
         attachTouchTracking(input);
+        // Add range validation if applicable - defer until after DOM insertion
+        console.log(`[createInputForType] Checking range validation for ${name}, suggestions:`, suggestions);
+        const rangeInfo = parseRange(suggestions);
+        console.log(`[createInputForType] Range info for ${name}:`, rangeInfo);
+        if (rangeInfo) {
+            console.log(`[createInputForType] Scheduling deferred range validation for ${name}`);
+            // Use setTimeout to defer validation setup until after the input is in the DOM
+            setTimeout(() => {
+                console.log(`[createInputForType] Executing deferred configureRangeValidation for ${name}`);
+                configureRangeValidation(input, suggestions);
+            }, 0);
+        }
+        else {
+            console.log(`[createInputForType] NO range validation for ${name}`);
+        }
         return input;
     }
 }
-// Create parm input (dropdown, textfield, or textarea for long values)
+// Create parm input (cbInput or textfield for all parameters to support CL variables)
 function createParmInput(name, suggestions, isRestricted, dft, len, type) {
-    console.log('[clPrompter] ', 'createParmInput start');
+    console.log(`[createParmInput] ${name}: suggestions=`, suggestions, 'isRestricted=', isRestricted, 'type=', type);
+    // Even restricted parameters must support CL variables, so always use cbInput when there are suggestions
     if (isRestricted && suggestions.length > 0) {
-        // Use standard select for restricted dropdowns
-        const select = document.createElement('select');
-        select.name = name;
-        select.style.minWidth = '150px';
-        suggestions.forEach(val => {
-            const option = document.createElement('option');
-            option.value = val;
-            option.textContent = val;
-            if (val === dft) {
-                option.selected = true;
-            }
-            select.appendChild(option);
+        // Normalize the default value before populating the input
+        const normalizedDft = dft ? normalizeValue(dft, suggestions, null) : '';
+        // Use cbInput instead of select to support CL variables like &VAR
+        const maxLength = Math.max(normalizedDft?.length || 0, ...suggestions.map(s => s.length));
+        const inputWidth = Math.max(15, maxLength + 3);
+        const cbinput = createCBInput({
+            name: name,
+            id: name,
+            value: normalizedDft,
+            options: suggestions,
+            width: `${inputWidth}ch`,
+            minWidth: '150px'
         });
-        attachTouchTracking(select);
+        const inputElement = cbinput.getInputElement();
+        attachTouchTracking(inputElement);
+        // Add blur handler to normalize values against allowed values
+        inputElement.addEventListener('blur', () => {
+            if (inputElement.value) {
+                const normalizedValue = normalizeValue(inputElement.value, suggestions, null);
+                inputElement.value = normalizedValue;
+            }
+        });
         console.log('[clPrompter] ', 'createParmInput end1');
-        return select;
+        return cbinput.getElement();
     }
     else {
         console.log('[clPrompter] ', 'createParmInput end2');
@@ -430,20 +714,22 @@ function createParmInput(name, suggestions, isRestricted, dft, len, type) {
     }
 }
 function createQualInput(parentParm, qual, qualName, qualType, qualLen, qualDft, isFirstPart) {
-    // Build allowed values: parent SngVal/SpcVal (first part only) + this Qual's SpcVal/SngVal/Values
+    // Build allowed values: this Qual's SpcVal/SngVal/Values, plus parent for first part
     const xmlVals = [];
+    // For the FIRST QUAL only, include parent-level SngVal/SpcVal (e.g., JOB(*))
     if (isFirstPart) {
-        parentParm.querySelectorAll(':scope > SngVal > Value').forEach(v => {
-            const val = v.getAttribute('Val');
-            if (val && val !== '*NULL')
-                xmlVals.push(val);
-        });
         parentParm.querySelectorAll(':scope > SpcVal > Value').forEach(v => {
             const val = v.getAttribute('Val');
             if (val && val !== '*NULL')
                 xmlVals.push(val);
         });
+        parentParm.querySelectorAll(':scope > SngVal > Value').forEach(v => {
+            const val = v.getAttribute('Val');
+            if (val && val !== '*NULL')
+                xmlVals.push(val);
+        });
     }
+    // Add this Qual's own special values
     if (qual) {
         qual.querySelectorAll('SpcVal > Value, SngVal > Value, Values > Value').forEach(v => {
             const val = v.getAttribute('Val');
@@ -454,6 +740,7 @@ function createQualInput(parentParm, qual, qualName, qualType, qualLen, qualDft,
     const fromMap = (state.allowedValsMap || {})[qualName] || [];
     const allowedVals = Array.from(new Set(fromMap.concat(xmlVals)));
     const restricted = isRestricted(qual);
+    console.log(`[createQualInput] ${qualName}: xmlVals=`, xmlVals, 'fromMap=', fromMap, 'allowedVals=', allowedVals, 'restricted=', restricted);
     // Default: for first part, prefer parent Dft if it’s among parent SngVal
     let dft = qualDft || '';
     if (isFirstPart) {
@@ -823,6 +1110,7 @@ function loadForm() {
     state.isInitializing = false;
     console.log(`[${ts2}] [loadForm] About to call attachStoredListeners()`);
     attachStoredListeners();
+    applyInitialFieldColors();
     console.log(`[${ts2}] [loadForm] END - Form ready for user interaction`);
 }
 // Calculate the longest label and set a CSS custom property for optimal grid sizing
@@ -1045,9 +1333,21 @@ function populateFormFromValues(values) {
                     populateQualInputs(parm, state.parmMetas[kwd] || {}, kwd, instances[i], i, inst);
                 }
                 else {
-                    const input = inst.querySelector(`[name="${kwd}"]`);
-                    if (input)
-                        input.value = instances[i][0]; // Simple param has only one element
+                    let input = inst.querySelector(`[name="${kwd}"]`);
+                    if (input) {
+                        // Check if we found a cbInput container - if so, get the actual input element
+                        if (input.classList?.contains('cbinput-container')) {
+                            const actualInput = input.querySelector('.cbinput-input');
+                            if (actualInput) {
+                                console.log(`[clPrompter] Found cbInput container, using actual input element`);
+                                input = actualInput;
+                            }
+                        }
+                        const rawVal = instances[i][0];
+                        const allowedVals = (state.allowedValsMap || {})[kwd] || [];
+                        const normalizedVal = normalizeValue(rawVal, allowedVals, parm);
+                        input.value = normalizedVal; // Simple param has only one element
+                    }
                 }
             }
         }
@@ -1059,13 +1359,22 @@ function populateFormFromValues(values) {
                 populateQualInputs(parm, state.parmMetas[kwd] || {}, kwd, instances[0], 0, document);
             }
             else {
-                const input = document.querySelector(`[name="${kwd}"]`);
+                let input = document.querySelector(`[name="${kwd}"]`);
                 console.log(`[clPrompter] Input for ${kwd}:`, input);
                 if (input) {
-                    const newVal = instances[0][0]; // Simple param: first instance, first element
-                    // vsc-combobox handles both suggestions and custom values - just set value directly
-                    console.log(`[clPrompter] Setting ${kwd} from "${input.value}" to "${newVal}"`);
-                    input.value = newVal;
+                    // Check if we found a cbInput container - if so, get the actual input element
+                    if (input.classList?.contains('cbinput-container')) {
+                        const actualInput = input.querySelector('.cbinput-input');
+                        if (actualInput) {
+                            console.log(`[clPrompter] Found cbInput container, using actual input element`);
+                            input = actualInput;
+                        }
+                    }
+                    const rawVal = instances[0][0]; // Simple param: first instance, first element
+                    const allowedVals = (state.allowedValsMap || {})[kwd] || [];
+                    const normalizedVal = normalizeValue(rawVal, allowedVals, parm);
+                    console.log(`[clPrompter] Setting ${kwd} from "${input.value}" to "${normalizedVal}" (original: "${rawVal}")`);
+                    input.value = normalizedVal;
                     console.log(`[clPrompter] Set ${kwd} to "${input.value}"`);
                 }
                 else {
@@ -1076,16 +1385,24 @@ function populateFormFromValues(values) {
     });
     state.isInitializing = false;
     attachStoredListeners();
+    applyInitialFieldColors();
+    // Validate all range inputs after population
+    requestAnimationFrame(() => validateAllRangeInputs());
     console.log('[clPrompter] populateFormFromValues end');
 }
 // Helpers for population (simplified; expand as needed)
 function populateElemInputs(parm, parmMeta, kwd, instance, idx, container) {
     console.log(`[clPrompter] populateElemInputs for ${kwd}, instance:`, instance);
+    console.log(`[clPrompter] Instance array length: ${instance.length}`);
     const elemParts = parm.querySelectorAll(':scope > Elem');
+    console.log(`[clPrompter] Number of ELEM parts in XML: ${elemParts.length}`);
     instance.forEach((elemValue, i) => {
+        console.log(`[clPrompter] Processing ELEM ${i}: value="${elemValue}"`);
         const elem = elemParts[i];
-        if (!elem)
+        if (!elem) {
+            console.log(`[clPrompter] ❌ No ELEM definition found for index ${i}`);
             return;
+        }
         const elemType = String(elem.getAttribute('Type') || 'CHAR');
         if (elemType === 'QUAL') {
             // elemValue for QUAL should be already split by parser
@@ -1100,13 +1417,23 @@ function populateElemInputs(parm, parmMeta, kwd, instance, idx, container) {
                 const subParts = parseParenthesizedContent(elemValue);
                 console.log(`[clPrompter] Nested ELEM ${kwd}_INST${idx}_ELEM${i} subParts:`, subParts);
                 subParts.forEach((subPart, j) => {
-                    const input = container.querySelector(`[name="${kwd}_INST${idx}_ELEM${i}_SUB${j}"]`);
+                    let input = container.querySelector(`[name="${kwd}_INST${idx}_ELEM${i}_SUB${j}"]`);
                     console.log(`[clPrompter] Input ${kwd}_INST${idx}_ELEM${i}_SUB${j}:`, input);
                     if (input) {
-                        console.log(`[clPrompter] Setting ${kwd}_INST${idx}_ELEM${i}_SUB${j} from "${input.value}" to "${subPart}"`);
-                        input.value = subPart;
-                        console.log(`[clPrompter] Set ${kwd}_INST${idx}_ELEM${i}_SUB${j} to "${input.value}"`);
+                        // Check if we found a cbInput container - if so, get the actual input element
+                        if (input.classList?.contains('cbinput-container')) {
+                            const actualInput = input.querySelector('.cbinput-input');
+                            if (actualInput) {
+                                console.log(`[clPrompter] Found cbInput container, using actual input element`);
+                                input = actualInput;
+                            }
+                        }
                         const sNode = subElems[j];
+                        const allowedVals = sNode ? ((state.allowedValsMap || {})[`${kwd}_INST${idx}_ELEM${i}_SUB${j}`] || []) : [];
+                        const normalizedVal = normalizeValue(subPart, allowedVals, sNode);
+                        console.log(`[clPrompter] Setting ${kwd}_INST${idx}_ELEM${i}_SUB${j} from "${input.value}" to "${normalizedVal}" (original: "${subPart}")`);
+                        input.value = normalizedVal;
+                        console.log(`[clPrompter] Set ${kwd}_INST${idx}_ELEM${i}_SUB${j} to "${input.value}"`);
                         const len = Number.parseInt(String(sNode?.getAttribute('Len') || ''), 10) || undefined;
                         const inl = Number.parseInt(String(sNode?.getAttribute('InlPmtLen') || ''), 10) || undefined;
                         ensureMinInputWidth(input, { len, inlPmtLen: inl, valueLen: String(subPart ?? '').length });
@@ -1117,11 +1444,23 @@ function populateElemInputs(parm, parmMeta, kwd, instance, idx, container) {
                 });
             }
             else {
-                const input = container.querySelector(`[name="${kwd}_INST${idx}_ELEM${i}"]`);
+                let input = container.querySelector(`[name="${kwd}_INST${idx}_ELEM${i}"]`);
                 console.log(`[clPrompter] Input ${kwd}_INST${idx}_ELEM${i}:`, input);
                 if (input) {
-                    console.log(`[clPrompter] Setting ${kwd}_INST${idx}_ELEM${i} from "${input.value}" to "${elemValue}"`);
-                    input.value = elemValue;
+                    // Check if we found a cbInput container - if so, get the actual input element
+                    if (input.classList?.contains('cbinput-container')) {
+                        const actualInput = input.querySelector('.cbinput-input');
+                        if (actualInput) {
+                            console.log(`[clPrompter] Found cbInput container, using actual input element`);
+                            input = actualInput;
+                        }
+                    }
+                    // Get allowed values from the Elem node (for special values like *SECLVL)
+                    // and from state.allowedValsMap as fallback
+                    const allowedFromMap = (state.allowedValsMap || {})[kwd] || [];
+                    const normalizedVal = normalizeValue(elemValue, allowedFromMap, elem);
+                    console.log(`[clPrompter] Setting ${kwd}_INST${idx}_ELEM${i} from "${input.value}" to "${normalizedVal}" (original: "${elemValue}")`);
+                    input.value = normalizedVal;
                     console.log(`[clPrompter] Set ${kwd}_INST${idx}_ELEM${i} to "${input.value}"`);
                     const len = Number.parseInt(String(elem.getAttribute('Len') || ''), 10) || undefined;
                     const inl = Number.parseInt(String(elem.getAttribute('InlPmtLen') || ''), 10) || undefined;
@@ -1141,18 +1480,28 @@ function populateQualInputs(parm, parmMeta, kwd, instance, idx, container) {
     // FIFO into inputs: QUAL0 ← instance[0], QUAL1 ← instance[1], ...
     let i = 0;
     for (;; i++) {
-        const input = container.querySelector(`[name="${kwd}_QUAL${i}"]`);
+        let input = container.querySelector(`[name="${kwd}_QUAL${i}"]`);
         if (!input)
             break;
-        const newVal = instance[i] ?? '';
+        // Check if we found a cbInput container - if so, get the actual input element
+        if (input.classList?.contains('cbinput-container')) {
+            const actualInput = input.querySelector('.cbinput-input');
+            if (actualInput) {
+                console.log(`[clPrompter] Found cbInput container, using actual input element`);
+                input = actualInput;
+            }
+        }
+        const rawVal = instance[i] ?? '';
+        const qNode = qualNodes[i];
+        const allowedVals = (state.allowedValsMap || {})[`${kwd}_QUAL${i}`] || [];
+        const newVal = normalizeValue(rawVal, allowedVals, qNode);
         console.log(`[clPrompter] Input ${kwd}_QUAL${i}:`, input);
-        // vsc-combobox handles both suggestions and custom values - just set value directly
+        // Set normalized value
         if (input.value !== newVal) {
-            console.log(`[clPrompter] Setting ${kwd}_QUAL${i} from "${input.value}" to "${newVal}"`);
+            console.log(`[clPrompter] Setting ${kwd}_QUAL${i} from "${input.value}" to "${newVal}" (original: "${rawVal}")`);
             input.value = newVal;
             console.log(`[clPrompter] Set ${kwd}_QUAL${i} to "${input.value}"`);
         }
-        const qNode = qualNodes[i];
         const len = Number.parseInt(String(qNode?.getAttribute('Len') || ''), 10) || undefined;
         const inl = Number.parseInt(String(qNode?.getAttribute('InlPmtLen') || ''), 10) || undefined;
         ensureMinInputWidth(input, { len, inlPmtLen: inl, valueLen: newVal.length });

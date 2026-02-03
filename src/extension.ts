@@ -1151,16 +1151,13 @@ export function getHtmlForPrompter(
 
     const htmlPath = path.join(__dirname, '..', 'media', 'prompter.html');
 
-    // Add cache-busting timestamp to force reload of webview resources
-    const timestamp = Date.now();
-
     let mainJs = webview.asWebviewUri(
         vscode.Uri.joinPath(extensionUri, 'media', 'main.js')
-    ).toString() + `?t=${timestamp}`;
+    ).toString();
 
     let styleUri = webview.asWebviewUri(
         vscode.Uri.joinPath(extensionUri, 'media', 'style.css')
-    ).toString() + `?t=${timestamp}`;
+    ).toString();
 
     // Read vscode-elements bundle to inject inline (bypasses CSP issues)
     const vscodeElementsPath = path.join(__dirname, '..', 'node_modules', '@vscode-elements', 'elements', 'dist', 'bundled.js');

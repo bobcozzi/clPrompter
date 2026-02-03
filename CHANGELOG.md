@@ -4,7 +4,7 @@ All notable changes to this project will be documented in this file.
 
 ## [0.0.13] - 2025-07-06
 ### Changed
-- All hardcoded color styles was removed from JavaScript; all visual styling for is now handled in CSS using VS Code theme variables.
+- All hardcoded color styles was removed from JavaScript; all visual styling is now handled in CSS using VS Code theme variables.
 - Added `.nested-elem-group` CSS class to `style.css` for theme-aware background, border, and foreground, matching `.elem-group` and `.qual-group`.
 - Updated `main.js` to only set the class for nested ELEM fieldsets, with no inline style properties.
 
