@@ -356,13 +356,7 @@ function configureRangeValidation(input: HTMLInputElement, suggestions: string[]
 
   // Create error message span
   const errorSpan = document.createElement('span');
-  errorSpan.className = 'range-error-message';
-  errorSpan.style.color = '#ff0000';
-  errorSpan.style.fontSize = '12px';
-  errorSpan.style.marginLeft = '8px';
-  errorSpan.style.display = 'none';
-  errorSpan.style.fontWeight = 'bold';
-  errorSpan.style.whiteSpace = 'nowrap';
+  errorSpan.className = 'prompter-error-msg';
 
   // Wrap the input (or container) and error span together so they share the same grid cell
   // This prevents the error span from being pushed outside the CSS grid layout
@@ -372,10 +366,6 @@ function configureRangeValidation(input: HTMLInputElement, suggestions: string[]
   if (parent) {
     // Create wrapper div to hold both input/container and error span
     const wrapper = document.createElement('div');
-    wrapper.style.display = 'flex';
-    wrapper.style.alignItems = 'center';
-    wrapper.style.gap = '8px';
-    wrapper.style.flexWrap = 'wrap';
     wrapper.className = 'range-validation-wrapper';
 
     // Insert wrapper before the target element, then move target into wrapper
@@ -401,7 +391,8 @@ function configureRangeValidation(input: HTMLInputElement, suggestions: string[]
     if (!input.value) {
       input.setCustomValidity('');
       input.style.color = '';
-      errorSpan.style.display = 'none';
+      input.classList.remove('validation-error');
+      errorSpan.classList.remove('visible');
       errorSpan.textContent = '';
       return;
     }
@@ -412,7 +403,8 @@ function configureRangeValidation(input: HTMLInputElement, suggestions: string[]
     if (input.value.startsWith('&')) {
       input.setCustomValidity('');
       input.style.color = '#006400'; // Valid - dark green
-      errorSpan.style.display = 'none';
+      input.classList.remove('validation-error');
+      errorSpan.classList.remove('visible');
       errorSpan.textContent = '';
       return;
     }
@@ -421,7 +413,8 @@ function configureRangeValidation(input: HTMLInputElement, suggestions: string[]
     if (specialValues.some(sv => sv.toUpperCase() === valueUpper)) {
       input.setCustomValidity('');
       input.style.color = '#006400'; // Valid - dark green
-      errorSpan.style.display = 'none';
+      input.classList.remove('validation-error');
+      errorSpan.classList.remove('visible');
       errorSpan.textContent = '';
       return;
     }
@@ -432,7 +425,8 @@ function configureRangeValidation(input: HTMLInputElement, suggestions: string[]
       if (!isNaN(numValue) && numValue >= numMin && numValue <= numMax) {
         input.setCustomValidity('');
         input.style.color = '#006400'; // Valid - dark green
-        errorSpan.style.display = 'none';
+        input.classList.remove('validation-error');
+        errorSpan.classList.remove('visible');
         errorSpan.textContent = '';
         return;
       } else {
@@ -444,13 +438,13 @@ function configureRangeValidation(input: HTMLInputElement, suggestions: string[]
         console.log(`[Range Validation] Setting error span display to inline, textContent="${errorMsg}"`);
         console.log(`[Range Validation] Error span element:`, errorSpan);
         console.log(`[Range Validation] Error span parent:`, errorSpan.parentElement || errorSpan.parentNode);
-        console.log(`[Range Validation] Looking for wrapper with class range-validation-wrapper...`);
-        const wrapperCheck = input.closest('.range-validation-wrapper');
+        console.log(`[Range Validation] Looking for wrapper with class parm-validation-wrapper...`);
+        const wrapperCheck = input.closest('.parm-validation-wrapper');
         console.log(`[Range Validation] Wrapper found:`, wrapperCheck);
         input.setCustomValidity(errorMsg);
-        input.style.color = '#ff0000'; // Invalid - red
+        input.classList.add('validation-error');
         errorSpan.textContent = errorMsg;
-        errorSpan.style.display = 'inline';
+        errorSpan.classList.add('visible');
         return;
       }
     } else {
@@ -458,7 +452,8 @@ function configureRangeValidation(input: HTMLInputElement, suggestions: string[]
       if (input.value >= range.min && input.value <= range.max) {
         input.setCustomValidity('');
         input.style.color = '#006400'; // Valid - dark green
-        errorSpan.style.display = 'none';
+        input.classList.remove('validation-error');
+        errorSpan.classList.remove('visible');
         errorSpan.textContent = '';
         return;
       }
@@ -471,10 +466,124 @@ function configureRangeValidation(input: HTMLInputElement, suggestions: string[]
     console.log(`[Range Validation] Error span element:`, errorSpan);
     console.log(`[Range Validation] Error span parent:`, errorSpan.parentElement || errorSpan.parentNode);
     input.setCustomValidity(msg);
-    input.style.color = '#ff0000'; // Invalid - red
+    input.classList.add('validation-error');
     errorSpan.textContent = msg;
-    errorSpan.style.display = 'inline';
+    errorSpan.classList.add('visible');
   });
+}
+
+// Validate Full="YES" fields - exact length required unless CL variable/expression
+function configureFullValidation(input: HTMLInputElement, requiredLength: number, container?: HTMLElement): void {
+  if (!requiredLength || requiredLength <= 0) return;
+
+  // Create error message span
+  const errorSpan = document.createElement('span');
+  errorSpan.className = 'prompter-error-msg';
+
+  // Wrap the input (or container) and error span together
+  const targetElement = container || input;
+  const parent = targetElement.parentElement || targetElement.parentNode;
+
+  if (parent) {
+    // Create wrapper div to hold both input/container and error span
+    const wrapper = document.createElement('div');
+    wrapper.className = 'parm-validation-wrapper';
+
+    // Insert wrapper before the target element, then move target into wrapper
+    parent.replaceChild(wrapper, targetElement);
+    wrapper.appendChild(targetElement);
+    wrapper.appendChild(errorSpan);
+  }
+
+  // Add blur handler for Full length validation
+  input.addEventListener('blur', () => {
+    if (!input.value) {
+      input.setCustomValidity('');
+      input.style.color = '';
+      input.classList.remove('validation-error');
+      errorSpan.classList.remove('visible');
+      errorSpan.textContent = '';
+      return;
+    }
+
+    // Allow CL variables or expressions containing &
+    if (input.value.includes('&')) {
+      input.setCustomValidity('');
+      input.style.color = '#006400'; // Valid - dark green
+      input.classList.remove('validation-error');
+      errorSpan.classList.remove('visible');
+      errorSpan.textContent = '';
+      return;
+    }
+
+    // Validate exact length
+    if (input.value.length === requiredLength) {
+      input.setCustomValidity('');
+      input.style.color = '#006400'; // Valid - dark green
+      input.classList.remove('validation-error');
+      errorSpan.classList.remove('visible');
+      errorSpan.textContent = '';
+      return;
+    } else {
+      // Wrong length - show error
+      const errorMsg = `Must be exactly ${requiredLength} character${requiredLength !== 1 ? 's' : ''}`;
+      input.setCustomValidity(errorMsg);
+      input.classList.add('validation-error');
+      errorSpan.textContent = errorMsg;
+      errorSpan.classList.add('visible');
+      return;
+    }
+  });
+}
+
+// ========================================
+// CENTRALIZED VALIDATION SETUP
+// ========================================
+// This is the single entry point for configuring ALL validations on an input element.
+// When adding new validation types (e.g., MinVal, MaxVal, Values, Expr):
+//   1. Create a new configureXxxValidation() function following the pattern above
+//   2. Add the XML attribute to ValidationAttributes interface
+//   3. Add a call to your function in setupValidations() below
+//   4. Extract the attribute in createQualInput/createElemInput/renderSimpleParm
+interface ValidationAttributes {
+  suggestions?: string[];      // For range validation (RangeMinVal/RangeMaxVal)
+  full?: string;                // For exact length validation (Full="YES")
+  len?: string;                 // Parameter length
+  // Future validations can be added here:
+  // minVal?: string;           // For MinVal attribute
+  // maxVal?: string;           // For MaxVal attribute
+  // values?: string;           // For Values attribute (allowed values list)
+  // expr?: string;             // For Expr attribute (allow expressions)
+}
+
+function setupValidations(input: HTMLInputElement, attrs: ValidationAttributes, container?: HTMLElement): void {
+  // Defer all validation setup until after DOM insertion
+  // This ensures the input element is in the DOM before we try to wrap it
+  setTimeout(() => {
+    // Range validation (RangeMinVal/RangeMaxVal)
+    if (attrs.suggestions && parseRange(attrs.suggestions)) {
+      configureRangeValidation(input, attrs.suggestions, container);
+    }
+
+    // Full length validation (Full="YES")
+    if (attrs.full?.toUpperCase() === 'YES' && attrs.len) {
+      const requiredLength = parseInt(attrs.len, 10);
+      if (!isNaN(requiredLength) && requiredLength > 0) {
+        configureFullValidation(input, requiredLength, container);
+      }
+    }
+
+    // Future validations can be added here:
+    // if (attrs.minVal) {
+    //   configureMinValueValidation(input, attrs.minVal);
+    // }
+    // if (attrs.maxVal) {
+    //   configureMaxValueValidation(input, attrs.maxVal);
+    // }
+    // if (attrs.values) {
+    //   configureValuesValidation(input, attrs.values);
+    // }
+  }, 0);
 }
 
 // Helper: Validate all inputs with range validation after form population
@@ -563,8 +672,130 @@ function applyInitialFieldColors(): void {
   console.log(`[${ts}] [applyInitialFieldColors] COMPLETE - ${coloredCount} fields colored dark green`);
 }
 
+// Configure tab order to move logically between input fields
+// This ensures TAB moves from input to input, not to labels or other elements
+function configureTabOrder(): void {
+  const ts = new Date().toISOString().substring(11, 23);
+  console.log(`[${ts}] [configureTabOrder] START`);
 
-function createInputForType(type: string, name: string, dft: string, len: string, suggestions: string[], isRestricted: boolean = false): HTMLElement {
+  // Find all input fields in the form (inputs, textareas, selects, cbinput elements)
+  const form = document.getElementById('promptForm');
+  if (!form) {
+    console.warn(`[${ts}] [configureTabOrder] Form not found`);
+    return;
+  }
+
+  // Get all focusable input elements in DOM order
+  const inputs = Array.from(form.querySelectorAll<HTMLElement>(
+    'input[type="text"], textarea, select, .cbinput-input'
+  ));
+
+  // Filter out hidden or disabled inputs
+  const visibleInputs = inputs.filter(input => {
+    const isVisible = input.offsetParent !== null; // Check if element is visible
+    const isDisabled = (input as HTMLInputElement).disabled;
+    return isVisible && !isDisabled;
+  });
+
+  console.log(`[${ts}] [configureTabOrder] Found ${visibleInputs.length} visible input fields`);
+
+  // Set tabindex sequentially (starting from 1)
+  visibleInputs.forEach((input, index) => {
+    input.tabIndex = index + 1;
+    const name = (input as HTMLInputElement).name || input.id || 'unnamed';
+    console.log(`[${ts}] [configureTabOrder] [${index + 1}] ${name}`);
+  });
+
+  // Remove tabindex from ALL labels to ensure they're not in tab order
+  const allLabels = form.querySelectorAll('label');
+  allLabels.forEach(label => {
+    label.removeAttribute('tabindex');
+    // Explicitly set tabindex to -1 to remove from tab order
+    (label as HTMLElement).tabIndex = -1;
+  });
+
+  // Remove tabindex from cbInput dropdown buttons (actual class is .cbinput-button)
+  const dropdownButtons = form.querySelectorAll('.cbinput-button');
+  dropdownButtons.forEach(btn => {
+    (btn as HTMLElement).tabIndex = -1;
+  });
+
+  // Ensure the first input gets focus when form loads
+  if (visibleInputs.length > 0) {
+    setTimeout(() => {
+      visibleInputs[0].focus();
+      console.log(`[${ts}] [configureTabOrder] Focused first input: ${(visibleInputs[0] as HTMLInputElement).name}`);
+    }, 100);
+  }
+
+  console.log(`[${ts}] [configureTabOrder] COMPLETE - Tab order configured for ${visibleInputs.length} inputs`);
+}
+
+/**
+ * Add focus indicators (arrow) to all input fields for better visual feedback
+ * Shows a small arrow at the right edge of the label, just before the input field
+ */
+function configureFocusIndicators(): void {
+  const form = document.getElementById('clForm') as HTMLFormElement;
+  if (!form) return;
+
+  // Get all input elements including static ones (clLabel, cmdComment)
+  const allInputs: HTMLElement[] = [
+    ...Array.from(form.querySelectorAll('input, textarea, .cbinput-input')),
+    document.getElementById('clLabel'),
+    document.getElementById('cmdComment')
+  ].filter(el => el !== null) as HTMLElement[];
+
+  allInputs.forEach(input => {
+    // Add focus event listener
+    input.addEventListener('focus', () => {
+      // Remove any existing indicators
+      document.querySelectorAll('.focus-indicator').forEach(ind => ind.remove());
+
+      // Find the associated label
+      const parent = input.closest('.form-group') || input.parentElement;
+      const label = parent?.querySelector('label');
+
+      if (label) {
+        // Create and insert indicator inside the label at the right edge
+        const indicator = document.createElement('span');
+        indicator.className = 'focus-indicator';
+        indicator.textContent = ' ▶';
+        indicator.style.color = 'var(--vscode-focusBorder, #0066cc)';
+        indicator.style.fontSize = '12px';
+        indicator.style.fontWeight = 'bold';
+        indicator.style.float = 'right';
+        indicator.style.pointerEvents = 'none';
+
+        label.appendChild(indicator);
+      }
+    });
+
+    // Add blur event listener
+    input.addEventListener('blur', () => {
+      // Remove the indicator from the label
+      const parent = input.closest('.form-group') || input.parentElement;
+      const label = parent?.querySelector('label');
+      if (label) {
+        const indicator = label.querySelector('.focus-indicator');
+        if (indicator) {
+          indicator.remove();
+        }
+      }
+    });
+  });
+
+  // Refocus the currently focused element to trigger the indicator (e.g., clLabel on initial load)
+  const currentlyFocused = document.activeElement as HTMLElement;
+  if (currentlyFocused && allInputs.includes(currentlyFocused)) {
+    // Blur and refocus to trigger the event listener
+    currentlyFocused.blur();
+    setTimeout(() => currentlyFocused.focus(), 0);
+  }
+}
+
+
+function createInputForType(type: string, name: string, dft: string, len: string, suggestions: string[], isRestricted: boolean = false, full?: string): HTMLElement {
   const effectiveLen = len ? parseInt(len, 10) : getDefaultLengthForType(type);
   const dftLen = (dft || '').length;
   const typeUpper = type.toUpperCase();
@@ -581,10 +812,7 @@ function createInputForType(type: string, name: string, dft: string, len: string
   // The cbInput provides quick selection with CL variable support, textarea allows manual editing
   if (suggestions.length > 0 && useLongInput) {
     const container = document.createElement('div');
-    container.style.display = 'flex';
-    container.style.flexDirection = 'column';
-    container.style.alignItems = 'flex-start';
-    container.style.gap = '8px';
+    container.className = 'textarea-cbinput-container';
 
     // Use cbInput instead of select to support CL variables
     const displaySuggestions = suggestions.filter(s => !s.startsWith('_RANGE_'));
@@ -676,12 +904,8 @@ function createInputForType(type: string, name: string, dft: string, len: string
       input.classList.add(getLengthClass(effectiveLen));
       attachTouchTracking(input);
 
-      // Add range validation - defer until after DOM insertion
-      if (parseRange(suggestions)) {
-        setTimeout(() => {
-          configureRangeValidation(input, suggestions);
-        }, 0);
-      }
+      // Configure all validations (range, full, future validations)
+      setupValidations(input, { suggestions, full, len });
 
       return input;
     }
@@ -781,28 +1005,16 @@ function createInputForType(type: string, name: string, dft: string, len: string
     input.classList.add(getLengthClass(effectiveLen));
     attachTouchTracking(input);
 
-    // Add range validation if applicable - defer until after DOM insertion
-    console.log(`[createInputForType] Checking range validation for ${name}, suggestions:`, suggestions);
-    const rangeInfo = parseRange(suggestions);
-    console.log(`[createInputForType] Range info for ${name}:`, rangeInfo);
-    if (rangeInfo) {
-      console.log(`[createInputForType] Scheduling deferred range validation for ${name}`);
-      // Use setTimeout to defer validation setup until after the input is in the DOM
-      setTimeout(() => {
-        console.log(`[createInputForType] Executing deferred configureRangeValidation for ${name}`);
-        configureRangeValidation(input, suggestions);
-      }, 0);
-    } else {
-      console.log(`[createInputForType] NO range validation for ${name}`);
-    }
+    // Configure all validations (range, full, future validations)
+    setupValidations(input, { suggestions, full, len });
 
     return input;
   }
 }
 
 // Create parm input (cbInput or textfield for all parameters to support CL variables)
-function createParmInput(name: string, suggestions: string[], isRestricted: boolean, dft: string, len?: string, type?: string): HTMLElement {
-  console.log(`[createParmInput] ${name}: suggestions=`, suggestions, 'isRestricted=', isRestricted, 'type=', type);
+function createParmInput(name: string, suggestions: string[], isRestricted: boolean, dft: string, len?: string, type?: string, full?: string): HTMLElement {
+  console.log(`[createParmInput] ${name}: suggestions=`, suggestions, 'isRestricted=', isRestricted, 'type=', type, 'full=', full);
   // Even restricted parameters must support CL variables, so always use cbInput when there are suggestions
   if (isRestricted && suggestions.length > 0) {
     // Normalize the default value before populating the input
@@ -839,7 +1051,7 @@ function createParmInput(name: string, suggestions: string[], isRestricted: bool
     return cbinput.getElement();
   } else {
     console.log('[clPrompter] ', 'createParmInput end2');
-    return createInputForType(type || 'CHAR', name, dft, len || '', suggestions, isRestricted);
+    return createInputForType(type || 'CHAR', name, dft, len || '', suggestions, isRestricted, full);
   }
 }
 
@@ -898,7 +1110,8 @@ function createQualInput(
   // Size: prefer Qual Len and InlPmtLen; expand later on populate if value grows
   const inl = Number.parseInt(String(qual?.getAttribute('InlPmtLen') || ''), 10) || undefined;
   const len = Number.parseInt(String(qual?.getAttribute('Len') || ''), 10) || undefined;
-  const input = createParmInput(qualName, allowedVals, restricted, dft, qualLen, qualType);
+  const full = String(qual?.getAttribute('Full') || '');
+  const input = createParmInput(qualName, allowedVals, restricted, dft, qualLen, qualType, full);
   ensureMinInputWidth(input as HTMLElement, { len, inlPmtLen: inl });
 
   return input;
@@ -954,7 +1167,8 @@ function createElemInput(
 
   const inl = Number.parseInt(String(elem?.getAttribute('InlPmtLen') || ''), 10) || undefined;
   const len = Number.parseInt(String(elem?.getAttribute('Len') || ''), 10) || undefined;
-  const input = createParmInput(elemName, allowedVals, restricted, dft, elemLen, elemType);
+  const full = String(elem?.getAttribute('Full') || '');
+  const input = createParmInput(elemName, allowedVals, restricted, dft, elemLen, elemType, full);
   ensureMinInputWidth(input as HTMLElement, { len, inlPmtLen: inl });
 
   return input;
@@ -968,6 +1182,7 @@ function renderSimpleParm(parm: ParmElement, kwd: string, container: HTMLElement
   // Input
   const type = String(parm.getAttribute('Type') || 'CHAR');
   const lenAttr = String(parm.getAttribute('Len') || '');
+  const fullAttr = String(parm.getAttribute('Full') || '');
   const inlPmtLen = String(parm.getAttribute('InlPmtLen') || '');
   // Use Len if available, otherwise fall back to InlPmtLen (for types like CMD, PNAME, etc.)
   const effectiveLenAttr = lenAttr || inlPmtLen;
@@ -978,7 +1193,7 @@ function renderSimpleParm(parm: ParmElement, kwd: string, container: HTMLElement
 
   const len = Number.parseInt(lenAttr, 10) || undefined;
   const inl = Number.parseInt(inlPmtLen, 10) || undefined;
-  const input = createParmInput(inputName, allowedVals, restricted, dft, effectiveLenAttr, type);
+  const input = createParmInput(inputName, allowedVals, restricted, dft, effectiveLenAttr, type, fullAttr);
   ensureMinInputWidth(input as HTMLElement, { len, inlPmtLen: inl });
 
   // Wrap in form-group for 5250-style grid layout with prompt and keyword in label
@@ -1333,6 +1548,8 @@ function loadForm(): void {
   console.log(`[${ts2}] [loadForm] About to call attachStoredListeners()`);
   attachStoredListeners();
   applyInitialFieldColors();
+  configureTabOrder(); // Configure tab navigation to move between input fields
+  configureFocusIndicators(); // Add visual focus indicators (arrows) to all inputs
   console.log(`[${ts2}] [loadForm] END - Form ready for user interaction`);
 }
 
@@ -1622,6 +1839,8 @@ function populateFormFromValues(values: ParmMap): void {
   state.isInitializing = false;
   attachStoredListeners();
   applyInitialFieldColors();
+  configureTabOrder(); // Configure tab navigation to move between input fields
+  configureFocusIndicators(); // Add visual focus indicators (arrows) to all inputs
 
   // Validate all range inputs after population
   requestAnimationFrame(() => validateAllRangeInputs());
@@ -2545,6 +2764,10 @@ window.addEventListener('message', event => {
     } else {
       console.warn('[clPrompter] Invalid nestedResult message:', { fieldId, commandString });
     }
+  } else if (message.type === 'ping') {
+    // Respond to ping to confirm webview is alive and responsive
+    console.log('[clPrompter] Received ping, sending pong');
+    vscode?.postMessage({ type: 'pong', hasProcessedFormData: state.hasProcessedFormData });
   }
   console.log('[clPrompter] ', 'addEventListener(\'message\') end');
 });

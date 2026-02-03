@@ -728,35 +728,10 @@ export function formatCLSource(
       continue;
     }
 
-    // First, peek ahead to find the end of this command and extract any trailing comment
-    let trailingComment: string | undefined;
-    let peekIdx = idx;
-
-    // Find the last line of this command by checking for continuation characters
-    while (peekIdx < allLines.length) {
-      const peekLine = allLines[peekIdx];
-      if (!peekLine) break;
-
-      const codePart = peekLine.replace(/\/\*.*\*\//g, '').trimEnd();
-      const hasContinuation = codePart.endsWith('+') || codePart.endsWith('-');
-
-      // Check for trailing comment on this line
-      const commentMatch = peekLine.match(/\/\*.*?\*\/\s*$/);
-      if (commentMatch && !hasContinuation) {
-        // This is the last line and it has a trailing comment
-        trailingComment = commentMatch[0].trim();
-        break;
-      }
-
-      if (!hasContinuation) {
-        break;
-      }
-      peekIdx++;
-    }
-
-    // Use collectCLCmdFromLine to get the complete command (comments already stripped)
+    // Use collectCLCmdFromLine to get the complete command and any trailing comment
     const cmdResult = collectCLCmdFromLine(mockDoc, idx);
     let command = cmdResult.command;
+    const trailingComment = cmdResult.comment; // Use the comment from collectCLCmdFromLine
     idx = cmdResult.endLine + 1; // Move past the command
 
     // Handle CL tags (labels ending with :)
@@ -814,11 +789,11 @@ export function formatCLSource(
           if (!lastLineEndsWithCont) {
             formattedLines[lastLineIdx] = lastLine + ' ' + trailingComment;
           } else {
-            formattedLines.push(' '.repeat(contCol) + trailingComment);
+            formattedLines.push(' '.repeat(contCol - 1) + trailingComment);
           }
         } else {
           const commentContent = commentMatch[1];
-          const commentIndent = ' '.repeat(contCol);
+          const commentIndent = ' '.repeat(contCol - 1);
 
           if (!lastLineEndsWithCont) {
             // Try to fit comment on the last line

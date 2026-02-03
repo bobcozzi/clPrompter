@@ -2,6 +2,46 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.0.40] - 2026-02-03
+### Added
+- **Visual Focus Indicator**: Arrow (▶) appears at the right edge of field labels to clearly show which input has focus
+- **Tab Navigation**: TAB key now moves sequentially between input fields for efficient keyboard navigation
+- **Diagnostic Settings**: New settings for saving command XML and prompter HTML to assist with troubleshooting:
+  - `clPrompter.saveCmdXMLtoFile` - Save command definition XML (default: false)
+  - `clPrompter.savedCmdXMLFileLocation` - Configure where XML files are saved
+  - `clPrompter.savePrompterHTMLtoFile` - Save prompter HTML for diagnostics (default: false)
+  - `clPrompter.savedPrompterHTMLFileLocation` - Configure where HTML files are saved
+  - All location settings support variables: `${tmpdir}`, `${userHome}`, `${workspaceFolder}`
+  - Nested prompting is now supported. Commands like SBMJOB that have a CMD parameter can have the command in that parameter prompted as well. This is called `nested prompting`.
+
+### Changed
+- **Improved Comment Handling**: Trailing comments on CL commands are now properly preserved and formatted
+  - Multi-line comments are correctly indented on continuation lines
+  - Comment indentation fixed to use proper column positioning (contCol-1 for 0-based indexing)
+- **Enhanced ELEM Parameter Formatting**: ELEM parameters (LOG, EXTRA, etc.) now stay together on one line when possible
+  - Fixed detection of ELEM parameters stored as expression objects
+  - Added atomic value protection to prevent internal line breaks
+  - Improved preemptive wrapping logic for better readability
+- **Renamed Settings** (for clarity):
+  - `enableDebugXml` → `saveCmdXMLtoFile`
+  - `debugXmlPath` → `savedCmdXMLFileLocation`
+
+### Fixed
+- **Initial Focus State**: Focus indicator now appears correctly on the first field (clLabel) when prompter opens
+- **Tab Order**: cbInput dropdown buttons no longer interfere with tab navigation (tabIndex=-1)
+- **Comment Indentation**: Fixed extra space issue in continuation lines of multi-line comments
+- **ELEM Parameter Breaking**: Resolved issue where ELEM parameters were wrapping internally despite being marked atomic
+  - Corrected token extraction from expression objects
+  - Added formatValue-level protection against chunking
+  - Improved fullParamText construction for accurate matching
+
+### Technical Improvements
+- Refactored focus indicator implementation with blur/refocus cycle for correct initial state
+- Now prompt all command parameter variations.
+- Enhanced tab order configuration with proper tabindex management for all input elements
+- Improved atomic value detection for complex parameter types
+- Added comprehensive token filtering and joining for expression object parameters
+
 ## [0.0.13] - 2025-07-06
 ### Changed
 - All hardcoded color styles was removed from JavaScript; all visual styling is now handled in CSS using VS Code theme variables.

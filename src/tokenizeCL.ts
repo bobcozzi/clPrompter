@@ -676,26 +676,35 @@ export function formatCL_SEU(
     let wrapped = false;
     const lines: string[] = [];
     const atomicValues = collectAtomicValues(node);
-    console.log('[clPrompter] formatCL_SEU');
     // 🔹 ADD atomic keyword+parens AND complete ELEM values here:
     for (const parm of node.parameters) {
         const keywordWithParen = applyCase(parm.name, keywordCase) + '(';
         atomicValues.add(keywordWithParen);
 
-        // For ELEM parameters (arrays), add the complete keyword+value as atomic to prevent internal breaks
-        if (Array.isArray(parm.value) && !('type' in parm.value)) {
-            // Simple array - format the complete parameter as atomic
-            const elements = parm.value.map(v => typeof v === 'string' ? v : String(v));
-            const valueText = elements.join(' ');
+        // For ELEM parameters (expression objects), add the complete keyword+value as atomic to prevent internal breaks
+        // ELEM parameters are stored as expression objects with tokens, not arrays
+        if (typeof parm.value === 'object' && parm.value !== null && 'type' in parm.value &&
+            (parm.value as any).type === 'expression' && 'tokens' in parm.value) {
+            // Expression object - extract non-space token values and join them
+            const tokens = (parm.value as any).tokens as Array<{type: string, value: string}>;
+            const values = tokens.filter(t => t.type !== 'space').map(t => t.value);
+            const valueText = values.join(' ');
             const withoutParen = applyCase(parm.name, keywordCase) + '(' + valueText;
             const withParen = withoutParen + ')';
-            console.log(`[formatCL_SEU] Adding atomic values for ${parm.name}: "${withoutParen}" and "${withParen}"`);
             // Add both with and without closing paren (since appendWrappedCLLine gets text without closing paren)
             atomicValues.add(withoutParen);
             atomicValues.add(withParen);
         }
+        // Fallback: For simple arrays (if any parameters still use this format)
+        else if (Array.isArray(parm.value) && !('type' in parm.value)) {
+            const elements = parm.value.map(v => typeof v === 'string' ? v : String(v));
+            const valueText = elements.join(' ');
+            const withoutParen = applyCase(parm.name, keywordCase) + '(' + valueText;
+            const withParen = withoutParen + ')';
+            atomicValues.add(withoutParen);
+            atomicValues.add(withParen);
+        }
     }
-    console.log(`[clPrompter] formatCL_SEU found ${atomicValues.size} atomic values`);
     const formatValue = (value: CLValue, indentPos: number, parmName?: string, actualStartPos?: number): string => {
         if (typeof value === 'string') return value;
 
@@ -839,6 +848,20 @@ export function formatCL_SEU(
             return formatCL_SEU(value, label).replace(new RegExp(eol, 'g'), eol + ' '.repeat(CONT_LINE_COL - 1));
         }
         if ('type' in value && value.type === 'expression') {
+            // Check if this is an atomic ELEM parameter that should NOT be broken into chunks
+            // These parameters were marked as atomic earlier and should stay on one line
+            if (parmName) {
+                const tokens = value.tokens as Array<{type: string, value: string}>;
+                const values = tokens.filter(t => t.type !== 'space').map(t => t.value);
+                const valueText = values.join(' ');
+                const fullParam = parmName + '(' + valueText + ')';
+
+                if (atomicValues.has(fullParam)) {
+                    // This is an atomic ELEM - return all values on one line without wrapping
+                    return valueText;
+                }
+            }
+
             const chunks = splitExpressionTokensForWrap(value.tokens);
 
             // DEBUG: Log chunks for VALUE parameter
@@ -959,7 +982,35 @@ export function formatCL_SEU(
             const estimatedParamLength = spaceBeforeParam.length + parmStrFirstLine.length + closingParen.length;
             const wouldExceedMargin = (currentLine.length + estimatedParamLength) > rightMargin;
 
-            if (wrapped && wouldExceedMargin) {
+// Check if this parameter is an ELEM group (expression object) that should be kept atomic
+            const isElemExpression = typeof parm.value === 'object' && parm.value !== null &&
+                'type' in parm.value && (parm.value as any).type === 'expression' && 'tokens' in parm.value;
+            const isElemArray = Array.isArray(parm.value) && !('type' in parm.value);
+            const isElemParameter = isElemExpression || isElemArray;
+
+            // For ELEM parameters, construct the full text using the raw values (not firstValueLine)
+            let fullParamText: string;
+            if (isElemExpression) {
+                // Extract non-space token values from expression object
+                const tokens = (parm.value as any).tokens as Array<{type: string, value: string}>;
+                const values = tokens.filter(t => t.type !== 'space').map(t => t.value);
+                const valueText = values.join(' ');
+                fullParamText = keywordText + '(' + valueText + ')';
+            } else if (isElemArray) {
+                // Extract values from array
+                const elements = (parm.value as Array<string | number | boolean>).map(v => typeof v === 'string' ? v : String(v));
+                const valueText = elements.join(' ');
+                fullParamText = keywordText + '(' + valueText + ')';
+            } else {
+                fullParamText = isPositional ? firstValueLine : keywordText + '(' + firstValueLine + ')';
+            }
+
+            const isAtomicElem = isElemParameter && atomicValues.has(fullParamText);
+
+            // Wrap if:
+            // 1. We would exceed margin AND we're already wrapping, OR
+            // 2. This is an atomic ELEM parameter that won't fit on current line
+            if (wouldExceedMargin && (wrapped || isAtomicElem)) {
                 // Would exceed margin - wrap to new line
                 linesOut.push(currentLine + ' ' + continuationChar);
                 currentLine = ' '.repeat(CONT_LINE_COL - 1);
@@ -1285,35 +1336,27 @@ function appendWrappedCLLine(
     // Find last space within width, accounting for continuation character
     let breakAt = remaining.lastIndexOf(' ', available - 2); // -2 for " +"
 
-    console.log(`[appendWrappedCLLine] remaining="${remaining.substring(0, 100)}" breakAt=${breakAt} atomicValues.size=${atomicValues.size}`);
-
     // Don't break inside atomic values - check if we're about to split an atomic parameter
     if (breakAt >= 0) {
-      console.log(`[appendWrappedCLLine] Checking ${atomicValues.size} atomic values...`);
       // Look for atomic values that would be split by this break
       for (const atomicVal of atomicValues) {
         // Find where this atomic value starts in the remaining text
         const atomicStart = remaining.indexOf(atomicVal);
-        console.log(`[appendWrappedCLLine] Checking atomic "${atomicVal}" -> indexOf=${atomicStart}`);
         if (atomicStart !== -1) {
           const atomicEnd = atomicStart + atomicVal.length;
           // If the break point is inside this atomic value, move it before the atomic value
           if (breakAt > atomicStart && breakAt < atomicEnd) {
-            console.log(`[appendWrappedCLLine] Found atomic value "${atomicVal}" in remaining text, breakAt=${breakAt} would split it`);
             // Try to find a space before this atomic value
             if (atomicStart > 0) {
               const spaceBeforeAtomic = remaining.lastIndexOf(' ', atomicStart - 1);
               if (spaceBeforeAtomic >= 0) {
-                console.log(`[appendWrappedCLLine] Moving breakAt from ${breakAt} to ${spaceBeforeAtomic} (before atomic)`);
                 breakAt = spaceBeforeAtomic;
               } else {
                 // No space before - wrap entire remaining text to next line
-                console.log(`[appendWrappedCLLine] No space before atomic, setting breakAt=-1 to wrap entire text`);
                 breakAt = -1;
               }
             } else {
               // Atomic value is at start of remaining - can't break it
-              console.log(`[appendWrappedCLLine] Atomic at start, setting breakAt=-1`);
               breakAt = -1;
             }
             break;

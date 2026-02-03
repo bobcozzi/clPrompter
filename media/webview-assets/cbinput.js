@@ -42,6 +42,7 @@ export class CBInput {
         this.button.type = 'button';
         this.button.className = 'cbinput-button';
         this.button.textContent = '▼';
+        this.button.tabIndex = -1; // Exclude from tab order - only the input should be tabbable
         this.button.style.padding = '0 6px';
         this.button.style.lineHeight = '1';
         this.button.style.fontSize = '9px';

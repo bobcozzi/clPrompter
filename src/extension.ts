@@ -207,7 +207,8 @@ export class ClPromptPanel {
      */
     public static async promptNestedCommand(extensionUri: vscode.Uri, commandString: string, parentPanel: ClPromptPanel): Promise<string | null> {
         return new Promise<string | null>(async (resolve) => {
-            const column = vscode.window.activeTextEditor?.viewColumn ?? vscode.ViewColumn.Beside;
+            // Use the parent panel's view column to overlay in the same location
+            const column = parentPanel._panel.viewColumn ?? vscode.ViewColumn.One;
 
             let cmdName = extractCmdName(commandString);
             if (!cmdName) {
@@ -241,6 +242,7 @@ export class ClPromptPanel {
                 column,
                 {
                     enableScripts: true,
+                    retainContextWhenHidden: true,
                     localResourceRoots: [vscode.Uri.joinPath(extensionUri, 'media')]
                 }
             );
@@ -259,6 +261,10 @@ export class ClPromptPanel {
                     // Promise already resolved, ignore
                     console.log('[promptNestedCommand] Promise already resolved');
                 }
+
+                // Reveal and restore the parent panel when nested panel closes
+                console.log('[promptNestedCommand] Revealing parent panel');
+                parentPanel._panel.reveal(column, false);
             });
         });
     }
@@ -301,16 +307,17 @@ export class ClPromptPanel {
         console.log(`[clPrompter] XML length: ${xml.length} characters`);
         console.log(`[clPrompter] XML starts with: ${xml.substring(0, 100)}`);
         console.log(`[clPrompter] XML ends with: ${xml.substring(xml.length - 100)}`);
+
         console.log("[clPrompter] <XML> ", xml);
         console.log("[clPrompter] </XML>");
 
 // Write XML to cmdDefn.xml file for debugging (if enabled)
         const config = vscode.workspace.getConfiguration('clPrompter');
-        const enableDebugXml = config.get<boolean>('enableDebugXml', false);
+        const saveCmdXMLtoFile = config.get<boolean>('saveCmdXMLtoFile', false);
 
-        if (enableDebugXml && editor && editor.document.uri.fsPath) {
+        if (saveCmdXMLtoFile && editor && editor.document.uri.fsPath) {
             const os = require('os');
-            let xmlDir = config.get<string>('debugXmlPath') || '${tmpdir}';
+            let xmlDir = config.get<string>('savedCmdXMLFileLocation') || '${tmpdir}';
 
             // Expand variables
             xmlDir = xmlDir
@@ -327,8 +334,8 @@ export class ClPromptPanel {
             } catch (err) {
                 console.error(`[clPrompter] ✗ Failed to write XML file: ${err}`);
             }
-        } else if (!enableDebugXml) {
-            console.log(`[clPrompter] Debug XML writing is disabled (enableDebugXml=false)`);
+        } else if (!saveCmdXMLtoFile) {
+            console.log(`[clPrompter] Debug XML writing is disabled (saveCmdXMLtoFile=false)`);
         } else {
             const scheme = editor?.document.uri.scheme || 'unknown';
             console.log(`[clPrompter] No file path available (scheme: ${scheme}), skipping XML file write`);
@@ -365,6 +372,7 @@ export class ClPromptPanel {
                 column,
                 {
                     enableScripts: true,
+                    retainContextWhenHidden: true,
                     localResourceRoots: [vscode.Uri.joinPath(extensionUri, 'media')]
                 }
             );
@@ -535,6 +543,20 @@ export class ClPromptPanel {
             .catch(err => {
                 console.error('[clPrompter] Error generating HTML:', err);
             });
+
+        // Listen for when the panel becomes visible again (e.g., after nested prompt closes)
+        this._panel.onDidChangeViewState(
+            e => {
+                if (e.webviewPanel.visible && !this._isNested) {
+                    console.log('[clPrompter] Panel became visible, ensuring webview is ready');
+                    // The webview might have lost its state, so we trigger a refresh
+                    // by checking if it needs reinitialization
+                    this._panel.webview.postMessage({ type: 'ping' });
+                }
+            },
+            null,
+            this._disposables
+        );
 
         // ✅ Fix around line 245 in constructor
         this._panel.onDidDispose(() => {
@@ -769,6 +791,46 @@ export class ClPromptPanel {
                         this._sentFormData = true;
                         break;
                     }
+                    case 'pong': {
+                        // Webview responded to ping - check if it needs reinitialization
+                        console.log('[clPrompter] Received pong, hasProcessedFormData:', message.hasProcessedFormData);
+                        if (!message.hasProcessedFormData && !this._sentFormData) {
+                            console.log('[clPrompter] Webview needs reinitialization, resending formData');
+                            // Resend the form data to reinitialize the webview
+                            const allowedValsMap = buildAllowedValsMap(this._xml);
+                            const config = vscode.workspace.getConfiguration('clPrompter');
+                            const keywordColor = config.get('kwdColor');
+                            const valueColor = config.get('kwdValueColor');
+                            const autoAdjust = config.get('kwdColorAutoAdjust');
+
+                            let cmdPrompt = '';
+                            try {
+                                const parser = new DOMParser();
+                                const xmlDoc = parser.parseFromString(this._xml, 'application/xml');
+                                const cmdNodes = xmlDoc.getElementsByTagName('Cmd');
+                                if (cmdNodes.length > 0) {
+                                    cmdPrompt = cmdNodes[0].getAttribute('Prompt') || '';
+                                }
+                            } catch (err) {
+                                console.error('[clPrompter] Failed to parse XML for command prompt:', err);
+                            }
+
+                            this._panel.webview.postMessage({
+                                type: 'formData',
+                                xml: this._xml,
+                                allowedValsMap,
+                                cmdName: this._cmdName,
+                                cmdPrompt: cmdPrompt,
+                                parmMap: this._parmMap,
+                                paramMap: this._parmMap,
+                                parmMetas: this._parmMetas,
+                                config: { keywordColor, valueColor, autoAdjust }
+                            });
+                            this._panel.webview.postMessage({ type: 'setLabel', label: this._cmdLabel, comment: this._cmdComment });
+                            this._sentFormData = true;
+                        }
+                        break;
+                    }
                 }
             },
             undefined,
@@ -824,7 +886,7 @@ export class ClPromptPanel {
         const nonce = getNonce();
         const cmdName = buildAPI2PartName(cmdString);
 
-        const prompter = await getHtmlForPrompter(webview, this._extensionUri, cmdName.toString(), xml, nonce);
+        const prompter = await getHtmlForPrompter(webview, this._extensionUri, cmdString, xml, nonce);
         // console.log("[clPrompter] HTML generated for Prompter: ", prompter);
         return prompter;
     }
@@ -1189,7 +1251,7 @@ export function getHtmlForPrompter(
             }
             const qualCmdName = buildQualName(TwoPartCmdName);
 
-            // Replace placeholders with escaped or safe values
+            // Replace placeholders with escaped or safe values (VS Code webview version)
             const replacedHtml = html
                 .replace(/{{nonce}}/g, nonce)
                 .replace(/{{cspSource}}/g, webview.cspSource)
@@ -1199,16 +1261,32 @@ export function getHtmlForPrompter(
                 .replace(/{{cmdName}}/g, qualCmdName)
                 .replace(/{{xml}}/g, xml.replace(/"/g, '&quot;')); // Escape double quotes for safety
 
-            try {
-                const now = new Date();
-                const yy = String(now.getFullYear()).slice(-2);
-                const mm = String(now.getMonth() + 1).padStart(2, '0');
-                const dd = String(now.getDate()).padStart(2, '0');
-                const dateStr = `${yy}${mm}${dd}`;
-                const debugPath = path.join(__dirname, `../../clPrompter-${dateStr}.html`);
-                fs.writeFileSync(debugPath, replacedHtml, { encoding: 'utf8' });
-            } catch (err) {
-                console.error('Continuing after Failed to write debug HTML file:', err);
+            // Save HTML for diagnostic purposes if enabled
+            const config = vscode.workspace.getConfiguration('clPrompter');
+            const savePrompterHTMLtoFile = config.get<boolean>('savePrompterHTMLtoFile', false);
+
+            if (savePrompterHTMLtoFile) {
+                try {
+                    const os = require('os');
+                    let htmlDir = config.get<string>('savedPrompterHTMLFileLocation') || '${tmpdir}';
+
+                    // Expand variables
+                    htmlDir = htmlDir
+                        .replace('${tmpdir}', os.tmpdir())
+                        .replace('${userHome}', os.homedir())
+                        .replace('${workspaceFolder}', vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || os.tmpdir());
+
+                    // Clean command name for filename (remove special chars)
+                    const cleanCmdName = qualCmdName.replace(/[^a-zA-Z0-9_-]/g, '_');
+                    const htmlFilePath = path.join(htmlDir, `clPrompter-${cleanCmdName}.html`);
+
+                    fs.writeFileSync(htmlFilePath, replacedHtml, { encoding: 'utf8' });
+                    console.log(`[clPrompter] ✓ Diagnostic HTML written to: ${htmlFilePath}`);
+                } catch (err) {
+                    console.error('[clPrompter] ✗ Failed to write diagnostic HTML file:', err);
+                }
+            } else {
+                console.log('[clPrompter] Diagnostic HTML writing is disabled (savePrompterHTMLtoFile=false)');
             }
 
             resolve(replacedHtml);

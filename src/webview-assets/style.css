@@ -387,6 +387,14 @@ textarea.long-text-input:focus {
   color: var(--vscode-focusBorder, #0066cc);
 }
 
+/* UNUSED - Consider removing these if confirmed not needed:
+.keyword-highlight - Not used in TypeScript code
+.clvar-input - Not referenced
+.form-label - Not used (we use .form-group label instead)
+.form-input - Not used
+.form-div - Not used (only appears in old comments)
+*/
+
 /* Legacy support for existing form-div */
 .form-label {
   display: inline-block;
@@ -481,4 +489,107 @@ button {
 /* Indent input fields for simple parameters (no QUAL/ELEM children) */
 .simple-parm-input-wrapper {
   margin-left: 0.25in;
+}
+
+/* ========================================
+   UNIFIED INPUT STYLING FOR ALL CONTROLS
+   ======================================== */
+
+/* All input fields - always white background regardless of theme */
+input[type="text"],
+input[type="number"],
+textarea.long-text-input,
+.cbinput-input,
+body[data-vscode-theme-kind="vscode-light"] input[type="text"],
+body[data-vscode-theme-kind="vscode-light"] input[type="number"],
+body[data-vscode-theme-kind="vscode-light"] textarea.long-text-input,
+body[data-vscode-theme-kind="vscode-light"] .cbinput-input,
+body[data-vscode-theme-kind="vscode-dark"] input[type="text"],
+body[data-vscode-theme-kind="vscode-dark"] input[type="number"],
+body[data-vscode-theme-kind="vscode-dark"] textarea.long-text-input,
+body[data-vscode-theme-kind="vscode-dark"] .cbinput-input,
+body[data-vscode-theme-kind="vscode-high-contrast"] input[type="text"],
+body[data-vscode-theme-kind="vscode-high-contrast"] input[type="number"],
+body[data-vscode-theme-kind="vscode-high-contrast"] textarea.long-text-input,
+body[data-vscode-theme-kind="vscode-high-contrast"] .cbinput-input {
+  background-color: #ffffff !important;
+  color: #000000;
+}
+
+/* Green text for pre-populated values (fields from original command) */
+input[type="text"][style*="color: rgb(0, 100, 0)"],
+input[type="text"][style*="color: #006400"],
+input[type="number"][style*="color: rgb(0, 100, 0)"],
+input[type="number"][style*="color: #006400"],
+textarea.long-text-input[style*="color: rgb(0, 100, 0)"],
+textarea.long-text-input[style*="color: #006400"],
+.cbinput-input[style*="color: rgb(0, 100, 0)"],
+.cbinput-input[style*="color: #006400"] {
+  color: #006400 !important;
+}
+
+/* cbInput button styling */
+.cbinput-button {
+  padding: 0 6px;
+  line-height: 1;
+  font-size: 9px;
+  border: 1px solid #3c3c3c;
+  border-left: none;
+  background: #3a3d41;
+  color: #cccccc;
+  cursor: pointer;
+  outline: none;
+  box-sizing: border-box;
+  margin: 0;
+  vertical-align: top;
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+}
+
+.cbinput-button:hover {
+  background: #505358;
+}
+
+.cbinput-button:active {
+  background: #2a2d30;
+}
+
+/* ========================================
+   RANGE VALIDATION STYLES
+   ======================================== */
+
+/* Range error message styling */
+.prompter-error-msg {
+  color: #ff0000;
+  font-size: 12px;
+  margin-left: 8px;
+  display: none;
+  font-weight: bold;
+  white-space: nowrap;
+}
+
+.prompter-error-msg.visible {
+  display: inline;
+}
+
+/* Range validation wrapper (input + error message) */
+.parm-validation-wrapper {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* Container for textarea with cbinput dropdown */
+.textarea-cbinput-container {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+/* Validation error state for inputs */
+input.validation-error,
+textarea.validation-error {
+  color: #ff0000;
 }
