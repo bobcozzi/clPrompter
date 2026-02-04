@@ -2360,18 +2360,13 @@ function wirePrompterControls() {
         });
     }
     document.addEventListener('keydown', e => {
-        if (e.key === 'Enter' && !e.shiftKey) {
-            // Enter key always submits the form (even in textareas)
-            // CL commands rarely need multiline input
-            e.preventDefault();
-            if (form) {
-                form.requestSubmit();
-            }
-        }
-        else if (e.key === 'Escape' || e.key === 'F3') {
+        if (e.key === 'Escape' || e.key === 'F3') {
             e.preventDefault();
             onCancel();
         }
+        // Note: Enter key is handled by the form's native submit behavior
+        // Pressing Enter in any input field automatically triggers form.submit event
+        // which calls onSubmit() once. No manual handling needed.
     });
     state.controlsWired = true;
     console.log('[clPrompter] ', 'wirePrompterControls end');

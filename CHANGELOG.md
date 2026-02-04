@@ -2,7 +2,19 @@
 
 All notable changes to this project will be documented in this file.
 
-## [0.0.41] - 2026-02-04
+## [0.0.42] - 2026-02-04
+### Fixed
+- **CRITICAL HOTFIX: Duplicate form submission bug in v0.0.41**: Removed Enter key handler that was causing duplicate submissions
+  - v0.0.41 introduced a new bug where `form.requestSubmit()` triggered duplicate `onSubmit()` calls
+  - Now relies solely on form's native submit behavior when Enter is pressed
+  - Pressing Enter in any input field naturally triggers form submission (single call)
+  - Escape/F3 keys still properly cancel the prompter
+
+### Technical Details
+- The issue: Document-level Enter key handler called `form.requestSubmit()`, which triggered the form's submit event handler, resulting in `onSubmit()` being called twice per Enter press
+- The fix: Removed manual Enter key handling completely - browsers handle Enter → form submit natively
+
+## [0.0.41] - 2026-02-04 [YANKED - DO NOT USE]
 ### Fixed
 - **Critical: Form Submission Memory Leak**: Fixed duplicate event handler that caused extension to crash with "JavaScript heap out of memory" error
   - Removed duplicate `onSubmit()` call from Enter key handler that created recursive submissions
