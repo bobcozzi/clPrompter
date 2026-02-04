@@ -2,7 +2,7 @@
   "name": "clprompter",
   "displayName": "Bob Cozzi's CL Prompter for IBM i",
   "description": "Bob Cozzi's CL Prompter for IBM i CL commands",
-  "version": "0.0.40",
+  "version": "0.0.41",
   "author": {
     "name": "Bob Cozzi",
     "url": "https://github.com/bobcozzi"
@@ -12,6 +12,7 @@
   "extensionKind": [
     "workspace"
   ],
+  "preview": true,
   "private": false,
   "license": "MIT",
   "repository": {

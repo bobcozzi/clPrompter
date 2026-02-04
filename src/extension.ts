@@ -482,8 +482,9 @@ export class ClPromptPanel {
             console.log('[clPrompter] EXTRA parameter parsed value:', JSON.stringify(this._parmMap['EXTRA'], null, 2));
         }
 
-        panel.webview.onDidReceiveMessage(message => {
-            if (message.type === 'webviewReady') {
+        this._disposables.push(
+            panel.webview.onDidReceiveMessage(message => {
+                if (message.type === 'webviewReady') {
                 // Prevent duplicate formData sends
                 if (this._sentFormData) {
                     console.log('[clPrompter] webviewReady ignored; formData already sent');
@@ -533,8 +534,8 @@ export class ClPromptPanel {
                 panel.webview.postMessage({ type: "setLabel", label: cmdLabel, comment: cmdComment });
                 this._sentFormData = true;
             }
-        });
-
+        })
+        );
 
         this.getHtmlForPrompter(this._panel.webview, this._cmdName, this._xml)
             .then(html => {

@@ -585,6 +585,11 @@ function configureTabOrder() {
     dropdownButtons.forEach(btn => {
         btn.tabIndex = -1;
     });
+    // Remove tabindex from multi-instance +/- buttons
+    const multiInstanceButtons = form.querySelectorAll('.add-parm-btn, .remove-parm-btn');
+    multiInstanceButtons.forEach(btn => {
+        btn.tabIndex = -1;
+    });
     // Ensure the first input gets focus when form loads
     if (visibleInputs.length > 0) {
         setTimeout(() => {
@@ -1211,6 +1216,7 @@ function addMultiInstanceControls(container, parm, kwd, idx, max, multiGroupDiv)
         addBtn.className = 'add-parm-btn';
         addBtn.textContent = '+';
         addBtn.title = 'Add entry';
+        addBtn.tabIndex = -1; // Remove from tab order
         addBtn.onclick = () => {
             const instances = multiGroupDiv.querySelectorAll('.parm-instance');
             if (instances.length < max) {
@@ -1227,6 +1233,7 @@ function addMultiInstanceControls(container, parm, kwd, idx, max, multiGroupDiv)
         removeBtn.className = 'remove-parm-btn';
         removeBtn.textContent = '—'; // em dash
         removeBtn.title = 'Remove entry';
+        removeBtn.tabIndex = -1; // Remove from tab order
         removeBtn.onclick = () => container.remove();
         btnBar.appendChild(removeBtn);
     }
@@ -2354,8 +2361,12 @@ function wirePrompterControls() {
     }
     document.addEventListener('keydown', e => {
         if (e.key === 'Enter' && !e.shiftKey) {
+            // Enter key always submits the form (even in textareas)
+            // CL commands rarely need multiline input
             e.preventDefault();
-            onSubmit();
+            if (form) {
+                form.requestSubmit();
+            }
         }
         else if (e.key === 'Escape' || e.key === 'F3') {
             e.preventDefault();

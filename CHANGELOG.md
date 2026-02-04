@@ -2,6 +2,24 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.0.41] - 2026-02-04
+### Fixed
+- **Critical: Form Submission Memory Leak**: Fixed duplicate event handler that caused extension to crash with "JavaScript heap out of memory" error
+  - Removed duplicate `onSubmit()` call from Enter key handler that created recursive submissions
+  - Enter key now properly triggers single form submission via `form.requestSubmit()`
+  - Prevents memory exhaustion from exponential event handler calls
+- **Enter Key Behavior**: Fixed Enter key to submit form from all field types including textareas
+  - Enter key submits the form (matching IBM i behavior)
+  - Shift+Enter allows line breaks in textareas when needed (rare use case)
+- **Tab Navigation**: Fixed multi-instance +/- buttons incorrectly appearing in tab order
+  - Add/remove parameter buttons now excluded from keyboard navigation (tabIndex=-1)
+  - Tab key only moves between actual input fields
+
+### Technical Improvements
+- Added message handler disposables to cleanup array for proper resource management
+- Improved event listener lifecycle management to prevent memory leaks
+- Enhanced keyboard event handling with proper delegation patterns
+
 ## [0.0.40] - 2026-02-03
 ### Added
 - **Visual Focus Indicator**: Arrow (▶) appears at the right edge of field labels to clearly show which input has focus
