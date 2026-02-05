@@ -2,7 +2,7 @@
   "name": "clprompter",
   "displayName": "Bob Cozzi's CL Prompter for IBM i",
   "description": "Bob Cozzi's CL Prompter for IBM i CL commands",
-  "version": "0.0.42",
+  "version": "0.0.45",
   "author": {
     "name": "Bob Cozzi",
     "url": "https://github.com/bobcozzi"
@@ -103,6 +103,11 @@
           "type": "string",
           "default": "${tmpdir}",
           "description": "Directory where clPrompt-<cmdName>.html file is written. Use ${tmpdir} for system temp, ${userHome} for home directory, or an absolute path."
+        },
+        "clPrompter.convertToUpperCase": {
+          "type": "boolean",
+          "default": true,
+          "description": "Convert CL variables, operators (*BCAT, *TCAT, etc.), and built-in functions (%SUBST, %TRIM, etc.) to uppercase. When true, text like '&pickles *bcat %trim(x)' becomes '&PICKLES *BCAT %TRIM(x)'. When false, preserves original case. Applies to both the prompter display and final command output."
         },
         "clPrompter.formatCase": {
           "type": "string",

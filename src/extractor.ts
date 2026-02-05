@@ -23,7 +23,7 @@ export interface ExtractedValues {
 
 /**
  * Extracts a full CL (Command Language) command from a document starting from a given line index.
- * Handles line continuations indicated by trailing `+` or `-` characters, and ignores trailing comments.
+ * Handles line continuations indicated by trailing `+` or `-` characters, and includes trailing comments.
  *
  * The function scans upwards to find the start of the command (handling continuations),
  * then concatenates all relevant lines, removing continuation characters and comments as needed.
@@ -82,7 +82,39 @@ export function collectCLCmdFromLine(
       commentParts.push(commentPart);
     } else {
       // Check if comment starts on this line
-      const commentIdx = line.indexOf('/*');
+      // Per IBM i CL rules: /* is only a comment if:
+      // 1. It starts at position 0, OR
+      // 2. It is preceded by at least one space AND not inside quotes
+      let commentIdx = -1;
+
+      if (line.startsWith('/*')) {
+        // Comment at position 0
+        commentIdx = 0;
+      } else {
+        // Look for the pattern ' /*' (space followed by /*) that is NOT inside quotes
+        // Scan through the line, tracking whether we're inside a quoted string
+        let inQuote = false;
+        for (let i = 0; i < line.length - 2; i++) {
+          const char = line[i];
+
+          // Toggle quote state when we encounter a single quote
+          if (char === "'") {
+            // Check if it's a doubled quote (escaped quote)
+            if (i + 1 < line.length && line[i + 1] === "'") {
+              i++; // Skip the next quote
+              continue;
+            }
+            inQuote = !inQuote;
+          }
+
+          // Check for ' /*' pattern when not inside quotes
+          if (!inQuote && char === ' ' && line[i + 1] === '/' && line[i + 2] === '*') {
+            commentIdx = i + 1; // Point to the '/' character
+            break;
+          }
+        }
+      }
+
       if (commentIdx !== -1) {
         commentPart = line.substring(commentIdx).trim();
         codePart = line.substring(0, commentIdx);

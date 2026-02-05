@@ -1,6 +1,11 @@
 import * as vscode from 'vscode';
 import { CLToken, CLNode, CLParsedParm, CLValue } from './types';
 
+// CL variable name pattern: &NAME or &NAME_QUALIFIER
+// Format: & followed by letter, then up to 21 more chars (letters, digits, underscores)
+// Max: 22 chars total (e.g., &LONGVAR_FIELDNAME)
+export const CL_VARIABLE_PATTERN = /^&[A-Z][A-Z0-9_]{0,21}$/i;
+
 // Function to get proper EOL character for cross-platform compatibility
 function getEOL(): string {
     const activeEditor = vscode.window.activeTextEditor;
@@ -20,10 +25,19 @@ export function tokenizeCL(input: string): CLToken[] {
     let i = 0;
 
     const peek = (): string => input[i];
+    const peekN = (n: number): string => input.substring(i, i + n);
     const next = (): string => input[i++];
     const isSpace = (ch: string): boolean => ch === ' ' || ch === '\t';
     const isAlpha = (ch: string): boolean => /[A-Z]/i.test(ch);
     const isDigit = (ch: string): boolean => /[0-9]/.test(ch);
+
+    // IBM i CL symbolic operators (per IBM documentation)
+    const SYMBOLIC_OPERATORS = [
+        '*CAT', '*BCAT', '*TCAT',           // Character string operators
+        '*AND', '*OR', '*NOT',              // Logical operators
+        '*EQ', '*GT', '*LT', '*GE', '*LE',  // Relational operators
+        '*NE', '*NG', '*NL'                 // More relational operators
+    ];
 
     while (i < input.length) {
         const ch = peek();
@@ -59,10 +73,38 @@ export function tokenizeCL(input: string): CLToken[] {
             while (isAlpha(peek()) || isDigit(peek())) varName += next();
             tokens.push({ type: 'variable', value: varName });
         } else if (ch === '*') {
-            // Symbolic value or operator
-            let sym = next();
-            while (isAlpha(peek())) sym += next();
-            tokens.push({ type: 'symbolic_value', value: sym });
+            // Check if this is a symbolic operator, symbolic value, or multiplication operator
+            if (isAlpha(input[i + 1])) {
+                // Read the full symbolic token
+                let sym = next(); // consume '*'
+                while (isAlpha(peek())) sym += next();
+                const upperSym = sym.toUpperCase();
+
+                // Check if it's a known operator
+                if (SYMBOLIC_OPERATORS.includes(upperSym)) {
+                    tokens.push({ type: 'operator', value: upperSym });
+                } else {
+                    // It's a symbolic value like *FILE, *LIBL, *CURLIB
+                    tokens.push({ type: 'symbolic_value', value: sym });
+                }
+            } else {
+                // Standalone * is multiplication operator
+                next();
+                tokens.push({ type: 'operator', value: '*' });
+            }
+        } else if (peekN(2) === '||' || peekN(2) === '|>' || peekN(2) === '|<' ||
+                   peekN(2) === '>=' || peekN(2) === '<=' || peekN(2) === '¬=' ||
+                   peekN(2) === '¬>' || peekN(2) === '¬<') {
+            // Two-character operators
+            const op = peekN(2);
+            next(); next();
+            tokens.push({ type: 'operator', value: op });
+        } else if (ch === '+' || ch === '-' || ch === '/' ||
+                   ch === '=' || ch === '>' || ch === '<' ||
+                   ch === '&' || ch === '|' || ch === '¬') {
+            // Single-character operators
+            next();
+            tokens.push({ type: 'operator', value: ch });
         } else if (ch === '%') {
             // Built-in function
             let fn = next();
@@ -75,7 +117,8 @@ export function tokenizeCL(input: string): CLToken[] {
                 val += next();
             }
             const upperVal = val.toUpperCase();
-            if (tokens.length === 0 && /^[A-Z][A-Z0-9]*$/.test(upperVal)) {
+            // Check for command (first token, can be LIB/CMD or just CMD)
+            if (tokens.length === 0 && /^([A-Z][A-Z0-9]*\/)?[A-Z][A-Z0-9]*$/.test(upperVal)) {
                 tokens.push({ type: 'command', value: upperVal });
             } else if (/^[A-Z][A-Z0-9]*$/.test(upperVal)) {
                 tokens.push({ type: 'keyword', value: upperVal });
@@ -681,19 +724,45 @@ export function formatCL_SEU(
         const keywordWithParen = applyCase(parm.name, keywordCase) + '(';
         atomicValues.add(keywordWithParen);
 
+        // For array of wrapped expressions (multi-instance ELEM), add each wrapped expression as atomic
+        if (Array.isArray(parm.value) && parm.value.length > 0 &&
+            parm.value.every((v: any) => typeof v === 'object' && v !== null && 'wrapped' in v && v.wrapped === true)) {
+            // Each wrapped expression should be atomic: (*KEYWORD 'value')
+            for (const expr of parm.value) {
+                const exprObj = expr as any;
+                const tokens = exprObj.tokens as Array<{type: string, value: string}>;
+                const inner = tokens.map((t: any) => t.value).join('');
+                atomicValues.add(`(${inner})`);
+                atomicValues.add(`(${inner})`); // With trailing space variant
+                console.log(`[atomicValues] Added wrapped ELEM expression as atomic: "(${inner})"`);
+            }
+        }
         // For ELEM parameters (expression objects), add the complete keyword+value as atomic to prevent internal breaks
         // ELEM parameters are stored as expression objects with tokens, not arrays
-        if (typeof parm.value === 'object' && parm.value !== null && 'type' in parm.value &&
+        else if (typeof parm.value === 'object' && parm.value !== null && 'type' in parm.value &&
             (parm.value as any).type === 'expression' && 'tokens' in parm.value) {
             // Expression object - extract non-space token values and join them
             const tokens = (parm.value as any).tokens as Array<{type: string, value: string}>;
             const values = tokens.filter(t => t.type !== 'space').map(t => t.value);
-            const valueText = values.join(' ');
-            const withoutParen = applyCase(parm.name, keywordCase) + '(' + valueText;
-            const withParen = withoutParen + ')';
-            // Add both with and without closing paren (since appendWrappedCLLine gets text without closing paren)
-            atomicValues.add(withoutParen);
-            atomicValues.add(withParen);
+
+            // If expression contains variables, join without spaces (e.g., &LONGVAR_FIELDNAME)
+            // Otherwise join with spaces for operators/keywords (e.g., &VAR *CAT &VAR2)
+            const hasVariable = tokens.some((t: any) => t.type === 'variable' || (t.type === 'value' && CL_VARIABLE_PATTERN.test(t.value)));
+            const hasOperatorOrKeyword = tokens.some((t: any) => t.type === 'keyword' || t.type === 'operator' || t.type === 'symbolic_value' || (t.type === 'value' && /^[*%]/.test(t.value)));
+            console.log(`[atomicValues] parm=${parm.name}, hasVariable=${hasVariable}, hasOperatorOrKeyword=${hasOperatorOrKeyword}, tokens=`, tokens.map(t => `${t.type}:${t.value}`));
+            const valueText = (hasVariable && !hasOperatorOrKeyword) ? values.join('') : values.join(' ');
+            console.log(`[atomicValues] valueText="${valueText}"`);
+
+            // ONLY add as atomic if it's a simple variable expression (no operators/keywords)
+            // Complex expressions like &VAR *EQ '*FROM' should NOT be atomic
+            if (hasVariable && !hasOperatorOrKeyword) {
+                const withoutParen = applyCase(parm.name, keywordCase) + '(' + valueText;
+                const withParen = withoutParen + ')';
+                // Add both with and without closing paren (since appendWrappedCLLine gets text without closing paren)
+                atomicValues.add(withoutParen);
+                atomicValues.add(withParen);
+                console.log(`[atomicValues] Added simple variable param as atomic: "${withoutParen}"`);
+            }
         }
         // Fallback: For simple arrays (if any parameters still use this format)
         else if (Array.isArray(parm.value) && !('type' in parm.value)) {
@@ -718,6 +787,25 @@ export function formatCL_SEU(
         }
 
         if (Array.isArray(value)) {
+            // Legacy: array of arrays (Max>1 ELEM as nested arrays)
+            if (value.length > 0 && Array.isArray(value[0])) {
+                return value.map((v) => '(' + formatValue(v, indentPos + 1) + ')').join(' ');
+            }
+            // NEW: Multi-instance ELEM detection from syntax (all wrapped expressions)
+            // If all values are expression objects with wrapped=true, treat as multi-instance
+            // CHECK THIS BEFORE general expression handling to preserve wrapping
+            const allWrapped = value.every((v: any) =>
+                typeof v === 'object' && v !== null && 'wrapped' in v && v.wrapped === true);
+            console.log(`[formatValue-array] parm=${parmName}, length=${value.length}, allWrapped=${allWrapped}`, value);
+            if (value.length > 1 && allWrapped) {
+                // Format each wrapped expression with parens
+                console.log(`[formatValue-array] Formatting as multi-instance ELEM with wrapping`);
+                return value.map((v: any) => {
+                    // Preserve original token spacing by joining tokens directly (spaces are separate tokens)
+                    const inner = v.tokens.map((t: CLToken) => t.value).join('');
+                    return `(${inner})`;
+                }).join(' ');
+            }
             // NEW: array of expressions (each may have wrapped=true/false)
             if (value.length > 0 && value.every(isExpression)) {
                 // For CMD/CMDSTR parameters, preserve parentheses wrapping for each expression
@@ -733,7 +821,10 @@ export function formatCL_SEU(
                         const v = value[i];
                         const inner = formatValue(v, indentPos + 1, parmName);
                         const wrapped = (v as any).wrapped === true;
-                        const formatted = wrapped ? `(${inner})` : inner;
+                        // IMPORTANT: When wrapped===true, the tokens already include parentheses
+                        // (e.g., "(", "(", "value", ")", ")"), so formatValue returns them.
+                        // Don't wrap again or we'll get (((value))) instead of ((value))
+                        const formatted = inner;
 
                         // Check if we need a space before this part
                         if (i === 0) {
@@ -799,10 +890,6 @@ export function formatCL_SEU(
                 }
                 return expr;
             }
-            // Legacy: array of arrays (Max>1 ELEM as nested arrays)
-            if (value.length > 0 && Array.isArray(value[0])) {
-                return value.map((v) => '(' + formatValue(v, indentPos + 1) + ')').join(' ');
-            }
             // Single grouped value (ELEM parameters like LOG, EXTRA, etc.)
             // Format elements on one line without internal breaks
             const elements = value.map(v => formatValue(v, indentPos + 1));
@@ -853,7 +940,20 @@ export function formatCL_SEU(
             if (parmName) {
                 const tokens = value.tokens as Array<{type: string, value: string}>;
                 const values = tokens.filter(t => t.type !== 'space').map(t => t.value);
-                const valueText = values.join(' ');
+
+                // Check if original tokens contain spaces between variables
+                // If yes, preserve spaces. If no, join without spaces (for compound vars like &LIB_&FILE)
+                const hasVariable = tokens.some(t => t.type === 'variable' || (t.type === 'value' && CL_VARIABLE_PATTERN.test(t.value)));
+                const hasOperatorOrKeyword = tokens.some(t => t.type === 'keyword' || t.type === 'operator' || t.type === 'symbolic_value' || (t.type === 'value' && /^[*%]/.test(t.value)));
+                const hasSpacesBetweenTokens = tokens.some(t => t.type === 'space');
+                console.log(`[formatValue-atomicCheck] parm=${parmName}, hasVariable=${hasVariable}, hasOperatorOrKeyword=${hasOperatorOrKeyword}, hasSpaces=${hasSpacesBetweenTokens}, tokens=`, tokens.map(t => `${t.type}:${t.value}`));
+
+                // Join logic:
+                // 1. If has operators/keywords OR has spaces between tokens → join with spaces
+                // 2. If only variables with NO spaces → join without spaces (compound var like &LIB_&FILE)
+                const valueText = (hasVariable && !hasOperatorOrKeyword && !hasSpacesBetweenTokens) ? values.join('') : values.join(' ');
+                console.log(`[formatValue-atomicCheck] valueText="${valueText}"`);
+
                 const fullParam = parmName + '(' + valueText + ')';
 
                 if (atomicValues.has(fullParam)) {
@@ -919,6 +1019,10 @@ export function formatCL_SEU(
                         }
                     }
                 }
+            }
+            // If this expression was originally wrapped in parentheses, preserve them
+            if ('wrapped' in value && value.wrapped === true) {
+                return '(' + expr + ')';
             }
             return expr;
         }
@@ -997,10 +1101,9 @@ export function formatCL_SEU(
                 const valueText = values.join(' ');
                 fullParamText = keywordText + '(' + valueText + ')';
             } else if (isElemArray) {
-                // Extract values from array
-                const elements = (parm.value as Array<string | number | boolean>).map(v => typeof v === 'string' ? v : String(v));
-                const valueText = elements.join(' ');
-                fullParamText = keywordText + '(' + valueText + ')';
+                // For array ELEM parameters, use formattedValue which handles wrapped expressions
+                // formattedValue already includes proper wrapping from formatValue function
+                fullParamText = keywordText + '(' + formattedValue + ')';
             } else {
                 fullParamText = isPositional ? firstValueLine : keywordText + '(' + firstValueLine + ')';
             }
@@ -1028,6 +1131,8 @@ export function formatCL_SEU(
         } else {
             parmText = ' ' + parmStrFirstLine;  // Normal case - add space between params
         }
+
+        console.log(`[formatCL_SEU] param ${idx}: parmText="${parmText}" (starts with space: ${parmText[0] === ' '})`);
 
         const result = appendWrappedCLLine(
             currentLine,
@@ -1071,8 +1176,15 @@ export function formatCL_SEU(
         // Extract comment content between /* and */
         const commentMatch = node.comment.match(/^\/\*\s*(.*?)\s*\*\/$/);
         if (!commentMatch) {
-            // Malformed comment, just append as-is
-            linesOut[lastIdx] = lastLine + ' ' + node.comment;
+            // Malformed comment, just append as-is if it fits
+            const testLine = lastLine + ' ' + node.comment;
+            if (testLine.length <= rightMargin) {
+                linesOut[lastIdx] = testLine;
+            } else {
+                // Doesn't fit - add continuation and put comment on next line
+                linesOut[lastIdx] = lastLine + ' ' + continuationChar;
+                linesOut.push(' '.repeat(CONT_LINE_COL - 1) + node.comment);
+            }
         } else {
             const commentContent = commentMatch[1];
             const testLine = lastLine + ' /* ' + commentContent + ' */';
@@ -1081,118 +1193,49 @@ export function formatCL_SEU(
             if (testLine.length <= rightMargin) {
                 linesOut[lastIdx] = testLine;
             } else {
-                // Need to wrap comment to continuation lines
-                const commentIndent = ' '.repeat(Math.max(0, CONT_LINE_COL - 1));
-                const words = commentContent.split(/\s+/);
+                // Need to wrap comment - add continuation char and put comment on next line
+                linesOut[lastIdx] = lastLine + ' ' + continuationChar;
 
-                // Try to fit some words on the last line
-                const availableOnLastLine = rightMargin - lastLine.length - 4; // -4 for ' /* '
+                // Format comment on continuation line(s)
+                const commentIndent = ' '.repeat(CONT_LINE_COL - 1);
+                const fullComment = '/* ' + commentContent + ' */';
 
-                if (availableOnLastLine > 10) {
-                    // Start comment on this line
-                    let firstLineContent = '';
-                    let remainingWords: string[] = [];
-
-                    for (let i = 0; i < words.length; i++) {
-                        const word = words[i];
-                        const testContent = firstLineContent ? firstLineContent + ' ' + word : word;
-                        const isLastWord = i === words.length - 1;
-
-                        // If this is the last word, check if it fits with */
-                        // Otherwise, check if it fits with +
-                        const suffix = isLastWord ? ' */' : ' +';
-                        if ((' /* ' + testContent + suffix).length <= rightMargin - lastLine.length) {
-                            firstLineContent = testContent;
-                            if (!isLastWord) {
-                                // Not the last word, so might have more
-                                continue;
-                            }
-                        } else {
-                            remainingWords = words.slice(i);
-                            break;
-                        }
-                    }
-
-                    if (remainingWords.length > 0) {
-                        // Comment continues, don't close it yet
-                        linesOut[lastIdx] = lastLine + ' /* ' + firstLineContent + ' +';
-
-                        // Continue on next line(s)
-                        let currentContent = '';
-                        for (let i = 0; i < remainingWords.length; i++) {
-                            const word = remainingWords[i];
-                            const isLastWord = i === remainingWords.length - 1;
-                            const testContent = currentContent ? currentContent + ' ' + word : word;
-                            const suffix = isLastWord ? ' */' : ' +';
-
-                            if ((commentIndent + testContent + suffix).length <= rightMargin) {
-                                currentContent = testContent;
-                                if (isLastWord) {
-                                    // This is the last word and it fits - close comment
-                                    linesOut.push(commentIndent + currentContent + ' */');
-                                    break;
-                                }
-                            } else {
-                                // Current content doesn't fit - output what we have and start fresh
-                                if (currentContent) {
-                                    linesOut.push(commentIndent + currentContent + ' +');
-                                    currentContent = word;
-                                    if (isLastWord) {
-                                        // This word was too long for the previous line but is the last word
-                                        linesOut.push(commentIndent + word + ' */');
-                                        break;
-                                    }
-                                } else {
-                                    // Even a single word is too long - just output it
-                                    const suffix = isLastWord ? ' */' : ' +';
-                                    linesOut.push(commentIndent + word + suffix);
-                                    if (isLastWord) break;
-                                }
-                            }
-                        }
-                    } else {
-                        // All content fit on first line
-                        linesOut[lastIdx] = lastLine + ' /* ' + firstLineContent + ' */';
-                    }
+                // Check if full comment fits on one continuation line
+                if ((commentIndent + fullComment).length <= rightMargin) {
+                    linesOut.push(commentIndent + fullComment);
                 } else {
-                    // No room on last line, start fresh line
-                    linesOut[lastIdx] = lastLine + ' +';
-
+                    // Comment needs wrapping across multiple lines
+                    const words = commentContent.split(/\s+/);
                     let currentContent = '';
+                    let commentLines: string[] = [];
+
                     for (let i = 0; i < words.length; i++) {
                         const word = words[i];
                         const isLastWord = i === words.length - 1;
                         const testContent = currentContent ? currentContent + ' ' + word : word;
-                        const prefix = i === 0 ? '/* ' : '';
                         const suffix = isLastWord ? ' */' : ' +';
+                        const prefix = commentLines.length === 0 ? '/* ' : '';
 
                         if ((commentIndent + prefix + testContent + suffix).length <= rightMargin) {
                             currentContent = testContent;
                             if (isLastWord) {
-                                // This is the last word and it fits
-                                linesOut.push(commentIndent + '/* ' + currentContent + ' */');
-                                break;
+                                // Last word fits - close the comment
+                                commentLines.push(commentIndent + prefix + currentContent + ' */');
                             }
                         } else {
-                            // Current content doesn't fit - output what we have and start fresh
+                            // Word doesn't fit - push current content and start new line
                             if (currentContent) {
-                                const linePrefix = i <= 1 ? '/* ' : '';
-                                linesOut.push(commentIndent + linePrefix + currentContent + ' +');
-                                currentContent = word;
-                                if (isLastWord) {
-                                    // This word was too long for the previous line but is the last word
-                                    linesOut.push(commentIndent + word + ' */');
-                                    break;
-                                }
-                            } else {
-                                // Even a single word is too long - just output it
-                                const linePrefix = i === 0 ? '/* ' : '';
-                                const suffix = isLastWord ? ' */' : ' +';
-                                linesOut.push(commentIndent + linePrefix + word + suffix);
-                                if (isLastWord) break;
+                                commentLines.push(commentIndent + prefix + currentContent + ' +');
+                            }
+                            currentContent = word;
+                            if (isLastWord) {
+                                // Last word on its own line
+                                commentLines.push(commentIndent + currentContent + ' */');
                             }
                         }
                     }
+
+                    linesOut.push(...commentLines);
                 }
             }
         }
@@ -1241,30 +1284,67 @@ function collectAtomicValues(node: CLNode | CLValue): Set<string> {
 
     function walk(val: CLNode | CLValue) {
         if (typeof val === 'string') {
-            // Only treat unquoted strings (like *YES, *LIBL, 1234) as atomic
+            // Check if this is a quoted string
             const isQuoted = val.startsWith("'") && val.endsWith("'");
-            if (!isQuoted || val.length <= 10) {
+
+            // Always treat short quoted strings as atomic (up to 50 chars to be safe)
+            // This prevents breaking strings like '*FROMFILE', '*YES', etc.
+            if (isQuoted && val.length <= 50) {
+                values.add(val);
+            }
+            // Also treat unquoted short strings as atomic
+            else if (!isQuoted && val.length <= 10) {
                 values.add(val);
             }
 
             // Always treat numbers as atomic
             if (/^\d+$/.test(val)) values.add(val);
-            // *symbol, %func, &var
-            if (/^[*%&]/.test(val)) values.add(val);
+            // *symbol, %func, &var (check after removing quotes if present)
+            const unquoted = isQuoted ? val.slice(1, -1) : val;
+            if (/^[*%&]/.test(unquoted)) {
+                values.add(val);
+                console.log(`[collectAtomicValues] Added atomic value: ${val}`);
+            }
         } else if (Array.isArray(val)) {
             val.forEach(walk);
         } else if ('function' in val) {
             val.args.forEach(walk);
         } else if ('type' in val && val.type === 'expression') {
-            // Add each token value as atomic if it's numeric or short quoted string
-            for (const t of val.tokens) {
-                if (
-                    t.type === 'string' &&
-                    t.value.length <= 10
-                ) {
-                    values.add(t.value);
-                } else if (t.type === 'value' && /^\d+$/.test(t.value)) {
-                    values.add(t.value);
+            // Check if expression contains a variable token
+            const hasVariable = val.tokens.some(t =>
+                t.type === 'variable' ||
+                (t.type === 'value' && CL_VARIABLE_PATTERN.test(t.value))
+            );
+
+            // Check if expression has operators or keywords
+            const hasOperatorOrKeyword = val.tokens.some(t =>
+                t.type === 'keyword' ||
+                t.type === 'symbolic_value' ||
+                (t.type === 'value' && /^[*%]/.test(t.value))
+            );
+
+            // ONLY treat simple variable expressions as atomic (no operators/keywords)
+            // E.g., &LONGVAR_FIELDNAME is atomic, but &VAR *EQ '*FROM' is NOT
+            if (hasVariable && !hasOperatorOrKeyword) {
+                // This is a simple variable expression - keep it atomic
+                const fullExpression = val.tokens.map(t => t.value).join('');
+                values.add(fullExpression);
+                console.log(`[collectAtomicValues] Added atomic value from simple variable expression: ${fullExpression}`);
+            } else {
+                // Complex expression or no variables - add individual atomic components
+                // Add short quoted strings, numbers, and keywords as atomic
+                for (const t of val.tokens) {
+                    if (t.type === 'string' && t.value.length <= 50) {
+                        // Quoted strings up to 50 chars are atomic
+                        values.add(t.value);
+                        console.log(`[collectAtomicValues] Added atomic quoted string: ${t.value}`);
+                    } else if (t.type === 'value' && /^\d+$/.test(t.value)) {
+                        values.add(t.value);
+                    } else if (t.type === 'symbolic_value' || (t.type === 'value' && /^[*%]/.test(t.value))) {
+                        // Keywords (*YES), built-in functions (%FUNC)
+                        values.add(t.value);
+                        console.log(`[collectAtomicValues] Added atomic symbolic value: ${t.value}`);
+                    }
                 }
             }
         } else if ('type' in val && val.type === 'command_call') {
@@ -1273,6 +1353,8 @@ function collectAtomicValues(node: CLNode | CLValue): Set<string> {
     }
 
     walk(node);
+    console.log(`[collectAtomicValues] Total atomic values collected: ${values.size}`);
+    console.log(`[collectAtomicValues] Atomic values:`, Array.from(values));
     return values;
 }
 
@@ -1290,6 +1372,8 @@ function appendWrappedCLLine(
   let currentLine = initialLine;
   let remaining = text;
   let wrappedLine = false;
+  let processedLength = 0; // Track how much of original text we've processed
+  let continuingInsideQuote = false; // Track if we're continuing inside a quoted string from previous line
 
   const padTo = (col: number, fill = 0) =>
     (currentLine.length >= col ? '' : ' '.repeat(col - currentLine.length + fill));
@@ -1312,10 +1396,27 @@ function appendWrappedCLLine(
     remaining = ' ' + remaining;
   };
 
+  // Helper to check if a position in the ORIGINAL text is inside a quoted string
+  const isInsideQuotedString = (posInOriginal: number): boolean => {
+    let quoteCount = 0;
+    for (let i = 0; i < posInOriginal && i < text.length; i++) {
+      if (text[i] === "'") {
+        // Check for escaped quote ''
+        if (i + 1 < text.length && text[i + 1] === "'") {
+          i++; // Skip the escaped quote pair
+        } else {
+          quoteCount++;
+        }
+      }
+    }
+    return (quoteCount % 2 === 1);
+  };
+
   // Before we start appending this chunk, normalize the boundary
   ensureBoundarySpace();
 
   while (remaining.length > 0) {
+    const remainingLengthBefore = remaining.length; // Safety check for infinite loop
     const available = rightMargin - currentLine.length;
 
     // If it fits completely, append whole chunk
@@ -1336,30 +1437,138 @@ function appendWrappedCLLine(
     // Find last space within width, accounting for continuation character
     let breakAt = remaining.lastIndexOf(' ', available - 2); // -2 for " +"
 
+    // FIRST: Check atomic values - they take precedence over everything else
     // Don't break inside atomic values - check if we're about to split an atomic parameter
     if (breakAt >= 0) {
       // Look for atomic values that would be split by this break
-      for (const atomicVal of atomicValues) {
+      // Sort by length (longest first) to match full expressions before their components
+      const sortedAtomicValues = Array.from(atomicValues).sort((a, b) => b.length - a.length);
+      console.log(`[tokenizeCL-wrap] Checking breakAt=${breakAt}, remaining="${remaining.substring(0, 60)}..."`);
+      console.log(`[tokenizeCL-wrap] atomicValues in set:`, sortedAtomicValues);
+      for (const atomicVal of sortedAtomicValues) {
         // Find where this atomic value starts in the remaining text
         const atomicStart = remaining.indexOf(atomicVal);
         if (atomicStart !== -1) {
           const atomicEnd = atomicStart + atomicVal.length;
-          // If the break point is inside this atomic value, move it before the atomic value
+          console.log(`[tokenizeCL-wrap] Checking atomic "${atomicVal.substring(0, 30)}..." at pos ${atomicStart}-${atomicEnd}`);
+
+          // Special handling for wrapped ELEM expressions like (*KEYWORD 'long string')
+          // These can be broken inside the quoted string if the string is long
+          const isWrappedElem = atomicVal.match(/^\(\*[A-Z]+\s+'.*'\)$/);
+          if (isWrappedElem && breakAt > atomicStart && breakAt < atomicEnd) {
+            // Find where the quoted string starts within the atomic value
+            const quoteStartInAtomic = atomicVal.indexOf("'");
+            const quoteEndInAtomic = atomicVal.lastIndexOf("'");
+            const stringLength = quoteEndInAtomic - quoteStartInAtomic + 1;
+
+            // Calculate absolute position in remaining text
+            const absoluteQuoteStart = atomicStart + quoteStartInAtomic;
+            const absoluteQuoteEnd = atomicStart + quoteEndInAtomic;
+
+            console.log(`[tokenizeCL] Wrapped ELEM detected, string length=${stringLength}, breakAt=${breakAt}, quoteRange=${absoluteQuoteStart}-${absoluteQuoteEnd}`);
+
+            if (breakAt > absoluteQuoteStart && breakAt < absoluteQuoteEnd) {
+              // Break is inside the quoted string - allow it
+              // For wrapped ELEM, we allow breaking inside the string regardless of length
+              // because keeping the keyword with the opening quote is more important
+              console.log(`[tokenizeCL] Allowing break inside quoted string within wrapped ELEM at position ${breakAt}`);
+              // breakAt stays as is - stop checking other atomic values
+              break;
+            } else if (breakAt <= absoluteQuoteStart) {
+              // Break is before the string - don't allow breaking between keyword and string
+              console.log(`[tokenizeCL] Break would separate keyword from string in wrapped ELEM`);
+              if (atomicStart > 0) {
+                const spaceBeforeAtomic = remaining.lastIndexOf(' ', atomicStart - 1);
+                if (spaceBeforeAtomic >= 0) {
+                  console.log(`[tokenizeCL] Moving breakAt from ${breakAt} to ${spaceBeforeAtomic} (before wrapped ELEM)`);
+                  breakAt = spaceBeforeAtomic;
+                } else {
+                  breakAt = -1;
+                }
+              } else {
+                breakAt = -1;
+              }
+              break;
+            }
+            // If breakAt is after the string (between closing quote and closing paren),
+            // fall through to regular atomic value handling
+          }
+
+          // Regular atomic value handling (not wrapped ELEM or short wrapped ELEM)
           if (breakAt > atomicStart && breakAt < atomicEnd) {
+            console.log(`[tokenizeCL] Preventing break inside atomic value: "${atomicVal}"`);
+            console.log(`[tokenizeCL] atomicStart=${atomicStart}, atomicEnd=${atomicEnd}, breakAt=${breakAt}`);
+            console.log(`[tokenizeCL] remaining text: "${remaining.substring(0, 50)}..."`);
             // Try to find a space before this atomic value
             if (atomicStart > 0) {
               const spaceBeforeAtomic = remaining.lastIndexOf(' ', atomicStart - 1);
               if (spaceBeforeAtomic >= 0) {
+                console.log(`[tokenizeCL] Moving breakAt from ${breakAt} to ${spaceBeforeAtomic} (space before atomic)`);
                 breakAt = spaceBeforeAtomic;
               } else {
+                console.log(`[tokenizeCL] No space before atomic value, setting breakAt=-1`);
                 // No space before - wrap entire remaining text to next line
                 breakAt = -1;
               }
             } else {
+              console.log(`[tokenizeCL] Atomic value at start, setting breakAt=-1`);
               // Atomic value is at start of remaining - can't break it
               breakAt = -1;
             }
             break;
+          }
+        }
+      }
+    }
+
+    // SECOND: Check if break point would split a quoted string (but only if not already inside atomic value)
+    // Scan remaining text for quoted strings and protect ALL of them (not just <= 10 chars)
+    if (breakAt >= 0) {
+      let inQuote = false;
+      let quoteStart = -1;
+      for (let i = 0; i < remaining.length; i++) {
+        if (remaining[i] === "'") {
+          if (!inQuote) {
+            inQuote = true;
+            quoteStart = i;
+          } else {
+            // Check if it's an escaped quote ''
+            if (i + 1 < remaining.length && remaining[i + 1] === "'") {
+              i++; // Skip the escaped quote
+            } else {
+              // End of quoted string - check if breakAt would split it
+              const quoteEnd = i; // Position of closing quote
+              const stringLength = quoteEnd - quoteStart + 1;
+
+              if (breakAt > quoteStart && breakAt <= quoteEnd) {
+                // Break point is inside this quoted string
+                console.log(`[tokenizeCL] Break inside quoted string: breakAt=${breakAt}, quoteStart=${quoteStart}, quoteEnd=${quoteEnd}, length=${stringLength}`);
+
+                // If it's a LONG string (>= 50 chars), allow breaking at the space inside it
+                if (stringLength >= 50) {
+                  console.log(`[tokenizeCL] Long string - allowing break at space inside quote at position ${breakAt}`);
+                  // breakAt stays as is - we'll break at this space inside the string
+                } else {
+                  // Short string - try to keep it atomic by moving break before it
+                  console.log(`[tokenizeCL] Short string - moving break before quote`);
+                  if (quoteStart > 0) {
+                    const spaceBeforeQuote = remaining.lastIndexOf(' ', quoteStart - 1);
+                    if (spaceBeforeQuote >= 0) {
+                      breakAt = spaceBeforeQuote;
+                      console.log(`[tokenizeCL] Moved breakAt before quote to position ${breakAt}`);
+                    } else {
+                      breakAt = -1; // No space before quote, wrap entire line
+                      console.log(`[tokenizeCL] No space before quote, setting breakAt=-1`);
+                    }
+                  } else {
+                    breakAt = -1; // Quote at start, can't break it
+                    console.log(`[tokenizeCL] Quote at start, setting breakAt=-1`);
+                  }
+                }
+                break; // Stop scanning
+              }
+              inQuote = false;
+            }
           }
         }
       }
@@ -1381,33 +1590,234 @@ function appendWrappedCLLine(
     }
     if (breakAt === -2) continue;
 
-    // If no safe space found, push current and continue
+    // If no safe space found, handle carefully to avoid infinite loops
     if (breakAt === -1 || breakAt === 0) {
-      // Hard wrap: push current line, continue building on next
-      linesOut.push(currentLine + ' ' + continuationChar);
+      if (breakAt === 0) {
+        // Leading space found
+        // If currentLine is empty (at line start), skip the space
+        // Otherwise, we need to keep the space for proper separation
+        if (currentLine.trim().length === 0) {
+          // At line start - skip leading space
+          processedLength += 1;
+          remaining = remaining.slice(1);
+          continue;
+        } else {
+          // Not at line start - append the space and continue looking for next break
+          currentLine += ' ';
+          processedLength += 1;
+          remaining = remaining.slice(1);
+          continue;
+        }
+      }
+
+      // breakAt === -1: No space found for safe breaking
+      // This means the entire remaining text is atomic or has no spaces
+      // We MUST make progress to avoid infinite loop
+
+      // If remaining text will fit on a fresh line, wrap now
+      const freshLineAvailable = rightMargin - indentCol;
+      if (remaining.length <= freshLineAvailable) {
+        // Text fits on next line - wrap current line and continue
+        // Use space before continuation since we haven't broken mid-word
+        linesOut.push(currentLine + ' ' + continuationChar);
+        currentLine = ' '.repeat(indentCol - 1);
+        wrappedLine = true;
+        // Remove any leading space from remaining to prevent extra indentation
+        remaining = remaining.trimStart();
+        // DON'T call ensureBoundarySpace() here - it can add a space to remaining
+        // which causes infinite loop. Fresh line doesn't need boundary space.
+        continue;
+      }
+
+      // Remaining won't fit even on fresh line - this is a problem
+      // We must force progress by taking what we can
+      // This handles extremely long atomic values (like very long quoted strings)
+
+      // CRITICAL: Don't break short quoted strings
+      // Check if remaining text starts with a quoted string
+      let quotedStringAtStart = null;
+      if (remaining[0] === "'") {
+        let i = 1;
+        let stringContent = "'";
+        while (i < remaining.length) {
+          stringContent += remaining[i];
+          if (remaining[i] === "'") {
+            // Check if escaped
+            if (i + 1 < remaining.length && remaining[i + 1] === "'") {
+              stringContent += remaining[i + 1];
+              i += 2;
+            } else {
+              // End of string
+              i++;
+              break;
+            }
+          } else {
+            i++;
+          }
+        }
+        quotedStringAtStart = { content: stringContent, length: i };
+      }
+
+      // If we have a short quoted string (< 30 chars) at the start, keep it atomic
+      // Wrap to next line to avoid breaking it
+      if (quotedStringAtStart && quotedStringAtStart.length < 30) {
+        // Check if the string fits on a fresh line
+        if (quotedStringAtStart.length <= freshLineAvailable) {
+          // This quoted string is short enough to keep atomic
+          // Wrap to next line and continue with the full string
+          console.log(`[tokenizeCL] Wrapping short quoted string to next line: ${quotedStringAtStart.content}`);
+          linesOut.push(currentLine + ' ' + continuationChar);
+          currentLine = ' '.repeat(indentCol - 1);
+          wrappedLine = true;
+          // Remove any leading space from remaining to prevent extra indentation
+          remaining = remaining.trimStart();
+          continue;
+        }
+      }
+
+      let mustTake = Math.max(1, available - 2); // Leave room for " +"
+
+      // CRITICAL: Don't slice through a quoted string without spaces
+      // Check if mustTake position is inside a quoted string
+      let inQuote = false;
+      let quoteStart = -1;
+      for (let i = 0; i < mustTake && i < remaining.length; i++) {
+        if (remaining[i] === "'") {
+          if (!inQuote) {
+            inQuote = true;
+            quoteStart = i;
+          } else {
+            // Check if it's an escaped quote ''
+            if (i + 1 < remaining.length && remaining[i + 1] === "'") {
+              i++; // Skip the escaped quote
+            } else {
+              // End of quoted string
+              inQuote = false;
+            }
+          }
+        }
+      }
+
+      // If we're about to cut inside a quoted string, break mid-string
+      // IBM i CL continuation inside quoted strings: NO space before +
+      if (inQuote) {
+        currentLine += remaining.slice(0, mustTake);
+        processedLength += mustTake;
+        remaining = remaining.slice(mustTake);
+        // Mid-string break: append + WITHOUT space (CL string continuation syntax)
+        linesOut.push(currentLine + continuationChar);
+        currentLine = ' '.repeat(indentCol - 1);
+        wrappedLine = true;
+        continuingInsideQuote = true; // Mark that next line continues inside the same string
+        // DON'T trim - we're inside a quoted string and spaces are significant content
+        // Don't call ensureBoundarySpace() - we're continuing inside a string
+        continue;
+      }
+
+      // Check if we're continuing from a previous line that was inside a quoted string
+      if (continuingInsideQuote) {
+        // Check if this chunk ends the quoted string
+        let foundClosingQuote = false;
+        for (let i = 0; i < mustTake && i < remaining.length; i++) {
+          if (remaining[i] === "'") {
+            // Check if it's an escaped quote ''
+            if (i + 1 < remaining.length && remaining[i + 1] === "'") {
+              i++; // Skip the escaped quote
+            } else {
+              // Found closing quote
+              foundClosingQuote = true;
+              continuingInsideQuote = false; // String ends in this chunk
+              break;
+            }
+          }
+        }
+
+        // If we're still inside the string, use + without space
+        currentLine += remaining.slice(0, mustTake);
+        processedLength += mustTake;
+        remaining = remaining.slice(mustTake);
+        linesOut.push(currentLine + continuationChar);
+        currentLine = ' '.repeat(indentCol - 1);
+        wrappedLine = true;
+        // If we didn't find the closing quote, we're still inside the string
+        // continuingInsideQuote remains true
+        // DON'T trim - we're inside a quoted string and spaces are significant content
+        continue;
+      }
+
+      // Normal force-wrap when no space found and text won't fit on fresh line
+      // (NOT inside quoted string - that case was handled above)
+      // Use space before continuation for non-string breaks
+      currentLine += remaining.slice(0, mustTake);
+      processedLength += mustTake;
+      remaining = remaining.slice(mustTake);
+      linesOut.push(currentLine + ' ' + continuationChar);  // Space before + is IBM i standard
       currentLine = ' '.repeat(indentCol - 1);
       wrappedLine = true;
-      // If breakAt was 0 (leading space), skip that space when continuing
-      if (breakAt === 0) {
-        remaining = remaining.slice(1); // Remove leading space
-      }
-      ensureBoundarySpace();
+      // Remove any leading space from remaining to prevent extra indentation
+      remaining = remaining.trimStart();
+      // Don't call ensureBoundarySpace() here - it will be called at top of loop
       continue;
     }
 
     // Normal break at a space
-    const chunk = remaining.slice(0, breakAt);     // left side (no trailing space)
-    currentLine += chunk;
+    // Check if we're breaking inside a quoted string (string with embedded spaces)
+    // Count quotes up to the break point
+    let quoteCount = 0;
+    for (let i = 0; i < breakAt; i++) {
+      if (remaining[i] === "'") {
+        // Check for escaped quote ''
+        if (i + 1 < remaining.length && remaining[i + 1] === "'") {
+          i++; // Skip the escaped quote pair
+        } else {
+          quoteCount++;
+        }
+      }
+    }
+    const breakingInsideQuote = (quoteCount % 2 === 1);
 
-    linesOut.push(currentLine + ' ' + continuationChar);
+    if (breakingInsideQuote) {
+      // Breaking inside a quoted string at a space
+      // The space is part of the string content, so keep it before the +
+      const chunk = remaining.slice(0, breakAt + 1);     // Include the space
+      currentLine += chunk;
+      linesOut.push(currentLine + continuationChar);     // No extra space before +
+      remaining = remaining.slice(breakAt + 1);           // Skip the space we included
+      continuingInsideQuote = true;
+    } else {
+      // Breaking between tokens at a space
+      // The space is a separator, so use it for spacing before +
+      const chunk = remaining.slice(0, breakAt);         // Don't include the space
+      currentLine += chunk;
+      linesOut.push(currentLine + ' ' + continuationChar); // Add space before +
+      remaining = remaining.slice(breakAt + 1);           // Skip the separator space
+      continuingInsideQuote = false;
+    }
     wrappedLine = true;
 
     // Start next line - use indentCol directly for consistent alignment
     currentLine = ' '.repeat(indentCol - 1);
 
-    // Keep remainder AFTER the split space, and ensure separation at boundary
-    remaining = remaining.slice(breakAt + 1);
-    ensureBoundarySpace();
+    // Update position in original text
+    processedLength += breakAt + 1;
+    // Note: remaining was already sliced in the if/else block above, don't slice again!
+
+    // When breaking at a space between tokens, ensure boundary spacing
+    // When breaking inside quotes, don't call this (continuingInsideQuote is true)
+    if (!continuingInsideQuote) {
+      ensureBoundarySpace();
+    }
+
+    // Safety check: ensure we made progress to prevent infinite loop
+    if (remaining.length >= remainingLengthBefore) {
+      console.error('[tokenizeCL] INFINITE LOOP DETECTED: remaining.length did not decrease');
+      console.error('  remainingBefore:', remainingLengthBefore);
+      console.error('  remainingAfter:', remaining.length);
+      console.error('  remaining text:', remaining.substring(0, 50));
+      // Force progress by taking at least 1 character
+      processedLength += 1;
+      remaining = remaining.slice(1);
+    }
   }
 
   return { currentLine, lineWrap: wrappedLine };

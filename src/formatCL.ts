@@ -3,7 +3,7 @@ import * as vscode from 'vscode';
 
 import { DOMParser } from '@xmldom/xmldom';
 import { ParmMeta } from './types';
-import { tokenizeCL, formatCL_SEU, parseCL } from './tokenizeCL'; // ← add parseCL
+import { tokenizeCL, formatCL_SEU, parseCL, CL_VARIABLE_PATTERN } from './tokenizeCL'; // ← add parseCL
 import { collectCLCmdFromLine } from './extractor'; // ← add this import
 
 // Type aliases must be declared before use
@@ -126,7 +126,8 @@ export function buildCLCommand(
   parmTypeMap: ParmTypeMap,
   parmMetas: ParmMeta[],
   presentParms?: Set<string>,
-  qualGroupsMap?: Record<string, string[][]>
+  qualGroupsMap?: Record<string, string[][]>,
+  convertToUpperCase: boolean = true
 ): string {
   // If a label is present in values, prepend it to the command string
   let cmd = '';
@@ -211,7 +212,7 @@ export function buildCLCommand(
       const parmType = updatedTypeMap[kwd] || "";
       const qualStrings = qualInstances.map(instanceArr =>
         instanceArr
-          .map((v, idx) => quoteIfNeeded(v, allowedVals, parmType))
+          .map((v, idx) => quoteIfNeeded(v, allowedVals, parmType, convertToUpperCase))
           .join('/')
       );
       cmd += ` ${kwd}(${qualStrings.join(' ')})`;
@@ -303,27 +304,26 @@ export function buildCLCommand(
           if (Array.isArray(elemValue)) {
             // Only use slash notation for first ELEM in single-instance parameters
             if (i === 0 && elemValue.length === 2 && !isMultiInstance) {
-              const quoted = elemValue.map(v => quoteIfNeeded(v, allowedVals, parmType)).reverse();
+              const quoted = elemValue.map(v => quoteIfNeeded(v, allowedVals, parmType, convertToUpperCase)).reverse();
               elemParts.push(`${quoted[0]}/${quoted[1]}`);
             } else {
-              const quoted = elemValue.map(v => quoteIfNeeded(v, allowedVals, parmType));
+              const quoted = elemValue.map(v => quoteIfNeeded(v, allowedVals, parmType, convertToUpperCase));
+              // For multi-instance, parts are already wrapped here
               elemParts.push(`(${quoted.join(' ')})`);
             }
           } else {
-            elemParts.push(quoteIfNeeded(elemValue, allowedVals, parmType));
+            // Single value - wrap it if multi-instance
+            const quotedValue = quoteIfNeeded(elemValue, allowedVals, parmType, convertToUpperCase);
+            elemParts.push(isMultiInstance ? `(${quotedValue})` : quotedValue);
           }
         }
-        if (isMultiInstance && elemParts.length > 0) {
-          const wrappedParts = elemParts.map(part => `(${part})`);
-          cmd += ` ${key}(${wrappedParts.join(' ')})`;
-        } else {
-          cmd += ` ${key}(${elemParts.join(' ')})`;
-        }
+        // Don't add extra wrapping - elemParts already have parens for multi-instance arrays
+        cmd += ` ${key}(${elemParts.join(' ')})`;
       } else {
         const elemParts = value.map((vArr: any) =>
           Array.isArray(vArr)
-            ? vArr.map((v: string) => quoteIfNeeded(v, allowedVals, parmType)).join(' ')
-            : quoteIfNeeded(vArr, allowedVals, parmType)
+            ? vArr.map((v: string) => quoteIfNeeded(v, allowedVals, parmType, convertToUpperCase)).join(' ')
+            : quoteIfNeeded(vArr, allowedVals, parmType, convertToUpperCase)
         );
         if (isMultiInstance) {
           const wrappedParts = elemParts.map(part => `(${part})`);
@@ -371,8 +371,8 @@ export function buildCLCommand(
       if (Array.isArray(value[0])) {
         const qualParts = value.map((vArr: any) =>
           Array.isArray(vArr)
-            ? vArr.slice().filter((x: any) => x !== undefined && x !== null && x !== '').map((v: string) => quoteIfNeeded(v, allowedVals, parmType)).join('/')
-            : quoteIfNeeded(vArr, allowedVals, parmType)
+            ? vArr.slice().filter((x: any) => x !== undefined && x !== null && x !== '').map((v: string) => quoteIfNeeded(v, allowedVals, parmType, convertToUpperCase)).join('/')
+            : quoteIfNeeded(vArr, allowedVals, parmType, convertToUpperCase)
         );
         if (isMultiInstance) {
           const wrappedParts = qualParts.map(part => `(${part})`);
@@ -381,24 +381,24 @@ export function buildCLCommand(
           cmd += ` ${key}(${qualParts.join(' ')})`;
         }
       } else {
-        const qualPart = value.slice().filter((x: any) => x !== undefined && x !== null && x !== '').map((v: string) => quoteIfNeeded(v, allowedVals, parmType)).join('/');
+        const qualPart = value.slice().filter((x: any) => x !== undefined && x !== null && x !== '').map((v: string) => quoteIfNeeded(v, allowedVals, parmType, convertToUpperCase)).join('/');
         cmd += ` ${key}(${qualPart})`;
       }
     } else if (Array.isArray(value)) {
       if (isMultiInstance) {
         if (hasElemChildren || hasQualChildren) {
-          const wrappedValues = value.map(v => `(${quoteIfNeeded(v, allowedVals, parmType)})`);
+          const wrappedValues = value.map(v => `(${quoteIfNeeded(v, allowedVals, parmType, convertToUpperCase)})`);
           cmd += ` ${key}(${wrappedValues.join(' ')})`;
         } else {
-          const quotedParts = value.filter(v => v !== undefined && v !== null && v !== '').map(v => quoteIfNeeded(v, allowedVals, parmType));
+          const quotedParts = value.filter(v => v !== undefined && v !== null && v !== '').map(v => quoteIfNeeded(v, allowedVals, parmType, convertToUpperCase));
           cmd += ` ${key}(${quotedParts.join(' ')})`;
         }
       } else {
-        const quotedParts = value.filter(v => v !== undefined && v !== null && v !== '').map(v => quoteIfNeeded(v, allowedVals, parmType));
+        const quotedParts = value.filter(v => v !== undefined && v !== null && v !== '').map(v => quoteIfNeeded(v, allowedVals, parmType, convertToUpperCase));
         cmd += ` ${key}(${quotedParts.join(' ')})`;
       }
     } else {
-      let q = quoteIfNeeded(String(value).trim(), allowedVals, parmType);
+      let q = quoteIfNeeded(String(value).trim(), allowedVals, parmType, convertToUpperCase);
       cmd += ` ${key}(${q})`;
     }
   }
@@ -476,7 +476,87 @@ function isCLExpression(val: string): boolean {
   return false;
 }
 
-export function quoteIfNeeded(val: string, allowedVals: string[] = [], parmType: string = ""): string {
+/**
+ * Uppercase CL variable names in expressions while preserving quoted strings.
+ * Example: 'Customer' *BCAT &custno → 'Customer' *BCAT &CUSTNO
+ */
+function uppercaseVariablesInExpression(val: string): string {
+  let result = '';
+  let i = 0;
+
+  while (i < val.length) {
+    const char = val[i];
+
+    // Handle quoted strings - preserve them as-is
+    if (char === "'") {
+      // Find the end of the quoted string, handling escaped quotes ''
+      result += char;
+      i++;
+      while (i < val.length) {
+        result += val[i];
+        if (val[i] === "'") {
+          // Check if it's an escaped quote
+          if (i + 1 < val.length && val[i + 1] === "'") {
+            result += val[i + 1];
+            i += 2;
+          } else {
+            // End of quoted string
+            i++;
+            break;
+          }
+        } else {
+          i++;
+        }
+      }
+    }
+    // Handle hex literals X'...' - preserve them as-is
+    else if ((char === 'X' || char === 'x') && i + 1 < val.length && val[i + 1] === "'") {
+      result += char + "'";
+      i += 2;
+      while (i < val.length && val[i] !== "'") {
+        result += val[i];
+        i++;
+      }
+      if (i < val.length) {
+        result += val[i]; // closing '
+        i++;
+      }
+    }
+    // Handle CL variables &NAME
+    else if (char === '&') {
+      // Capture the whole variable name
+      let varName = '&';
+      i++;
+      while (i < val.length && /[A-Z0-9_$#@.]/i.test(val[i])) {
+        varName += val[i];
+        i++;
+      }
+      // Uppercase the variable name
+      result += varName.toUpperCase();
+    }
+    // Handle built-in functions %FUNCTION
+    else if (char === '%') {
+      // Capture the whole function name
+      let funcName = '%';
+      i++;
+      while (i < val.length && /[A-Z0-9]/i.test(val[i])) {
+        funcName += val[i];
+        i++;
+      }
+      // Uppercase the function name
+      result += funcName.toUpperCase();
+    }
+    // Everything else - copy as-is
+    else {
+      result += char;
+      i++;
+    }
+  }
+
+  return result;
+}
+
+export function quoteIfNeeded(val: string, allowedVals: string[] = [], parmType: string = "", convertToUpperCase: boolean = true): string {
   const trimmed = val.trim();
   const type = parmType.toUpperCase().replace(/^[*]/, "");
 
@@ -503,8 +583,10 @@ export function quoteIfNeeded(val: string, allowedVals: string[] = [], parmType:
     return true;
   }
 
-  // 1. Do not quote CL variable names, such as: &COUNT
-  if (/^&[A-Z][A-Z0-9]{0,9}$/i.test(trimmed)) {
+  // 1. Do not quote CL variable names, including qualified names (e.g., &COUNT, &CUSTOMER_ADDRESS)
+  // Format: &NAME or &NAME_QUALIFIER where each part is up to 10 chars
+  // Max length: &(10)_(10) = 22 chars total
+  if (CL_VARIABLE_PATTERN.test(trimmed)) {
     return trimmed;
   }
 
@@ -528,9 +610,16 @@ export function quoteIfNeeded(val: string, allowedVals: string[] = [], parmType:
     return trimmed;
   }
 
-  // 6. Library-qualified name like QGPL/CUST
-  if (/^[A-Z0-9$#@_]+\/[A-Z0-9$#@_]+$/i.test(trimmed)) {
-    return trimmed;
+  // 6. Library-qualified name like QGPL/CUST or with variables like &RMTLIB/&RMTFILE
+  // Split on '/' and validate each part (allows CL variables up to 22 chars)
+  const qualParts = trimmed.split('/');
+  if (qualParts.length === 2) {
+    const [lib, name] = qualParts;
+    const isLibValid = /^[A-Z$#@][A-Z0-9$#@_]{0,10}$/i.test(lib) || CL_VARIABLE_PATTERN.test(lib);
+    const isNameValid = /^[A-Z$#@][A-Z0-9$#@_]{0,10}$/i.test(name) || CL_VARIABLE_PATTERN.test(name);
+    if (isLibValid && isNameValid) {
+      return trimmed;
+    }
   }
 
   // 7. Unqualified valid CL name
@@ -545,7 +634,8 @@ export function quoteIfNeeded(val: string, allowedVals: string[] = [], parmType:
 
   // 9. CL expression (e.g., *IF &X = &Y)
   if (isCLExpression(trimmed)) {
-    return val;
+    // Conditionally uppercase variables in the expression based on setting
+    return convertToUpperCase ? uppercaseVariablesInExpression(val) : val;
   }
 
   // 10. Special case: empty quoted or blank
@@ -572,7 +662,7 @@ export function quoteIfNeeded(val: string, allowedVals: string[] = [], parmType:
 export function isValidName(val: string): boolean {
   const trimmed = val.trim();
   if (trimmed.startsWith("&")) {
-    return /^[&][A-Z$#@][A-Z0-9$#@_.]{0,10}$/i.test(trimmed);
+    return CL_VARIABLE_PATTERN.test(trimmed);
   }
   if (
     (trimmed.startsWith("'") && trimmed.endsWith("'")) ||
@@ -758,8 +848,10 @@ export function formatCLSource(
 
     // Tokenize and format the command using formatCL_SEU
     try {
+      console.log('[formatCLSource] Formatting command:', command);
       const tokens = tokenizeCL(command);
-      const node = parseCL(tokens);
+      const node = parseCL(tokens, trailingComment);
+      console.log('[formatCLSource] Parsed node:', JSON.stringify(node, null, 2));
 
       // Apply case conversion to the command name if needed
       if (options.cvtcase !== '*NONE' && node.name) {
@@ -767,101 +859,12 @@ export function formatCLSource(
       }
 
       // Format using the proper CL formatter
+      console.log('[formatCLSource] Calling formatCL_SEU...');
       const formatted = formatCL_SEU(node, label);
+      console.log('[formatCLSource] Formatted result:', formatted);
 
       // Split into lines
       const formattedLines = formatted.split('\n');
-
-      // If there's a trailing comment, handle it with word wrapping and continuation characters
-      if (trailingComment) {
-        const config = vscode.workspace.getConfiguration('clPrompter');
-        const rightMargin = config.get<number>('formatRightMargin', 72);
-        const contCol = config.get<number>('formatContinuePosition', 27);
-
-        const lastLineIdx = formattedLines.length - 1;
-        let lastLine = formattedLines[lastLineIdx];
-        const lastLineEndsWithCont = lastLine.trimEnd().endsWith('+') || lastLine.trimEnd().endsWith('-');
-
-        // Extract comment content between /* and */
-        const commentMatch = trailingComment.match(/^\/\*\s*(.*?)\s*\*\/$/);
-        if (!commentMatch) {
-          // Malformed comment, just append as-is
-          if (!lastLineEndsWithCont) {
-            formattedLines[lastLineIdx] = lastLine + ' ' + trailingComment;
-          } else {
-            formattedLines.push(' '.repeat(contCol - 1) + trailingComment);
-          }
-        } else {
-          const commentContent = commentMatch[1];
-          const commentIndent = ' '.repeat(contCol - 1);
-
-          if (!lastLineEndsWithCont) {
-            // Try to fit comment on the last line
-            const testLine = lastLine + ' /* ' + commentContent + ' */';
-
-            if (testLine.length <= rightMargin) {
-              // Fits on same line
-              formattedLines[lastLineIdx] = testLine;
-            } else {
-              // Need to wrap - start comment on same line if there's room
-              const availableOnLastLine = rightMargin - lastLine.length - 4; // -4 for ' /* '
-
-              if (availableOnLastLine > 10) { // At least some room for content
-                // Start comment on this line
-                const words = commentContent.split(/\s+/);
-                let firstLineContent = '';
-                let remainingWords: string[] = [];
-
-                // Fill first line
-                for (let i = 0; i < words.length; i++) {
-                  const word = words[i];
-                  const testContent = firstLineContent ? firstLineContent + ' ' + word : word;
-
-                  if ((' /* ' + testContent + ' +').length <= rightMargin - lastLine.length) {
-                    firstLineContent = testContent;
-                  } else {
-                    remainingWords = words.slice(i);
-                    break;
-                  }
-                }
-
-                if (firstLineContent) {
-                  formattedLines[lastLineIdx] = lastLine + ' /* ' + firstLineContent + ' +';
-
-                  // Continue on next line(s)
-                  let currentContent = '';
-                  for (const word of remainingWords) {
-                    const testContent = currentContent ? currentContent + ' ' + word : word;
-                    const isLastWord = word === remainingWords[remainingWords.length - 1];
-                    const suffix = isLastWord ? ' */' : ' +';
-
-                    if ((commentIndent + testContent + suffix).length <= rightMargin || !currentContent) {
-                      currentContent = testContent;
-                    } else {
-                      // Current line is full
-                      formattedLines.push(commentIndent + currentContent + ' +');
-                      currentContent = word;
-                    }
-                  }
-
-                  if (currentContent) {
-                    formattedLines.push(commentIndent + currentContent + ' */');
-                  }
-                } else {
-                  // Can't fit anything on first line, put entire comment on continuation lines
-                  wrapCommentOnContinuationLines(formattedLines, commentContent, commentIndent, rightMargin);
-                }
-              } else {
-                // Not enough room on last line, put entire comment on continuation lines
-                wrapCommentOnContinuationLines(formattedLines, commentContent, commentIndent, rightMargin);
-              }
-            }
-          } else {
-            // Last line ends with continuation - put comment on next line(s)
-            wrapCommentOnContinuationLines(formattedLines, commentContent, commentIndent, rightMargin);
-          }
-        }
-      }
 
       outputLines.push(...formattedLines);
 
@@ -965,6 +968,22 @@ function writeFormatted(
   let continued = false;
   let prevTail = '';
 
+  // Helper to check if we're inside a quoted string at the break point
+  const isInsideQuotes = (text: string): boolean => {
+    let inQuote = false;
+    for (let i = 0; i < text.length; i++) {
+      if (text[i] === "'") {
+        // Check for doubled quote (escaped)
+        if (i + 1 < text.length && text[i + 1] === "'") {
+          i++; // Skip the doubled quote
+          continue;
+        }
+        inQuote = !inQuote;
+      }
+    }
+    return inQuote;
+  };
+
   while (inputLeft.length > 0) {
     let chunk = '';
     const limit = (!continued ? maxlength : (maxlength - options.indcont));
@@ -983,14 +1002,20 @@ function writeFormatted(
 
       // Left piece FOR THIS LINE; drop trailing spaces
       const leftPiece = inputLeft.slice(0, breakPos).replace(/[ \t]+$/, '');
-      chunk = leftPiece + ' +';
+
+      // Check if we're breaking inside a quoted string
+      const inQuotes = isInsideQuotes(leftPiece);
+
+      // If inside quotes, no space before +; otherwise add space
+      chunk = inQuotes ? leftPiece + '+' : leftPiece + ' +';
 
       // Remainder AFTER the split-space (skip it explicitly)
       const remainder = inputLeft.slice(breakPos + 1);
       inputLeft = remainder;
 
-      // Record tail before we add " +"
+      // Record tail before we add " +" and track if we're continuing inside quotes
       prevTail = lastNonSpaceChar(leftPiece);
+      const wasInQuotes = inQuotes;
 
       // Push this wrapped line now
       if (continued) {
@@ -1002,7 +1027,8 @@ function writeFormatted(
 
       // Before next iteration, if remainder starts with a token and prevTail is a token,
       // insert a leading space to preserve separation
-      if (inputLeft.length > 0 && inputLeft[0] !== ' ' && needsLeadingSpace(prevTail, inputLeft[0])) {
+      // BUT: Don't add space if we broke inside a quoted string
+      if (!wasInQuotes && inputLeft.length > 0 && inputLeft[0] !== ' ' && needsLeadingSpace(prevTail, inputLeft[0])) {
         inputLeft = ' ' + inputLeft;
       }
 

@@ -104,7 +104,8 @@ function generateElemInstructions(
 
     for (let e = 0; e < vals.length; e++) {
       const elemValue = vals[e];
-      const elemName = isMultiInstance ? `${kwd}_ELEM${e}_${instanceIdx}` : `${kwd}_ELEM${e}`;
+      // Always use INST naming to maintain 2D array structure consistency
+      const elemName = `${kwd}_INST${instanceIdx}_ELEM${e}`;
 
       console.log(`[generateElemInstructions] ${kwd} - Element ${e}:`);
       console.log(`[generateElemInstructions] ${kwd} -   elemValue:`, elemValue);
@@ -116,20 +117,49 @@ function generateElemInstructions(
       if (Array.isArray(elemValue)) {
         console.log(`[generateElemInstructions] ${kwd} - Processing nested array for element ${e}:`, elemValue);
 
-        for (let se = 0; se < elemValue.length; se++) {
-          const subValue = elemValue[se];
-          if (subValue && subValue.toString().trim() !== '') {
-            const subElemName = `${elemName}_${se}`;
+        // Check if this is a QUAL element (qualified name with 2 parts)
+        // QUAL arrays have exactly 2 string elements (library/file or similar)
+        const isQualElement = elemValue.length === 2 &&
+                              elemValue.every(v => typeof v === 'string' || v === '');
+
+        if (isQualElement) {
+          console.log(`[generateElemInstructions] ${kwd} - Detected QUAL element, creating QUAL instructions`);
+          // Create QUAL instructions with proper naming: RMTFILE_INST0_ELEM0_QUAL0, etc.
+          for (let q = 0; q < elemValue.length; q++) {
+            const qualValue = elemValue[q];
+            const qualName = `${elemName}_QUAL${q}`;
 
             instructions.push({
-              type: 'elem',
-              target: subElemName,
-              value: subValue,
+              type: 'qual',
+              target: qualName,
+              value: qualValue || '',
               method: 'vscode-select',
-              options: { forceValue: true, dispatchEvents: true }
+              options: {
+                shadowDOMAccess: true,
+                forceValue: true,
+                dispatchEvents: true
+              }
             });
 
-            console.log(`[generateElemInstructions] ${kwd} - Added nested ELEM instruction: ${subElemName} = "${subValue}"`);
+            console.log(`[generateElemInstructions] ${kwd} - Added QUAL instruction: ${qualName} = "${qualValue}"`);
+          }
+        } else {
+          // Regular nested ELEM (not a QUAL)
+          for (let se = 0; se < elemValue.length; se++) {
+            const subValue = elemValue[se];
+            if (subValue && subValue.toString().trim() !== '') {
+              const subElemName = `${elemName}_${se}`;
+
+              instructions.push({
+                type: 'elem',
+                target: subElemName,
+                value: subValue,
+                method: 'vscode-select',
+                options: { forceValue: true, dispatchEvents: true }
+              });
+
+              console.log(`[generateElemInstructions] ${kwd} - Added nested ELEM instruction: ${subElemName} = "${subValue}"`);
+            }
           }
         }
       }
@@ -459,7 +489,10 @@ export function generatePopulationInstructions(
       instructions.push(...generateMultiInstanceInstructions(kwd, vals, xmlContent, paramMap, options));
     } else if (hasElems) {
       // ELEM parameter (single instance)
-      instructions.push(...generateElemInstructions(kwd, vals, 0, false, options));
+      // For single-instance ELEM parameters, vals is [[elem0, elem1, ...]]
+      // We need to pass vals[0] (the elements array) to generateElemInstructions
+      const elemValues = Array.isArray(vals) && vals.length > 0 ? vals[0] : vals;
+      instructions.push(...generateElemInstructions(kwd, elemValues, 0, false, options));
     } else if (hasQuals) {
       // QUAL parameter (single instance)
       instructions.push(...generateQualInstructions(kwd, vals, options));

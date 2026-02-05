@@ -33,7 +33,7 @@ export interface CLElem {
 }
 
 export type CLToken =
-  | { type: 'command' | 'keyword' | 'function' | 'variable' | 'value' | 'string' | 'symbolic_value'; value: string }
+  | { type: 'command' | 'keyword' | 'function' | 'variable' | 'value' | 'string' | 'symbolic_value' | 'operator'; value: string }
   | { type: 'paren_open' | 'paren_close'; value: '(' | ')' }
   | { type: 'space'; value: ' ' };
 
@@ -167,6 +167,7 @@ export interface PrompterState {
   touchedFields: Set<string>; // Track which fields the user has interacted with
   isInitializing: boolean; // Flag to prevent touch tracking during form initialization
   elementsToTrack: HTMLElement[]; // Elements to attach listeners to after initialization
+  convertToUpperCase: boolean; // Whether to auto-convert variables, operators, and built-in functions to uppercase
 }
 
 // Utility types

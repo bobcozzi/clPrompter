@@ -2,7 +2,30 @@
 
 All notable changes to this project will be documented in this file.
 
-## [0.0.42] - 2026-02-04
+## [0.0.45] - 2026-02-04
+### Fixed
+- **ELEM group parentheses preservation**: Fixed formatting to preserve parentheses around multi-instance ELEM parameters
+  - Fixed EXTRA, LOG, SETVAR and other ELEM parameters losing parentheses during formatting
+  - Example: `EXTRA((*BEFORE 'text') (*AFTER 'text'))` now formats correctly
+  - Fixed prompter path double-wrapping issue in buildCLCommand
+  - Fixed formatter path array condition ordering in formatValue
+- **CMD/CMDSTR parameter formatting**: Fixed SBMJOB and similar commands from adding extra parentheses layers
+  - Each format/prompt cycle was adding an extra `()` wrapper
+  - Now preserves original parentheses structure from tokens
+- **Line wrapping improvements**: Enhanced atomic value detection for better line breaking
+  - Wrapped expressions added to atomic values set to prevent mid-expression breaks
+  - Sorted atomic values by length (longest first) for proper matching
+  - Special handling for wrapped ELEM expressions with quoted strings
+
+## [0.0.43] - 2026-02-04
+### Fixed
+- **Enter key in textareas**: Restored proper textarea behavior where Enter submits form
+  - v0.0.42 broke this by removing ALL Enter key handling
+  - Now specifically handles Enter in textareas to submit form (matching IBM i behavior)
+  - Shift+Enter still allows newlines in textareas for rare multiline cases
+  - Regular input fields use native form submit (no duplicate submissions)
+
+## [0.0.42] - 2026-02-04 [YANKED - Broke textarea Enter behavior]
 ### Fixed
 - **CRITICAL HOTFIX: Duplicate form submission bug in v0.0.41**: Removed Enter key handler that was causing duplicate submissions
   - v0.0.41 introduced a new bug where `form.requestSubmit()` triggered duplicate `onSubmit()` calls

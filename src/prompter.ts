@@ -47,7 +47,8 @@ let state: PrompterState = {
   parmMetas: {},
   touchedFields: new Set<string>(),
   isInitializing: false,
-  elementsToTrack: [] // Elements to attach listeners to after initialization
+  elementsToTrack: [], // Elements to attach listeners to after initialization
+  convertToUpperCase: true // Default to true (traditional behavior)
 };
 
 // VS Code API
@@ -321,11 +322,8 @@ function normalizeValue(value: string, allowedValues: string[], parm: Element | 
     return match;
   }
 
-  // No match in allowed values - apply Case attribute
-  if (isMono) {
-    return value.toUpperCase();
-  }
-
+  // No match in allowed values - preserve original case in prompter
+  // Uppercase conversion only happens during command building based on convertToUpperCase setting
   return value;
 }
 
@@ -495,8 +493,8 @@ function configureFullValidation(input: HTMLInputElement, requiredLength: number
     wrapper.appendChild(errorSpan);
   }
 
-  // Add blur handler for Full length validation
-  input.addEventListener('blur', () => {
+  // Validation logic shared by blur, idle timeout, and Enter key events
+  const validateFullLength = () => {
     if (!input.value) {
       input.setCustomValidity('');
       input.style.color = '';
@@ -533,6 +531,27 @@ function configureFullValidation(input: HTMLInputElement, requiredLength: number
       errorSpan.classList.add('visible');
       return;
     }
+  };
+
+  // Add blur handler for Full length validation
+  input.addEventListener('blur', validateFullLength);
+
+  // Add Enter key handler to validate before submission
+  input.addEventListener('keydown', (e: KeyboardEvent) => {
+    if (e.key === 'Enter') {
+      validateFullLength();
+    }
+  });
+
+  // Add debounced validation on idle (500ms after user stops typing)
+  let validationTimeout: number | undefined;
+  input.addEventListener('input', () => {
+    if (validationTimeout) {
+      clearTimeout(validationTimeout);
+    }
+    validationTimeout = window.setTimeout(() => {
+      validateFullLength();
+    }, 500); // Validate 500ms after user stops typing
   });
 }
 
@@ -679,7 +698,7 @@ function configureTabOrder(): void {
   console.log(`[${ts}] [configureTabOrder] START`);
 
   // Find all input fields in the form (inputs, textareas, selects, cbinput elements)
-  const form = document.getElementById('promptForm');
+  const form = document.getElementById('clForm');
   if (!form) {
     console.warn(`[${ts}] [configureTabOrder] Form not found`);
     return;
@@ -1010,6 +1029,35 @@ function createInputForType(type: string, name: string, dft: string, len: string
     input.dataset.default = dft || '';
     input.classList.add(getLengthClass(effectiveLen));
     attachTouchTracking(input);
+
+    // Add blur handler for VARNAME validation only (no case conversion)
+    console.log('[createInputForType] Attaching blur handler to:', name, 'type:', type);
+    input.addEventListener('blur', () => {
+      console.log('[blur handler] Fired for:', input.name, 'value:', input.value, 'type:', type);
+      const typeUpper = type.toUpperCase();
+
+      // Type=VARNAME validation: must start with & and be max 11 chars total
+      // Do NOT uppercase - let the command builder handle that
+      if (typeUpper === 'VARNAME' && input.value) {
+        console.log('[blur handler] VARNAME validation - original value:', input.value);
+        let normalized = input.value;
+
+        if (!normalized.startsWith('&')) {
+          // Automatically prepend & if missing
+          normalized = '&' + normalized;
+        }
+        // Enforce 11 character max (& + 10 chars)
+        if (normalized.length > 11) {
+          normalized = normalized.substring(0, 11);
+        }
+
+        if (normalized !== input.value) {
+          input.value = normalized;
+          console.log('[blur handler] VARNAME adjusted to:', input.value);
+        }
+      }
+      // Note: Case conversion is handled by buildCLCommand() based on convertVarsToUpperCase setting
+    });
 
     // Configure all validations (range, full, future validations)
     setupValidations(input, { suggestions, full, len });
@@ -1495,6 +1543,16 @@ function addMultiInstanceControls(container: HTMLElement, parm: ParmElement, kwd
         const newIdx = instances.length;
         const newInst = renderParmInstance(parm, kwd, newIdx, max, multiGroupDiv);
         multiGroupDiv.appendChild(newInst);
+
+        // Apply dark green color to new instance if it was in the original command
+        const newInput = newInst.querySelector('input[name], textarea[name]') as HTMLInputElement;
+        console.log('[+ button] New input:', newInput, 'name:', newInput?.name, 'wasInOriginalCommand:', wasInOriginalCommand(newInput?.name || ''));
+        if (newInput && wasInOriginalCommand(newInput.name)) {
+          console.log('[+ button] Applying dark green color to:', newInput.name);
+          newInput.style.color = '#006400';
+        } else {
+          console.log('[+ button] NOT applying color. newInput:', !!newInput, 'wasInOriginalCommand:', wasInOriginalCommand(newInput?.name || ''));
+        }
       }
     };
     btnBar.appendChild(addBtn);
@@ -1873,10 +1931,19 @@ function populateElemInputs(parm: ParmElement, parmMeta: ParmMetaMap[string], kw
     const elemType = String(elem.getAttribute('Type') || 'CHAR');
 
     if (elemType === 'QUAL') {
-      // elemValue for QUAL should be already split by parser
-      // For now, we need to parse it here since we're passing as string
-      const qualParts = splitQualLeftToRight(elemValue);
-      populateQualInputs(elem as unknown as ParmElement, parmMeta, `${kwd}_ELEM${i}`, qualParts, idx, container);
+      // elemValue for QUAL can be:
+      // 1. A string like "LIB/FILE" that needs to be split
+      // 2. Already an array ["FILE", "LIB"] from parser (for ELEM containing QUAL)
+      let qualParts: string[];
+      if (Array.isArray(elemValue)) {
+        qualParts = elemValue; // Already split by parser
+        console.log(`[clPrompter] QUAL is already array:`, qualParts);
+      } else {
+        qualParts = splitQualLeftToRight(elemValue); // Split the string
+        console.log(`[clPrompter] QUAL split from string "${elemValue}":`, qualParts);
+      }
+      // Use full name with INST for consistency with webview input naming
+      populateQualInputs(elem as unknown as ParmElement, parmMeta, `${kwd}_INST${idx}_ELEM${i}`, qualParts, idx, container);
     } else {
       const subElems = elem.querySelectorAll(':scope > Elem');
       if (subElems.length > 0) {
@@ -2663,13 +2730,22 @@ function wirePrompterControls(): void {
   }
 
   document.addEventListener('keydown', e => {
-    if (e.key === 'Escape' || e.key === 'F3') {
+    const target = e.target;
+
+    // Handle Enter in any input field or textarea
+    if (e.key === 'Enter' && !e.shiftKey && (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement)) {
+      // For textareas, Enter should submit (not add newline) unless Shift is pressed
+      // For regular inputs, Enter should submit the form
+      e.preventDefault();
+      if (form) {
+        console.log('[Enter key] Submitting form from:', target.tagName, 'name:', (target as HTMLInputElement).name);
+        (form as HTMLFormElement).requestSubmit();
+      }
+    } else if (e.key === 'Escape' || e.key === 'F3') {
       e.preventDefault();
       onCancel();
     }
-    // Note: Enter key is handled by the form's native submit behavior
-    // Pressing Enter in any input field automatically triggers form.submit event
-    // which calls onSubmit() once. No manual handling needed.
+    // Shift+Enter in textareas: allow newline (don't preventDefault above)
   });
 
   state.controlsWired = true;
@@ -2729,6 +2805,12 @@ window.addEventListener('message', event => {
     // Apply configured colors (if provided)
     const config = (message as any).config;
     applyConfigStyles(config);
+
+    // Store the convertToUpperCase setting
+    if (config && typeof config.convertToUpperCase === 'boolean') {
+      state.convertToUpperCase = config.convertToUpperCase;
+      console.log('[clPrompter] convertToUpperCase set to:', state.convertToUpperCase);
+    }
 
     loadForm();
     wirePrompterControls();
