@@ -54,7 +54,7 @@ export type CLValue =
   | CLNode
   | CLValue[]
   | { function: string; args: CLValue[] }
-  | { type: 'expression'; tokens: CLToken[] };
+  | { type: 'expression'; tokens: CLToken[]; wrapped?: boolean };
 
 export interface ParsedParms {
   [kwd: string]: string | string[] | (string | string[])[]; // Supports simple, QUAL, ELEM, multi-instance

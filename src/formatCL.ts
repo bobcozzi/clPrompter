@@ -3,8 +3,9 @@ import * as vscode from 'vscode';
 
 import { DOMParser } from '@xmldom/xmldom';
 import { ParmMeta } from './types';
-import { tokenizeCL, formatCL_SEU, parseCL, CL_VARIABLE_PATTERN } from './tokenizeCL'; // ← add parseCL
-import { collectCLCmdFromLine } from './extractor'; // ← add this import
+import { tokenizeCL, parseCL, CL_VARIABLE_PATTERN } from './tokenizeCL';
+import { collectCLCmdFromLine } from './extractor';
+import { formatCLCommand_v2 } from './tokenLayoutFormatter';
 
 // Type aliases must be declared before use
 type AllowedValsMap = Record<string, string[]>; // e.g. { OBJTYPE: ["*ALL", "*FILE", ...], ... }
@@ -790,14 +791,9 @@ export function formatCLSource(
 
   while (idx < allLines.length) {
     const currentLine = allLines[idx];
-    if (!currentLine) {
-      idx++;
-      continue;
-    }
-
     const trimmedLine = currentLine.trim();
 
-    // Handle empty lines
+    // Handle empty lines - check trimmed length to preserve blank lines
     if (trimmedLine.length === 0) {
       outputLines.push('');
       idx++;
@@ -848,10 +844,8 @@ export function formatCLSource(
 
     // Tokenize and format the command using formatCL_SEU
     try {
-      console.log('[formatCLSource] Formatting command:', command);
       const tokens = tokenizeCL(command);
       const node = parseCL(tokens, trailingComment);
-      console.log('[formatCLSource] Parsed node:', JSON.stringify(node, null, 2));
 
       // Apply case conversion to the command name if needed
       if (options.cvtcase !== '*NONE' && node.name) {
@@ -859,9 +853,16 @@ export function formatCLSource(
       }
 
       // Format using the proper CL formatter
-      console.log('[formatCLSource] Calling formatCL_SEU...');
-      const formatted = formatCL_SEU(node, label);
-      console.log('[formatCLSource] Formatted result:', formatted);
+      // Get VS Code configuration for formatting
+      const config = vscode.workspace.getConfiguration('clPrompter');
+      const formatted = formatCLCommand_v2(node, label, {
+        leftMargin: config.get<number>('formatCmdPosition', 14),
+        rightMargin: config.get<number>('formatRightMargin', 70),
+        contIndent: config.get<number>('formatContinuePosition', 27),
+        continuationChar: '+',
+        labelPosition: config.get<number>('formatLabelPosition', 2),
+        kwdPosition: config.get<number>('formatKwdPosition', 25)
+      });
 
       // Split into lines
       const formattedLines = formatted.split('\n');

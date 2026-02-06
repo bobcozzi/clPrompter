@@ -11,6 +11,7 @@
     "rootDir": "src",
     "strict": true,
     "esModuleInterop": true,
+    "downlevelIteration": true,  // Allow iteration over Map/Set/Array
     "moduleResolution": "node",  // Node.js resolution
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true
@@ -23,6 +24,7 @@
     ".vscode-test",
     "out",
     "backup",
-    "src/prompter.ts"  // Exclude webview files
+    "src/prompter.ts",  // Exclude webview files
+    "src/test*.ts"      // Exclude test files from builds
   ]
 }

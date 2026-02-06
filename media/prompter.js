@@ -1351,8 +1351,9 @@ function optimizeLabelWidth() {
             maxLength = text.length;
         }
     });
-    // Add 2ch padding, but cap at 50ch (don't exceed current max)
-    const optimalWidth = Math.min(maxLength + 2, 50);
+    // Add 2ch padding, but ensure a minimum of 10ch to accommodate static "Label:" and "Comment:" fields
+    // Cap at 50ch (don't exceed current max)
+    const optimalWidth = Math.max(Math.min(maxLength + 2, 50), 10);
     // Set CSS custom property on the document root
     document.documentElement.style.setProperty('--clp-label-width', `${optimalWidth}ch`);
     console.log(`[clPrompter] Optimized label width: ${optimalWidth}ch (max label: ${maxLength} chars)`);

@@ -1,0 +1,228 @@
+IBM i CL Command Formatter
+Consolidated Design & Line-Wrapping Specification
+(Integrated with CL Parameter Grammar and MAX Semantics)
+
+----------------------------------------------------------------
+1. Inputs
+----------------------------------------------------------------
+
+1.1 Command Input
+- One complete CL command as a single logical string
+- No embedded line breaks
+
+1.2 Margin Settings
+- Label start column
+- Command name start column
+- First parameter start column
+- Continuation line start column
+- Right margin column
+
+----------------------------------------------------------------
+2. Formatting Goals
+----------------------------------------------------------------
+
+- Emulate IBM i SEU CL Prompter output
+- Preserve semantic units defined by CL parameter grammar
+- Apply deterministic, testable wrapping rules
+- Use correct CL continuation symbols (+, -)
+- Respect PARM / ELEM / QUAL / MAX semantics
+
+----------------------------------------------------------------
+3. CL Parameter Grammar (Context for Formatting)
+----------------------------------------------------------------
+
+All CL parameters originate from a base PARM definition.
+
+A PARM:
+- May be a primitive type (*CHAR, *INT, *DEC, etc.)
+- May be composed of ELEM and/or QUAL definitions
+- May specify MAX, defaulting to 1
+
+MAX governs repetition behavior:
+- MAX(1): parameter value appears once
+- MAX(n > 1): parameter value may repeat up to n times
+
+When MAX > 1:
+- Simple PARM or top-level ELEM/QUAL values are space-separated
+- Entire parameter value is enclosed in parentheses
+
+Examples:
+OBJTYPE(*FILE *PGM *DTAARA)
+OBJ(QGPL/DATAF1 QTEMP/DATAF2 CHGJOB)
+
+If the repeated value itself is an ELEM group:
+MSGID((CPF9898 QSYS/QCPFMSG) (MCH3601 QCPFMSG))
+
+----------------------------------------------------------------
+4. Parameter Value Taxonomy (Authoritative)
+----------------------------------------------------------------
+
+Each parameter instance must be classified into exactly one of the following
+formatter value types.
+
+Atomic
+- Single indivisible value
+- Includes qualified names (QUAL syntax)
+- Examples:
+  *PGM
+  QGPL/CUSTMAST
+  054361/COZZI/DSP01
+
+MultiAtomic
+- MAX > 1, space-separated atomic values
+- Single parenthesis group
+- Examples:
+  OBJTYPE(*PGM *FILE *CMD)
+  OBJ(QGPL/DATAF1 QTEMP/DATAF2 CHGJOB)
+
+Grouped
+- Nested parentheses caused by repeating ELEM or nested ELEM definitions
+- Examples:
+  MSGID((CPF9898 QSYS/QCPFMSG) (MCH3601 QCPFMSG))
+  INCREL((*IF IMDEL *EQ 'D') (*OR IMDEL *EQ ' '))
+
+Quoted
+- Quoted string literal
+- Example:
+  TEXT('SQL Tools UDTF Source code')
+
+Expression
+- CL expression or function
+- Example:
+  CHGVAR(&X (&A + &B * 10))
+
+----------------------------------------------------------------
+5. Qualified Values (QUAL) – Formatting Rule
+----------------------------------------------------------------
+
+QUAL values (LIB/OBJ, JOBNBR/USER/JOB, etc.):
+- Are semantically multi-part
+- Are syntactically indivisible
+
+For formatting purposes:
+- QUAL values are treated as Atomic
+- No legal breakpoints exist within a qualified value
+- Entire value must move together
+
+Illegal formatting:
+OBJ(QGPL/ +
+    CUSTMAST)
+
+----------------------------------------------------------------
+6. Anchor Rules (Non-Negotiable)
+----------------------------------------------------------------
+
+Each parameter has an anchor which must appear intact on a single line.
+
+Atomic:
+  KEYWORD(value)
+
+MultiAtomic:
+  KEYWORD(firstValue
+
+Grouped:
+  KEYWORD(
+
+Quoted:
+  KEYWORD('
+
+Expression:
+  KEYWORD(
+
+If the anchor does not fit on the current line, the entire parameter moves
+to the next continuation line.
+
+----------------------------------------------------------------
+7. Legal Breakpoints by Value Type
+----------------------------------------------------------------
+
+Breakpoints are evaluated right-to-left, selecting the rightmost legal
+breakpoint before the right margin.
+
+Atomic
+- No breakpoints
+
+MultiAtomic
+- Breaks allowed only at spaces between atomic values
+- Keyword and first value are inseparable
+
+Grouped
+- Between ELEM groups: ') ('
+- Between tokens inside a group
+- Before a closing ')'
+
+Quoted
+- Prefer breaks after spaces
+- Forced breaks allowed at any character boundary
+- Embedded blanks should be preserved when possible
+
+Expression
+- After operators
+- Between tokens
+- Before closing ')'
+
+----------------------------------------------------------------
+8. Continuation Symbols (Exact Semantics)
+----------------------------------------------------------------
+
+'+'
+- Continue value at continuation column
+- Leading blanks are skipped
+
+'-'
+- Continue value starting in column 1
+- Used only when preserving significant whitespace in quoted strings
+
+'+' is the default continuation symbol.
+'-' is rare and whitespace-driven.
+
+----------------------------------------------------------------
+9. Unified Wrapping Algorithm
+----------------------------------------------------------------
+
+For each parameter:
+1) If the entire parameter fits, emit it unchanged.
+2) Otherwise, emit using wrapped logic.
+
+Wrapped Logic:
+1) Emit anchor. If it does not fit, start a continuation line.
+2) Emit remaining value tokens until no longer fitting.
+3) Break at the best legal breakpoint.
+4) Emit continuation symbol.
+5) Continue on a new line.
+
+Forced breaks:
+- Allowed for Quoted values
+- Rare for Grouped and Expression
+- Never allowed for Atomic or MultiAtomic
+
+----------------------------------------------------------------
+10. Tokenization Guidance
+----------------------------------------------------------------
+
+Recommended token types:
+
+- AtomicLiteral        (*PGM, *FILE)
+- QualifiedName        (LIB/OBJ, JOB/USER/NBR)
+- QuotedLiteral
+- Operator
+- Paren
+- Space
+
+For formatting:
+QualifiedName is treated as Atomic.
+
+----------------------------------------------------------------
+11. Decision Summary
+----------------------------------------------------------------
+
+Type         Anchor Locked   Splittable        Forced Split   Uses +   Uses -
+Atomic       Yes             No                No             No       No
+MultiAtomic  First value     Between values    No             Yes      No
+Grouped      '('             Yes               Rare           Yes      No
+Quoted       '''             Yes               Yes            Yes      Rare
+Expression   '('             Yes               Rare           Yes      No
+
+----------------------------------------------------------------
+End of Specification
+----------------------------------------------------------------

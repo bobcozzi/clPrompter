@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import { CLToken, CLNode, CLParsedParm, CLValue } from './types';
+import { formatCLCommand_v2 } from './tokenLayoutFormatter';
 
 // CL variable name pattern: &NAME or &NAME_QUALIFIER
 // Format: & followed by letter, then up to 21 more chars (letters, digits, underscores)
@@ -209,8 +210,6 @@ export function parseCL(tokens: CLToken[], comment?: string): CLNode {
             if (lookahead && lookahead.type === 'paren_open') {
                 const parmName = next(); // keyword
                 seenNamed = true;
-                // Debug
-                console.log('PARM:', parmName.value, 'Next token:', peek());
                 next(); // consume '('
                 const val = parseValue();
                 if (peek() && peek().type === 'paren_close') next();
@@ -518,17 +517,92 @@ function extractParms(parmStr: string): Array<{ kwd: string; value: string }> {
     return out;
 }
 
+/**
+ * Extract trailing comment from a CL command string
+ * Returns { command: string, comment: string | undefined }
+ */
+export function extractCommentFromCommand(input: string): { command: string; comment?: string } {
+    // Look for /* comment */ at the end of the command (with optional whitespace before it)
+    // The comment can only start after a space (per IBM i CL rules)
+
+    let commentIdx = -1;
+    let inQuote = false;
+
+    // Scan through the string, tracking whether we're inside a quoted string
+    for (let i = 0; i < input.length - 2; i++) {
+        const char = input[i];
+
+        // Toggle quote state when we encounter a single quote
+        if (char === "'") {
+            // Check if it's a doubled quote (escaped quote)
+            if (i + 1 < input.length && input[i + 1] === "'") {
+                i++; // Skip the next quote
+                continue;
+            }
+            inQuote = !inQuote;
+        }
+
+        // Check for ' /*' pattern when not inside quotes
+        if (!inQuote && char === ' ' && input[i + 1] === '/' && input[i + 2] === '*') {
+            commentIdx = i + 1; // Point to the '/' character
+            break;
+        }
+    }
+
+    // Also check if comment starts at position 0
+    if (commentIdx === -1 && input.startsWith('/*')) {
+        commentIdx = 0;
+    }
+
+    if (commentIdx === -1) {
+        // No comment found
+        return { command: input };
+    }
+
+    // Extract comment and command parts
+    const commentPart = input.substring(commentIdx).trim();
+    const commandPart = input.substring(0, commentIdx).trim();
+
+    // Verify the comment has both /* and */
+    if (commentPart.includes('/*') && commentPart.includes('*/')) {
+        return { command: commandPart, comment: commentPart };
+    }
+
+    // Comment is incomplete, return full command
+    return { command: input };
+}
+
 
 export function formatCLCmd(label: string | undefined, cmdName: string, parmStr: string, comment?: string): string {
+    // Extract comment from parmStr if present (and no comment already provided)
+    let actualComment = comment;
+    let actualParmStr = parmStr;
+
+    if (!actualComment) {
+        const extracted = extractCommentFromCommand(parmStr);
+        actualParmStr = extracted.command;
+        actualComment = extracted.comment;
+    }
+
     // Tokenize and parse the full command (command name + params)
-    const tokens = tokenizeCL(`${cmdName} ${parmStr}`);
-    const ast = parseCL(tokens, comment);
+    const tokens = tokenizeCL(`${cmdName} ${actualParmStr}`);
+    const ast = parseCL(tokens, actualComment);
 
     // Ensure command name is set as provided
     ast.name = cmdName;
 
-    // SEU-style formatter preserves nested parens (e.g., (1 64))
-    return formatCL_SEU(ast, label);
+    // Get VS Code configuration for formatting
+    const config = vscode.workspace.getConfiguration('clPrompter');
+
+    // Use the unified formatter (v2)
+    return formatCLCommand_v2(ast, label, {
+        leftMargin: config.get<number>('formatCmdPosition', 14),
+        rightMargin: config.get<number>('formatRightMargin', 70),
+        contIndent: config.get<number>('formatContinuePosition', 27),
+        continuationChar: '+',
+        labelPosition: config.get<number>('formatLabelPosition', 2),
+        kwdPosition: config.get<number>('formatKwdPosition', 25)
+    });
 }
 
 /** Formatter */
@@ -707,542 +781,17 @@ export function formatCL_SEU(
     node: CLNode,
     label?: string
 ): string {
-
-    const continuationChar = '+';
+    // Unified formatter - route to formatCLCommand_v2
     const config = vscode.workspace.getConfiguration('clPrompter');
-    const rightMargin = config.get<number>('formatRightMargin', 72);
-    const keywordCase = (config.get<string>('formatCase', '*UPPER') === '*UPPER') ? 'upper' : 'lower';
-    const LABEL_COL = config.get<number>('formatLabelPosition', 2);
-    const CMD_COL = config.get<number>('formatCmdPosition', 14);
-    const FIRST_PARAM_COL = config.get<number>('formatKwdPosition', 25);
-    const CONT_LINE_COL = config.get<number>('formatContinuePosition', 27);
-    let wrapped = false;
-    const lines: string[] = [];
-    const atomicValues = collectAtomicValues(node);
-    // 🔹 ADD atomic keyword+parens AND complete ELEM values here:
-    for (const parm of node.parameters) {
-        const keywordWithParen = applyCase(parm.name, keywordCase) + '(';
-        atomicValues.add(keywordWithParen);
 
-        // For array of wrapped expressions (multi-instance ELEM), add each wrapped expression as atomic
-        if (Array.isArray(parm.value) && parm.value.length > 0 &&
-            parm.value.every((v: any) => typeof v === 'object' && v !== null && 'wrapped' in v && v.wrapped === true)) {
-            // Each wrapped expression should be atomic: (*KEYWORD 'value')
-            for (const expr of parm.value) {
-                const exprObj = expr as any;
-                const tokens = exprObj.tokens as Array<{type: string, value: string}>;
-                const inner = tokens.map((t: any) => t.value).join('');
-                atomicValues.add(`(${inner})`);
-                atomicValues.add(`(${inner})`); // With trailing space variant
-                console.log(`[atomicValues] Added wrapped ELEM expression as atomic: "(${inner})"`);
-            }
-        }
-        // For ELEM parameters (expression objects), add the complete keyword+value as atomic to prevent internal breaks
-        // ELEM parameters are stored as expression objects with tokens, not arrays
-        else if (typeof parm.value === 'object' && parm.value !== null && 'type' in parm.value &&
-            (parm.value as any).type === 'expression' && 'tokens' in parm.value) {
-            // Expression object - extract non-space token values and join them
-            const tokens = (parm.value as any).tokens as Array<{type: string, value: string}>;
-            const values = tokens.filter(t => t.type !== 'space').map(t => t.value);
-
-            // If expression contains variables, join without spaces (e.g., &LONGVAR_FIELDNAME)
-            // Otherwise join with spaces for operators/keywords (e.g., &VAR *CAT &VAR2)
-            const hasVariable = tokens.some((t: any) => t.type === 'variable' || (t.type === 'value' && CL_VARIABLE_PATTERN.test(t.value)));
-            const hasOperatorOrKeyword = tokens.some((t: any) => t.type === 'keyword' || t.type === 'operator' || t.type === 'symbolic_value' || (t.type === 'value' && /^[*%]/.test(t.value)));
-            console.log(`[atomicValues] parm=${parm.name}, hasVariable=${hasVariable}, hasOperatorOrKeyword=${hasOperatorOrKeyword}, tokens=`, tokens.map(t => `${t.type}:${t.value}`));
-            const valueText = (hasVariable && !hasOperatorOrKeyword) ? values.join('') : values.join(' ');
-            console.log(`[atomicValues] valueText="${valueText}"`);
-
-            // ONLY add as atomic if it's a simple variable expression (no operators/keywords)
-            // Complex expressions like &VAR *EQ '*FROM' should NOT be atomic
-            if (hasVariable && !hasOperatorOrKeyword) {
-                const withoutParen = applyCase(parm.name, keywordCase) + '(' + valueText;
-                const withParen = withoutParen + ')';
-                // Add both with and without closing paren (since appendWrappedCLLine gets text without closing paren)
-                atomicValues.add(withoutParen);
-                atomicValues.add(withParen);
-                console.log(`[atomicValues] Added simple variable param as atomic: "${withoutParen}"`);
-            }
-        }
-        // Fallback: For simple arrays (if any parameters still use this format)
-        else if (Array.isArray(parm.value) && !('type' in parm.value)) {
-            const elements = parm.value.map(v => typeof v === 'string' ? v : String(v));
-            const valueText = elements.join(' ');
-            const withoutParen = applyCase(parm.name, keywordCase) + '(' + valueText;
-            const withParen = withoutParen + ')';
-            atomicValues.add(withoutParen);
-            atomicValues.add(withParen);
-        }
-    }
-    const formatValue = (value: CLValue, indentPos: number, parmName?: string, actualStartPos?: number): string => {
-        if (typeof value === 'string') return value;
-
-        // DEBUG: Log CMD/CMDSTR parameter structure
-        if (parmName === 'CMD' || parmName === 'CMDSTR') {
-            console.log(`${parmName} parameter structure:`, JSON.stringify(value, null, 2));
-            console.log(`${parmName} is array?`, Array.isArray(value));
-            if (typeof value === 'object' && value !== null && 'type' in value) {
-                console.log(`${parmName} type:`, (value as any).type);
-            }
-        }
-
-        if (Array.isArray(value)) {
-            // Legacy: array of arrays (Max>1 ELEM as nested arrays)
-            if (value.length > 0 && Array.isArray(value[0])) {
-                return value.map((v) => '(' + formatValue(v, indentPos + 1) + ')').join(' ');
-            }
-            // NEW: Multi-instance ELEM detection from syntax (all wrapped expressions)
-            // If all values are expression objects with wrapped=true, treat as multi-instance
-            // CHECK THIS BEFORE general expression handling to preserve wrapping
-            const allWrapped = value.every((v: any) =>
-                typeof v === 'object' && v !== null && 'wrapped' in v && v.wrapped === true);
-            console.log(`[formatValue-array] parm=${parmName}, length=${value.length}, allWrapped=${allWrapped}`, value);
-            if (value.length > 1 && allWrapped) {
-                // Format each wrapped expression with parens
-                console.log(`[formatValue-array] Formatting as multi-instance ELEM with wrapping`);
-                return value.map((v: any) => {
-                    // Preserve original token spacing by joining tokens directly (spaces are separate tokens)
-                    const inner = v.tokens.map((t: CLToken) => t.value).join('');
-                    return `(${inner})`;
-                }).join(' ');
-            }
-            // NEW: array of expressions (each may have wrapped=true/false)
-            if (value.length > 0 && value.every(isExpression)) {
-                // For CMD/CMDSTR parameters, preserve parentheses wrapping for each expression
-                // Don't treat as continuous stream - each expression is independent
-                const isCmdParameter = parmName && (parmName.toUpperCase() === 'CMD' || parmName.toUpperCase() === 'CMDSTR');
-
-                if (isCmdParameter) {
-                    // Original behavior: format each expression independently and wrap if needed
-                    // But be smart about spacing - don't add space before wrapped expression if
-                    // previous expression was a keyword
-                    const parts: string[] = [];
-                    for (let i = 0; i < value.length; i++) {
-                        const v = value[i];
-                        const inner = formatValue(v, indentPos + 1, parmName);
-                        const wrapped = (v as any).wrapped === true;
-                        // IMPORTANT: When wrapped===true, the tokens already include parentheses
-                        // (e.g., "(", "(", "value", ")", ")"), so formatValue returns them.
-                        // Don't wrap again or we'll get (((value))) instead of ((value))
-                        const formatted = inner;
-
-                        // Check if we need a space before this part
-                        if (i === 0) {
-                            // First part, no space needed
-                            parts.push(formatted);
-                        } else {
-                            // Check if current expression is wrapped (like "(value)")
-                            // and previous expression ended with a keyword
-                            const prevExpr = value[i - 1];
-                            const prevTokens = prevExpr.tokens;
-                            const prevLastToken = prevTokens[prevTokens.length - 1];
-                            const prevEndsWithKeyword = prevLastToken.type === 'keyword';
-
-                            // No space before wrapped expression if previous ended with keyword
-                            if (wrapped && prevEndsWithKeyword) {
-                                parts.push(formatted);
-                            } else {
-                                parts.push(' ' + formatted);
-                            }
-                        }
-                    }
-                    return parts.join('');
-                }
-
-                // For other parameters (like VALUE), collect all chunks for optimal line filling
-                const allChunks: string[] = [];
-                for (let i = 0; i < value.length; i++) {
-                    const v = value[i];
-                    const chunks = splitExpressionTokensForWrap(v.tokens);
-
-                    // Add space separator between expressions (except before first)
-                    if (i > 0 && allChunks.length > 0) {
-                        // Space will be added during wrapping
-                    }
-
-                    // Add all chunks from this expression
-                    allChunks.push(...chunks);
-                }
-
-                // Now wrap all chunks together as one continuous stream
-                let expr = '';
-                let lineLen = indentPos;
-
-                for (let i = 0; i < allChunks.length; i++) {
-                    const chunk = allChunks[i];
-                    if (i === 0) {
-                        expr += chunk;
-                        lineLen += chunk.length;
-                    } else {
-                        // Add space separator between chunks
-                        const spaceNeeded = 1;
-
-                        if (lineLen + spaceNeeded + chunk.length > rightMargin) {
-                            // Wrap to new line at continuation column
-                            const eol = getEOL();
-                            expr += `${eol}${' '.repeat(CONT_LINE_COL - 1)}${chunk}`;
-                            lineLen = CONT_LINE_COL - 1 + chunk.length;
-                        } else {
-                            expr += ' ' + chunk;
-                            lineLen += spaceNeeded + chunk.length;
-                        }
-                    }
-                }
-                return expr;
-            }
-            // Single grouped value (ELEM parameters like LOG, EXTRA, etc.)
-            // Format elements on one line without internal breaks
-            const elements = value.map(v => formatValue(v, indentPos + 1));
-            return elements.join(' ');
-        }
-
-        if ('function' in value) {
-            const args = value.args.map(a => formatValue(a, indentPos + 1));
-            const singleLine = `${value.function}(${args.join(' ')})`;
-            if (indentPos + singleLine.length <= rightMargin) {
-                return singleLine;
-            } else {
-                const eol = getEOL();
-                // Create properly formatted multi-line function call with continuation characters at line ends
-                const formattedArgs: string[] = [];
-                for (let i = 0; i < args.length; i++) {
-                    const arg = args[i];
-                    const isLast = i === args.length - 1;
-                    const indentedArg = ' '.repeat(Math.max(0, CONT_LINE_COL - 1)) + arg;
-
-                    if (isLast) {
-                        formattedArgs.push(indentedArg);
-                    } else {
-                        formattedArgs.push(indentedArg + ' ' + continuationChar);
-                    }
-                }
-
-                const closeParen = ' '.repeat(Math.max(0, indentPos - 1)) + ')';
-                return `${value.function}(${eol}${formattedArgs.join(eol)}${eol}${closeParen}`;
-            }
-        }
-        if ('type' in value && value.type === 'command_call') {
-            const eol = getEOL();
-            // DEBUG: Log nested command structure
-            if (parmName === 'CMD' || parmName === 'CMDSTR') {
-                console.log('Nested command:', value.name);
-                console.log('Nested command params:', value.parameters.map((p: any) => ({
-                    name: p.name,
-                    value: typeof p.value === 'string' ? p.value : p.value
-                })));
-            }
-            // Nested commands should always use CONT_LINE_COL for continuation lines, not indentPos
-            return formatCL_SEU(value, label).replace(new RegExp(eol, 'g'), eol + ' '.repeat(CONT_LINE_COL - 1));
-        }
-        if ('type' in value && value.type === 'expression') {
-            // Check if this is an atomic ELEM parameter that should NOT be broken into chunks
-            // These parameters were marked as atomic earlier and should stay on one line
-            if (parmName) {
-                const tokens = value.tokens as Array<{type: string, value: string}>;
-                const values = tokens.filter(t => t.type !== 'space').map(t => t.value);
-
-                // Check if original tokens contain spaces between variables
-                // If yes, preserve spaces. If no, join without spaces (for compound vars like &LIB_&FILE)
-                const hasVariable = tokens.some(t => t.type === 'variable' || (t.type === 'value' && CL_VARIABLE_PATTERN.test(t.value)));
-                const hasOperatorOrKeyword = tokens.some(t => t.type === 'keyword' || t.type === 'operator' || t.type === 'symbolic_value' || (t.type === 'value' && /^[*%]/.test(t.value)));
-                const hasSpacesBetweenTokens = tokens.some(t => t.type === 'space');
-                console.log(`[formatValue-atomicCheck] parm=${parmName}, hasVariable=${hasVariable}, hasOperatorOrKeyword=${hasOperatorOrKeyword}, hasSpaces=${hasSpacesBetweenTokens}, tokens=`, tokens.map(t => `${t.type}:${t.value}`));
-
-                // Join logic:
-                // 1. If has operators/keywords OR has spaces between tokens → join with spaces
-                // 2. If only variables with NO spaces → join without spaces (compound var like &LIB_&FILE)
-                const valueText = (hasVariable && !hasOperatorOrKeyword && !hasSpacesBetweenTokens) ? values.join('') : values.join(' ');
-                console.log(`[formatValue-atomicCheck] valueText="${valueText}"`);
-
-                const fullParam = parmName + '(' + valueText + ')';
-
-                if (atomicValues.has(fullParam)) {
-                    // This is an atomic ELEM - return all values on one line without wrapping
-                    return valueText;
-                }
-            }
-
-            const chunks = splitExpressionTokensForWrap(value.tokens);
-
-            // DEBUG: Log chunks for VALUE parameter
-            if (parmName === 'VALUE') {
-                console.log('Chunks for VALUE:', chunks);
-                console.log('IndentPos (for continuations):', indentPos);
-                console.log('ActualStartPos (first line):', actualStartPos);
-                console.log('Right margin:', rightMargin);
-            }
-
-            let expr = '';
-            // Use actualStartPos for the first line if provided, otherwise use indentPos
-            let lineLen = actualStartPos !== undefined ? actualStartPos : indentPos;
-
-            // Reserve space for continuation character " +" (2 chars) on any line that might wrap
-            // This ensures we don't exceed the margin when the continuation char is added later
-            const continuationCharSpace = 2;
-            const effectiveMargin = rightMargin - continuationCharSpace;
-
-            // For CMD/CMDSTR parameters, preserve exact token spacing
-            const isCmdParameter = parmName && (parmName.toUpperCase() === 'CMD' || parmName.toUpperCase() === 'CMDSTR');
-
-            for (let i = 0; i < chunks.length; i++) {
-                const chunk = chunks[i];
-                if (i === 0) {
-                    // First chunk - just add it
-                    expr += chunk;
-                    lineLen += chunk.length;
-                    if (parmName === 'VALUE') {
-                        console.log(`Chunk ${i}: "${chunk}" (len=${chunk.length}), lineLen now: ${lineLen}`);
-                    }
-                } else {
-                    // Subsequent chunks - add space separator and check if wrapping is needed
-                    const spaceNeeded = 1; // Always add space between chunks
-
-                    // Check if we're at the last chunk
-                    const isLastChunk = (i === chunks.length - 1);
-                    // Use effective margin (reserve space for " +") unless it's the last chunk
-                    const marginToUse = isLastChunk ? rightMargin : effectiveMargin;
-
-                    if (lineLen + spaceNeeded + chunk.length > marginToUse) {
-                        // Wrap to new line at continuation column
-                        const eol = getEOL();
-                        expr += `${eol}${' '.repeat(CONT_LINE_COL - 1)}${chunk}`;
-                        lineLen = CONT_LINE_COL - 1 + chunk.length;
-                        if (parmName === 'VALUE') {
-                            console.log(`Chunk ${i}: "${chunk}" (len=${chunk.length}) WRAPPED, lineLen now: ${lineLen}`);
-                        }
-                    } else {
-                        // Fits on current line
-                        expr += ' ' + chunk;
-                        lineLen += spaceNeeded + chunk.length;
-                        if (parmName === 'VALUE') {
-                            console.log(`Chunk ${i}: "${chunk}" (len=${chunk.length}), lineLen now: ${lineLen}`);
-                        }
-                    }
-                }
-            }
-            // If this expression was originally wrapped in parentheses, preserve them
-            if ('wrapped' in value && value.wrapped === true) {
-                return '(' + expr + ')';
-            }
-            return expr;
-        }
-        return '';
-    };
-
-    const labelPart = label
-        ? padTo(LABEL_COL - 1, 0) + (label + ':').padEnd(CMD_COL - LABEL_COL + 1)
-        : padTo(CMD_COL - 1, 0);
-
-    let currentLine = labelPart + applyCase(node.name, keywordCase) + padTo(FIRST_PARAM_COL - 2, (labelPart + applyCase(node.name, keywordCase)).length);
-
-    // Remove this block if you want strict column control, or adjust as needed
-    // if (currentLine.length < FIRST_PARAM_COL) {
-    //     currentLine += ' '.repeat(FIRST_PARAM_COL - currentLine.length);
-    // }
-
-    const linesOut: string[] = [];
-    let firstParam = true;
-
-    for (const [idx, parm] of node.parameters.entries()) {
-
-        // Check if this is a positional parameter (internal __pos naming)
-        const isPositional = parm.name.toLowerCase().startsWith('__pos');
-        const keywordText = isPositional ? '' : applyCase(parm.name, keywordCase);
-
-        // Calculate where the value will actually start on the current line
-        // For named params: after "KEYWORD("
-        // For positional params: right after current position
-        const keywordPrefix = isPositional ? '' : keywordText + '(';
-        const spaceBeforeParam = firstParam ? '' : ' ';
-
-        // Calculate the actual starting position for the value on the first line
-        let actualStartPos: number;
-        if (wrapped && !firstParam) {
-            // If we're wrapping to a new line, start at continuation column
-            actualStartPos = CONT_LINE_COL - 1 + keywordPrefix.length;
-        } else {
-            // Otherwise, start after current line content plus the keyword prefix
-            actualStartPos = currentLine.length + spaceBeforeParam.length + keywordPrefix.length;
-        }
-
-        const indentPos = idx === 0 ? FIRST_PARAM_COL : CONT_LINE_COL;
-        const formattedValue = formatValue(parm.value, indentPos, parm.name, actualStartPos);
-        const eol = getEOL();
-        const valueLines = formattedValue.split(eol);
-        const firstValueLine = valueLines[0];
-
-        const parmStrFirstLine = isPositional
-            ? // For positional params, preserve the value as-is (including parens for expressions)
-              (firstValueLine.startsWith("'") || firstValueLine.startsWith("(") ? firstValueLine : applyCase(firstValueLine, keywordCase))
-            : keywordText + '(' +
-              (firstValueLine.startsWith("'") ? firstValueLine : applyCase(firstValueLine, keywordCase));
-
-        // Check if we need to wrap to a new line before adding this parameter
-        // Only wrap if adding this parameter (with closing paren) would exceed the margin
-        let justWrapped = false;
-        if (!firstParam) {
-            const closingParen = isPositional ? '' : ')';
-            const spaceBeforeParam = ' ';
-            const estimatedParamLength = spaceBeforeParam.length + parmStrFirstLine.length + closingParen.length;
-            const wouldExceedMargin = (currentLine.length + estimatedParamLength) > rightMargin;
-
-// Check if this parameter is an ELEM group (expression object) that should be kept atomic
-            const isElemExpression = typeof parm.value === 'object' && parm.value !== null &&
-                'type' in parm.value && (parm.value as any).type === 'expression' && 'tokens' in parm.value;
-            const isElemArray = Array.isArray(parm.value) && !('type' in parm.value);
-            const isElemParameter = isElemExpression || isElemArray;
-
-            // For ELEM parameters, construct the full text using the raw values (not firstValueLine)
-            let fullParamText: string;
-            if (isElemExpression) {
-                // Extract non-space token values from expression object
-                const tokens = (parm.value as any).tokens as Array<{type: string, value: string}>;
-                const values = tokens.filter(t => t.type !== 'space').map(t => t.value);
-                const valueText = values.join(' ');
-                fullParamText = keywordText + '(' + valueText + ')';
-            } else if (isElemArray) {
-                // For array ELEM parameters, use formattedValue which handles wrapped expressions
-                // formattedValue already includes proper wrapping from formatValue function
-                fullParamText = keywordText + '(' + formattedValue + ')';
-            } else {
-                fullParamText = isPositional ? firstValueLine : keywordText + '(' + firstValueLine + ')';
-            }
-
-            const isAtomicElem = isElemParameter && atomicValues.has(fullParamText);
-
-            // Wrap if:
-            // 1. We would exceed margin AND we're already wrapping, OR
-            // 2. This is an atomic ELEM parameter that won't fit on current line
-            if (wouldExceedMargin && (wrapped || isAtomicElem)) {
-                // Would exceed margin - wrap to new line
-                linesOut.push(currentLine + ' ' + continuationChar);
-                currentLine = ' '.repeat(CONT_LINE_COL - 1);
-                justWrapped = true;
-            }
-        }
-
-        // space between parameters
-        // Don't add leading space if we just wrapped to a continuation line (already at correct column)
-        let parmText = '';
-        if (firstParam) {
-            parmText = parmStrFirstLine;
-        } else if (justWrapped) {
-            parmText = parmStrFirstLine;  // No space - already at continuation column
-        } else {
-            parmText = ' ' + parmStrFirstLine;  // Normal case - add space between params
-        }
-
-        console.log(`[formatCL_SEU] param ${idx}: parmText="${parmText}" (starts with space: ${parmText[0] === ' '})`);
-
-        const result = appendWrappedCLLine(
-            currentLine,
-            parmText,
-            linesOut,
-            rightMargin,
-            indentPos,
-            continuationChar,
-            atomicValues
-        );
-        // Simply use the result as-is - appendWrappedCLLine handles indentation correctly
-        currentLine = result.currentLine;
-        wrapped = result.lineWrap;
-
-        // Handle continuation lines from multi-line values
-        // These are already formatted with proper indentation by formatValue, so just add them directly
-        for (let i = 1; i < valueLines.length; i++) {
-            if (!valueLines[i].trim()) continue;
-
-            // Push current line with continuation character (trim trailing spaces first)
-            linesOut.push(currentLine.trimEnd() + ' ' + continuationChar);
-            // Use the pre-formatted line as-is - it already has correct indentation
-            currentLine = valueLines[i];
-            wrapped = true;
-        }
-
-        // Only add closing paren for named parameters, not positional
-        if (!isPositional) {
-            currentLine += ')';
-        }
-        firstParam = false;
-    }
-
-    linesOut.push(currentLine);
-
-    // Append trailing comment if present with proper wrapping
-    if (node.comment) {
-        const lastIdx = linesOut.length - 1;
-        let lastLine = linesOut[lastIdx];
-
-        // Extract comment content between /* and */
-        const commentMatch = node.comment.match(/^\/\*\s*(.*?)\s*\*\/$/);
-        if (!commentMatch) {
-            // Malformed comment, just append as-is if it fits
-            const testLine = lastLine + ' ' + node.comment;
-            if (testLine.length <= rightMargin) {
-                linesOut[lastIdx] = testLine;
-            } else {
-                // Doesn't fit - add continuation and put comment on next line
-                linesOut[lastIdx] = lastLine + ' ' + continuationChar;
-                linesOut.push(' '.repeat(CONT_LINE_COL - 1) + node.comment);
-            }
-        } else {
-            const commentContent = commentMatch[1];
-            const testLine = lastLine + ' /* ' + commentContent + ' */';
-
-            // Check if it fits on the same line
-            if (testLine.length <= rightMargin) {
-                linesOut[lastIdx] = testLine;
-            } else {
-                // Need to wrap comment - add continuation char and put comment on next line
-                linesOut[lastIdx] = lastLine + ' ' + continuationChar;
-
-                // Format comment on continuation line(s)
-                const commentIndent = ' '.repeat(CONT_LINE_COL - 1);
-                const fullComment = '/* ' + commentContent + ' */';
-
-                // Check if full comment fits on one continuation line
-                if ((commentIndent + fullComment).length <= rightMargin) {
-                    linesOut.push(commentIndent + fullComment);
-                } else {
-                    // Comment needs wrapping across multiple lines
-                    const words = commentContent.split(/\s+/);
-                    let currentContent = '';
-                    let commentLines: string[] = [];
-
-                    for (let i = 0; i < words.length; i++) {
-                        const word = words[i];
-                        const isLastWord = i === words.length - 1;
-                        const testContent = currentContent ? currentContent + ' ' + word : word;
-                        const suffix = isLastWord ? ' */' : ' +';
-                        const prefix = commentLines.length === 0 ? '/* ' : '';
-
-                        if ((commentIndent + prefix + testContent + suffix).length <= rightMargin) {
-                            currentContent = testContent;
-                            if (isLastWord) {
-                                // Last word fits - close the comment
-                                commentLines.push(commentIndent + prefix + currentContent + ' */');
-                            }
-                        } else {
-                            // Word doesn't fit - push current content and start new line
-                            if (currentContent) {
-                                commentLines.push(commentIndent + prefix + currentContent + ' +');
-                            }
-                            currentContent = word;
-                            if (isLastWord) {
-                                // Last word on its own line
-                                commentLines.push(commentIndent + currentContent + ' */');
-                            }
-                        }
-                    }
-
-                    linesOut.push(...commentLines);
-                }
-            }
-        }
-    }
-
-    const eol = getEOL();
-    return linesOut.join(eol);
+    return formatCLCommand_v2(node, label, {
+        leftMargin: config.get<number>('formatCmdPosition', 14),
+        rightMargin: config.get<number>('formatRightMargin', 70),
+        contIndent: config.get<number>('formatContinuePosition', 27),
+        continuationChar: '+',
+        labelPosition: config.get<number>('formatLabelPosition', 2),
+        kwdPosition: config.get<number>('formatKwdPosition', 25)
+    });
 }
 
 /**

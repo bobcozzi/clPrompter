@@ -2,6 +2,33 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.0.46] - 2026-02-06
+### Fixed
+- **Formatter: Nested command paren preservation**: Fixed nested commands losing closing parentheses during formatting
+  - Example: `SBMJOB CMD(DSPJOB JOB(x) DUPJOBOPT(y))` now correctly preserves both closing parens
+  - Enhanced token layout formatter to check wrapped flag on individual array items
+- **Formatter: Comment preservation**: Fixed trailing comments being removed during command formatting
+  - Added `extractCommentFromCommand()` function to extract comments before tokenization
+  - Integrated comment extraction into `formatCLCmd()` workflow
+  - Comments now properly preserved and reformatted with IBM i-style spacing
+- **Formatter: Blank line preservation**: Fixed blank lines being deleted in file-level formatting
+  - Corrected falsy check in `formatCL.ts` to properly detect empty lines
+  - Empty lines now preserved in source file formatting
+- **Formatter: Continuation comment handling**: Fixed comments lost after multi-line string literals with continuations
+  - Added quote state tracking across continuation lines in `extractor.ts`
+  - Multi-line strings with trailing comments now correctly preserve both elements
+- **Formatter: Margin overflow prevention**: Fixed continuation character causing lines to exceed right margin
+  - Added logic to check if adding ` +` would exceed margin before appending
+  - Breaks line earlier if continuation would cause overflow
+- **Formatter: IBM i-style comment placement**: Comments now start on same line when space permits (matching IBM i behavior)
+  - First checks if full comment fits on current line without wrapping
+  - Only adds continuation and wraps if comment is too long
+  - Word-wraps long comments across multiple lines respecting margins
+  - Example: `PRTDEV(*USRPRF) /* comment */` keeps comment on same line instead of breaking unnecessarily
+- **Prompter: Label width collapse**: Fixed "Label:" and "Comment:" fields becoming 2 characters wide for commands with no parameters
+  - Added minimum width constraint of 10ch to `optimizeLabelWidth()`
+  - Static fields now properly sized even when parameter form is empty
+
 ## [0.0.45] - 2026-02-04
 ### Fixed
 - **ELEM group parentheses preservation**: Fixed formatting to preserve parentheses around multi-instance ELEM parameters

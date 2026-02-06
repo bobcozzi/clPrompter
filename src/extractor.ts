@@ -58,6 +58,7 @@ export function collectCLCmdFromLine(
   let command = '';
   let commentParts: string[] = [];
   let inComment = false;
+  let inQuote = false; // Track quote state across continuation lines
   let lineIndex = startLine;
   const totalLines = doc.lineCount;
   let prevContChar = '';
@@ -93,7 +94,7 @@ export function collectCLCmdFromLine(
       } else {
         // Look for the pattern ' /*' (space followed by /*) that is NOT inside quotes
         // Scan through the line, tracking whether we're inside a quoted string
-        let inQuote = false;
+        // Note: inQuote is now tracked across continuation lines
         for (let i = 0; i < line.length - 2; i++) {
           const char = line[i];
 

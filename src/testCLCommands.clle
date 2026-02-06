@@ -1,0 +1,117 @@
+ DTAARA:     PGM        PARM(&P2 &PARM3 &PARM4 &P7 &PARM8 &PARM10) +
+                          /* Input parameters */
+             DCL        VAR(&VALUE) TYPE(*CHAR) LEN(128) +
+                          VALUE('These are the times to rememberx x +
+                          x x x x x x x')
+             DCL        VAR(&TOMBR) TYPE(*CHAR) LEN(20) BASPTR(&P2) +
+                          DEFVAR(&BASE)
+             DCL         VAR(&MBROPT) TYPE(*CHAR) LEN(10)
+             DCL         VAR(&CRTFILE) TYPE(*CHAR) LEN(4) POS(5)
+             DCL         VAR(&FC) TYPE(*CHAR) LEN(12)
+             DCL         VAR(&CPYSRC) TYPE(*CHAR) LEN(512)
+/* This is some long-ass comment */
+             DCL         VAR(&LEN) TYPE(*DEC) LEN(5 0)
+             DCL         VAR(&CMDLEN) TYPE(*DEC) LEN(15 5)
+ TRYCATCH:   MONMSG     MSGID(MSG1000 MSG2000) /* hello bitch what +
+                          the fuck are you doing here? */
+             GOTO       CMDLBL(ENDPGM)
+ TRYCATCX:    MONMSG    MSGID(CPF0000 MCH3601)
+             IF         COND(&TOFILE *EQ '*FROM' *OR &TOFILE = +
+                          '*FROMFILE') THEN(DO)
+             ENDDO
+
+             COZTEST/BADQUAL FILE('THESEARETHEDAYSTOHOLDONTOBUTWEWON+
+                        TALTHOUGHWELLWANTTO'/'THESEARETHETIMESTOREME+
+                        MBERCAUSETHEYWILLNOTLASTFOREVER') +
+                          /* Hello world */
+
+
+
+             IF         COND(&TOLIB *EQ '*FROMLIB') THEN(DO)
+             CHGVAR     VAR(&TOLIB) VALUE(&TOLIB *BCAT 'HELLO WORLD')
+             ENDDO
+             DLTF       FILE(QTEMP/DDMTOFILE) SYSTEM(*FILETYPE)
+             MONMSG     MSGID(CPF0000)
+             DLTF       FILE(QTEMP/DDMFRMFILE)
+             MONMSG     MSGID(CPF0000)
+             IF         COND(&TOSYS *NE '*LOCAL') THEN(DO)
+             CRTDDMF    FILE(QTEMP/DDMFRMFILE) RMTFILE(&LIB /) +
+                          RMTLOCNAME(NAS *IP) LCLLOCNAME(*LOC) +
+                          PORT(*DRDA) /* create ddm file */
+
+             CHGVAR     VAR(&TOLIB) VALUE('QTEMP')
+             CHGVAR     VAR(&TOLIB) VALUE('QTEMP')
+             CHGVAR     VAR(&TOFILE) VALUE('DDMTOFILE')
+             ENDDO
+             IF         COND(&FROMSYS *NE '*LOCAL') THEN(DO) /* no */
+
+             CHGVAR     VAR(&FROMLIB) VALUE(QTEMP)
+             CHGVAR     VAR(&SHORTVAR) +
+                          VALUE('xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx+
+                          xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx+
+                          xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx+
+                          xxxxxxxxxxxxxxxxxxxxxxxxxx')
+
+             CHGVAR     VAR(&FROMFILE) VALUE('These are the times to +
+                          remember, cause they will not last +
+                          forever. remember, cause they will not +
+                          last forever. remember, cause they will +
+                          not last forever. remember, cause they +
+                          will not last forever. won''t although +
+                          we''ll want to.') /* Hello world */
+
+             CHGVAR     VAR(&LONGVAR_FIELDNAME) +
+                          VALUE('xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx+
+                          xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx')
+
+             CHGVAR     VAR(&FROMFILE) VALUE('These are the +
+                          timestoremember, cause they will not +
+                          lastforever.') /* hello world */
+
+             CHGVAR      VAR(&FCK) VALUE(X'0000000000000000')
+
+             CHGJOB     JOB(*) JOBPTY(3) OUTPTY(3) PRTDEV(*USRPRF) +
+                          OUTQ(*USRPRF) RUNPTY(14) PRTTXT('This is +
+                          some print text') LOG(4 0 *MSG) +
+                          LOGCLPGM(*YES) LOGOUTPUT(*JOBEND) /* +
+                          Print override */
+
+ CHANGJOB:   CHGJOB     JOB(400400/COZZI/DSP01) JOBPTY(3) +
+                          OUTQ(*USRPRF) LOG(4 0 *SECLVL) +
+                          DDMCNV(*KEEP) SCDDATE(*MONTHSTR) +
+                          SCDTIME(*CURRENT) DATFMT(*YMD) +
+                          DFTWAIT(*NOMAX) /* Something, something, +
+                          something, dark side! */
+ CHANGJOB:   CHGJOB     JOB(400400/COZZI/DSP01) JOBPTY(3) +
+                          OUTQ(*USRPRF) LOG(4 0 *SECLVL) +
+                          DDMCNV(*KEEP) SCDDATE(*MONTHSTR) +
+                          SCDTIME(*CURRENT) DATFMT(*YMD) +
+                          DFTWAIT(*NOMAX) /* Something, something, +
+                          something, dark side! */
+             DSPJOB     JOB(063459/COZZI/THREADS) DUPJOBOPT(*MSG)
+             CHGVAR     VAR(&OBJNAME) VALUE(&OBJ / &NAME)
+             SBMJOB     CMD(DSPJOB JOB(063459/COZZI/THREADS) +
+                          DUPJOBOPT(*MSG)) JOB(IBMIRD) +
+                          PRTDEV(*USRPRF) /* what the heck? Over. */
+
+ IQUERY:     RUNIQRY    SQL('select * from qiws.qcustcdt') +
+                          OUTPUT(*PRINT) EXTRA((*BEFORE 'Something +
+                          something something, dark side.') (*AFTER +
+                          'The force awakens in this one.')) +
+                          EMAIL('cozzi@rpgiv.com' +
+                          'jason@aidltd.com') /* Hello World */
+
+             CHGVAR     VAR(&CPYSRC3) VALUE(&TOFILE *TCAT ') ' *BCAT +
+                          'FROMMBR(' *CAT 'FROMFILE(' *CAT &FROMLIB +
+                          *TCAT '/' *CAT &FROMFILE *TCAT ')' *BCAT +
+                          'TOFILE(' *CAT &TOLIB *TCAT '/' *CAT +
+                          &TOFILE *TCAT ') ' *BCAT 'FROMMBR(' *CAT +
+                          &FROMMBR *TCAT ')' *BCAT 'TOMBR(' *CAT +
+                          &TOMBR *TCAT ')' *BCAT 'MBROPT(' *CAT +
+                          &MBROPT *TCAT ')' *BCAT 'CRTFILE(' *CAT +
+                          &CRTFILE *TCAT ')')
+
+             CHGVAR     VAR(&RESULT) VALUE(&A * &B + 3 - &OFFSET * +
+                          &LEN)
+
+ ENDPGM:     ENDPGM
