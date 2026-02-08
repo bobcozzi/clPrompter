@@ -44,7 +44,7 @@ interface LayoutConfig {
 const DEFAULT_CONFIG: LayoutConfig = {
     leftMargin: 15,
     rightMargin: 80,
-    contIndent: 26,
+    contIndent: 25,
     continuationChar: '+'
 };
 
@@ -550,7 +550,10 @@ export function formatCLCommand_v2(node: CLNode, label?: string, config: Partial
         // Position label at labelPosition, command at leftMargin
         const labelPos = finalConfig.labelPosition || 2;
         const labelPad = ' '.repeat(Math.max(0, labelPos - 1));
-        const cmdPad = ' '.repeat(Math.max(0, finalConfig.leftMargin - (labelPos + label.length + 1)));
+        // For label-only lines (empty cmdName and no parameters), don't add padding
+        const cmdPad = (node.name === '' && node.parameters.length === 0)
+            ? ''
+            : ' '.repeat(Math.max(0, finalConfig.leftMargin - (labelPos + label.length + 1)));
         cmdStart = `${labelPad}${label}:${cmdPad}${node.name}`;
         leftPad = '';
     } else {
@@ -599,27 +602,27 @@ export function formatCLCommand_v2(node: CLNode, label?: string, config: Partial
     if (node.comment) {
         const lastLineIdx = lines.length - 1;
         const lastLine = lines[lastLineIdx];
+        const trimmedLine = lastLine.trimEnd();
         const commentWithSpace = ' ' + node.comment;
 
-        // Check if comment fits on the same line as the last line
-        if (lastLine.length + commentWithSpace.length <= finalConfig.rightMargin) {
+        // Check if comment fits on the same line (use trimmed line for accurate length)
+        if (trimmedLine.length + commentWithSpace.length <= finalConfig.rightMargin) {
             // Comment fits on same line
-            lines[lastLineIdx] = lastLine + commentWithSpace;
+            lines[lastLineIdx] = trimmedLine + commentWithSpace;
         } else {
             // Comment doesn't fit entirely - need to analyze further
-            const trimmedLine = lastLine.trimEnd();
             const commentIndent = ' '.repeat(finalConfig.contIndent - 1);
 
             // Extract comment text (strip opening and closing markers)
             const commentText = node.comment.replace(/^\/\*\s*/, '').replace(/\s*\*\/$/, '').trim();
 
-            // First check if comment fits on same line WITHOUT wrapping
+            // Check if reconstructing comment with proper spacing would fit
             const openMarker = ' /* ';
             const closeMarker = ' */';
             const fullCommentOneLine = trimmedLine + openMarker + commentText + closeMarker;
 
             if (fullCommentOneLine.length <= finalConfig.rightMargin) {
-                // Comment fits entirely on the line without wrapping
+                // Comment fits entirely on the line with proper spacing
                 lines[lastLineIdx] = fullCommentOneLine;
             } else {
                 // Try to start comment on same line with command, wrapping remainder

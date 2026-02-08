@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.0.47] - 2026-02-07
+### Fixed
+- **Prompter: Focus indicator for combined parameters**: Fixed focus indicator not following focus from dropdown to textarea in parameters with both controls
+  - Applied textarea-cbinput-container split pattern to all parameter rendering functions
+  - Fixed renderQualParm, renderElemParm (multiple locations) to create separate form-groups for dropdown and textarea
+  - Fixed delayed blur handler to prevent premature indicator removal
+- **Prompter: Focus indicator positioning**: Optimized spacing between indicator and input fields
+  - Reduced indicator margin, label padding, and grid gap for tighter layout
+  - Changed label overflow from hidden to visible to prevent indicator clipping
+- **Prompter: Textarea alignment**: Fixed cmdComment and all textareas to use top alignment instead of center alignment for consistent appearance
+
 ## [0.0.46] - 2026-02-06
 ### Fixed
 - **Formatter: Nested command paren preservation**: Fixed nested commands losing closing parentheses during formatting
@@ -107,7 +118,7 @@ All notable changes to this project will be documented in this file.
   - `debugXmlPath` → `savedCmdXMLFileLocation`
 
 ### Fixed
-- **Initial Focus State**: Focus indicator now appears correctly on the first field (clLabel) when prompter opens
+- **Initial Focus State**: Focus indicator now appears correctly on the first field (cmdLabel) when prompter opens
 - **Tab Order**: cbInput dropdown buttons no longer interfere with tab navigation (tabIndex=-1)
 - **Comment Indentation**: Fixed extra space issue in continuation lines of multi-line comments
 - **ELEM Parameter Breaking**: Resolved issue where ELEM parameters were wrapping internally despite being marked atomic

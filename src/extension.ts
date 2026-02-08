@@ -211,6 +211,15 @@ export class ClPromptPanel {
             const column = parentPanel._panel.viewColumn ?? vscode.ViewColumn.One;
 
             let cmdName = extractCmdName(commandString);
+            const cmdLabel = extractCmdLabel(commandString);
+
+            // Handle label-only lines in nested context
+            if (!cmdName && cmdLabel) {
+                console.log(`[clPrompter] Label-only nested line: ${cmdLabel}`);
+                resolve(cmdLabel + ':');
+                return;
+            }
+
             if (!cmdName) {
                 cmdName = (await askUserForCMDToPrompt(commandString)).toString();
             }
@@ -221,7 +230,6 @@ export class ClPromptPanel {
 
             console.log(`[clPrompter] Nested prompt for: ${cmdName}`);
             const xml = await getCMDXML(cmdName);
-            const cmdLabel = extractCmdLabel(commandString);
 
             // Extract command prompt from XML for panel title
             let cmdPrompt = '';
@@ -294,13 +302,41 @@ export class ClPromptPanel {
         }
 
         let cmdName = extractCmdName(fullCmd);
+        const cmdLabel = extractCmdLabel(fullCmd);
+
+        // ✅ Create selection that spans the entire command range (needed for all code paths)
+        const selection = editor && commandRange
+            ? new vscode.Selection(
+                commandRange.startLine, 0,
+                commandRange.endLine, editor.document.lineAt(commandRange.endLine).text.length
+            )
+            : undefined;
+
+        // Handle label-only lines (e.g., "ENDPGM:")
+        if (!cmdName && cmdLabel) {
+            // Label-only line - create a minimal prompter with just Label and Comment fields
+            console.log(`[clPrompter] Label-only line detected: ${cmdLabel}`);
+            const panel = vscode.window.createWebviewPanel(
+                'clPrompter',
+                `Label: ${cmdLabel}`,
+                vscode.ViewColumn.One,
+                {
+                    enableScripts: true,
+                    retainContextWhenHidden: true,
+                    localResourceRoots: [vscode.Uri.joinPath(extensionUri, 'media')]
+                }
+            );
+            ClPromptPanel.currentPanel = new ClPromptPanel(
+                panel, extensionUri, '', cmdLabel, '', editor, selection, fullCmd, cmdComment);
+            return;
+        }
+
         if (!cmdName) {
             cmdName = (await askUserForCMDToPrompt(fullCmd)).toString();
         }
         if (!cmdName || cmdName.trim() == '') {
             return;
         }
-        const cmdLabel = extractCmdLabel(fullCmd);
 
         console.log(`[clPrompter] About to call getCMDXML for: ${cmdName}`);
         const xml = await getCMDXML(cmdName);
@@ -340,14 +376,6 @@ export class ClPromptPanel {
             const scheme = editor?.document.uri.scheme || 'unknown';
             console.log(`[clPrompter] No file path available (scheme: ${scheme}), skipping XML file write`);
         }
-
-        // ✅ Create selection that spans the entire command range
-        const selection = editor && commandRange
-            ? new vscode.Selection(
-                commandRange.startLine, 0,
-                commandRange.endLine, editor.document.lineAt(commandRange.endLine).text.length
-            )
-            : undefined;
 
         // Extract command prompt from XML for panel title
         let cmdPrompt = '';
@@ -420,7 +448,8 @@ export class ClPromptPanel {
         this._documentUri = editor?.document.uri;
         this._selection = selection;
 
-        if (fullCmd) {
+        // For label-only lines (no command), skip parameter extraction from XML
+        if (fullCmd && cmdName && cmdName.trim() !== '') {
             // 1) Extract metas then filter/sort by XML (skip Constant/NULL)
             this._parmMetas = extractParmMetas(xml);
 
@@ -499,6 +528,14 @@ export class ClPromptPanel {
                     return;
                 }
                 console.log('[clPrompter] Sending processed data to webview');
+
+                // For label-only lines (no command), skip XML processing and just send label/comment
+                if (!this._cmdName || this._cmdName.trim() === '') {
+                    console.log('[clPrompter] Label-only prompter (webviewReady), skipping XML processing');
+                    panel.webview.postMessage({ type: "setLabel", label: cmdLabel, comment: cmdComment });
+                    this._sentFormData = true;
+                    return;
+                }
 
                 // Extract command prompt from XML
                 let cmdPrompt = '';
@@ -593,6 +630,66 @@ export class ClPromptPanel {
                         console.log('[submit] this._cmdName:', this._cmdName);
                         console.log('[submit] Received cmdName:', message.cmdName);
                         console.log('[submit] message.values:', message.values);
+
+                        // Handle label-only lines (no command)
+                        if (!this._cmdName || this._cmdName.trim() === '') {
+                            console.log('[submit] Label-only line, skipping XML processing');
+
+                            // Extract comment from values if present (normalize newlines to spaces)
+                            const submittedComment = message.values['comment'] as string | undefined;
+                            const normalizedComment = submittedComment ? submittedComment.replace(/\r\n|\n|\r/g, ' ') : submittedComment;
+                            const finalComment = normalizedComment || (this._cmdComment ? this._cmdComment.replace(/\r\n|\n|\r/g, ' ') : this._cmdComment);
+
+                            // Format label-only line directly (bypass tokenizer/parser)
+                            const config = vscode.workspace.getConfiguration('clPrompter');
+                            const labelPosition = config.get<number>('formatLabelPosition', 2);
+                            const labelPad = ' '.repeat(Math.max(0, labelPosition - 1));
+
+                            let formatted = `${labelPad}${this._cmdLabel}:`;
+                            if (finalComment && finalComment.trim()) {
+                                formatted += ' ' + finalComment.trim();
+                            }
+
+                            console.log('[submit] Label-only formatted output:', formatted);
+
+                            // If this is a nested prompter, resolve with formatted label
+                            if (this._isNested && this._nestedResolver) {
+                                console.log('[submit] Nested prompter resolving with label:', formatted);
+                                this._nestedResolver(formatted);
+                                this._panel.dispose();
+                                break;
+                            }
+
+                            // Insert the formatted label back into the document
+                            if (this._documentUri && this._selection) {
+                                vscode.workspace.openTextDocument(this._documentUri).then(doc => {
+                                    vscode.window.showTextDocument(doc, { preview: false, preserveFocus: true }).then(editor => {
+                                        const eol = doc.eol === vscode.EndOfLine.LF ? '\n' : '\r\n';
+                                        const formattedWithEOL = formatted.split(/\r?\n/).join(eol);
+                                        editor.edit(editBuilder => {
+                                            editBuilder.replace(this._selection!, formattedWithEOL);
+                                        }).then(success => {
+                                            if (!success) {
+                                                vscode.window.showWarningMessage('Failed to insert label. Try again.');
+                                            }
+                                            // Transfer focus back to editor before disposing
+                                            vscode.window.showTextDocument(doc, { preview: false, preserveFocus: false }).then(() => {
+                                                this._panel.dispose();
+                                            });
+                                        });
+                                    });
+                                });
+                            } else {
+                                vscode.window.showWarningMessage(
+                                    'Could not insert label: original editor is no longer open.'
+                                );
+                                vscode.env.clipboard.writeText(formatted);
+                                vscode.window.showInformationMessage('Label copied to clipboard.');
+                                this._panel.dispose();
+                            }
+                            break;
+                        }
+
                         console.log('[submit] Raw message.values:');
                         Object.keys(message.values).forEach(key => {
                             console.log(`  ${key}: "${message.values[key]}"`);
@@ -631,8 +728,9 @@ export class ClPromptPanel {
                             console.log('[submit] INCREL value from form:', message.values['INCREL']);
                         }
 
-                        // Extract comment from values if present
+                        // Extract comment from values if present (normalize newlines to spaces)
                         const submittedComment = message.values['comment'] as string | undefined;
+                        const normalizedComment = submittedComment ? submittedComment.replace(/\r\n|\n|\r/g, ' ') : submittedComment;
 
                         // Get the convertToUpperCase setting
                         const config = vscode.workspace.getConfiguration('clPrompter');
@@ -650,8 +748,8 @@ export class ClPromptPanel {
                             convertToUpperCase
                         );
 
-                        // Append comment if present
-                        const finalComment = submittedComment || this._cmdComment;
+                        // Append comment if present (use normalized comment)
+                        const finalComment = normalizedComment || (this._cmdComment ? this._cmdComment.replace(/\r\n|\n|\r/g, ' ') : this._cmdComment);
                         if (finalComment && finalComment.trim()) {
                             cmd += ' ' + finalComment.trim();
                         }
@@ -698,7 +796,7 @@ export class ClPromptPanel {
                         // Use the active document's EOL
                         if (this._documentUri && this._selection) {
                             vscode.workspace.openTextDocument(this._documentUri).then(doc => {
-                                vscode.window.showTextDocument(doc, { preview: false }).then(editor => {
+                                vscode.window.showTextDocument(doc, { preview: false, preserveFocus: true }).then(editor => {
                                     const eol = doc.eol === vscode.EndOfLine.LF ? '\n' : '\r\n';
                                     const formattedWithEOL = formatted.split(/\r?\n/).join(eol);
                                     editor.edit(editBuilder => {
@@ -707,7 +805,10 @@ export class ClPromptPanel {
                                         if (!success) {
                                             vscode.window.showWarningMessage('Failed to insert CL command. Try again.');
                                         }
-                                        this._panel.dispose();
+                                        // Transfer focus back to editor before disposing
+                                        vscode.window.showTextDocument(doc, { preview: false, preserveFocus: false }).then(() => {
+                                            this._panel.dispose();
+                                        });
                                     });
                                 });
                             });
@@ -726,7 +827,16 @@ export class ClPromptPanel {
                         if (this._isNested && this._nestedResolver) {
                             this._nestedResolver(null);
                         }
-                        this._panel.dispose();
+                        // Return focus to editor before disposing
+                        if (this._documentUri) {
+                            vscode.workspace.openTextDocument(this._documentUri).then(doc => {
+                                vscode.window.showTextDocument(doc, { preview: false, preserveFocus: false }).then(() => {
+                                    this._panel.dispose();
+                                });
+                            });
+                        } else {
+                            this._panel.dispose();
+                        }
                         break;
                     }
                     case 'promptNested': {
@@ -755,6 +865,14 @@ export class ClPromptPanel {
                         // Ignore if already sent
                         if (this._sentFormData) {
                             console.log('[clPrompter] loadForm ignored; formData already sent');
+                            break;
+                        }
+
+                        // For label-only lines (no command), skip XML processing and just send label/comment
+                        if (!this._cmdName || this._cmdName.trim() === '') {
+                            console.log('[clPrompter] Label-only prompter, skipping XML processing');
+                            this._panel.webview.postMessage({ type: 'setLabel', label: this._cmdLabel, comment: this._cmdComment });
+                            this._sentFormData = true;
                             break;
                         }
 
@@ -811,6 +929,15 @@ export class ClPromptPanel {
                         console.log('[clPrompter] Received pong, hasProcessedFormData:', message.hasProcessedFormData);
                         if (!message.hasProcessedFormData && !this._sentFormData) {
                             console.log('[clPrompter] Webview needs reinitialization, resending formData');
+
+                            // For label-only lines (no command), skip XML processing and just send label/comment
+                            if (!this._cmdName || this._cmdName.trim() === '') {
+                                console.log('[clPrompter] Label-only prompter (pong), skipping XML processing');
+                                this._panel.webview.postMessage({ type: 'setLabel', label: this._cmdLabel, comment: this._cmdComment });
+                                this._sentFormData = true;
+                                break;
+                            }
+
                             // Resend the form data to reinitialize the webview
                             const allowedValsMap = buildAllowedValsMap(this._xml);
                             const config = vscode.workspace.getConfiguration('clPrompter');
@@ -1007,7 +1134,7 @@ function extractCmdName(cmdString: string): string {
     // Split into tokens
     let tokens = str.split(/\s+/);
     // If first token ends with a colon, it's a label
-    if (tokens.length > 1 && tokens[0].endsWith(':')) {
+    if (tokens[0].endsWith(':')) {
         tokens.shift();
     }
     // The next token is the command (possibly qualified)
@@ -1021,7 +1148,7 @@ function extractCmdName(cmdString: string): string {
 function extractCmdLabel(cmdString: string): string {
     let str = cmdString.trim();
     let tokens = str.split(/\s+/);
-    if (tokens.length > 1 && tokens[0].endsWith(':')) {
+    if (tokens[0].endsWith(':')) {
         // Remove the colon and return the label
         return tokens[0].slice(0, -1);
     }

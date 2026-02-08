@@ -46,7 +46,7 @@ body[data-vscode-theme-kind="vscode-high-contrast"] .parm-kwd {
   font-family: var(--vscode-editor-font-family, 'Courier New', monospace);
 }
 /* CL Command Label styling */
-#clLabel {
+#cmdLabel {
   color: #00AA00;
   font-family: var(--vscode-editor-font-family, 'Courier New', monospace);
 }
@@ -259,8 +259,8 @@ textarea.long-text-input:focus {
   border-color: var(--vscode-focusBorder, #0066cc);
 }
 
-/* Adjust form-group for textarea */
-.form-group:has(textarea.long-text-input) {
+/* Adjust form-group for textarea - top-align labels */
+.form-group:has(textarea) {
   align-items: flex-start;
 }
 
@@ -340,15 +340,15 @@ textarea.long-text-input:focus {
   margin: 0 0.2em 0 0;
   box-sizing: border-box;
   border: 1px solid #888;
-  background: #f5f5f5;
   overflow: visible;
   pointer-events: auto;
 }
 
-.add-parm-btn:focus,
-.remove-parm-btn:focus {
-  outline: none;
-  border-color: #0078d4;
+.add-parm-btn {
+  background: lightgrey;
+}
+.remove-parm-btn {
+    background: pink;
 }
 
 /* 5250-style form group with grid layout */
@@ -357,14 +357,15 @@ textarea.long-text-input:focus {
   grid-template-columns: var(--clp-label-width, 50ch) 1fr;
   align-items: center;
   margin-bottom: 15px;
-  gap: 10px;
+  gap: 5px;
 }
 
 .form-group label {
   text-align: left;
-  padding-right: 10px;
+  /* change this padding-right to adjust the gap before the field */
+  padding-right: 5px;
   white-space: nowrap;
-  overflow: hidden;
+  overflow: visible;
   text-overflow: ellipsis;
 }
 

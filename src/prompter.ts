@@ -693,9 +693,9 @@ function applyInitialFieldColors(): void {
 
 // Configure tab order to move logically between input fields
 // This ensures TAB moves from input to input, not to labels or other elements
-function configureTabOrder(): void {
+function configureTabOrder(focusFirst: boolean = true): void {
   const ts = new Date().toISOString().substring(11, 23);
-  console.log(`[${ts}] [configureTabOrder] START`);
+  console.log(`[${ts}] [configureTabOrder] START (focusFirst=${focusFirst})`);
 
   // Find all input fields in the form (inputs, textareas, selects, cbinput elements)
   const form = document.getElementById('clForm');
@@ -704,13 +704,28 @@ function configureTabOrder(): void {
     return;
   }
 
-  // Get all focusable input elements in DOM order
-  const inputs = Array.from(form.querySelectorAll<HTMLElement>(
+// Get cmdLabel and cmdComment (they're outside the form)
+  const cmdLabel = document.getElementById('cmdLabel');
+  const cmdComment = document.getElementById('cmdComment');
+
+  // Build the complete list of inputs in desired tab order:
+  // 1. cmdLabel (first)
+  // 2. All form inputs (in DOM order)
+  // 3. cmdComment (last)
+  const allInputs: HTMLElement[] = [];
+
+  if (cmdLabel) allInputs.push(cmdLabel);
+
+  // Get all focusable input elements from the form in DOM order
+  const formInputs = Array.from(form.querySelectorAll<HTMLElement>(
     'input[type="text"], textarea, select, .cbinput-input'
   ));
+  allInputs.push(...formInputs);
+
+  if (cmdComment) allInputs.push(cmdComment);
 
   // Filter out hidden or disabled inputs
-  const visibleInputs = inputs.filter(input => {
+  const visibleInputs = allInputs.filter(input => {
     const isVisible = input.offsetParent !== null; // Check if element is visible
     const isDisabled = (input as HTMLInputElement).disabled;
     return isVisible && !isDisabled;
@@ -726,7 +741,7 @@ function configureTabOrder(): void {
   });
 
   // Remove tabindex from ALL labels to ensure they're not in tab order
-  const allLabels = form.querySelectorAll('label');
+  const allLabels = document.querySelectorAll('label');
   allLabels.forEach(label => {
     label.removeAttribute('tabindex');
     // Explicitly set tabindex to -1 to remove from tab order
@@ -734,19 +749,19 @@ function configureTabOrder(): void {
   });
 
   // Remove tabindex from cbInput dropdown buttons (actual class is .cbinput-button)
-  const dropdownButtons = form.querySelectorAll('.cbinput-button');
+  const dropdownButtons = document.querySelectorAll('.cbinput-button');
   dropdownButtons.forEach(btn => {
     (btn as HTMLElement).tabIndex = -1;
   });
 
   // Remove tabindex from multi-instance +/- buttons
-  const multiInstanceButtons = form.querySelectorAll('.add-parm-btn, .remove-parm-btn');
+  const multiInstanceButtons = document.querySelectorAll('.add-parm-btn, .remove-parm-btn');
   multiInstanceButtons.forEach(btn => {
     (btn as HTMLElement).tabIndex = -1;
   });
 
-  // Ensure the first input gets focus when form loads
-  if (visibleInputs.length > 0) {
+  // Ensure the first input gets focus when form loads (only if requested)
+  if (focusFirst && visibleInputs.length > 0) {
     setTimeout(() => {
       visibleInputs[0].focus();
       console.log(`[${ts}] [configureTabOrder] Focused first input: ${(visibleInputs[0] as HTMLInputElement).name}`);
@@ -764,42 +779,168 @@ function configureFocusIndicators(): void {
   const form = document.getElementById('clForm') as HTMLFormElement;
   if (!form) return;
 
-  // Get all input elements including static ones (clLabel, cmdComment)
+  const cmdLabel = document.getElementById('cmdLabel');
+  const cmdComment = document.getElementById('cmdComment');
+
+  // Get all input elements including static ones (cmdLabel, cmdComment)
   const allInputs: HTMLElement[] = [
     ...Array.from(form.querySelectorAll('input, textarea, .cbinput-input')),
-    document.getElementById('clLabel'),
-    document.getElementById('cmdComment')
+    cmdLabel,
+    cmdComment
   ].filter(el => el !== null) as HTMLElement[];
 
+  // Store currently focused element
+  const currentlyFocused = document.activeElement as HTMLElement;
+
   allInputs.forEach(input => {
+    // Skip if we've already attached listeners (check for data attribute)
+    if (input.dataset.focusListenerAttached === 'true') {
+      return;
+    }
+
+    // Mark as having listeners attached
+    input.dataset.focusListenerAttached = 'true';
+
     // Add focus event listener
     input.addEventListener('focus', () => {
-      // Remove any existing indicators
-      document.querySelectorAll('.focus-indicator').forEach(ind => ind.remove());
+      const inputName = (input as any).name || input.className;
+      console.log('[focus] Input:', inputName);
 
-      // Find the associated label
-      const parent = input.closest('.form-group') || input.parentElement;
-      const label = parent?.querySelector('label');
+      // Find the associated label FIRST
+      // For combined parameters (dropdown + textarea), the label is in the form-group that contains the textarea-cbinput-container
+      let parent = input.closest('.form-group');
+      let label = parent?.querySelector('label');
+
+      // If input is inside a textarea-cbinput-container, get the label from the parent form-group
+      const container = input.closest('.textarea-cbinput-container');
+      if (container) {
+        parent = container.closest('.form-group');
+        label = parent?.querySelector('label');
+      }
+
+      console.log('[focus] Parent found?', !!parent, 'Label found?', !!label);
+      console.log('[focus] Parent classList:', parent?.classList.toString());
+      if (container) console.log('[focus] Inside textarea-cbinput-container');
+
+      // Check if THIS label already has an indicator (kept from blur event)
+      let existingIndicator = label?.querySelector('.focus-indicator');
+
+      // Remove any indicators from OTHER labels (not this one)
+      const allIndicators = document.querySelectorAll('.focus-indicator');
+      console.log('[focus] Found', allIndicators.length, 'existing indicators');
+      allIndicators.forEach(ind => {
+        if (ind.parentElement !== label) {
+          console.log('[focus] Removing indicator from other label');
+          ind.remove();
+        }
+      });
+
+      // If this label already has an indicator, make sure it's visible and return
+      if (existingIndicator && existingIndicator.parentElement === label) {
+        console.log('[focus] ✓ Label already has indicator, enforcing visibility with !important');
+        const indicatorEl = existingIndicator as HTMLElement;
+        // Use !important to override any CSS that might hide it
+        indicatorEl.style.setProperty('display', 'inline', 'important');
+        indicatorEl.style.setProperty('visibility', 'visible', 'important');
+        indicatorEl.style.setProperty('opacity', '1', 'important');
+        return; // Don't create a new one
+      }
 
       if (label) {
-        // Create and insert indicator inside the label at the right edge
+        console.log('[focus] ✓ Adding indicator to label:', label.textContent?.substring(0, 30));
+
+        // Float the indicator right with a small margin to keep it visible
         const indicator = document.createElement('span');
         indicator.className = 'focus-indicator';
-        indicator.textContent = ' ▶';
-        indicator.style.color = 'var(--vscode-focusBorder, #0066cc)';
-        indicator.style.fontSize = '12px';
-        indicator.style.fontWeight = 'bold';
+        indicator.textContent = '▶';
         indicator.style.float = 'right';
+        indicator.style.color = 'var(--vscode-focusBorder, #0066cc)';
+        indicator.style.fontSize = '14px';
+        indicator.style.fontWeight = 'bold';
+        indicator.style.marginRight = '5px'; // Keep close to input field
         indicator.style.pointerEvents = 'none';
 
         label.appendChild(indicator);
+      } else {
+        console.log('[focus] ✗ No label found for input');
       }
     });
 
     // Add blur event listener
-    input.addEventListener('blur', () => {
+    input.addEventListener('blur', (e) => {
+      // Check if focus is moving to another input in the same form-group
+      const relatedTarget = (e as FocusEvent).relatedTarget as HTMLElement;
+
+      const inputName = (input as any).name || input.className;
+      const targetName = (relatedTarget as any)?.name || relatedTarget?.className;
+      console.log('[blur] Input:', inputName, 'relatedTarget:', targetName);
+
+      // If focus is moving to another input in the same group, don't remove the indicator
+      // Check both the form-group and the textarea-cbinput-container
+      if (relatedTarget) {
+        const parentFormGroup = input.closest('.form-group');
+        const relatedFormGroup = relatedTarget.closest('.form-group');
+        const parentContainer = input.closest('.textarea-cbinput-container');
+        const relatedContainer = relatedTarget.closest('.textarea-cbinput-container');
+
+        console.log('[blur] Same form-group?', parentFormGroup === relatedFormGroup);
+        console.log('[blur] Same container?', parentContainer === relatedContainer, parentContainer && relatedContainer);
+
+        // Keep indicator if moving within same form-group OR same textarea-cbinput-container
+        if ((parentFormGroup && parentFormGroup === relatedFormGroup) ||
+            (parentContainer && parentContainer === relatedContainer)) {
+          console.log('[blur] ✓ Keeping indicator - focus staying in same group');
+          return;
+        }
+      }
+
+      // If relatedTarget is undefined, wait briefly to see where focus actually went
+      // This handles cases where the textarea briefly loses focus but regains it
+      if (!relatedTarget) {
+        console.log('[blur] relatedTarget undefined, checking activeElement after delay');
+        setTimeout(() => {
+          const newFocus = document.activeElement as HTMLElement;
+          const newFocusName = (newFocus as any)?.name || newFocus?.className;
+          console.log('[blur-delayed] activeElement is now:', newFocusName);
+
+          // If focus is still on the same input, don't remove indicator
+          if (newFocus === input) {
+            console.log('[blur-delayed] ✓ Focus still on same input, keeping indicator');
+            return;
+          }
+
+          // Check if the new focus is in the same container
+          const parentContainer = input.closest('.textarea-cbinput-container');
+          const newFocusContainer = newFocus?.closest('.textarea-cbinput-container');
+
+          if (parentContainer && parentContainer === newFocusContainer) {
+            console.log('[blur-delayed] ✓ Focus returned to same container, keeping indicator');
+            return;
+          }
+
+          // Remove indicator if focus has truly left
+          console.log('[blur-delayed] ✗ Removing indicator');
+          const parent = parentContainer ? parentContainer.closest('.form-group') : input.closest('.form-group');
+          const label = parent?.querySelector('label');
+          if (label) {
+            const indicator = label.querySelector('.focus-indicator');
+            if (indicator) {
+              indicator.remove();
+            }
+          }
+        }, 50);
+        return;
+      }
+
+      console.log('[blur] ✗ Removing indicator');
       // Remove the indicator from the label
-      const parent = input.closest('.form-group') || input.parentElement;
+      // For combined parameters, look up to the form-group containing the textarea-cbinput-container
+      let parent = input.closest('.form-group');
+      const container = input.closest('.textarea-cbinput-container');
+      if (container) {
+        parent = container.closest('.form-group');
+      }
+
       const label = parent?.querySelector('label');
       if (label) {
         const indicator = label.querySelector('.focus-indicator');
@@ -810,12 +951,10 @@ function configureFocusIndicators(): void {
     });
   });
 
-  // Refocus the currently focused element to trigger the indicator (e.g., clLabel on initial load)
-  const currentlyFocused = document.activeElement as HTMLElement;
+  // Restore focus to the previously focused element or trigger indicator on current focus
   if (currentlyFocused && allInputs.includes(currentlyFocused)) {
-    // Blur and refocus to trigger the event listener
-    currentlyFocused.blur();
-    setTimeout(() => currentlyFocused.focus(), 0);
+    // Trigger the focus event to show indicator
+    currentlyFocused.dispatchEvent(new FocusEvent('focus'));
   }
 }
 
@@ -1273,6 +1412,35 @@ function renderSimpleParm(parm: ParmElement, kwd: string, container: HTMLElement
   }
 
   formGroup.appendChild(input);
+
+  // EIGHTH FIX: If input is a textarea-cbinput-container, create a separate form-group for the textarea
+  // This gives the textarea its own label for the focus indicator
+  if (input instanceof HTMLElement && input.classList.contains('textarea-cbinput-container')) {
+    const textarea = input.querySelector('textarea');
+    if (textarea) {
+      // Remove textarea from container (leave dropdown in original form-group)
+      input.removeChild(textarea);
+
+      // Create a new form-group for the textarea
+      const textareaFormGroup = document.createElement('div');
+      textareaFormGroup.className = 'form-group simple-parm-group';
+
+      // Create an empty label to maintain grid alignment and provide a target for focus indicator
+      const textareaLabel = document.createElement('label');
+      textareaLabel.textContent = ''; // Empty label
+      textareaLabel.htmlFor = textarea.name;
+
+      textareaFormGroup.appendChild(textareaLabel);
+      textareaFormGroup.appendChild(textarea);
+
+      // Append both form-groups to div
+      div.appendChild(formGroup);
+      div.appendChild(textareaFormGroup);
+      container.appendChild(div);
+      return; // Early return since we've handled the append
+    }
+  }
+
   div.appendChild(formGroup);
   container.appendChild(div);
 }
@@ -1335,7 +1503,33 @@ function renderQualParm(parm: ParmElement, kwd: string, container: HTMLElement, 
     );
 
     qualDiv.appendChild(input);
-    container.appendChild(qualDiv);
+
+    // Split textarea-cbinput-container into two form-groups
+    if (input instanceof HTMLElement && input.classList.contains('textarea-cbinput-container')) {
+      const textarea = input.querySelector('textarea');
+      if (textarea) {
+        input.removeChild(textarea); // Remove from container, leave dropdown
+
+        // Create new form-group for textarea
+        const textareaQualDiv = document.createElement('div');
+        textareaQualDiv.className = 'form-group';
+
+        // Empty label for grid alignment
+        const textareaLabel = document.createElement('label');
+        textareaLabel.textContent = '';
+        textareaLabel.htmlFor = textarea.name;
+
+        textareaQualDiv.appendChild(textareaLabel);
+        textareaQualDiv.appendChild(textarea);
+
+        container.appendChild(qualDiv);
+        container.appendChild(textareaQualDiv);
+      } else {
+        container.appendChild(qualDiv);
+      }
+    } else {
+      container.appendChild(qualDiv);
+    }
   }
 
   console.log('[clPrompter] ', 'renderQualParm end');
@@ -1417,7 +1611,33 @@ function renderElemParm(parm: ParmElement, kwd: string, idx: number, container: 
         );
 
         qualDiv.appendChild(input);
-        fieldset.appendChild(qualDiv);
+
+        // Split textarea-cbinput-container into two form-groups
+        if (input instanceof HTMLElement && input.classList.contains('textarea-cbinput-container')) {
+          const textarea = input.querySelector('textarea');
+          if (textarea) {
+            input.removeChild(textarea); // Remove from container, leave dropdown
+
+            // Create new form-group for textarea
+            const textareaQualDiv = document.createElement('div');
+            textareaQualDiv.className = 'form-group';
+
+            // Empty label for grid alignment
+            const textareaLabel = document.createElement('label');
+            textareaLabel.textContent = '';
+            textareaLabel.htmlFor = textarea.name;
+
+            textareaQualDiv.appendChild(textareaLabel);
+            textareaQualDiv.appendChild(textarea);
+
+            fieldset.appendChild(qualDiv);
+            fieldset.appendChild(textareaQualDiv);
+          } else {
+            fieldset.appendChild(qualDiv);
+          }
+        } else {
+          fieldset.appendChild(qualDiv);
+        }
       });
     } else {
       // Regular ELEM (not QUAL type)
@@ -1451,7 +1671,33 @@ function renderElemParm(parm: ParmElement, kwd: string, idx: number, container: 
           );
 
           subDiv.appendChild(input);
-          elemDiv.appendChild(subDiv);
+
+          // Split textarea-cbinput-container into two form-groups
+          if (input instanceof HTMLElement && input.classList.contains('textarea-cbinput-container')) {
+            const textarea = input.querySelector('textarea');
+            if (textarea) {
+              input.removeChild(textarea); // Remove from container, leave dropdown
+
+              // Create new form-group for textarea
+              const textareaSubDiv = document.createElement('div');
+              textareaSubDiv.className = 'form-group';
+
+              // Empty label for grid alignment
+              const textareaLabel = document.createElement('label');
+              textareaLabel.textContent = '';
+              textareaLabel.htmlFor = textarea.name;
+
+              textareaSubDiv.appendChild(textareaLabel);
+              textareaSubDiv.appendChild(textarea);
+
+              elemDiv.appendChild(subDiv);
+              elemDiv.appendChild(textareaSubDiv);
+            } else {
+              elemDiv.appendChild(subDiv);
+            }
+          } else {
+            elemDiv.appendChild(subDiv);
+          }
         });
       } else {
         const label = document.createElement('label');
@@ -1474,9 +1720,34 @@ function renderElemParm(parm: ParmElement, kwd: string, idx: number, container: 
         );
 
         elemDiv.appendChild(input);
-      }
 
-      fieldset.appendChild(elemDiv);
+        // Split textarea-cbinput-container into two form-groups (same fix as renderSimpleParm)
+        if (input instanceof HTMLElement && input.classList.contains('textarea-cbinput-container')) {
+          const textarea = input.querySelector('textarea');
+          if (textarea) {
+            input.removeChild(textarea); // Remove from container, leave dropdown
+
+            // Create new form-group for textarea
+            const textareaElemDiv = document.createElement('div');
+            textareaElemDiv.className = 'form-group';
+
+            // Empty label for grid alignment
+            const textareaLabel = document.createElement('label');
+            textareaLabel.textContent = '';
+            textareaLabel.htmlFor = textarea.name;
+
+            textareaElemDiv.appendChild(textareaLabel);
+            textareaElemDiv.appendChild(textarea);
+
+            fieldset.appendChild(elemDiv);
+            fieldset.appendChild(textareaElemDiv);
+          } else {
+            fieldset.appendChild(elemDiv);
+          }
+        } else {
+          fieldset.appendChild(elemDiv);
+        }
+      }
     }
   });
   container.appendChild(fieldset);
@@ -1553,6 +1824,17 @@ function addMultiInstanceControls(container: HTMLElement, parm: ParmElement, kwd
         } else {
           console.log('[+ button] NOT applying color. newInput:', !!newInput, 'wasInOriginalCommand:', wasInOriginalCommand(newInput?.name || ''));
         }
+
+        // Reconfigure tab order to include the newly added instance
+        configureTabOrder(false);
+
+        // Reconfigure focus indicators for newly added elements
+        configureFocusIndicators();
+
+        // Focus the newly added input
+        if (newInput) {
+          setTimeout(() => newInput.focus(), 50);
+        }
       }
     };
     btnBar.appendChild(addBtn);
@@ -1563,7 +1845,27 @@ function addMultiInstanceControls(container: HTMLElement, parm: ParmElement, kwd
     removeBtn.textContent = '—'; // em dash
     removeBtn.title = 'Remove entry';
     removeBtn.tabIndex = -1; // Remove from tab order
-    removeBtn.onclick = () => container.remove();
+    removeBtn.onclick = () => {
+      // Remember which element had focus
+      const activeElement = document.activeElement as HTMLElement;
+      const wasInputInRemovedContainer = container.contains(activeElement);
+
+      container.remove();
+
+      // Reconfigure tab order after removing instance (without forcing focus)
+      configureTabOrder(false);
+
+      // Reconfigure focus indicators after removing
+      configureFocusIndicators();
+
+      // If the removed container had focus, focus the next available input
+      if (wasInputInRemovedContainer) {
+        const nextInput = multiGroupDiv.querySelector('input[name], textarea[name]') as HTMLInputElement;
+        if (nextInput) {
+          setTimeout(() => nextInput.focus(), 50);
+        }
+      }
+    };
     btnBar.appendChild(removeBtn);
   }
   container.appendChild(btnBar);
@@ -2659,19 +2961,54 @@ function assembleCurrentParmMap(): ParmMap {
 }
 //////////
 
+// Helper function to normalize newlines in all values (from textarea fields)
+function normalizeNewlinesInValues(values: Record<string, any>): void {
+  console.log('[clPrompter] normalizeNewlinesInValues - START');
+  for (const key in values) {
+    const value = values[key];
+    console.log(`[clPrompter] normalizeNewlines checking key: ${key}, type: ${typeof value}, isArray: ${Array.isArray(value)}`);
+    if (typeof value === 'string') {
+      const hasNewline = /\r\n|\n|\r/.test(value);
+      if (hasNewline) {
+        console.log(`[clPrompter] normalizeNewlines FOUND newline in ${key}, before: ${JSON.stringify(value)}`);
+        values[key] = value.replace(/\r\n|\n|\r/g, ' ');
+        console.log(`[clPrompter] normalizeNewlines after: ${JSON.stringify(values[key])}`);
+      }
+    } else if (Array.isArray(value)) {
+      // Handle arrays (multi-instance parameters)
+      values[key] = value.map(item => {
+        if (typeof item === 'string') {
+          return item.replace(/\r\n|\n|\r/g, ' ');
+        } else if (Array.isArray(item)) {
+          // Handle nested arrays (QUAL parameters)
+          return item.map(subItem =>
+            typeof subItem === 'string' ? subItem.replace(/\r\n|\n|\r/g, ' ') : subItem
+          );
+        }
+        return item;
+      });
+    }
+  }
+  console.log('[clPrompter] normalizeNewlinesInValues - END');
+}
+
 // Event handlers
 function onSubmit(): void {
   console.log('[clPrompter] ', 'onSubmit (Enter) start');
   const values = assembleCurrentParmMap();
 
-  // Include label in values if present
+  // Normalize newlines in all parameter values (textarea fields can have Shift+Enter)
+  normalizeNewlinesInValues(values);
+
+  // Include label in values if present (normalize newlines just in case)
   if (state.cmdLabel && state.cmdLabel.trim()) {
-    values['label'] = state.cmdLabel;
+    values['label'] = state.cmdLabel.replace(/\r\n|\n|\r/g, ' ').trim();
   }
 
-  // Include comment with delimiters if present
+  // Include comment with delimiters if present (normalize newlines)
   if (state.cmdComment && state.cmdComment.trim()) {
-    values['comment'] = '/* ' + state.cmdComment.trim() + ' */';
+    const normalizedComment = state.cmdComment.replace(/\r\n|\n|\r/g, ' ').trim();
+    values['comment'] = '/* ' + normalizedComment + ' */';
   }
 
   const cmdName = state.xmlDoc?.querySelector('Cmd')?.getAttribute('CmdName') || state.cmdName;
@@ -2693,7 +3030,7 @@ function wirePrompterControls(): void {
   const form = document.getElementById('clForm');
   const submitBtn = document.getElementById('submitBtn');
   const cancelBtn = document.getElementById('cancelBtn');
-  const labelInput = document.getElementById('clLabel') as HTMLInputElement;
+  const labelInput = document.getElementById('cmdLabel') as HTMLInputElement;
   const commentInput = document.getElementById('cmdComment') as HTMLTextAreaElement;
 
   // Wire up label input
@@ -2719,9 +3056,28 @@ function wirePrompterControls(): void {
 
   if (submitBtn) {
     submitBtn.addEventListener('click', onSubmit);
+    // Trap Tab key on submit button to wrap back to first input
+    submitBtn.addEventListener('keydown', (e) => {
+      if (e.key === 'Tab' && !e.shiftKey) {
+        e.preventDefault();
+        if (labelInput) {
+          labelInput.focus();
+        }
+      }
+    });
   }
   if (cancelBtn) {
     cancelBtn.addEventListener('click', onCancel);
+  }
+
+  // Trap Shift+Tab on first input to wrap to comment field
+  if (labelInput && commentInput) {
+    labelInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Tab' && e.shiftKey) {
+        e.preventDefault();
+        commentInput.focus();
+      }
+    });
   }
   if (form) {
     form.addEventListener('submit', e => {
@@ -2827,13 +3183,21 @@ window.addEventListener('message', event => {
     console.log('[clPrompter] Set cmdLabel to:', state.cmdLabel);
     console.log('[clPrompter] Set cmdComment to:', state.cmdComment);
     // Update the HTML inputs
-    const labelInput = document.getElementById('clLabel') as HTMLInputElement;
+    const labelInput = document.getElementById('cmdLabel') as HTMLInputElement;
     if (labelInput) {
       labelInput.value = state.cmdLabel;
     }
     const commentInput = document.getElementById('cmdComment') as HTMLTextAreaElement;
     if (commentInput) {
       commentInput.value = state.cmdComment;
+    }
+
+    // If formData hasn't been processed yet, this is a label-only prompter
+    // Wire up controls so submit/cancel buttons work
+    if (!state.hasProcessedFormData) {
+      console.log('[clPrompter] Label-only prompter detected, wiring controls');
+      state.hasProcessedFormData = true;
+      wirePrompterControls();
     }
   } else if (message.type === 'nestedResult') {
     // Handle nested prompter result - update the field with the returned command string

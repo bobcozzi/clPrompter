@@ -20,8 +20,8 @@
 
   <h2 id="mainTitle" class="main-title"></h2>
   <div class="form-group">
-    <label for="clLabel">Label:</label>
-    <input type="text" id="clLabel" maxlength="10" />
+    <label for="cmdLabel">Label:</label>
+    <input type="text" id="cmdLabel" maxlength="10" />
   </div>
 
   <form id="clForm"></form>
@@ -37,9 +37,9 @@
   <script nonce="{{nonce}}">
     const vscode = acquireVsCodeApi();
     window.vscodeApi = vscode;
-    // Set focus to the clLabel input when the page loads
+    // Set focus to the cmdLabel input when the page loads
     window.addEventListener('DOMContentLoaded', () => {
-      const labelInput = document.getElementById('clLabel');
+      const labelInput = document.getElementById('cmdLabel');
       if (labelInput) {
         labelInput.focus();
       }
