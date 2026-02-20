@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.0.48] - 2026-02-20
+### Added
+- **Public API for external extensions**: Exposed `CLPrompter()` function that external extensions can import and use programmatically
+  - No editor document required - works entirely through the webview panel
+  - Returns Promise<string | null> with updated command or null if cancelled
+  - Supports both optional (runtime check) and required (extensionDependencies) patterns
+  - Added comprehensive API documentation in CLPROMPTER_API.md
+  - Added test commands (Shift+F4) for API validation
+  - Example use case: RDi-style compile prompting without opening text editors
+
 ## [0.0.47] - 2026-02-07
 ### Fixed
 - **Prompter: Focus indicator for combined parameters**: Fixed focus indicator not following focus from dropdown to textarea in parameters with both controls

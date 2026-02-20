@@ -362,6 +362,7 @@ textarea.long-text-input:focus {
 
 .form-group label {
   text-align: left;
+  /* change this padding-right to adjust the gap before the field */
   padding-right: 5px;
   white-space: nowrap;
   overflow: visible;

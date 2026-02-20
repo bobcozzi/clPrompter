@@ -6,6 +6,8 @@ import { CodeForIBMi } from "@halcyontech/vscode-ibmi-types";
 export let code4i: CodeForIBMi;
 import { Extension, extensions } from "vscode";
 
+import { initializePrompter, CLPrompter, CLPrompterCallback } from './clPrompter';
+
 import { ParmMeta, ParmMetaMap } from './types';
 import {
     extractAllowedValsAndTypes,
@@ -168,10 +170,17 @@ export async function activate(context: vscode.ExtensionContext) {
                 vscode.window.showInformationMessage('CL file formatted');
             })
         );
+
+
     } catch (error) {
         console.error('[clPrompter] Activation error:', error);
         vscode.window.showErrorMessage(`Activation failed: ${error}`);
     }
+
+    // Initialize the standalone CLPrompter API for external extensions
+    // This must be done after ClPromptPanel is defined
+    initializePrompter(ClPromptPanel, context.extensionUri);
+
     console.log('CL Prompter activate [end]');
 }
 
@@ -1034,6 +1043,9 @@ export class ClPromptPanel {
     }
 }
 
+// Export the CLPrompter function for use by external extensions
+// Note: The function is initialized in activate() after the extension context is available
+export { CLPrompter, CLPrompterCallback };
 
 // Build ordered positional KWDs from ParmMetaMap.posNbr
 function getPositionalKwdsFromMetaMap(meta: ParmMetaMap | undefined): string[] {
