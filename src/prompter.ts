@@ -48,7 +48,7 @@ let state: PrompterState = {
   touchedFields: new Set<string>(),
   isInitializing: false,
   elementsToTrack: [], // Elements to attach listeners to after initialization
-  convertToUpperCase: true // Default to true (traditional behavior)
+  convertParmValueToUpperCase: true // Default to true (traditional behavior)
 };
 
 // VS Code API
@@ -323,7 +323,7 @@ function normalizeValue(value: string, allowedValues: string[], parm: Element | 
   }
 
   // No match in allowed values - preserve original case in prompter
-  // Uppercase conversion only happens during command building based on convertToUpperCase setting
+  // Uppercase conversion only happens during command building based on convertParmValueToUpperCase setting
   return value;
 }
 
@@ -1195,7 +1195,7 @@ function createInputForType(type: string, name: string, dft: string, len: string
           console.log('[blur handler] VARNAME adjusted to:', input.value);
         }
       }
-      // Note: Case conversion is handled by buildCLCommand() based on convertVarsToUpperCase setting
+      // Note: Case conversion is handled by buildCLCommand() based on convertParmValueToUpperCase setting
     });
 
     // Configure all validations (range, full, future validations)
@@ -1642,9 +1642,14 @@ function renderElemParm(parm: ParmElement, kwd: string, idx: number, container: 
     } else {
       // Regular ELEM (not QUAL type)
       const elemDiv = document.createElement('div');
-      elemDiv.className = 'form-group';
-
       const subElems = elem.querySelectorAll(':scope > Elem');
+
+      // Only apply form-group class if there are no sub-elements
+      // (sub-elements will have their own form-group class for proper grid layout)
+      if (subElems.length === 0) {
+        elemDiv.className = 'form-group';
+      }
+
       if (subElems.length > 0) {
         subElems.forEach((subElem, j) => {
           const subDiv = document.createElement('div');
@@ -1699,6 +1704,8 @@ function renderElemParm(parm: ParmElement, kwd: string, idx: number, container: 
             elemDiv.appendChild(subDiv);
           }
         });
+        // Append the elemDiv containing all sub-elements to the fieldset
+        fieldset.appendChild(elemDiv);
       } else {
         const label = document.createElement('label');
         const ePrompt = String(elem.getAttribute('Prompt') || `Element ${i}`);
@@ -2251,7 +2258,8 @@ function populateElemInputs(parm: ParmElement, parmMeta: ParmMetaMap[string], kw
       const subElems = elem.querySelectorAll(':scope > Elem');
       if (subElems.length > 0) {
         // Nested ELEM group - parse parenthesized content
-        const subParts = parseParenthesizedContent(elemValue);
+        // elemValue can be a string like "(*BEFORE 'text')" or already an array [] from parser
+        const subParts = Array.isArray(elemValue) ? elemValue : parseParenthesizedContent(elemValue);
         console.log(`[clPrompter] Nested ELEM ${kwd}_INST${idx}_ELEM${i} subParts:`, subParts);
 
         subParts.forEach((subPart, j) => {
@@ -2526,9 +2534,10 @@ function assembleCurrentParmMap(): ParmMap {
           }
 
           // Assemble each top-level ELEM
+          const parentInOriginal = wasInOriginalCommand(kwd);
           const elemVals: string[] = [];
           let lastNonDefaultIndex = -1;
-          console.log(`[DEBUG] ${kwd} assembling elemVals, elemParts.length=${elemParts.length}`);
+          console.log(`[DEBUG] ${kwd} assembling elemVals, elemParts.length=${elemParts.length}, parentInOriginal=${parentInOriginal}`);
 
           elemParts.forEach((elem, i) => {
             const elemType = (elem as Element).getAttribute('Type') || 'CHAR';
@@ -2575,14 +2584,17 @@ function assembleCurrentParmMap(): ParmMap {
                     anySubTouched = true;
                   }
                 });
-                // If any sub field was touched, include this nested ELEM group
-                if (anySubTouched) {
+                // If any sub field was touched OR parent was in original command with values, include this nested ELEM group
+                const hasNonEmptyValues = subVals.some(v => v.length > 0);
+                if (anySubTouched || (parentInOriginal && hasNonEmptyValues)) {
                   const trimmedSubs = subVals.filter(v => v.length > 0);
                   const joined = '(' + trimmedSubs.join(' ') + ')';
                   elemVals.push(joined);
-                  lastNonDefaultIndex = i;
+                  if (anySubTouched) {
+                    lastNonDefaultIndex = i;
+                  }
                 } else {
-                  elemVals.push(''); // All subs untouched
+                  elemVals.push(''); // All subs untouched and not from original
                 }
               } else {
                 const input = inst.querySelector(`[name="${kwd}_INST${instIdx}_ELEM${i}"]`) as HTMLInputElement | null;
@@ -2608,7 +2620,6 @@ function assembleCurrentParmMap(): ParmMap {
 
           // Only include ELEMs if any were modified (have values)
           console.log(`[DEBUG] ${kwd} lastNonDefaultIndex=${lastNonDefaultIndex}, elemVals:`, elemVals);
-          const parentInOriginal = wasInOriginalCommand(kwd);
           console.log(`[DEBUG] ${kwd} wasInOriginalCommand=${parentInOriginal}`);
           if (lastNonDefaultIndex >= 0) {
             // Include all ELEM values up to and including the last one with a value
@@ -3163,10 +3174,10 @@ window.addEventListener('message', event => {
     const config = (message as any).config;
     applyConfigStyles(config);
 
-    // Store the convertToUpperCase setting
-    if (config && typeof config.convertToUpperCase === 'boolean') {
-      state.convertToUpperCase = config.convertToUpperCase;
-      console.log('[clPrompter] convertToUpperCase set to:', state.convertToUpperCase);
+    // Store the convertParmValueToUpperCase setting
+    if (config && typeof config.convertParmValueToUpperCase === 'boolean') {
+      state.convertParmValueToUpperCase = config.convertParmValueToUpperCase;
+      console.log('[clPrompter] convertParmValueToUpperCase set to:', state.convertParmValueToUpperCase);
     }
 
     loadForm();

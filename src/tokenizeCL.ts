@@ -71,14 +71,16 @@ export function tokenizeCL(input: string): CLToken[] {
         } else if (ch === '&') {
             // Variable
             let varName = next();
-            while (isAlpha(peek()) || isDigit(peek())) varName += next();
+            while (i < input.length && (isAlpha(peek()) || isDigit(peek()) || peek() === '_')) {
+                varName += next();
+            }
             tokens.push({ type: 'variable', value: varName });
         } else if (ch === '*') {
             // Check if this is a symbolic operator, symbolic value, or multiplication operator
             if (isAlpha(input[i + 1])) {
                 // Read the full symbolic token
                 let sym = next(); // consume '*'
-                while (isAlpha(peek())) sym += next();
+                while (i < input.length && isAlpha(peek())) sym += next();
                 const upperSym = sym.toUpperCase();
 
                 // Check if it's a known operator
@@ -109,7 +111,7 @@ export function tokenizeCL(input: string): CLToken[] {
         } else if (ch === '%') {
             // Built-in function
             let fn = next();
-            while (isAlpha(peek())) fn += next();
+            while (i < input.length && isAlpha(peek())) fn += next();
             tokens.push({ type: 'function', value: fn });
         } else {
             // Keyword, command, or value
@@ -593,6 +595,44 @@ export function formatCLCmd(label: string | undefined, cmdName: string, parmStr:
 
     // Get VS Code configuration for formatting
     const config = vscode.workspace.getConfiguration('clPrompter');
+    const convertCmdAndParmNameCase = config.get('convertCmdAndParmNameCase', '*UPPER') as '*UPPER' | '*LOWER' | '*NONE';
+
+    // Apply case conversion to command name and parameter keywords
+    if (convertCmdAndParmNameCase !== '*NONE') {
+        const lowercase = 'abcdefghijklmnopqrstuvwxyz';
+        const uppercase = lowercase.toUpperCase();
+        let fromCase = '';
+        let toCase = '';
+
+        if (convertCmdAndParmNameCase === '*UPPER') {
+            fromCase = lowercase;
+            toCase = uppercase;
+        } else if (convertCmdAndParmNameCase === '*LOWER') {
+            fromCase = uppercase;
+            toCase = lowercase;
+        }
+
+        // Import translateCase from formatCL
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        const { translateCase } = require('./formatCL');
+
+        // Convert command name
+        if (ast.name) {
+            ast.name = translateCase(ast.name, fromCase, toCase);
+        }
+
+        // Convert parameter keywords
+        for (const param of ast.parameters) {
+            if (param.name) {
+                param.name = translateCase(param.name, fromCase, toCase);
+            }
+        }
+
+        // Convert label if present
+        if (label) {
+            label = translateCase(label, fromCase, toCase);
+        }
+    }
 
     // Use the unified formatter (v2)
     return formatCLCommand_v2(ast, label, {

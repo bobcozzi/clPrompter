@@ -167,7 +167,7 @@ export interface PrompterState {
   touchedFields: Set<string>; // Track which fields the user has interacted with
   isInitializing: boolean; // Flag to prevent touch tracking during form initialization
   elementsToTrack: HTMLElement[]; // Elements to attach listeners to after initialization
-  convertToUpperCase: boolean; // Whether to auto-convert variables, operators, and built-in functions to uppercase
+  convertParmValueToUpperCase: boolean; // Whether to auto-convert variables, operators, and built-in functions within parameter values to uppercase
 }
 
 // Utility types

@@ -2,6 +2,25 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.0.50] - 2026-02-21
+### Fixed
+- **CALL PARM parameter rendering**: Fixed CALL command PARM parameter only showing first value instead of all values
+  - V7R4+ PARM has nested ELEM structure with Type/Length/Decimal specifications
+  - Added `fieldset.appendChild(elemDiv)` to render nested ELEM sub-elements properly
+  - Fixed CSS layout for nested elements to display on separate lines
+  - Fixed value preservation for unchanged nested ELEM values
+- **Tokenizer bounds checking**: Fixed "invalid string length" runtime error when prompting commands with positional parameters
+  - Added bounds checks (`i < input.length`) to the tokenizeCL.ts file which Prevents infinite loops when reaching end of input string
+### Changed
+- **Settings renamed for clarity**: Renamed case conversion settings to better describe their purpose
+  - `convertToUpperCase` → `convertParmValueToUpperCase`: Only affects &variables, *operators, and %functions in parameters
+  - `formatCase` → `convertCmdAndParmNameCase`: Affects command names and parameter keyword names (CHGVAR/chgvar, VAR/var)
+- **Architecture simplification**: Unified case conversion logic in formatter pipeline
+  - Removed duplicate case conversion from `buildCLCommand()` function
+  - Added case conversion to `formatCLCmd()` unified formatter
+  - Exported `translateCase()` helper function from formatCL.ts
+  - Proper separation: `buildCLCommand` builds raw command, `formatCLCmd` applies formatting
+
 ## [0.0.49] - 2026-02-21
 ### Fixed
 - **Public API: Export correction**: Fixed `activate()` function to properly return API exports for external extensions

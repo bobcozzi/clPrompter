@@ -128,7 +128,7 @@ export function buildCLCommand(
   parmMetas: ParmMeta[],
   presentParms?: Set<string>,
   qualGroupsMap?: Record<string, string[][]>,
-  convertToUpperCase: boolean = true
+  convertParmValueToUpperCase: boolean = true
 ): string {
   // If a label is present in values, prepend it to the command string
   let cmd = '';
@@ -143,17 +143,9 @@ export function buildCLCommand(
       }
     }
   }
+
+  // Add command name as-is - case conversion will be handled by formatter
   cmd += cmdName;
-
-  // Remove *LIBL/ from the command name if present
-  const LIBL = '*LIBL/';
-  if (cmd.toUpperCase().startsWith(LIBL)) {
-    cmd = cmd.substring(LIBL.length);
-  }
-
-  // ✅ Check if this command actually has ELEM pattern keys
-  // ✅ Support both simple and nested ELEM patterns
-      // Replace current hasElemPatterns with:
     const hasElemPatterns = Object.keys(values).some(key =>
       /^.+_ELEM\d+$/.test(key) ||                 // simple
       /^.+_ELEM\d+_(QUAL|SUB)\d+$/.test(key)      // nested QUAL/SUB
@@ -213,7 +205,7 @@ export function buildCLCommand(
       const parmType = updatedTypeMap[kwd] || "";
       const qualStrings = qualInstances.map(instanceArr =>
         instanceArr
-          .map((v, idx) => quoteIfNeeded(v, allowedVals, parmType, convertToUpperCase))
+          .map((v, idx) => quoteIfNeeded(v, allowedVals, parmType, convertParmValueToUpperCase))
           .join('/')
       );
       cmd += ` ${kwd}(${qualStrings.join(' ')})`;
@@ -305,16 +297,16 @@ export function buildCLCommand(
           if (Array.isArray(elemValue)) {
             // Only use slash notation for first ELEM in single-instance parameters
             if (i === 0 && elemValue.length === 2 && !isMultiInstance) {
-              const quoted = elemValue.map(v => quoteIfNeeded(v, allowedVals, parmType, convertToUpperCase)).reverse();
+              const quoted = elemValue.map(v => quoteIfNeeded(v, allowedVals, parmType, convertParmValueToUpperCase)).reverse();
               elemParts.push(`${quoted[0]}/${quoted[1]}`);
             } else {
-              const quoted = elemValue.map(v => quoteIfNeeded(v, allowedVals, parmType, convertToUpperCase));
+              const quoted = elemValue.map(v => quoteIfNeeded(v, allowedVals, parmType, convertParmValueToUpperCase));
               // For multi-instance, parts are already wrapped here
               elemParts.push(`(${quoted.join(' ')})`);
             }
           } else {
             // Single value - wrap it if multi-instance
-            const quotedValue = quoteIfNeeded(elemValue, allowedVals, parmType, convertToUpperCase);
+            const quotedValue = quoteIfNeeded(elemValue, allowedVals, parmType, convertParmValueToUpperCase);
             elemParts.push(isMultiInstance ? `(${quotedValue})` : quotedValue);
           }
         }
@@ -323,8 +315,8 @@ export function buildCLCommand(
       } else {
         const elemParts = value.map((vArr: any) =>
           Array.isArray(vArr)
-            ? vArr.map((v: string) => quoteIfNeeded(v, allowedVals, parmType, convertToUpperCase)).join(' ')
-            : quoteIfNeeded(vArr, allowedVals, parmType, convertToUpperCase)
+            ? vArr.map((v: string) => quoteIfNeeded(v, allowedVals, parmType, convertParmValueToUpperCase)).join(' ')
+            : quoteIfNeeded(vArr, allowedVals, parmType, convertParmValueToUpperCase)
         );
         if (isMultiInstance) {
           const wrappedParts = elemParts.map(part => `(${part})`);
@@ -372,8 +364,8 @@ export function buildCLCommand(
       if (Array.isArray(value[0])) {
         const qualParts = value.map((vArr: any) =>
           Array.isArray(vArr)
-            ? vArr.slice().filter((x: any) => x !== undefined && x !== null && x !== '').map((v: string) => quoteIfNeeded(v, allowedVals, parmType, convertToUpperCase)).join('/')
-            : quoteIfNeeded(vArr, allowedVals, parmType, convertToUpperCase)
+            ? vArr.slice().filter((x: any) => x !== undefined && x !== null && x !== '').map((v: string) => quoteIfNeeded(v, allowedVals, parmType, convertParmValueToUpperCase)).join('/')
+            : quoteIfNeeded(vArr, allowedVals, parmType, convertParmValueToUpperCase)
         );
         if (isMultiInstance) {
           const wrappedParts = qualParts.map(part => `(${part})`);
@@ -382,24 +374,24 @@ export function buildCLCommand(
           cmd += ` ${key}(${qualParts.join(' ')})`;
         }
       } else {
-        const qualPart = value.slice().filter((x: any) => x !== undefined && x !== null && x !== '').map((v: string) => quoteIfNeeded(v, allowedVals, parmType, convertToUpperCase)).join('/');
+        const qualPart = value.slice().filter((x: any) => x !== undefined && x !== null && x !== '').map((v: string) => quoteIfNeeded(v, allowedVals, parmType, convertParmValueToUpperCase)).join('/');
         cmd += ` ${key}(${qualPart})`;
       }
     } else if (Array.isArray(value)) {
       if (isMultiInstance) {
         if (hasElemChildren || hasQualChildren) {
-          const wrappedValues = value.map(v => `(${quoteIfNeeded(v, allowedVals, parmType, convertToUpperCase)})`);
+          const wrappedValues = value.map(v => `(${quoteIfNeeded(v, allowedVals, parmType, convertParmValueToUpperCase)})`);
           cmd += ` ${key}(${wrappedValues.join(' ')})`;
         } else {
-          const quotedParts = value.filter(v => v !== undefined && v !== null && v !== '').map(v => quoteIfNeeded(v, allowedVals, parmType, convertToUpperCase));
+          const quotedParts = value.filter(v => v !== undefined && v !== null && v !== '').map(v => quoteIfNeeded(v, allowedVals, parmType, convertParmValueToUpperCase));
           cmd += ` ${key}(${quotedParts.join(' ')})`;
         }
       } else {
-        const quotedParts = value.filter(v => v !== undefined && v !== null && v !== '').map(v => quoteIfNeeded(v, allowedVals, parmType, convertToUpperCase));
+        const quotedParts = value.filter(v => v !== undefined && v !== null && v !== '').map(v => quoteIfNeeded(v, allowedVals, parmType, convertParmValueToUpperCase));
         cmd += ` ${key}(${quotedParts.join(' ')})`;
       }
     } else {
-      let q = quoteIfNeeded(String(value).trim(), allowedVals, parmType, convertToUpperCase);
+      let q = quoteIfNeeded(String(value).trim(), allowedVals, parmType, convertParmValueToUpperCase);
       cmd += ` ${key}(${q})`;
     }
   }
@@ -557,7 +549,7 @@ function uppercaseVariablesInExpression(val: string): string {
   return result;
 }
 
-export function quoteIfNeeded(val: string, allowedVals: string[] = [], parmType: string = "", convertToUpperCase: boolean = true): string {
+export function quoteIfNeeded(val: string, allowedVals: string[] = [], parmType: string = "", convertParmValueToUpperCase: boolean = true): string {
   const trimmed = val.trim();
   const type = parmType.toUpperCase().replace(/^[*]/, "");
 
@@ -636,7 +628,7 @@ export function quoteIfNeeded(val: string, allowedVals: string[] = [], parmType:
   // 9. CL expression (e.g., *IF &X = &Y)
   if (isCLExpression(trimmed)) {
     // Conditionally uppercase variables in the expression based on setting
-    return convertToUpperCase ? uppercaseVariablesInExpression(val) : val;
+    return convertParmValueToUpperCase ? uppercaseVariablesInExpression(val) : val;
   }
 
   // 10. Special case: empty quoted or blank
@@ -892,7 +884,7 @@ export function formatCLSource(
 
 // --- Helper Functions ---
 
-function translateCase(str: string, fromCase: string, toCase: string): string {
+export function translateCase(str: string, fromCase: string, toCase: string): string {
   let result = '';
   for (const ch of str) {
     const idx = fromCase.indexOf(ch);

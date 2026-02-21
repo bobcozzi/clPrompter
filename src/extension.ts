@@ -90,7 +90,7 @@ export async function activate(context: vscode.ExtensionContext) {
                 // Get format options from configuration
                 const config = vscode.workspace.getConfiguration('clPrompter');
                 const formatOptions: FormatOptions = {
-                    cvtcase: config.get('formatCase', '*UPPER') as '*UPPER' | '*LOWER' | '*NONE',
+                    cvtcase: config.get('convertCmdAndParmNameCase', '*UPPER') as '*UPPER' | '*LOWER' | '*NONE',
                     indrmks: config.get('formatIndentComments', '*YES') as '*NO' | '*YES',
                     labelpos: config.get('formatLabelPosition', 2),
                     bgncol: config.get('formatCmdPosition', 14),
@@ -141,7 +141,7 @@ export async function activate(context: vscode.ExtensionContext) {
                 // Get format options from configuration
                 const config = vscode.workspace.getConfiguration('clPrompter');
                 const formatOptions: FormatOptions = {
-                    cvtcase: config.get('formatCase', '*UPPER') as '*UPPER' | '*LOWER' | '*NONE',
+                    cvtcase: config.get('convertCmdAndParmNameCase', '*UPPER') as '*UPPER' | '*LOWER' | '*NONE',
                     indrmks: config.get('formatIndentComments', '*YES') as '*NO' | '*YES',
                     labelpos: config.get('formatLabelPosition', 2),
                     bgncol: config.get('formatCmdPosition', 14),
@@ -503,6 +503,11 @@ export class ClPromptPanel {
             try {
                 this._parmMap = parseCLParms(cmdWithKeywords, this._parmMetas);
                 console.log('[clPrompter] parseCLParms keys:', Object.keys(this._parmMap));
+                // Debug PARM specifically for CALL command
+                if (this._parmMap['PARM']) {
+                    console.log('[clPrompter] PARM immediately after parseCLParms:', JSON.stringify(this._parmMap['PARM']));
+                    console.log('[clPrompter] PARM length:', this._parmMap['PARM'].length);
+                }
                 // Debug RMTFILE specifically
                 if (this._parmMap['RMTFILE']) {
                     console.log('[clPrompter] RMTFILE immediately after parseCLParms:', JSON.stringify(this._parmMap['RMTFILE']));
@@ -579,7 +584,7 @@ export class ClPromptPanel {
                 const keywordColor = config.get('kwdColor');
                 const valueColor = config.get('kwdValueColor');
                 const autoAdjust = config.get('kwdColorAutoAdjust');
-                const convertToUpperCase = config.get('convertToUpperCase', true);
+                const convertParmValueToUpperCase = config.get('convertParmValueToUpperCase', true);
 
                 panel.webview.postMessage({
                     type: 'formData',
@@ -590,7 +595,7 @@ export class ClPromptPanel {
                     paramMap: this._parmMap,
                     parmMap: this._parmMap,
                     parmMetas: this._parmMetas,
-                    config: { keywordColor, valueColor, autoAdjust, convertToUpperCase }
+                    config: { keywordColor, valueColor, autoAdjust, convertParmValueToUpperCase }
                 });
                 panel.webview.postMessage({ type: "setLabel", label: cmdLabel, comment: cmdComment });
                 this._sentFormData = true;
@@ -747,9 +752,9 @@ export class ClPromptPanel {
                         const submittedComment = message.values['comment'] as string | undefined;
                         const normalizedComment = submittedComment ? submittedComment.replace(/\r\n|\n|\r/g, ' ') : submittedComment;
 
-                        // Get the convertToUpperCase setting
+                        // Get the case conversion setting for parameter values
                         const config = vscode.workspace.getConfiguration('clPrompter');
-                        const convertToUpperCase = config.get('convertToUpperCase', true);
+                        const convertParmValueToUpperCase = config.get('convertParmValueToUpperCase', true);
 
                         let cmd = buildCLCommand(
                             this._cmdName,
@@ -760,7 +765,7 @@ export class ClPromptPanel {
                             this._parmMetas,
                             this._presentParms,
                             undefined,
-                            convertToUpperCase
+                            convertParmValueToUpperCase
                         );
 
                         // Append comment if present (use normalized comment)

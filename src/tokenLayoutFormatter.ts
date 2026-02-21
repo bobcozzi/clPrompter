@@ -246,6 +246,14 @@ function valueToLayoutTokens(value: CLValue, context: { inWrappedExpr?: boolean 
 function parameterToLayoutTokens(name: string, value: CLValue): LayoutToken[] {
     const tokens: LayoutToken[] = [];
 
+    // Handle positional parameters (like DCL &VAR TYPE(*CHAR) LEN(10))
+    // Positional params are marked with __pos1, __pos2, etc. and should not show the keyword
+    if (name.startsWith('__pos')) {
+        // Just output the value without keyword syntax
+        const valueTokens = valueToLayoutTokens(value);
+        return valueTokens;
+    }
+
     // For simple short string values, keep the entire parameter atomic
     if (typeof value === 'string' && value.length <= 40) {
         // Keep KEYWORD(value) together as one atomic unit

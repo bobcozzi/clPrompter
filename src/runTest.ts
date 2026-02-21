@@ -16,7 +16,7 @@ Module.prototype.require = function(id: string) {
                         get(key: string, defaultValue?: any): any {
                             const defaults: any = {
                                 'formatRightMargin': 70,
-                                'formatCase': '*UPPER',
+                                'convertCmdAndParmNameCase': '*UPPER',
                                 'formatLabelPosition': 2,
                                 'formatCmdPosition': 14,
                                 'formatKwdPosition': 25,

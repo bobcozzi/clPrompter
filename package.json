@@ -2,7 +2,7 @@
   "name": "clprompter",
   "displayName": "Bob Cozzi's CL Prompter for IBM i",
   "description": "Bob Cozzi's CL Prompter for IBM i CL commands",
-  "version": "0.0.49",
+  "version": "0.0.50",
   "author": {
     "name": "Bob Cozzi",
     "url": "https://github.com/bobcozzi"
@@ -104,12 +104,12 @@
           "default": "${tmpdir}",
           "description": "Directory where clPrompt-<cmdName>.html file is written. Use ${tmpdir} for system temp, ${userHome} for home directory, or an absolute path."
         },
-        "clPrompter.convertToUpperCase": {
+        "clPrompter.convertParmValueToUpperCase": {
           "type": "boolean",
           "default": true,
-          "description": "Convert CL variables, operators (*BCAT, *TCAT, etc.), and built-in functions (%SUBST, %TRIM, etc.) to uppercase. When true, text like '&pickles *bcat %trim(x)' becomes '&PICKLES *BCAT %TRIM(x)'. When false, preserves original case. Applies to both the prompter display and final command output."
+          "description": "Convert CL variables, operators (*BCAT, *TCAT, etc.), and built-in functions (%SUBST, %TRIM, etc.) within parameter values to uppercase. When true, text like '&pickles *bcat %trim(x)' becomes '&PICKLES *BCAT %TRIM(x)'. When false, preserves original case. Applies when returning from the prompter."
         },
-        "clPrompter.formatCase": {
+        "clPrompter.convertCmdAndParmNameCase": {
           "type": "string",
           "default": "*UPPER",
           "enum": [
@@ -117,7 +117,7 @@
             "*LOWER",
             "*NONE"
           ],
-          "description": "Case conversion for CL source. *UPPER = uppercase, *LOWER = lowercase, *NONE = no change."
+          "description": "Case conversion for CL command names and parameter keywords. *UPPER = uppercase (CHGVAR VAR(...)), *LOWER = lowercase (chgvar var(...)), *NONE = no change. Applies when returning from the prompter and when formatting CL source."
         },
         "clPrompter.formatIndentComments": {
           "type": "string",

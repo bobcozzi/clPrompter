@@ -17,7 +17,7 @@ let state = {
     touchedFields: new Set(),
     isInitializing: false,
     elementsToTrack: [], // Elements to attach listeners to after initialization
-    convertToUpperCase: true // Default to true (traditional behavior)
+    convertParmValueToUpperCase: true // Default to true (traditional behavior)
 };
 const vscode = typeof window !== 'undefined' ? window.vscodeApi : undefined;
 // Helper: Check if restricted
@@ -250,7 +250,7 @@ function normalizeValue(value, allowedValues, parm) {
         return match;
     }
     // No match in allowed values - preserve original case in prompter
-    // Uppercase conversion only happens during command building based on convertToUpperCase setting
+    // Uppercase conversion only happens during command building based on convertParmValueToUpperCase setting
     return value;
 }
 // Helper: Parse range metadata from suggestions array
@@ -999,7 +999,7 @@ function createInputForType(type, name, dft, len, suggestions, isRestricted = fa
                     console.log('[blur handler] VARNAME adjusted to:', input.value);
                 }
             }
-            // Note: Case conversion is handled by buildCLCommand() based on convertVarsToUpperCase setting
+            // Note: Case conversion is handled by buildCLCommand() based on convertParmValueToUpperCase setting
         });
         // Configure all validations (range, full, future validations)
         setupValidations(input, { suggestions, full, len });
@@ -1361,8 +1361,12 @@ function renderElemParm(parm, kwd, idx, container, prompt, dft, max) {
         else {
             // Regular ELEM (not QUAL type)
             const elemDiv = document.createElement('div');
-            elemDiv.className = 'form-group';
             const subElems = elem.querySelectorAll(':scope > Elem');
+            // Only apply form-group class if there are no sub-elements
+            // (sub-elements will have their own form-group class for proper grid layout)
+            if (subElems.length === 0) {
+                elemDiv.className = 'form-group';
+            }
             if (subElems.length > 0) {
                 subElems.forEach((subElem, j) => {
                     const subDiv = document.createElement('div');
@@ -1403,6 +1407,8 @@ function renderElemParm(parm, kwd, idx, container, prompt, dft, max) {
                         elemDiv.appendChild(subDiv);
                     }
                 });
+                // Append the elemDiv containing all sub-elements to the fieldset
+                fieldset.appendChild(elemDiv);
             }
             else {
                 const label = document.createElement('label');
@@ -1911,7 +1917,8 @@ function populateElemInputs(parm, parmMeta, kwd, instance, idx, container) {
             const subElems = elem.querySelectorAll(':scope > Elem');
             if (subElems.length > 0) {
                 // Nested ELEM group - parse parenthesized content
-                const subParts = parseParenthesizedContent(elemValue);
+                // elemValue can be a string like "(*BEFORE 'text')" or already an array [] from parser
+                const subParts = Array.isArray(elemValue) ? elemValue : parseParenthesizedContent(elemValue);
                 console.log(`[clPrompter] Nested ELEM ${kwd}_INST${idx}_ELEM${i} subParts:`, subParts);
                 subParts.forEach((subPart, j) => {
                     let input = container.querySelector(`[name="${kwd}_INST${idx}_ELEM${i}_SUB${j}"]`);
@@ -2167,9 +2174,10 @@ function assembleCurrentParmMap() {
                         }
                     }
                     // Assemble each top-level ELEM
+                    const parentInOriginal = wasInOriginalCommand(kwd);
                     const elemVals = [];
                     let lastNonDefaultIndex = -1;
-                    console.log(`[DEBUG] ${kwd} assembling elemVals, elemParts.length=${elemParts.length}`);
+                    console.log(`[DEBUG] ${kwd} assembling elemVals, elemParts.length=${elemParts.length}, parentInOriginal=${parentInOriginal}`);
                     elemParts.forEach((elem, i) => {
                         const elemType = elem.getAttribute('Type') || 'CHAR';
                         const elemDefault = getElemFormDefault(parm, i); // Use form default for output assembly
@@ -2218,15 +2226,18 @@ function assembleCurrentParmMap() {
                                         anySubTouched = true;
                                     }
                                 });
-                                // If any sub field was touched, include this nested ELEM group
-                                if (anySubTouched) {
+                                // If any sub field was touched OR parent was in original command with values, include this nested ELEM group
+                                const hasNonEmptyValues = subVals.some(v => v.length > 0);
+                                if (anySubTouched || (parentInOriginal && hasNonEmptyValues)) {
                                     const trimmedSubs = subVals.filter(v => v.length > 0);
                                     const joined = '(' + trimmedSubs.join(' ') + ')';
                                     elemVals.push(joined);
-                                    lastNonDefaultIndex = i;
+                                    if (anySubTouched) {
+                                        lastNonDefaultIndex = i;
+                                    }
                                 }
                                 else {
-                                    elemVals.push(''); // All subs untouched
+                                    elemVals.push(''); // All subs untouched and not from original
                                 }
                             }
                             else {
@@ -2254,7 +2265,6 @@ function assembleCurrentParmMap() {
                     });
                     // Only include ELEMs if any were modified (have values)
                     console.log(`[DEBUG] ${kwd} lastNonDefaultIndex=${lastNonDefaultIndex}, elemVals:`, elemVals);
-                    const parentInOriginal = wasInOriginalCommand(kwd);
                     console.log(`[DEBUG] ${kwd} wasInOriginalCommand=${parentInOriginal}`);
                     if (lastNonDefaultIndex >= 0) {
                         // Include all ELEM values up to and including the last one with a value
@@ -2802,10 +2812,10 @@ window.addEventListener('message', event => {
         // Apply configured colors (if provided)
         const config = message.config;
         applyConfigStyles(config);
-        // Store the convertToUpperCase setting
-        if (config && typeof config.convertToUpperCase === 'boolean') {
-            state.convertToUpperCase = config.convertToUpperCase;
-            console.log('[clPrompter] convertToUpperCase set to:', state.convertToUpperCase);
+        // Store the convertParmValueToUpperCase setting
+        if (config && typeof config.convertParmValueToUpperCase === 'boolean') {
+            state.convertParmValueToUpperCase = config.convertParmValueToUpperCase;
+            console.log('[clPrompter] convertParmValueToUpperCase set to:', state.convertParmValueToUpperCase);
         }
         loadForm();
         wirePrompterControls();
