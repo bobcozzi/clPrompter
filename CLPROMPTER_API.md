@@ -2,9 +2,41 @@
 
 The CLPrompter extension provides a simple API that allows other VS Code extensions to programmatically invoke the CL prompter and receive the updated command string.
 
-## Installation
+## Two Integration Approaches
 
-First, ensure your extension declares a dependency on the clPrompter extension in your `package.json`:
+You can integrate CLPrompter in two ways depending on your needs:
+
+### Option 1: Optional Enhancement (Recommended)
+
+Your extension works without CLPrompter but provides enhanced functionality when it's installed. This gives users flexibility.
+
+**Benefits:**
+- ✅ Your extension works for everyone
+- ✅ Enhanced experience when CLPrompter is installed
+- ✅ No forced dependency
+- ✅ Users can install CLPrompter later if they want
+
+**Setup:** Do NOT add to `extensionDependencies` in package.json. Instead, check for the extension at runtime:
+
+```typescript
+const clPrompterExt = vscode.extensions.getExtension('CozziResearch.clprompter');
+if (clPrompterExt) {
+    // Use CLPrompter
+} else {
+    // Fallback to simple input box or alternative UI
+}
+```
+
+### Option 2: Required Dependency
+
+CLPrompter is mandatory for your extension to work. VS Code will prompt users to install it automatically.
+
+**Benefits:**
+- ✅ Simpler code - no fallback logic needed
+- ✅ Guaranteed full functionality
+- ✅ VS Code handles installation prompts
+
+**Setup:** Add to `package.json`:
 
 ```json
 {
@@ -14,20 +46,29 @@ First, ensure your extension declares a dependency on the clPrompter extension i
 }
 ```
 
-## How the Import Works
+## How the API Works
 
-### Runtime Import (The Extension Itself)
+### Accessing CLPrompter from Your Extension
 
-When you write:
+The CLPrompter extension exports its API through the extension's `activate()` function. To use it in your extension, you access it via VS Code's extension API:
+
 ```typescript
-import { CLPrompter } from 'CozziResearch.clprompter';
+const clPrompterExt = vscode.extensions.getExtension('CozziResearch.clprompter');
+
+if (clPrompterExt) {
+    if (!clPrompterExt.isActive) {
+        await clPrompterExt.activate();
+    }
+    const { CLPrompter } = clPrompterExt.exports;
+    // Now you can use CLPrompter
+}
 ```
 
-This import is resolved **at runtime** by VS Code's extension host. Here's what happens:
+**How it works:**
 
-1. **No npm package needed** - This is NOT an npm package import. VS Code resolves it to the installed extension.
+1. **No npm package needed** - This is NOT an npm package. VS Code resolves it to the installed extension.
 2. **Extension must be installed** - Users must have the CozziResearch.clprompter extension installed from the VS Code marketplace.
-3. **Automatic activation** - When your extension imports from another extension, VS Code automatically activates that extension first.
+3. **Manual activation check** - Your code needs to ensure the extension is activated before accessing exports.
 4. **Access to exports** - You get access to whatever the extension exported from its `activate()` function.
 
 **Important**: The extension itself just needs to be *installed* - no additional source code downloads required at runtime!
@@ -135,7 +176,8 @@ If you want the complete type definitions:
 │     declare module 'CozziResearch.clprompter' { ... }       │
 │                                                               │
 │  3. Your code:                                               │
-│     import { CLPrompter } from 'CozziResearch.clprompter';  │
+│     const ext = vscode.extensions.getExtension(...);        │
+│     const { CLPrompter } = ext.exports;                     │
 │     const result = await CLPrompter('CRTPF FILE(...)');     │
 │                                                               │
 └─────────────────────────────────────────────────────────────┘
@@ -152,10 +194,11 @@ If you want the complete type definitions:
 │    ✓ halcyontechltd.code-for-ibmi                          │
 │                                                               │
 │  When your extension runs:                                   │
-│    1. VS Code activates CozziResearch.clprompter            │
-│    2. Import resolves to extension's exports                │
-│    3. CLPrompter() function is available                    │
-│    4. Everything just works! ✓                              │
+│    1. VS Code has CozziResearch.clprompter installed        │
+│    2. Your code gets the extension via getExtension()       │
+│    3. Activates it if needed                                │
+│    4. Accesses exports.CLPrompter() function                │
+│    5. Everything just works! ✓                              │
 │                                                               │
 └─────────────────────────────────────────────────────────────┘
 ```
@@ -166,20 +209,46 @@ If you want the complete type definitions:
 
 ### Method 1: Simple API (Recommended)
 
-The simplest way to use the CLPrompter is with just a command string. The extension will automatically find the clPrompter extension and handle all the setup:
+The simplest way to use the CLPrompter is by accessing it through the extension API:
 
 ```typescript
-import { CLPrompter } from 'CozziResearch.clprompter';
+import * as vscode from 'vscode';
 
-// Prompt a CL command
-const result = await CLPrompter('CRTPF FILE(MYLIB/MYFILE)');
+async function promptCommand(command: string): Promise<string | null> {
+    // Get the CLPrompter extension
+    const clPrompterExt = vscode.extensions.getExtension('CozziResearch.clprompter');
+
+    if (!clPrompterExt) {
+        vscode.window.showErrorMessage('CLPrompter extension not installed');
+        return null;
+    }
+
+    // Ensure it's activated
+    if (!clPrompterExt.isActive) {
+        await clPrompterExt.activate();
+    }
+
+    // Access the exported API
+    const { CLPrompter } = clPrompterExt.exports;
+
+    if (typeof CLPrompter !== 'function') {
+        vscode.window.showErrorMessage('CLPrompter API not available');
+        return null;
+    }
+
+    // Prompt the command
+    return await CLPrompter(command);
+}
+
+// Use it
+const result = await promptCommand('CRTPF FILE(MYLIB/MYFILE)');
 
 if (result && result !== 'CRTPF FILE(MYLIB/MYFILE)') {
-  // User submitted changes
-  console.log('Updated command:', result);
+    // User submitted changes
+    console.log('Updated command:', result);
 } else {
-  // User cancelled or no changes made
-  console.log('Command unchanged');
+    // User cancelled or no changes made
+    console.log('Command unchanged');
 }
 ```
 
@@ -188,13 +257,14 @@ if (result && result !== 'CRTPF FILE(MYLIB/MYFILE)') {
 If you prefer to pass the extension URI explicitly, you can use this overload:
 
 ```typescript
-import * as vscode from 'vscode';
-import { CLPrompter } from 'CozziResearch.clprompter';
-
-const result = await CLPrompter(
-  context.extensionUri,  // Your extension's URI (not required)
-  'CRTPF FILE(MYLIB/MYFILE)'
-);
+const clPrompterExt = vscode.extensions.getExtension('CozziResearch.clprompter');
+if (clPrompterExt?.isActive) {
+    const { CLPrompter } = clPrompterExt.exports;
+    const result = await CLPrompter(
+        context.extensionUri,  // Your extension's URI (optional)
+        'CRTPF FILE(MYLIB/MYFILE)'
+    );
+}
 ```
 
 ### Method 3: Callback API
@@ -202,17 +272,19 @@ const result = await CLPrompter(
 If you prefer callbacks over promises:
 
 ```typescript
-import { CLPrompterCallback } from 'CozziResearch.clprompter';
-
-CLPrompterCallback(
-  context.extensionUri,
-  'CRTPF FILE(MYLIB/MYFILE)',
-  (result) => {
-    if (result) {
-      console.log('Result:', result);
-    }
-  }
-);
+const clPrompterExt = vscode.extensions.getExtension('CozziResearch.clprompter');
+if (clPrompterExt?.isActive) {
+    const { CLPrompterCallback } = clPrompterExt.exports;
+    CLPrompterCallback(
+        context.extensionUri,
+        'CRTPF FILE(MYLIB/MYFILE)',
+        (result) => {
+            if (result) {
+                console.log('Result:', result);
+            }
+        }
+    );
+}
 ```
 
 ## Return Values
@@ -229,7 +301,6 @@ Here's a complete example of a command that prompts a CL command:
 
 ```typescript
 import * as vscode from 'vscode';
-import { CLPrompter } from 'CozziResearch.clprompter';
 
 export function activate(context: vscode.ExtensionContext) {
   const disposable = vscode.commands.registerCommand(
@@ -245,7 +316,28 @@ export function activate(context: vscode.ExtensionContext) {
         return;
       }
 
+      // Get the CLPrompter extension
+      const clPrompterExt = vscode.extensions.getExtension('CozziResearch.clprompter');
+
+      if (!clPrompterExt) {
+        vscode.window.showErrorMessage('CLPrompter extension not installed');
+        return;
+      }
+
+      // Ensure it's activated
+      if (!clPrompterExt.isActive) {
+        await clPrompterExt.activate();
+      }
+
       try {
+        // Access the exported API
+        const { CLPrompter } = clPrompterExt.exports;
+
+        if (typeof CLPrompter !== 'function') {
+          vscode.window.showErrorMessage('CLPrompter API not available');
+          return;
+        }
+
         // Prompt the command
         const result = await CLPrompter(command);
 
@@ -280,9 +372,67 @@ export function activate(context: vscode.ExtensionContext) {
 
 ## Quick Start Guide for Extension Developers
 
-Here's a complete step-by-step guide to add CLPrompter support to your extension:
+Choose the integration approach that fits your needs:
 
-### Step 1: Update package.json
+### Quick Start: Option 1 - Optional Enhancement
+
+**Step 1: Create Type Definitions (Optional, for IntelliSense)**
+
+Create `src/clprompter.d.ts` in your extension:
+```typescript
+declare module 'CozziResearch.clprompter' {
+  import * as vscode from 'vscode';
+
+  export function CLPrompter(commandString: string): Promise<string | null>;
+  export function CLPrompter(
+    extensionUri: vscode.Uri,
+    commandString: string
+  ): Promise<string | null>;
+}
+```
+
+**Step 2: Use with Fallback in Your Code**
+
+```typescript
+import * as vscode from 'vscode';
+
+async function promptCommand(command: string): Promise<string | null> {
+    const clPrompterExt = vscode.extensions.getExtension('CozziResearch.clprompter');
+
+    if (clPrompterExt) {
+        if (!clPrompterExt.isActive) {
+            await clPrompterExt.activate();
+        }
+
+        if (clPrompterExt.exports?.CLPrompter) {
+            try {
+                return await clPrompterExt.exports.CLPrompter(command);
+            } catch (error) {
+                console.error('CLPrompter error:', error);
+            }
+        }
+    }
+
+    // Fallback: Simple input box
+    return await vscode.window.showInputBox({
+        prompt: 'Edit CL Command',
+        value: command,
+        placeHolder: 'Install CozziResearch.clprompter for full prompting'
+    }) || command;
+}
+```
+
+**Step 3: Optionally Recommend the Extension**
+
+In your extension's README or when users first use the feature, you can suggest installing CLPrompter for the best experience.
+
+That's it! Your extension works for everyone with graceful enhancement.
+
+---
+
+### Quick Start: Option 2 - Required Dependency
+
+**Step 1: Update package.json**
 
 Add the extension dependency:
 ```json
@@ -294,7 +444,7 @@ Add the extension dependency:
 }
 ```
 
-### Step 2: Create Type Definitions
+**Step 2: Create Type Definitions**
 
 Create `src/clprompter.d.ts` in your extension:
 ```typescript
@@ -312,22 +462,40 @@ declare module 'CozziResearch.clprompter' {
 ### Step 3: Use in Your Code
 
 ```typescript
-import { CLPrompter } from 'CozziResearch.clprompter';
+import * as vscode from 'vscode';
 
 // In your command handler
-const result = await CLPrompter('CRTPF FILE(MYLIB/MYFILE)');
-if (result && result !== 'CRTPF FILE(MYLIB/MYFILE)') {
-  console.log('Updated:', result);
+const clPrompterExt = vscode.extensions.getExtension('CozziResearch.clprompter');
+
+if (clPrompterExt) {
+  if (!clPrompterExt.isActive) {
+    await clPrompterExt.activate();
+  }
+
+  const { CLPrompter } = clPrompterExt.exports;
+
+  if (typeof CLPrompter === 'function') {
+    const result = await CLPrompter('CRTPF FILE(MYLIB/MYFILE)');
+    if (result && result !== 'CRTPF FILE(MYLIB/MYFILE)') {
+      console.log('Updated:', result);
+    }
+  }
 }
 ```
 
 ### Step 4: Test
 
-1. Install **CozziResearch.clprompter** extension from marketplace
+1. Install **CozziResearch.clprompter** extension from marketplace (if testing)
 2. Press F5 to run your extension
 3. Call your command - the prompter will open automatically!
 
-That's it! No npm packages, no source downloads, no complex setup.
+**Note:** When declared as a required dependency, VS Code will automatically prompt users to install CLPrompter if it's missing.
+
+---
+
+**Key Difference:**
+- **Option 1 (Optional):** Users can use your extension without CLPrompter installed - it falls back to a simple input box
+- **Option 2 (Required):** VS Code forces users to install CLPrompter before using your extension - full prompter always available
 
 ## Real-World Use Case: Prompting Build Commands
 
@@ -355,7 +523,6 @@ if(cp.showDialog() == CLPrompter.OK) {
 **VS Code Equivalent (Much Simpler!):**
 ```typescript
 import * as vscode from 'vscode';
-import { CLPrompter } from 'CozziResearch.clprompter';
 
 // Check if clPrompter is installed
 const clPrompterExt = vscode.extensions.getExtension('CozziResearch.clprompter');
@@ -368,6 +535,9 @@ if (!clPrompterExt) {
 if (!clPrompterExt.isActive) {
     await clPrompterExt.activate();
 }
+
+// Access the API
+const { CLPrompter } = clPrompterExt.exports;
 
 // Prompt the command (no editor document needed!)
 let compileCommand = 'CRTBNDRPG PGM(MYLIB/MYPGM) SRCFILE(QRPGLESRC)';
@@ -398,7 +568,7 @@ if (result && result !== compileCommand) {
 ### Example: Multiple Commands in a Build Script
 
 ```typescript
-import { CLPrompter } from 'CozziResearch.clprompter';
+import * as vscode from 'vscode';
 
 interface BuildStep {
     name: string;
@@ -410,6 +580,16 @@ const buildSteps: BuildStep[] = [
     { name: 'Create Service Program', command: 'CRTSRVPGM SRVPGM(MYLIB/MYSRVPGM)' },
     { name: 'Create Binding Directory', command: 'CRTBNDDIR BNDDIR(MYLIB/MYBNDDIR)' }
 ];
+
+// Get CLPrompter
+const clPrompterExt = vscode.extensions.getExtension('CozziResearch.clprompter');
+if (!clPrompterExt) return;
+
+if (!clPrompterExt.isActive) {
+    await clPrompterExt.activate();
+}
+
+const { CLPrompter } = clPrompterExt.exports;
 
 // Let user select and prompt any step
 const selected = await vscode.window.showQuickPick(
@@ -438,7 +618,6 @@ if (selected) {
 
 ```typescript
 import * as vscode from 'vscode';
-import { CLPrompter } from 'CozziResearch.clprompter';
 
 async function promptCommand(command: string): Promise<string | null> {
     // Check if clPrompter is available
@@ -450,18 +629,25 @@ async function promptCommand(command: string): Promise<string | null> {
             await clPrompterExt.activate();
         }
 
-        try {
-            return await CLPrompter(command);
-        } catch (error) {
-            console.error('CLPrompter error:', error);
-            // Fall through to manual input
+        if (clPrompterExt.exports) {
+            const CLPrompter = clPrompterExt.exports.CLPrompter;
+
+            if (typeof CLPrompter === 'function') {
+                try {
+                    return await CLPrompter(command);
+                } catch (error) {
+                    console.error('CLPrompter error:', error);
+                    // Fall through to fallback
+                }
+            }
         }
     }
 
     // Fallback: Simple input box if extension not installed or error occurred
     return await vscode.window.showInputBox({
-        prompt: 'Edit CL Command (Install CozziResearch.clprompter for full prompter)',
+        prompt: 'Edit CL Command',
         value: command,
+        placeHolder: 'Install CozziResearch.clprompter for full IBM i prompting',
         validateInput: (value) => {
             return value.trim() === '' ? 'Command cannot be empty' : null;
         }
@@ -490,13 +676,24 @@ If you want to require the CLPrompter extension (simpler approach):
   ]
 }
 
-// In your code - just use it directly!
-import { CLPrompter } from 'CozziResearch.clprompter';
+// In your code - access via extension API
+import * as vscode from 'vscode';
 
+const clPrompterExt = vscode.extensions.getExtension('CozziResearch.clprompter')!;
+if (!clPrompterExt.isActive) {
+    await clPrompterExt.activate();
+}
+
+const { CLPrompter } = clPrompterExt.exports;
 const result = await CLPrompter('CRTPF FILE(MYLIB/MYFILE)');
 ```
 
 VS Code will automatically prompt users to install the extension if it's missing.
+
+## Features
+
+The CLPrompter API provides:
+
 - **Parameter Validation** - Validates parameters according to command definitions
 - **Special Values** - Provides dropdowns for parameters with special values
 - **CL Variables** - Supports CL variables (&VAR) in parameter values
@@ -568,7 +765,20 @@ if (ext && !ext.isActive) {
 
 ## What Users of Your Extension Need
 
-When you publish your extension that uses CLPrompter:
+When you publish your extension that uses CLPrompter, requirements depend on your integration choice:
+
+### If Using Option 1 (Optional Enhancement):
+
+✅ **Users need to install:**
+1. Your extension
+2. halcyontechltd.code-for-ibmi (Code for IBM i)
+
+✅ **Optionally can install for enhanced experience:**
+- CozziResearch.clprompter (from marketplace)
+
+✅ **Your extension works either way** - with graceful fallback to simple input box
+
+### If Using Option 2 (Required Dependency):
 
 ✅ **Users MUST have these extensions installed:**
 1. Your extension
@@ -576,6 +786,8 @@ When you publish your extension that uses CLPrompter:
 3. halcyontechltd.code-for-ibmi (Code for IBM i)
 
 ✅ **VS Code will prompt users** to install missing dependencies automatically when they install your extension (thanks to `extensionDependencies`).
+
+### In Both Cases:
 
 ❌ **Users do NOT need:**
 - Source code

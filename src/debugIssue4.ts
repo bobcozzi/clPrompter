@@ -17,7 +17,7 @@ const node: CLNode = {
     name: 'CHGVAR',
     parameters: [
         { name: 'VAR', value: '&FROMFILE' },
-        { name: 'VALUE', value: "'These are the times toremember, cause they will not lastforever. won''t although''ll'" }
+        { name: 'VALUE', value: "'These are the times to remember, cause they will not last forever. won''t although''ll'" }
     ]
 };
 

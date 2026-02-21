@@ -2,6 +2,26 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.0.49] - 2026-02-21
+### Fixed
+- **Public API: Export correction**: Fixed `activate()` function to properly return API exports for external extensions
+  - Added `return { CLPrompter, CLPrompterCallback }` statement that was missing
+  - External extensions can now correctly access the API via `vscode.extensions.getExtension().exports`
+  - Issue reported by Alan in #6 - dynamic import pattern doesn't work, but extension API pattern does
+### Added
+- **API Documentation**: Updated CLPROMPTER_API.md with correct usage patterns
+  - Documented both Optional Enhancement and Required Dependency integration approaches
+  - Replaced incorrect dynamic import examples with proper `vscode.extensions.getExtension()` pattern
+  - Added comprehensive examples showing fallback patterns for graceful degradation
+- **API Verification Test**: Added `testAPICall.ts` to verify API exports are correct
+  - Checks source code for proper imports and return statement
+  - Run with `npm run test:api` to validate API structure
+  - Documentation in API_TESTS.md
+### Changed
+- **Build Configuration**: Updated tsconfig.json to exclude test, run, and debug files from builds
+  - Added exclusions for `src/test*.ts`, `src/run*.ts`, and `src/debug*.ts` patterns
+  - Development/testing files no longer compiled into extension package
+
 ## [0.0.48] - 2026-02-20
 ### Added
 - **Public API for external extensions**: Exposed `CLPrompter()` function that external extensions can import and use programmatically

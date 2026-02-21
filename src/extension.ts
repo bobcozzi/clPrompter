@@ -182,6 +182,12 @@ export async function activate(context: vscode.ExtensionContext) {
     initializePrompter(ClPromptPanel, context.extensionUri);
 
     console.log('CL Prompter activate [end]');
+
+    // Return API for external extensions
+    return {
+        CLPrompter,
+        CLPrompterCallback
+    };
 }
 
 

@@ -2,7 +2,7 @@
   "name": "clprompter",
   "displayName": "Bob Cozzi's CL Prompter for IBM i",
   "description": "Bob Cozzi's CL Prompter for IBM i CL commands",
-  "version": "0.0.48",
+  "version": "0.0.49",
   "author": {
     "name": "Bob Cozzi",
     "url": "https://github.com/bobcozzi"
@@ -187,7 +187,8 @@
     "lint": "eslint",
     "watch": "tsc -w -p ./",
     "copy-assets": "cp -r src/webview-assets/* media/",
-    "build": "npm run compile && npm run compile-webview && npm run copy-assets"
+    "build": "npm run compile && npm run compile-webview && npm run copy-assets",
+    "test:api": "tsc src/testAPICall.ts --outDir out --module commonjs --target es2020 --esModuleInterop --skipLibCheck && node out/testAPICall.js"
   },
   "devDependencies": {
     "@types/node": "20.8.10",

@@ -25,6 +25,8 @@
     "out",
     "backup",
     "src/prompter.ts",  // Exclude webview files
-    "src/test*.ts"      // Exclude test files from builds
+    "src/test*.ts",     // Exclude test files from builds
+    "src/run*.ts",      // Exclude test runners from builds
+    "src/debug*.ts"     // Exclude debug files from builds
   ]
 }
