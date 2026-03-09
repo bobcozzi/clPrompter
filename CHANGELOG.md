@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.0.51] - 2026-03-09
+### Changed
+- **Licensing**: Added MIT License headers to all source files
+  - Updated license.txt with full MIT License text
+  - Copyright (c) 2026 R. Cozzi, Jr.
+  - Added license headers to all .ts source files in src/ folder
+  - Test files excluded from published extension package
+
 ## [0.0.50] - 2026-02-21
 ### Fixed
 - **CALL PARM parameter rendering**: Fixed CALL command PARM parameter only showing first value instead of all values

@@ -6,6 +6,7 @@ node_modules/**
 
 .vscode/
 src/
+src/test/
 test/
 backup/
 -install/
