@@ -2,8 +2,18 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.0.52] - 2026-03-21
+### Fixes
+- **Positional parameter binding**: Implemented positional (unnamed) parameter binding when prompting with positional parameters.
+  - IBM i binds positional values by `<Parm>` arrival sequence but I had not yet implemented position-binding/prompting.
+  - `PosNbr` is now used as a display-only attribute to control prompter sequence — it is no longer used for prompter binding.
+  - Example: `DCL &WORK *CHAR 10` — STG was added to DCL after LEN/VALUE but given `PosNbr=3` to appear between TYPE and LEN in the prompter; the bare value `10` now correctly maps to LEN (3rd in arrival order) instead of STG.
+  - Added `getPositionalKwdsFromXMLByArrival()` function that returns parameters in XML arrival order for positional binding, keeping `getPositionalKwdsFromXML()` (PosNbr-sorted) for display ordering
+### Changes
+- **Diagnostic log removed**: Removed leftover `PROMPTER-V2.JS IS EXECUTING!` diagnostic console message from `prompter.ts`
+
 ## [0.0.51] - 2026-03-09
-### Changed
+### Changes
 - **Licensing**: Added MIT License headers to all source files
   - Updated license.txt with full MIT License text
   - Copyright (c) 2026 R. Cozzi, Jr.
@@ -11,7 +21,7 @@ All notable changes to this project will be documented in this file.
   - Test files excluded from published extension package
 
 ## [0.0.50] - 2026-02-21
-### Fixed
+### Fixes
 - **CALL PARM parameter rendering**: Fixed CALL command PARM parameter only showing first value instead of all values
   - V7R4+ PARM has nested ELEM structure with Type/Length/Decimal specifications
   - Added `fieldset.appendChild(elemDiv)` to render nested ELEM sub-elements properly
@@ -19,7 +29,7 @@ All notable changes to this project will be documented in this file.
   - Fixed value preservation for unchanged nested ELEM values
 - **Tokenizer bounds checking**: Fixed "invalid string length" runtime error when prompting commands with positional parameters
   - Added bounds checks (`i < input.length`) to the tokenizeCL.ts file which Prevents infinite loops when reaching end of input string
-### Changed
+### Changes
 - **Settings renamed for clarity**: Renamed case conversion settings to better describe their purpose
   - `convertToUpperCase` → `convertParmValueToUpperCase`: Only affects &variables, *operators, and %functions in parameters
   - `formatCase` → `convertCmdAndParmNameCase`: Affects command names and parameter keyword names (CHGVAR/chgvar, VAR/var)

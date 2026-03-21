@@ -54,9 +54,6 @@ import {
   CancelMessage
 } from './types.js';
 
-// 🔥 DIAGNOSTIC: Verify new prompter-v2.js is executing
-console.log('🔥🔥🔥 PROMPTER-V2.JS IS EXECUTING! 🔥🔥🔥');
-
 // Global state (typed)
 let state: PrompterState = {
   xmlDoc: null,

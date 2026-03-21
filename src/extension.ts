@@ -493,14 +493,19 @@ export class ClPromptPanel {
             this._parmMetas = extractParmMetas(xml);
 
             const throwawayKwds = getThrowawayKwdsFromXML(xml);
-            const posOrder = getPositionalKwdsFromXML(xml); // already excludes throwaways
+            // posOrder: sorted by PosNbr — used for prompter display ordering of _parmMetas
+            const posOrder = getPositionalKwdsFromXML(xml);
+            // posOrderByArrival: XML arrival order — used for binding positional values
+            // IBM i matches unnamed (positional) parameters by the order PARM statements
+            // appear in the command source, NOT by PosNbr.  PosNbr is display-only.
+            const posOrderByArrival = getPositionalKwdsFromXMLByArrival(xml);
             const posIndex = new Map<string, number>();
             posOrder.forEach((k, i) => posIndex.set(k, i));
 
             // Filter metas by throwaways from XML
             this._parmMetas = this._parmMetas.filter(m => !throwawayKwds.has(String((m as any).Kwd || '').toUpperCase()));
 
-            // Stable sort metas: positional first (by posOrder), then keep original order
+            // Stable sort metas: positional first (by PosNbr/posOrder), then keep original order
             this._parmMetas = this._parmMetas
                 .map((m, idx) => ({ m, idx, p: posIndex.get(String((m as any).Kwd || '').toUpperCase()) }))
                 .sort((a, b) => {
@@ -516,11 +521,11 @@ export class ClPromptPanel {
             // 2) MaxPos
             const maxPos = getMaxPos(xml);
 
-            // 3) Rewrite leading positionals by XML list, then parse
+            // 3) Rewrite leading positionals by XML arrival order, then parse
             console.log('[clPrompter] Full command before rewrite:', fullCmd);
             const cmdWithKeywords =
-                (maxPos ?? 0) > 0 && posOrder.length > 0
-                    ? rewriteLeadingPositionalsByList(fullCmd, posOrder, maxPos)
+                (maxPos ?? 0) > 0 && posOrderByArrival.length > 0
+                    ? rewriteLeadingPositionalsByList(fullCmd, posOrderByArrival, maxPos)
                     : fullCmd;
             console.log('[clPrompter] Full command after rewrite:', cmdWithKeywords);
 
@@ -1544,6 +1549,40 @@ function getPositionalKwdsFromXML(xml: string): string[] {
         return a.idx - b.idx; // stable among no-pos
     });
 
+    return items.map(x => x.kwd);
+}
+
+/**
+ * Returns positional-eligible keywords in XML ARRIVAL ORDER (source definition order).
+ * IBM i binds positional (unnamed) parameters by the sequence in which PARM statements
+ * appear in the command source — not by the PosNbr display sequence. PosNbr controls
+ * only the prompt display order. For example, DCL's STG was added after LEN/VALUE but
+ * given PosNbr=3 to appear between TYPE and LEN in the prompter; however a bare positional
+ * value typed as the 3rd argument still maps to LEN (3rd in arrival order), not STG.
+ */
+function getPositionalKwdsFromXMLByArrival(xml: string): string[] {
+    const items: Array<{ kwd: string; idx: number }> = [];
+    const re = /<Parm\b([^>]*)>/gi;
+    let m: RegExpExecArray | null;
+    let idx = 0;
+
+    while ((m = re.exec(xml))) {
+        const attrs = m[1];
+
+        const kwdM = attrs.match(/\bKwd="([^"]+)"/i);
+        if (!kwdM) { idx++; continue; }
+        const kwd = kwdM[1].toUpperCase();
+
+        // Skip Constant and NULL (same as getPositionalKwdsFromXML)
+        if (/\bConstant\s*=/i.test(attrs)) { idx++; continue; }
+        const typeM = attrs.match(/\bType="([^"]+)"/i);
+        if (typeM && typeM[1].toUpperCase() === 'NULL') { idx++; continue; }
+
+        items.push({ kwd, idx });
+        idx++;
+    }
+
+    // Return in XML arrival order — no sort by PosNbr
     return items.map(x => x.kwd);
 }
 
