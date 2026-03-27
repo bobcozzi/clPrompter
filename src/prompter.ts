@@ -314,7 +314,7 @@ function normalizeValue(value: string, allowedValues: string[], parm: Element | 
   // NEVER modify quoted strings - they preserve case regardless of Case attribute
   // Check for surrounding quotes (apostrophes)
   if ((value.startsWith("'") && value.endsWith("'")) ||
-      (value.startsWith('"') && value.endsWith('"'))) {
+    (value.startsWith('"') && value.endsWith('"'))) {
     return value;
   }
 
@@ -725,7 +725,7 @@ function configureTabOrder(focusFirst: boolean = true): void {
     return;
   }
 
-// Get cmdLabel and cmdComment (they're outside the form)
+  // Get cmdLabel and cmdComment (they're outside the form)
   const cmdLabel = document.getElementById('cmdLabel');
   const cmdComment = document.getElementById('cmdComment');
 
@@ -909,7 +909,7 @@ function configureFocusIndicators(): void {
 
         // Keep indicator if moving within same form-group OR same textarea-cbinput-container
         if ((parentFormGroup && parentFormGroup === relatedFormGroup) ||
-            (parentContainer && parentContainer === relatedContainer)) {
+          (parentContainer && parentContainer === relatedContainer)) {
           console.log('[blur] ✓ Keeping indicator - focus staying in same group');
           return;
         }
@@ -2349,7 +2349,7 @@ function populateQualInputs(parm: ParmElement, parmMeta: ParmMetaMap[string], kw
 
   // FIFO into inputs: QUAL0 ← instance[0], QUAL1 ← instance[1], ...
   let i = 0;
-  for (;; i++) {
+  for (; ; i++) {
     let input = container.querySelector(`[name="${kwd}_QUAL${i}"]`) as any;
     if (!input) break;
 
@@ -2422,7 +2422,15 @@ function assembleCurrentParmMap(): ParmMap {
           const elemParts = parm.querySelectorAll(':scope > Elem');
 
           // Check parent SngVal or first ELEM SpcVal
-          const firstElemInput = inst.querySelector(`[name="${kwd}_INST${instIdx}_ELEM0"]`) as HTMLInputElement | null;
+          const firstElem = elemParts[0] as Element | null;
+
+          const firstElemType = firstElem?.getAttribute('Type') || 'CHAR';
+          let firstElemInput: HTMLInputElement | null = null;
+          if (firstElemType === 'QUAL') {
+            firstElemInput = inst.querySelector(`[name="${kwd}_INST${instIdx}_ELEM0_QUAL0"]`) as HTMLInputElement | null;
+          } else {
+            firstElemInput = inst.querySelector(`[name="${kwd}_INST${instIdx}_ELEM0"]`) as HTMLInputElement | null;
+          }
           const firstElemVal = (firstElemInput?.value || '').trim();
           console.log(`[DEBUG] ${kwd} instance ELEM0 value: "${firstElemVal}"`);
 
@@ -2464,7 +2472,7 @@ function assembleCurrentParmMap(): ParmMap {
               if (elemType === 'QUAL') {
                 const parts: string[] = [];
                 for (let j = 0; ; j++) {
-                  const q = inst.querySelector(`[name="${kwd}_ELEM${i}_QUAL${j}"]`) as HTMLInputElement | null;
+                  const q = inst.querySelector(`[name="${kwd}_INST${instIdx}_ELEM${i}_QUAL${j}"]`) as HTMLInputElement | null;
                   if (!q) break;
                   parts.push((q.value || '').trim());
                 }
@@ -2518,7 +2526,7 @@ function assembleCurrentParmMap(): ParmMap {
               if (elemType === 'QUAL') {
                 const parts: string[] = [];
                 for (let j = 0; ; j++) {
-                  const q = inst.querySelector(`[name="${kwd}_ELEM${i}_QUAL${j}"]`) as HTMLInputElement | null;
+                  const q = inst.querySelector(`[name="${kwd}_INST${instIdx}_ELEM${i}_QUAL${j}"]`) as HTMLInputElement | null;
                   if (!q) break;
                   parts.push((q.value || '').trim());
                 }

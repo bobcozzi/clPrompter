@@ -2069,7 +2069,15 @@ function assembleCurrentParmMap() {
                 if (hasElem) {
                     const elemParts = parm.querySelectorAll(':scope > Elem');
                     // Check parent SngVal or first ELEM SpcVal
-                    const firstElemInput = inst.querySelector(`[name="${kwd}_INST${instIdx}_ELEM0"]`);
+                    const firstElem = elemParts[0];
+                    const firstElemType = firstElem?.getAttribute('Type') || 'CHAR';
+                    let firstElemInput = null;
+                    if (firstElemType === 'QUAL') {
+                        firstElemInput = inst.querySelector(`[name="${kwd}_INST${instIdx}_ELEM0_QUAL0"]`);
+                    }
+                    else {
+                        firstElemInput = inst.querySelector(`[name="${kwd}_INST${instIdx}_ELEM0"]`);
+                    }
                     const firstElemVal = (firstElemInput?.value || '').trim();
                     console.log(`[DEBUG] ${kwd} instance ELEM0 value: "${firstElemVal}"`);
                     // Skip instance if first ELEM is empty (user never filled it)
@@ -2107,7 +2115,7 @@ function assembleCurrentParmMap() {
                             if (elemType === 'QUAL') {
                                 const parts = [];
                                 for (let j = 0;; j++) {
-                                    const q = inst.querySelector(`[name="${kwd}_ELEM${i}_QUAL${j}"]`);
+                                    const q = inst.querySelector(`[name="${kwd}_INST${instIdx}_ELEM${i}_QUAL${j}"]`);
                                     if (!q)
                                         break;
                                     parts.push((q.value || '').trim());
@@ -2159,7 +2167,7 @@ function assembleCurrentParmMap() {
                             if (elemType === 'QUAL') {
                                 const parts = [];
                                 for (let j = 0;; j++) {
-                                    const q = inst.querySelector(`[name="${kwd}_ELEM${i}_QUAL${j}"]`);
+                                    const q = inst.querySelector(`[name="${kwd}_INST${instIdx}_ELEM${i}_QUAL${j}"]`);
                                     if (!q)
                                         break;
                                     parts.push((q.value || '').trim());
