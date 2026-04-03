@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.0.53] - 2026-03-25
+### Changes
+- **Rebranding**: Extension renamed to "CL Prompter and Formatter for IBM i" to reflect both major capabilities
+  - Updated display name and description in package.json
+  - Revised README.md to give equal prominence to both CL prompting and CL formatting features
+  - Added dedicated "Getting Started" sections for both prompting and formatting workflows
+  - Organized features into separate "CL Prompter Features" and "CL Formatter Features" sections
+
+
 ## [0.0.52] - 2026-03-21
 ### Fixes
 - **Positional parameter binding**: Implemented positional (unnamed) parameter binding when prompting with positional parameters.

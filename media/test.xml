@@ -1,0 +1,10 @@
+<QcdCLCmd DTDVersion="2.0">
+    <Cmd CmdName="BADQUAL" CmdLib="COZTEST" CCSID="37" MaxPos="99" Prompt="Test spcval for QUAL parms" MsgF="QCPFMSG" MsgFLib="__LIBL" ExecBatch="YES" ChgCmdExit="NO" RtvCmdExit="NO">
+        <Parm Kwd="B" PosNbr="1" KeyParm="NO" RtnVal="NO" PassVal="DFT" Type="DEC" Min="1" Max="1" Prompt="Decimal value" Len="7.0" Rstd="NO" AlwUnprt="YES" AlwVar="YES" Expr="NO" Full="NO" DspInput="YES" Vary="NO" PassAtr="NO" Case="MONO" CCSID="JOB" IsDtaAra="NO" IsFile="NO" IsPgm="NO" Choice="Number"></Parm>
+        <Parm Kwd="AMOUNT" PosNbr="2" KeyParm="NO" RtnVal="NO" PassVal="DFT" Type="DEC" Min="0" Max="1" Prompt="Amount &gt; B" Len="7.0" Rstd="NO" AlwUnprt="YES" AlwVar="YES" Expr="NO" Full="NO" DspInput="YES" Vary="NO" PassAtr="NO" Case="MONO" CCSID="JOB" IsDtaAra="NO" IsFile="NO" IsPgm="NO" Choice="Number"></Parm>
+        <Parm Kwd="AMT" PosNbr="3" KeyParm="NO" RtnVal="NO" PassVal="DFT" Type="DEC" Min="0" Max="1" Prompt="Amt &gt; 50" Len="7.0" Rstd="NO" Rel="GT" RelVal="50" AlwUnprt="YES" AlwVar="YES" Expr="NO" Full="NO" DspInput="YES" Vary="NO" PassAtr="NO" Case="MONO" CCSID="JOB" IsDtaAra="NO" IsFile="NO" IsPgm="NO" Choice="Number"></Parm>
+        <Dep CtlKwdRel="ALWAYS" NbrTrueRel="EQ" NbrTrue="1" MsgID="CPD0141">
+            <DepParm Kwd="AMOUNT" Rel="GT" CmpKwd="B" />
+        </Dep>
+    </Cmd>
+</QcdCLCmd>

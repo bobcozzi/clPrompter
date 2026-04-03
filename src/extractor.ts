@@ -26,6 +26,7 @@
 import * as vscode from 'vscode';
 
 import { DOMParser, Element as XMLElement, Node as XMLNode } from '@xmldom/xmldom';
+import { DepConstraint, DepParmEntry } from './types';
 
 export interface AllowedValuesMap {
     [key: string]: string[] & { _noCustomInput?: boolean };
@@ -297,6 +298,14 @@ export function extractAllowedValues(element: XMLElement): string[] {
         }
     }
 
+    // Parse Rel/RelVal attributes — emit _REL_<Rel>_<RelVal> metadata for relational constraint validation
+    const rel = element.getAttribute("Rel");
+    const relVal = element.getAttribute("RelVal");
+    if (rel && relVal !== null) {
+        vals.push(`_REL_${rel}_${relVal}`);
+        console.log(`[clPrompter] Added rel metadata Rel=${rel} RelVal=${relVal} for ${element.tagName}`);
+    }
+
     return [...new Set(vals)]; // Remove duplicates
 }
 
@@ -471,6 +480,30 @@ export function buildAllowedValsMap(xmlContent: string): AllowedValuesMap {
         }
     });
 
+    // Process <Dep> blocks — cross-parameter relational dependencies
+    // Example: <Dep CtlKwdRel="ALWAYS"><DepParm Kwd="AMOUNT" Rel="GT" CmpKwd="B" /></Dep>
+    // means AMOUNT must be > the current value of parameter B at runtime.
+    // Only CtlKwdRel="ALWAYS" is supported; IF/IFNOT require conditional logic beyond scope here.
+    const deps = Array.from(xmlDoc.getElementsByTagName("Dep")) as XMLElement[];
+    for (const dep of deps) {
+        if (dep.getAttribute("CtlKwdRel") !== "ALWAYS") continue;
+        const depParms = Array.from(dep.getElementsByTagName("DepParm")) as XMLElement[];
+        for (const depParm of depParms) {
+            const kwd = depParm.getAttribute("Kwd");
+            const rel = depParm.getAttribute("Rel");
+            const cmpKwd = depParm.getAttribute("CmpKwd");
+            if (!kwd || !rel || !cmpKwd) continue;
+            if (!allowedValsMap[kwd]) {
+                allowedValsMap[kwd] = [] as any;
+            }
+            const meta = `_DEPREL_${rel}_${cmpKwd}`;
+            if (!allowedValsMap[kwd].includes(meta)) {
+                allowedValsMap[kwd].push(meta);
+                console.log(`[clPrompter] Added dep-rel constraint: ${kwd} must be ${rel} compared to ${cmpKwd}`);
+            }
+        }
+    }
+
     console.log("[clPrompter] allowedValsMap built successfully:", allowedValsMap);
     return allowedValsMap;
 }
@@ -505,4 +538,86 @@ export function hasSpecialValues(allowedVals: string[]): boolean {
  */
 export function getSpecialValues(allowedVals: string[]): string[] {
     return allowedVals.filter(v => v && v !== '_noCustomInput' && !v.startsWith('_RANGE_'));
+}
+
+/**
+ * Build a map of user-visible Val → internal MapTo for each parameter keyword.
+ * Used in the webview to translate user inputs to internal values when evaluating Dep constraints
+ * (which compare against MapTo values, not user-visible Val values).
+ */
+export function buildValToMapToMap(xmlContent: string): { [kwd: string]: { [val: string]: string } } {
+    const result: { [kwd: string]: { [val: string]: string } } = {};
+    const parser = new DOMParser();
+    const xmlDoc = parser.parseFromString(xmlContent, 'text/xml');
+    const parms = Array.from(xmlDoc.getElementsByTagName('Parm')) as XMLElement[];
+
+    for (const parm of parms) {
+        const kwd = parm.getAttribute('Kwd');
+        if (!kwd) continue;
+
+        const valMap: { [val: string]: string } = {};
+        const spcVals = Array.from(parm.getElementsByTagName('SpcVal')).flatMap(
+            sv => Array.from(sv.getElementsByTagName('Value'))
+        ) as XMLElement[];
+        const sngVals = Array.from(parm.getElementsByTagName('SngVal')).flatMap(
+            sv => Array.from(sv.getElementsByTagName('Value'))
+        ) as XMLElement[];
+
+        for (const vNode of [...spcVals, ...sngVals]) {
+            const v = vNode.getAttribute('Val');
+            const m = vNode.getAttribute('MapTo')?.trim();
+            if (v && m && v !== m) {
+                valMap[v] = m;
+            }
+        }
+
+        if (Object.keys(valMap).length > 0) {
+            result[kwd] = valMap;
+        }
+    }
+
+    return result;
+}
+
+/**
+ * Build a structured list of Dep constraints from command XML.
+ * Covers all CtlKwdRel types: ALWAYS, EQ, NE, SPCFD.
+ * Each DepParm can compare by CmpVal (literal MapTo) or CmpKwd (other parameter's value)
+ * or check SPCFD (was it specified by the user).
+ */
+export function buildDepConstraints(xmlContent: string): DepConstraint[] {
+    const constraints: DepConstraint[] = [];
+    const parser = new DOMParser();
+    const xmlDoc = parser.parseFromString(xmlContent, 'text/xml');
+    const deps = Array.from(xmlDoc.getElementsByTagName('Dep')) as XMLElement[];
+
+    for (const dep of deps) {
+        const ctlKwdRel = dep.getAttribute('CtlKwdRel') || 'ALWAYS';
+        const ctlKwd = dep.getAttribute('CtlKwd') || undefined;
+        const rawCmpVal = dep.getAttribute('CmpVal');
+        const cmpVal: string | undefined = rawCmpVal !== null ? rawCmpVal : undefined;
+        const nbrTrueRel = dep.getAttribute('NbrTrueRel') || 'GT';
+        const nbrTrue = parseInt(dep.getAttribute('NbrTrue') || '0', 10);
+        const msgId = dep.getAttribute('MsgID') || '';
+
+        const depParms: DepParmEntry[] = [];
+        const dpElements = Array.from(dep.getElementsByTagName('DepParm')) as XMLElement[];
+        for (const dp of dpElements) {
+            const dpKwd = dp.getAttribute('Kwd');
+            const dpRel = dp.getAttribute('Rel');
+            if (!dpKwd || !dpRel) continue;
+            const entry: DepParmEntry = { kwd: dpKwd, rel: dpRel };
+            const cv = dp.getAttribute('CmpVal');
+            if (cv !== null) entry.cmpVal = cv;
+            const ck = dp.getAttribute('CmpKwd');
+            if (ck) entry.cmpKwd = ck;
+            depParms.push(entry);
+        }
+
+        if (depParms.length > 0) {
+            constraints.push({ ctlKwdRel, ctlKwd, cmpVal, nbrTrueRel, nbrTrue, msgId, depParms });
+        }
+    }
+
+    return constraints;
 }

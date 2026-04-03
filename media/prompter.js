@@ -38,7 +38,9 @@ let state = {
     touchedFields: new Set(),
     isInitializing: false,
     elementsToTrack: [], // Elements to attach listeners to after initialization
-    convertParmValueToUpperCase: true // Default to true (traditional behavior)
+    convertParmValueToUpperCase: true, // Default to true (traditional behavior)
+    depConstraints: [],
+    valToMapToMap: {}
 };
 const vscode = typeof window !== 'undefined' ? window.vscodeApi : undefined;
 // Helper: Check if restricted
@@ -481,6 +483,406 @@ function configureFullValidation(input, requiredLength, container) {
         }, 500); // Validate 500ms after user stops typing
     });
 }
+// Validate Rstd=Y fields — value must match one of the allowed values exactly (case-insensitive)
+function configureRstdValidation(input, suggestions, container) {
+    // Filter metadata entries; only keep actual display values
+    const displayValues = suggestions.filter(s => !s.startsWith('_RANGE_') && !s.startsWith('_REL_'));
+    if (displayValues.length === 0)
+        return;
+    // Create error message span
+    const errorSpan = document.createElement('span');
+    errorSpan.className = 'prompter-error-msg';
+    // Wrap the input (or container) and error span together so they share the same grid cell
+    const targetElement = container || input;
+    const parent = targetElement.parentElement || targetElement.parentNode;
+    if (parent) {
+        const wrapper = document.createElement('div');
+        wrapper.className = 'parm-validation-wrapper';
+        parent.replaceChild(wrapper, targetElement);
+        wrapper.appendChild(targetElement);
+        wrapper.appendChild(errorSpan);
+    }
+    const validateRstd = () => {
+        if (!input.value) {
+            input.setCustomValidity('');
+            input.style.color = '';
+            input.classList.remove('validation-error');
+            errorSpan.classList.remove('visible');
+            errorSpan.textContent = '';
+            return;
+        }
+        // CL variables (start with &) bypass Rstd restriction
+        if (input.value.startsWith('&')) {
+            input.setCustomValidity('');
+            input.style.color = '#006400';
+            input.classList.remove('validation-error');
+            errorSpan.classList.remove('visible');
+            errorSpan.textContent = '';
+            return;
+        }
+        // Case-insensitive match against allowed values
+        const valueUpper = input.value.toUpperCase();
+        const match = displayValues.find(v => v.toUpperCase() === valueUpper);
+        if (match) {
+            // Normalize to canonical casing
+            input.value = match;
+            input.setCustomValidity('');
+            input.style.color = '#006400';
+            input.classList.remove('validation-error');
+            errorSpan.classList.remove('visible');
+            errorSpan.textContent = '';
+        }
+        else {
+            const msg = 'Value entered is not valid';
+            input.setCustomValidity(msg);
+            input.classList.add('validation-error');
+            errorSpan.textContent = msg;
+            errorSpan.classList.add('visible');
+        }
+    };
+    input.addEventListener('blur', validateRstd);
+    input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter')
+            validateRstd();
+    });
+}
+// Helper: Parse Rel/RelVal constraint metadata from a suggestions array
+// Returns an array of { op, val } objects (op: GE, LE, GT, LT, EQ, NE)
+function parseRelConstraints(suggestions) {
+    const result = [];
+    const pattern = /^_REL_([A-Z]+)_(.+)$/;
+    for (const s of suggestions) {
+        const m = s.match(pattern);
+        if (m)
+            result.push({ op: m[1], val: m[2] });
+    }
+    return result;
+}
+// Builds a human-readable constraint hint string from range/rel metadata (e.g. "> 50", "1 to 100")
+function buildConstraintHint(suggestions) {
+    const parts = [];
+    const range = parseRange(suggestions);
+    if (range) {
+        parts.push(`${range.min} to ${range.max}`);
+    }
+    for (const { op, val } of parseRelConstraints(suggestions)) {
+        switch (op) {
+            case 'GE':
+            case 'NL':
+                parts.push(`>= ${val}`);
+                break;
+            case 'LE':
+            case 'NG':
+                parts.push(`<= ${val}`);
+                break;
+            case 'GT':
+                parts.push(`> ${val}`);
+                break;
+            case 'LT':
+                parts.push(`< ${val}`);
+                break;
+            case 'EQ':
+                parts.push(`= ${val}`);
+                break;
+            case 'NE':
+                parts.push(`\u2260 ${val}`);
+                break;
+        }
+    }
+    // Cross-parameter dep-rel constraints — show the parameter name as the reference
+    for (const { op, cmpKwd } of parseDepRelConstraints(suggestions)) {
+        switch (op) {
+            case 'GE':
+            case 'NL':
+                parts.push(`>= ${cmpKwd}`);
+                break;
+            case 'LE':
+            case 'NG':
+                parts.push(`<= ${cmpKwd}`);
+                break;
+            case 'GT':
+                parts.push(`> ${cmpKwd}`);
+                break;
+            case 'LT':
+                parts.push(`< ${cmpKwd}`);
+                break;
+            case 'EQ':
+                parts.push(`= ${cmpKwd}`);
+                break;
+            case 'NE':
+                parts.push(`\u2260 ${cmpKwd}`);
+                break;
+        }
+    }
+    return parts.join(', ');
+}
+// Validate Rel/RelVal constraint fields — value must satisfy the relational constraint
+function configureRelValidation(input, suggestions, container) {
+    const constraints = parseRelConstraints(suggestions);
+    if (constraints.length === 0)
+        return;
+    // Special values (non-metadata) that are always valid
+    const specialValues = suggestions.filter(s => !s.startsWith('_RANGE_') && !s.startsWith('_REL_') && !s.startsWith('_DEPREL_'));
+    // Create error message span
+    const errorSpan = document.createElement('span');
+    errorSpan.className = 'prompter-error-msg';
+    const targetElement = container || input;
+    const parent = targetElement.parentElement || targetElement.parentNode;
+    if (parent) {
+        const wrapper = document.createElement('div');
+        wrapper.className = 'parm-validation-wrapper';
+        parent.replaceChild(wrapper, targetElement);
+        wrapper.appendChild(targetElement);
+        wrapper.appendChild(errorSpan);
+    }
+    const validateRel = () => {
+        if (!input.value) {
+            input.setCustomValidity('');
+            input.style.color = '';
+            input.classList.remove('validation-error');
+            errorSpan.classList.remove('visible');
+            errorSpan.textContent = '';
+            return;
+        }
+        // CL variables bypass constraint validation
+        if (input.value.startsWith('&')) {
+            input.setCustomValidity('');
+            input.style.color = '#006400';
+            input.classList.remove('validation-error');
+            errorSpan.classList.remove('visible');
+            errorSpan.textContent = '';
+            return;
+        }
+        // Special values always pass (case-insensitive)
+        const valueUpper = input.value.toUpperCase();
+        if (specialValues.some(sv => sv.toUpperCase() === valueUpper)) {
+            input.setCustomValidity('');
+            input.style.color = '#006400';
+            input.classList.remove('validation-error');
+            errorSpan.classList.remove('visible');
+            errorSpan.textContent = '';
+            return;
+        }
+        // Determine if constraint comparison is numeric
+        const firstVal = constraints[0].val;
+        const numInputVal = parseFloat(input.value);
+        const isNumeric = !isNaN(parseFloat(firstVal)) && !isNaN(numInputVal);
+        const numInput = numInputVal;
+        const passes = constraints.every(({ op, val }) => {
+            if (isNumeric) {
+                const numVal = parseFloat(val);
+                switch (op) {
+                    case 'GE':
+                    case 'NL': return numInput >= numVal; // NL = Not Less than
+                    case 'LE':
+                    case 'NG': return numInput <= numVal; // NG = Not Greater than
+                    case 'GT': return numInput > numVal;
+                    case 'LT': return numInput < numVal;
+                    case 'EQ': return numInput === numVal;
+                    case 'NE': return numInput !== numVal;
+                    default: return true;
+                }
+            }
+            else {
+                switch (op) {
+                    case 'GE':
+                    case 'NL': return input.value >= val; // NL = Not Less than
+                    case 'LE':
+                    case 'NG': return input.value <= val; // NG = Not Greater than
+                    case 'GT': return input.value > val;
+                    case 'LT': return input.value < val;
+                    case 'EQ': return input.value === val;
+                    case 'NE': return input.value !== val;
+                    default: return true;
+                }
+            }
+        });
+        if (passes) {
+            input.setCustomValidity('');
+            input.style.color = '#006400';
+            input.classList.remove('validation-error');
+            errorSpan.classList.remove('visible');
+            errorSpan.textContent = '';
+        }
+        else {
+            // Build a specific message like "Value must be > 50" from the failing constraints
+            const opSymbol = (op) => {
+                switch (op) {
+                    case 'GE':
+                    case 'NL': return '>=';
+                    case 'LE':
+                    case 'NG': return '<=';
+                    case 'GT': return '>';
+                    case 'LT': return '<';
+                    case 'EQ': return '=';
+                    case 'NE': return '\u2260';
+                    default: return op;
+                }
+            };
+            const parts = constraints.map(c => `${opSymbol(c.op)} ${c.val}`);
+            const msg = `Value must be ${parts.join(' and ')}`;
+            input.setCustomValidity(msg);
+            input.classList.add('validation-error');
+            errorSpan.textContent = msg;
+            errorSpan.classList.add('visible');
+        }
+    };
+    input.addEventListener('blur', validateRel);
+    input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter')
+            validateRel();
+    });
+}
+// Helper: Parse _DEPREL_ cross-parameter constraint metadata
+// Returns { op, cmpKwd } pairs, e.g. _DEPREL_GT_B → { op: 'GT', cmpKwd: 'B' }
+function parseDepRelConstraints(suggestions) {
+    const result = [];
+    const pattern = /^_DEPREL_([A-Z]+)_(.+)$/;
+    for (const s of suggestions) {
+        const m = s.match(pattern);
+        if (m)
+            result.push({ op: m[1], cmpKwd: m[2] });
+    }
+    return result;
+}
+// Validate cross-parameter constraints — e.g. AMOUNT must be > the value of parameter B
+function configureDepRelValidation(input, suggestions, container) {
+    const constraints = parseDepRelConstraints(suggestions);
+    if (constraints.length === 0)
+        return;
+    const specialValues = suggestions.filter(s => !s.startsWith('_RANGE_') && !s.startsWith('_REL_') && !s.startsWith('_DEPREL_'));
+    const errorSpan = document.createElement('span');
+    errorSpan.className = 'prompter-error-msg';
+    const targetElement = container || input;
+    const parent = targetElement.parentElement || targetElement.parentNode;
+    if (parent) {
+        const wrapper = document.createElement('div');
+        wrapper.className = 'parm-validation-wrapper';
+        parent.replaceChild(wrapper, targetElement);
+        wrapper.appendChild(targetElement);
+        wrapper.appendChild(errorSpan);
+    }
+    const opSymbol = (op) => {
+        switch (op) {
+            case 'GE':
+            case 'NL': return '>=';
+            case 'LE':
+            case 'NG': return '<=';
+            case 'GT': return '>';
+            case 'LT': return '<';
+            case 'EQ': return '=';
+            case 'NE': return '\u2260';
+            default: return op;
+        }
+    };
+    const validateDepRel = () => {
+        if (!input.value) {
+            input.setCustomValidity('');
+            input.style.color = '';
+            input.classList.remove('validation-error');
+            errorSpan.classList.remove('visible');
+            errorSpan.textContent = '';
+            return;
+        }
+        if (input.value.startsWith('&')) {
+            input.setCustomValidity('');
+            input.style.color = '#006400';
+            input.classList.remove('validation-error');
+            errorSpan.classList.remove('visible');
+            errorSpan.textContent = '';
+            return;
+        }
+        const valueUpper = input.value.toUpperCase();
+        if (specialValues.some(sv => sv.toUpperCase() === valueUpper)) {
+            input.setCustomValidity('');
+            input.style.color = '#006400';
+            input.classList.remove('validation-error');
+            errorSpan.classList.remove('visible');
+            errorSpan.textContent = '';
+            return;
+        }
+        for (const { op, cmpKwd } of constraints) {
+            // Find the compared parameter's input in the form
+            const cmpInput = document.querySelector(`input[name="${cmpKwd}"]`);
+            const cmpValue = cmpInput ? cmpInput.value.trim() : '';
+            if (!cmpValue)
+                continue; // skip if the compared field is empty
+            const numInput = parseFloat(input.value);
+            const numCmp = parseFloat(cmpValue);
+            const isNumeric = !isNaN(numInput) && !isNaN(numCmp);
+            let passes;
+            if (isNumeric) {
+                switch (op) {
+                    case 'GE':
+                    case 'NL':
+                        passes = numInput >= numCmp;
+                        break;
+                    case 'LE':
+                    case 'NG':
+                        passes = numInput <= numCmp;
+                        break;
+                    case 'GT':
+                        passes = numInput > numCmp;
+                        break;
+                    case 'LT':
+                        passes = numInput < numCmp;
+                        break;
+                    case 'EQ':
+                        passes = numInput === numCmp;
+                        break;
+                    case 'NE':
+                        passes = numInput !== numCmp;
+                        break;
+                    default: passes = true;
+                }
+            }
+            else {
+                switch (op) {
+                    case 'GE':
+                    case 'NL':
+                        passes = input.value >= cmpValue;
+                        break;
+                    case 'LE':
+                    case 'NG':
+                        passes = input.value <= cmpValue;
+                        break;
+                    case 'GT':
+                        passes = input.value > cmpValue;
+                        break;
+                    case 'LT':
+                        passes = input.value < cmpValue;
+                        break;
+                    case 'EQ':
+                        passes = input.value === cmpValue;
+                        break;
+                    case 'NE':
+                        passes = input.value !== cmpValue;
+                        break;
+                    default: passes = true;
+                }
+            }
+            if (!passes) {
+                const cmpDisplay = cmpValue ? `${cmpKwd} (${cmpValue})` : cmpKwd;
+                const msg = `Value must be ${opSymbol(op)} ${cmpDisplay}`;
+                input.setCustomValidity(msg);
+                input.classList.add('validation-error');
+                errorSpan.textContent = msg;
+                errorSpan.classList.add('visible');
+                return;
+            }
+        }
+        input.setCustomValidity('');
+        input.style.color = '#006400';
+        input.classList.remove('validation-error');
+        errorSpan.classList.remove('visible');
+        errorSpan.textContent = '';
+    };
+    input.addEventListener('blur', validateDepRel);
+    input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter')
+            validateDepRel();
+    });
+}
 function setupValidations(input, attrs, container) {
     // Defer all validation setup until after DOM insertion
     // This ensures the input element is in the DOM before we try to wrap it
@@ -496,16 +898,21 @@ function setupValidations(input, attrs, container) {
                 configureFullValidation(input, requiredLength, container);
             }
         }
-        // Future validations can be added here:
-        // if (attrs.minVal) {
-        //   configureMinValueValidation(input, attrs.minVal);
-        // }
-        // if (attrs.maxVal) {
-        //   configureMaxValueValidation(input, attrs.maxVal);
-        // }
-        // if (attrs.values) {
-        //   configureValuesValidation(input, attrs.values);
-        // }
+        // Rstd=Y validation — value must be from the allowed values list
+        if (attrs.isRestricted && attrs.suggestions) {
+            const displayVals = attrs.suggestions.filter(s => !s.startsWith('_RANGE_') && !s.startsWith('_REL_') && !s.startsWith('_DEPREL_'));
+            if (displayVals.length > 0) {
+                configureRstdValidation(input, attrs.suggestions, container);
+            }
+        }
+        // Rel/RelVal constraint validation
+        if (attrs.suggestions && parseRelConstraints(attrs.suggestions).length > 0) {
+            configureRelValidation(input, attrs.suggestions, container);
+        }
+        // Cross-parameter Dep/DepParm constraint validation
+        if (attrs.suggestions && parseDepRelConstraints(attrs.suggestions).length > 0) {
+            configureDepRelValidation(input, attrs.suggestions, container);
+        }
     }, 0);
 }
 // Helper: Validate all inputs with range validation after form population
@@ -828,7 +1235,7 @@ function createInputForType(type, name, dft, len, suggestions, isRestricted = fa
         const container = document.createElement('div');
         container.className = 'textarea-cbinput-container';
         // Use cbInput instead of select to support CL variables
-        const displaySuggestions = suggestions.filter(s => !s.startsWith('_RANGE_'));
+        const displaySuggestions = suggestions.filter(s => !s.startsWith('_RANGE_') && !s.startsWith('_REL_') && !s.startsWith('_DEPREL_'));
         // Normalize the default value before populating the textarea
         const normalizedDft = dft ? normalizeValue(dft, displaySuggestions, null) : '';
         const cbinput = createCBInput({
@@ -898,9 +1305,9 @@ function createInputForType(type, name, dft, len, suggestions, isRestricted = fa
     }
     // If there are suggestions (but not long input), check if they're only range metadata
     if (suggestions.length > 0) {
-        // Filter out range metadata from display
-        const displaySuggestions = suggestions.filter(s => !s.startsWith('_RANGE_'));
-        // If only range metadata (no actual special values), use regular input with range validation
+        // Filter out all metadata prefixes from display values
+        const displaySuggestions = suggestions.filter(s => !s.startsWith('_RANGE_') && !s.startsWith('_REL_') && !s.startsWith('_DEPREL_'));
+        // If only range/rel/deprel metadata (no actual special values), use regular input with hint + validation
         if (displaySuggestions.length === 0) {
             const input = document.createElement('input');
             input.type = 'text';
@@ -909,7 +1316,19 @@ function createInputForType(type, name, dft, len, suggestions, isRestricted = fa
             input.dataset.default = dft || '';
             input.classList.add(getLengthClass(effectiveLen));
             attachTouchTracking(input);
-            // Configure all validations (range, full, future validations)
+            // Show constraint hint to right of input (e.g. "> 50", "1 to 100")
+            const hint = buildConstraintHint(suggestions);
+            if (hint) {
+                const hintContainer = document.createElement('div');
+                hintContainer.className = 'parm-input-container';
+                hintContainer.appendChild(input);
+                const hintSpan = document.createElement('span');
+                hintSpan.className = 'constraint-hint';
+                hintSpan.textContent = hint;
+                hintContainer.appendChild(hintSpan);
+                setupValidations(input, { suggestions, full, len }, hintContainer);
+                return hintContainer;
+            }
             setupValidations(input, { suggestions, full, len });
             return input;
         }
@@ -941,6 +1360,13 @@ function createInputForType(type, name, dft, len, suggestions, isRestricted = fa
             const container = cbinput.getElement();
             setTimeout(() => {
                 configureRangeValidation(inputElement, suggestions, container);
+            }, 0);
+        }
+        // Add Rel/RelVal validation if applicable (e.g. SpcVal + Rel constraint together)
+        if (parseRelConstraints(suggestions).length > 0) {
+            const relContainer = cbinput.getElement();
+            setTimeout(() => {
+                configureRelValidation(inputElement, suggestions, relContainer);
             }, 0);
         }
         return cbinput.getElement();
@@ -1032,28 +1458,31 @@ function createParmInput(name, suggestions, isRestricted, dft, len, type, full) 
     console.log(`[createParmInput] ${name}: suggestions=`, suggestions, 'isRestricted=', isRestricted, 'type=', type, 'full=', full);
     // Even restricted parameters must support CL variables, so always use cbInput when there are suggestions
     if (isRestricted && suggestions.length > 0) {
+        // Filter metadata markers out of the display list for the dropdown options
+        const displaySuggestions = suggestions.filter(s => !s.startsWith('_RANGE_') && !s.startsWith('_REL_') && !s.startsWith('_DEPREL_'));
         // Normalize the default value before populating the input
-        const normalizedDft = dft ? normalizeValue(dft, suggestions, null) : '';
+        const normalizedDft = dft ? normalizeValue(dft, displaySuggestions, null) : '';
         // Use cbInput instead of select to support CL variables like &VAR
-        const maxLength = Math.max(normalizedDft?.length || 0, ...suggestions.map(s => s.length));
+        const maxLength = Math.max(normalizedDft?.length || 0, ...displaySuggestions.map(s => s.length));
         const inputWidth = Math.max(15, maxLength + 3);
         const cbinput = createCBInput({
             name: name,
             id: name,
             value: normalizedDft,
-            options: suggestions,
+            options: displaySuggestions,
             width: `${inputWidth}ch`,
             minWidth: '150px'
         });
         const inputElement = cbinput.getInputElement();
         attachTouchTracking(inputElement);
-        // Add blur handler to normalize values against allowed values
-        inputElement.addEventListener('blur', () => {
-            if (inputElement.value) {
-                const normalizedValue = normalizeValue(inputElement.value, suggestions, null);
-                inputElement.value = normalizedValue;
+        // Attach Rstd validation (shows "Value entered is not valid" for values outside the allowed list)
+        setTimeout(() => {
+            configureRstdValidation(inputElement, suggestions, cbinput.getElement());
+            // Also attach Rel/RelVal constraint validation if any _REL_ entries exist
+            if (parseRelConstraints(suggestions).length > 0) {
+                configureRelValidation(inputElement, suggestions);
             }
-        });
+        }, 0);
         console.log('[clPrompter] ', 'createParmInput end1');
         return cbinput.getElement();
     }
@@ -2677,12 +3106,281 @@ function normalizeNewlinesInValues(values) {
     }
     console.log('[clPrompter] normalizeNewlinesInValues - END');
 }
+// ========================================
+// DEP/DEPPARM FORM-LEVEL VALIDATION ENGINE
+// ========================================
+// Evaluates all <Dep> cross-parameter constraints against the current form values.
+// Called at submit time and live on input blur.
+/**
+ * Translate a user-visible value (e.g. "*NO") to its internal MapTo form (e.g. "N")
+ * using the valToMapToMap loaded from XML. Falls back to returning val unchanged.
+ */
+function resolveToInternal(kwd, val) {
+    const kwdMap = state.valToMapToMap[kwd];
+    if (!kwdMap)
+        return val;
+    // Direct lookup: is this user val in the map?
+    if (kwdMap[val] !== undefined)
+        return kwdMap[val];
+    // Case-insensitive lookup
+    const upper = val.toUpperCase();
+    for (const [k, v] of Object.entries(kwdMap)) {
+        if (k.toUpperCase() === upper)
+            return v;
+    }
+    return val;
+}
+/**
+ * Compare two string/numeric values using a relational operator.
+ * Operator uses IBM i conventions: EQ, NE, GT, LT, GE, NL, LE, NG.
+ */
+function compareDepValues(a, op, b) {
+    const numA = parseFloat(a);
+    const numB = parseFloat(b);
+    const isNumeric = !isNaN(numA) && !isNaN(numB);
+    if (isNumeric) {
+        switch (op) {
+            case 'EQ': return numA === numB;
+            case 'NE': return numA !== numB;
+            case 'GT': return numA > numB;
+            case 'LT': return numA < numB;
+            case 'GE':
+            case 'NL': return numA >= numB;
+            case 'LE':
+            case 'NG': return numA <= numB;
+            default: return true;
+        }
+    }
+    const ua = a.toUpperCase();
+    const ub = b.toUpperCase();
+    switch (op) {
+        case 'EQ': return ua === ub;
+        case 'NE': return ua !== ub;
+        case 'GT': return ua > ub;
+        case 'LT': return ua < ub;
+        case 'GE':
+        case 'NL': return ua >= ub;
+        case 'LE':
+        case 'NG': return ua <= ub;
+        default: return true;
+    }
+}
+/**
+ * Get the current (internal/resolved) value for a parameter keyword from the DOM.
+ * Searches for the first matching input[name="kwd"] and translates via valToMapToMap.
+ */
+function getFieldInternalValue(kwd) {
+    const input = document.querySelector(`input[name="${kwd}"]`);
+    const raw = input ? input.value.trim() : '';
+    return resolveToInternal(kwd, raw);
+}
+/** Get the raw user value for a keyword (no MapTo translation). */
+function getFieldRawValue(kwd) {
+    const input = document.querySelector(`input[name="${kwd}"]`);
+    return input ? input.value.trim() : '';
+}
+/**
+ * Evaluate a single DepParm entry against the current form values.
+ * Returns true if the condition holds (DepParm "passes").
+ */
+function evaluateDepParm(dp) {
+    const rawVal = getFieldRawValue(dp.kwd);
+    const val = resolveToInternal(dp.kwd, rawVal);
+    if (dp.rel === 'SPCFD') {
+        // "Was the field specified?" — approximate as: value is non-empty
+        return rawVal.length > 0;
+    }
+    if (dp.cmpKwd) {
+        // Compare against another parameter's current value
+        const cmpVal = getFieldInternalValue(dp.cmpKwd);
+        return compareDepValues(val, dp.rel, cmpVal);
+    }
+    if (dp.cmpVal !== undefined) {
+        // Compare against a literal internal value
+        return compareDepValues(val, dp.rel, dp.cmpVal);
+    }
+    return true; // Unknown pattern — treat as passing
+}
+/**
+ * Evaluate one Dep block. Returns null if the constraint passes, or an error
+ * description string if it is violated.
+ */
+function evaluateDepConstraint(constraint) {
+    // Step 1: Check the control condition
+    if (constraint.ctlKwdRel !== 'ALWAYS') {
+        if (!constraint.ctlKwd)
+            return null; // Malformed — skip
+        const ctlRaw = getFieldRawValue(constraint.ctlKwd);
+        const ctlVal = resolveToInternal(constraint.ctlKwd, ctlRaw);
+        let conditionMet;
+        switch (constraint.ctlKwdRel) {
+            case 'EQ':
+                conditionMet = compareDepValues(ctlVal, 'EQ', constraint.cmpVal ?? '');
+                break;
+            case 'NE':
+                conditionMet = compareDepValues(ctlVal, 'NE', constraint.cmpVal ?? '');
+                break;
+            case 'SPCFD':
+                conditionMet = ctlRaw.length > 0;
+                break;
+            default:
+                return null; // Unknown — skip
+        }
+        if (!conditionMet)
+            return null; // Condition not met → constraint doesn't apply
+    }
+    // Step 2: Count how many DepParms are true
+    let trueCount = 0;
+    for (const dp of constraint.depParms) {
+        if (evaluateDepParm(dp))
+            trueCount++;
+    }
+    // Step 3: Check NbrTrueRel/NbrTrue
+    let passes;
+    switch (constraint.nbrTrueRel) {
+        case 'GT':
+            passes = trueCount > constraint.nbrTrue;
+            break;
+        case 'GE':
+            passes = trueCount >= constraint.nbrTrue;
+            break;
+        case 'EQ':
+            passes = trueCount === constraint.nbrTrue;
+            break;
+        case 'LE':
+            passes = trueCount <= constraint.nbrTrue;
+            break;
+        case 'LT':
+            passes = trueCount < constraint.nbrTrue;
+            break;
+        case 'NE':
+            passes = trueCount !== constraint.nbrTrue;
+            break;
+        default: passes = true;
+    }
+    if (passes)
+        return null;
+    // Build a human-readable error message
+    return buildDepErrorMessage(constraint, trueCount);
+}
+/**
+ * Build a human-readable description of a Dep constraint violation.
+ */
+function buildDepErrorMessage(constraint, trueCount) {
+    const opSymbols = {
+        GT: '>', GE: '>=', NL: '>=', LT: '<', LE: '<=', NG: '<=', EQ: '=', NE: '\u2260'
+    };
+    const kwds = [...new Set(constraint.depParms.map(dp => dp.kwd))];
+    const kwdList = kwds.join(', ');
+    // Describe requirements
+    const total = constraint.depParms.length;
+    let require = '';
+    switch (constraint.nbrTrueRel) {
+        case 'GT':
+            require = `at least ${constraint.nbrTrue + 1}`;
+            break;
+        case 'GE':
+            require = `at least ${constraint.nbrTrue}`;
+            break;
+        case 'EQ':
+            require = `exactly ${constraint.nbrTrue}`;
+            break;
+        case 'LE':
+            require = `at most ${constraint.nbrTrue}`;
+            break;
+        default: require = String(constraint.nbrTrue);
+    }
+    // Special-case common patterns for clearer messages
+    // Pattern: ALWAYS, 3 DepParms, NbrTrueRel=GT NbrTrue=0 with 2 CmpVal=0/escape + 1 CmpKwd ordering
+    const cmpKwdEntry = constraint.depParms.find(dp => dp.cmpKwd);
+    if (constraint.ctlKwdRel === 'ALWAYS' && cmpKwdEntry && constraint.nbrTrueRel === 'GT' && constraint.nbrTrue === 0) {
+        const sym = opSymbols[cmpKwdEntry.rel] || cmpKwdEntry.rel;
+        const cmpKwdRaw = getFieldRawValue(cmpKwdEntry.cmpKwd);
+        return `${cmpKwdEntry.kwd} must be ${sym} ${cmpKwdEntry.cmpKwd}${cmpKwdRaw ? ` (${cmpKwdRaw})` : ''}`;
+    }
+    // Pattern: conditional EQ/NE on control keyword
+    if (constraint.ctlKwd) {
+        const ctlRaw = getFieldRawValue(constraint.ctlKwd);
+        const ctlDisplay = ctlRaw || constraint.ctlKwd;
+        if (constraint.nbrTrueRel === 'EQ' && constraint.nbrTrue === total) {
+            // All must be true
+            const conditions = constraint.depParms.map(dp => {
+                if (dp.cmpVal !== undefined) {
+                    const sym = opSymbols[dp.rel] || dp.rel;
+                    return `${dp.kwd} ${sym} ${dp.cmpVal}`;
+                }
+                return `${dp.kwd} SPCFD`;
+            }).join(' and ');
+            return `When ${constraint.ctlKwd} = ${ctlDisplay}: ${conditions}`;
+        }
+        if (constraint.nbrTrueRel === 'GT' && constraint.nbrTrue === 0) {
+            // At least one must be true — OR between them
+            const conditions = constraint.depParms.map(dp => {
+                const sym = opSymbols[dp.rel] || dp.rel;
+                return `${dp.kwd} ${sym} ${dp.cmpVal ?? dp.cmpKwd ?? ''}`;
+            }).join(' or ');
+            return `When ${constraint.ctlKwd} = ${ctlDisplay}: ${conditions}`;
+        }
+    }
+    // Generic fallback
+    return `Dependency constraint violated (${constraint.msgId || kwdList}): ${require} of ${total} conditions must hold`;
+}
+/**
+ * Evaluate ALL Dep constraints and return an array of error messages.
+ * Empty array means all constraints pass.
+ */
+function evaluateAllDepConstraints() {
+    const errors = [];
+    for (const constraint of state.depConstraints) {
+        const err = evaluateDepConstraint(constraint);
+        if (err)
+            errors.push(err);
+    }
+    return errors;
+}
+/**
+ * Show or hide the Dep error banner above the submit button.
+ */
+function showDepErrorBanner(errors) {
+    let banner = document.getElementById('dep-error-banner');
+    if (errors.length === 0) {
+        if (banner)
+            banner.style.display = 'none';
+        return;
+    }
+    if (!banner) {
+        banner = document.createElement('div');
+        banner.id = 'dep-error-banner';
+        banner.className = 'dep-error-banner';
+        const submitBtn = document.getElementById('submitBtn');
+        if (submitBtn && submitBtn.parentNode) {
+            submitBtn.parentNode.insertBefore(banner, submitBtn);
+        }
+        else {
+            document.body.appendChild(banner);
+        }
+    }
+    banner.style.display = '';
+    if (errors.length === 1) {
+        banner.textContent = errors[0];
+    }
+    else {
+        banner.innerHTML = '<ul>' + errors.map(e => `<li>${e}</li>`).join('') + '</ul>';
+    }
+}
 // Event handlers
 function onSubmit() {
     console.log('[clPrompter] ', 'onSubmit (Enter) start');
     const values = assembleCurrentParmMap();
     // Normalize newlines in all parameter values (textarea fields can have Shift+Enter)
     normalizeNewlinesInValues(values);
+    // Evaluate cross-parameter Dep constraints and block submission if there are violations
+    const depErrors = evaluateAllDepConstraints();
+    showDepErrorBanner(depErrors);
+    if (depErrors.length > 0) {
+        console.log('[clPrompter] onSubmit blocked by Dep constraint violations:', depErrors);
+        return;
+    }
     // Include label in values if present (normalize newlines just in case)
     if (state.cmdLabel && state.cmdLabel.trim()) {
         values['label'] = state.cmdLabel.replace(/\r\n|\n|\r/g, ' ').trim();
@@ -2781,12 +3479,23 @@ function wirePrompterControls() {
     });
     state.controlsWired = true;
     console.log('[clPrompter] ', 'wirePrompterControls end');
+    // Live Dep constraint re-validation: re-evaluate all constraints on any input blur
+    // Using event delegation on the form so we don't need to re-wire after each render
+    const depForm = document.getElementById('clForm');
+    if (depForm) {
+        depForm.addEventListener('blur', () => {
+            const errors = evaluateAllDepConstraints();
+            showDepErrorBanner(errors);
+        }, true); // capture phase catches all blur events inside the form
+    }
 }
 function resetPrompterState() {
     console.log('[clPrompter] ', 'resetPrompterState start (never called?)');
     state.xmlDoc = null;
     state.parms = [];
     state.allowedValsMap = {};
+    state.depConstraints = [];
+    state.valToMapToMap = {};
     state.originalParmMap = {};
     state.cmdName = '';
     state.hasProcessedFormData = false;
@@ -2817,6 +3526,8 @@ window.addEventListener('message', event => {
         });
         console.log('[clPrompter] Parsed parms:', state.parms.length); // Add this
         state.allowedValsMap = message.allowedValsMap || {};
+        state.depConstraints = message.depConstraints || [];
+        state.valToMapToMap = message.valToMapToMap || {};
         state.cmdName = message.cmdName || '';
         // Update main title with command name and prompt
         const cmdPrompt = message.cmdPrompt || '';

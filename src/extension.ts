@@ -49,7 +49,7 @@ import {
 import * as fs from 'fs';
 import * as path from 'path';
 import { buildAPI2PartName, buildQualName } from './QlgPathName';
-import { collectCLCmd, buildAllowedValsMap } from './extractor';
+import { collectCLCmd, buildAllowedValsMap, buildDepConstraints, buildValToMapToMap } from './extractor';
 import { getCMDXML } from './getcmdxml';
 
 import {
@@ -609,6 +609,8 @@ export class ClPromptPanel {
                 console.log('[clPrompter] webviewReady: Extracted cmdPrompt:', cmdPrompt);
 
                 const allowedValsMap = buildAllowedValsMap(xml);
+                const depConstraints = buildDepConstraints(xml);
+                const valToMapToMap = buildValToMapToMap(xml);
                 const config = vscode.workspace.getConfiguration('clPrompter');
                 const keywordColor = config.get('kwdColor');
                 const valueColor = config.get('kwdValueColor');
@@ -619,6 +621,8 @@ export class ClPromptPanel {
                     type: 'formData',
                     xml,
                     allowedValsMap,
+                    depConstraints,
+                    valToMapToMap,
                     cmdName,
                     cmdPrompt: cmdPrompt,
                     paramMap: this._parmMap,
@@ -952,6 +956,8 @@ export class ClPromptPanel {
                         this._panel.webview.postMessage({ type: 'setLabel', label: this._cmdLabel, comment: this._cmdComment });
 
                         const allowedValsMap = buildAllowedValsMap(this._xml);
+                        const depConstraints = buildDepConstraints(this._xml);
+                        const valToMapToMap = buildValToMapToMap(this._xml);
                         const config = vscode.workspace.getConfiguration('clPrompter');
                         const keywordColor = config.get('kwdColor');
                         const valueColor = config.get('kwdValueColor');
@@ -963,6 +969,8 @@ export class ClPromptPanel {
                             type: 'formData',
                             xml: this._xml,
                             allowedValsMap,
+                            depConstraints,
+                            valToMapToMap,
                             cmdName: this._cmdName,
                             cmdPrompt: cmdPrompt,
                             parmMap: this._parmMap,
@@ -989,6 +997,8 @@ export class ClPromptPanel {
 
                             // Resend the form data to reinitialize the webview
                             const allowedValsMap = buildAllowedValsMap(this._xml);
+                            const depConstraints = buildDepConstraints(this._xml);
+                            const valToMapToMap = buildValToMapToMap(this._xml);
                             const config = vscode.workspace.getConfiguration('clPrompter');
                             const keywordColor = config.get('kwdColor');
                             const valueColor = config.get('kwdValueColor');
@@ -1010,6 +1020,8 @@ export class ClPromptPanel {
                                 type: 'formData',
                                 xml: this._xml,
                                 allowedValsMap,
+                                depConstraints,
+                                valToMapToMap,
                                 cmdName: this._cmdName,
                                 cmdPrompt: cmdPrompt,
                                 parmMap: this._parmMap,

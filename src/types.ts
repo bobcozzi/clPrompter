@@ -161,6 +161,8 @@ export interface FormDataMessage {
   parmMap?: { [kwd: string]: any }; // Legacy support
   config?: { keywordColor?: any };
   cmdMaxPos?: number; // ← add if you have Cmd MaxPos
+  depConstraints?: DepConstraint[];           // Cross-parameter Dep/DepParm constraints
+  valToMapToMap?: { [kwd: string]: { [val: string]: string } }; // Val→MapTo for Dep evaluation
 }
 
 export interface SubmitMessage {
@@ -192,6 +194,26 @@ export interface PrompterState {
   isInitializing: boolean; // Flag to prevent touch tracking during form initialization
   elementsToTrack: HTMLElement[]; // Elements to attach listeners to after initialization
   convertParmValueToUpperCase: boolean; // Whether to auto-convert variables, operators, and built-in functions within parameter values to uppercase
+  depConstraints: DepConstraint[];  // Cross-parameter Dep/DepParm constraints
+  valToMapToMap: { [kwd: string]: { [val: string]: string } }; // Val→MapTo translation map
+}
+
+// Dep/DepParm cross-parameter constraint types
+export interface DepParmEntry {
+  kwd: string;
+  rel: string;      // EQ, NE, GT, LT, GE, LE, NL, NG, SPCFD
+  cmpVal?: string;  // literal internal (MapTo) value to compare against
+  cmpKwd?: string;  // keyword of another parameter to compare against
+}
+
+export interface DepConstraint {
+  ctlKwdRel: string;  // ALWAYS, EQ, NE, SPCFD
+  ctlKwd?: string;    // controlling keyword (absent when ALWAYS)
+  cmpVal?: string;    // internal value to compare ctlKwd against
+  nbrTrueRel: string; // GT, GE, EQ, LE, LT, NE
+  nbrTrue: number;    // threshold count
+  msgId: string;      // e.g. "CPD2830"
+  depParms: DepParmEntry[];
 }
 
 // Utility types

@@ -573,12 +573,28 @@ textarea.long-text-input[style*="color: #006400"],
   display: inline;
 }
 
-/* Range validation wrapper (input + error message) */
-.parm-validation-wrapper {
+/* Range/parm validation wrappers (input + error message) */
+.parm-validation-wrapper,
+.range-validation-wrapper {
   display: flex;
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
+}
+
+/* Container for input + inline constraint hint (e.g. "> 50") */
+.parm-input-container {
+  display: inline-flex;
+  align-items: center;
+}
+
+/* Constraint hint text shown to the right of the input */
+.constraint-hint {
+  margin-left: 0.5cm;
+  font-size: 0.8em;
+  color: var(--vscode-descriptionForeground, #888888);
+  white-space: nowrap;
+  font-style: italic;
 }
 
 /* Container for textarea with cbinput dropdown */
@@ -593,4 +609,28 @@ textarea.long-text-input[style*="color: #006400"],
 input.validation-error,
 textarea.validation-error {
   color: #ff0000;
+}
+
+/* =============================================
+   DEP/DEPPARM CROSS-PARAMETER ERROR BANNER
+   ============================================= */
+.dep-error-banner {
+  border: 1px solid var(--vscode-inputValidation-errorBorder, #f48771);
+  background-color: var(--vscode-inputValidation-errorBackground, rgba(255, 0, 0, 0.1));
+  color: var(--vscode-inputValidation-errorForeground, #f48771);
+  border-radius: 3px;
+  padding: 6px 12px;
+  margin-bottom: 8px;
+  font-size: 12px;
+  font-weight: bold;
+}
+
+.dep-error-banner ul {
+  margin: 4px 0 0 16px;
+  padding: 0;
+}
+
+.dep-error-banner li {
+  list-style-type: disc;
+  margin-bottom: 2px;
 }
