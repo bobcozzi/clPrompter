@@ -1,6 +1,18 @@
 # Changelog
 
-All notable changes to this project will be documented in this file.
+All notable changes to this project are documented in this file.
+
+## [0.0.54] - 2026-04-06
+### Fixes
+- **ELEM(QUAL) parameter values not returned**: Fixed `BNDSRVPGM` and similar parameters whose first `<Elem>` is of type `QUAL` being silently dropped on submit.
+  - The empty-check for an ELEM instance used the selector `_ELEM0` but a QUAL-type first elem's input is named `_ELEM0_QUAL0` — so the instance was always seen as empty and skipped.
+  - Two additional selectors in the default-value scan loops were missing the `_INST${instIdx}` segment (`_ELEM${i}_QUAL${j}` → `_INST${instIdx}_ELEM${i}_QUAL${j}`), causing QUAL-within-ELEM values to always read as empty.
+- **SPCFD false-positive constraint violations**: Fixed spurious `"Dependency constraint violated"` errors (e.g. `RNS9332` on `CRTBNDRPG`) caused by treating parameters with defaults as "specified".
+  - IBM i `SPCFD` means the user explicitly changed the value away from the default. Fields that still hold their `Dft` attribute value are now correctly treated as "not specified".
+  - Added `buildDefaultValMap()` in `extractor.ts` and `isFieldSpecified()` in `prompter.ts`; both SPCFD evaluation branches updated.
+- **`NbrTrueRel=NE` error message**: Added missing `NE` case to `buildDepErrorMessage()` — previously fell through to the default, producing a nonsensical message.
+- **Cross-parameter constraint hint operator inverted**: When `NbrTrueRel=EQ NbrTrue=0`, the `_DEPREL_` hint metadata now emits the inverted operator so the UI shows (e.g.) `<> GRPPRF` instead of the misleading `= GRPPRF`.
+- **`<>` replaces `≠` for "not equal" hints**: Replaced the hard-to-read `≠` Unicode character with the clearer `<>` in all constraint hints and error messages.
 
 ## [0.0.53] - 2026-03-25
 ### Changes

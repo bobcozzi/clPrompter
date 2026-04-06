@@ -484,15 +484,21 @@ export function buildAllowedValsMap(xmlContent: string): AllowedValuesMap {
     // Example: <Dep CtlKwdRel="ALWAYS"><DepParm Kwd="AMOUNT" Rel="GT" CmpKwd="B" /></Dep>
     // means AMOUNT must be > the current value of parameter B at runtime.
     // Only CtlKwdRel="ALWAYS" is supported; IF/IFNOT require conditional logic beyond scope here.
+    const relInvert: Record<string, string> = { EQ: 'NE', NE: 'EQ', GT: 'LE', GE: 'LT', LT: 'GE', LE: 'GT', NL: 'GT', NG: 'LT' };
     const deps = Array.from(xmlDoc.getElementsByTagName("Dep")) as XMLElement[];
     for (const dep of deps) {
         if (dep.getAttribute("CtlKwdRel") !== "ALWAYS") continue;
+        const nbrTrueRel = dep.getAttribute("NbrTrueRel") || "GT";
+        const nbrTrue = parseInt(dep.getAttribute("NbrTrue") || "0", 10);
+        // When NbrTrueRel=EQ NbrTrue=0, none of these conditions can hold → invert each operator
+        const invertOp = nbrTrueRel === "EQ" && nbrTrue === 0;
         const depParms = Array.from(dep.getElementsByTagName("DepParm")) as XMLElement[];
         for (const depParm of depParms) {
             const kwd = depParm.getAttribute("Kwd");
-            const rel = depParm.getAttribute("Rel");
+            const rawRel = depParm.getAttribute("Rel");
             const cmpKwd = depParm.getAttribute("CmpKwd");
-            if (!kwd || !rel || !cmpKwd) continue;
+            if (!kwd || !rawRel || !cmpKwd) continue;
+            const rel = invertOp ? (relInvert[rawRel] ?? rawRel) : rawRel;
             if (!allowedValsMap[kwd]) {
                 allowedValsMap[kwd] = [] as any;
             }
@@ -576,6 +582,26 @@ export function buildValToMapToMap(xmlContent: string): { [kwd: string]: { [val:
         }
     }
 
+    return result;
+}
+
+/**
+ * Build a map of keyword → default display value (Dft attribute) from command XML.
+ * Used to determine whether a parameter is "specified" (differs from its default)
+ * for evaluating SPCFD Dep constraints.
+ */
+export function buildDefaultValMap(xmlContent: string): { [kwd: string]: string } {
+    const result: { [kwd: string]: string } = {};
+    const parser = new DOMParser();
+    const xmlDoc = parser.parseFromString(xmlContent, 'text/xml');
+    const parms = Array.from(xmlDoc.getElementsByTagName('Parm')) as XMLElement[];
+    for (const parm of parms) {
+        const kwd = parm.getAttribute('Kwd');
+        const dft = parm.getAttribute('Dft');
+        if (kwd && dft !== null) {
+            result[kwd] = dft;
+        }
+    }
     return result;
 }
 

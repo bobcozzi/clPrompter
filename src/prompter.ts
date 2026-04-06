@@ -73,7 +73,8 @@ let state: PrompterState = {
   elementsToTrack: [], // Elements to attach listeners to after initialization
   convertParmValueToUpperCase: true, // Default to true (traditional behavior)
   depConstraints: [],
-  valToMapToMap: {}
+  valToMapToMap: {},
+  defaultValMap: {}
 };
 
 // VS Code API
@@ -674,7 +675,7 @@ function buildConstraintHint(suggestions: string[]): string {
       case 'GT': parts.push(`> ${val}`); break;
       case 'LT': parts.push(`< ${val}`); break;
       case 'EQ': parts.push(`= ${val}`); break;
-      case 'NE': parts.push(`\u2260 ${val}`); break;
+      case 'NE': parts.push(`<> ${val}`); break;
     }
   }
   // Cross-parameter dep-rel constraints — show the parameter name as the reference
@@ -685,7 +686,7 @@ function buildConstraintHint(suggestions: string[]): string {
       case 'GT': parts.push(`> ${cmpKwd}`); break;
       case 'LT': parts.push(`< ${cmpKwd}`); break;
       case 'EQ': parts.push(`= ${cmpKwd}`); break;
-      case 'NE': parts.push(`\u2260 ${cmpKwd}`); break;
+      case 'NE': parts.push(`<> ${cmpKwd}`); break;
     }
   }
   return parts.join(', ');
@@ -791,7 +792,7 @@ function configureRelValidation(input: HTMLInputElement, suggestions: string[], 
           case 'GT': return '>';
           case 'LT': return '<';
           case 'EQ': return '=';
-          case 'NE': return '\u2260';
+          case 'NE': return '<>';
           default: return op;
         }
       };
@@ -849,7 +850,7 @@ function configureDepRelValidation(input: HTMLInputElement, suggestions: string[
       case 'GT': return '>';
       case 'LT': return '<';
       case 'EQ': return '=';
-      case 'NE': return '\u2260';
+      case 'NE': return '<>';
       default: return op;
     }
   };
@@ -2811,7 +2812,15 @@ function assembleCurrentParmMap(): ParmMap {
           const elemParts = parm.querySelectorAll(':scope > Elem');
 
           // Check parent SngVal or first ELEM SpcVal
-          const firstElemInput = inst.querySelector(`[name="${kwd}_INST${instIdx}_ELEM0"]`) as HTMLInputElement | null;
+          // When first ELEM is a QUAL type, its input is named _ELEM0_QUAL0 (not _ELEM0)
+          const firstElem = elemParts[0] as Element | null;
+          const firstElemType = firstElem?.getAttribute('Type') || 'CHAR';
+          let firstElemInput: HTMLInputElement | null;
+          if (firstElemType === 'QUAL') {
+            firstElemInput = inst.querySelector(`[name="${kwd}_INST${instIdx}_ELEM0_QUAL0"]`) as HTMLInputElement | null;
+          } else {
+            firstElemInput = inst.querySelector(`[name="${kwd}_INST${instIdx}_ELEM0"]`) as HTMLInputElement | null;
+          }
           const firstElemVal = (firstElemInput?.value || '').trim();
           console.log(`[DEBUG] ${kwd} instance ELEM0 value: "${firstElemVal}"`);
 
@@ -2853,7 +2862,7 @@ function assembleCurrentParmMap(): ParmMap {
               if (elemType === 'QUAL') {
                 const parts: string[] = [];
                 for (let j = 0; ; j++) {
-                  const q = inst.querySelector(`[name="${kwd}_ELEM${i}_QUAL${j}"]`) as HTMLInputElement | null;
+                  const q = inst.querySelector(`[name="${kwd}_INST${instIdx}_ELEM${i}_QUAL${j}"]`) as HTMLInputElement | null;
                   if (!q) break;
                   parts.push((q.value || '').trim());
                 }
@@ -2907,7 +2916,7 @@ function assembleCurrentParmMap(): ParmMap {
               if (elemType === 'QUAL') {
                 const parts: string[] = [];
                 for (let j = 0; ; j++) {
-                  const q = inst.querySelector(`[name="${kwd}_ELEM${i}_QUAL${j}"]`) as HTMLInputElement | null;
+                  const q = inst.querySelector(`[name="${kwd}_INST${instIdx}_ELEM${i}_QUAL${j}"]`) as HTMLInputElement | null;
                   if (!q) break;
                   parts.push((q.value || '').trim());
                 }
@@ -3485,6 +3494,19 @@ function getFieldRawValue(kwd: string): string {
 }
 
 /**
+ * Determine whether a field was "specified" by the user (differs from its default).
+ * IBM i SPCFD semantics: the parameter is considered specified only when its value
+ * is non-empty AND differs from the Dft attribute value supplied with the command XML.
+ */
+function isFieldSpecified(kwd: string): boolean {
+  const rawVal = getFieldRawValue(kwd);
+  if (!rawVal) return false;
+  const defaultVal = state.defaultValMap[kwd];
+  if (defaultVal !== undefined && rawVal === defaultVal) return false;
+  return true;
+}
+
+/**
  * Evaluate a single DepParm entry against the current form values.
  * Returns true if the condition holds (DepParm "passes").
  */
@@ -3493,8 +3515,7 @@ function evaluateDepParm(dp: DepParmEntry): boolean {
   const val = resolveToInternal(dp.kwd, rawVal);
 
   if (dp.rel === 'SPCFD') {
-    // "Was the field specified?" — approximate as: value is non-empty
-    return rawVal.length > 0;
+    return isFieldSpecified(dp.kwd);
   }
 
   if (dp.cmpKwd) {
@@ -3532,7 +3553,7 @@ function evaluateDepConstraint(constraint: DepConstraint): string | null {
         conditionMet = compareDepValues(ctlVal, 'NE', constraint.cmpVal ?? '');
         break;
       case 'SPCFD':
-        conditionMet = ctlRaw.length > 0;
+        conditionMet = isFieldSpecified(constraint.ctlKwd!);
         break;
       default:
         return null; // Unknown — skip
@@ -3570,7 +3591,7 @@ function evaluateDepConstraint(constraint: DepConstraint): string | null {
  */
 function buildDepErrorMessage(constraint: DepConstraint, trueCount: number): string {
   const opSymbols: Record<string, string> = {
-    GT: '>', GE: '>=', NL: '>=', LT: '<', LE: '<=', NG: '<=', EQ: '=', NE: '\u2260'
+    GT: '>', GE: '>=', NL: '>=', LT: '<', LE: '<=', NG: '<=', EQ: '=', NE: '<>'
   };
 
   const kwds = [...new Set(constraint.depParms.map(dp => dp.kwd))];
@@ -3584,6 +3605,11 @@ function buildDepErrorMessage(constraint: DepConstraint, trueCount: number): str
     case 'GE': require = `at least ${constraint.nbrTrue}`; break;
     case 'EQ': require = `exactly ${constraint.nbrTrue}`; break;
     case 'LE': require = `at most ${constraint.nbrTrue}`; break;
+    case 'NE':
+      if (constraint.nbrTrue === 0) { require = 'at least one'; }
+      else if (constraint.nbrTrue === total) { require = 'none'; }
+      else { require = `a count other than ${constraint.nbrTrue}`; }
+      break;
     default: require = String(constraint.nbrTrue);
   }
 
@@ -3810,6 +3836,7 @@ function resetPrompterState(): void {
   state.allowedValsMap = {};
   state.depConstraints = [];
   state.valToMapToMap = {};
+  state.defaultValMap = {};
   state.originalParmMap = {};
   state.cmdName = '';
   state.hasProcessedFormData = false;
@@ -3841,6 +3868,7 @@ window.addEventListener('message', event => {
     state.allowedValsMap = message.allowedValsMap || {};
     state.depConstraints = (message as any).depConstraints || [];
     state.valToMapToMap = (message as any).valToMapToMap || {};
+    state.defaultValMap = (message as any).defaultValMap || {};
     state.cmdName = message.cmdName || '';
 
     // Update main title with command name and prompt

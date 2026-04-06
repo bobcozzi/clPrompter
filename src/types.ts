@@ -163,6 +163,7 @@ export interface FormDataMessage {
   cmdMaxPos?: number; // ← add if you have Cmd MaxPos
   depConstraints?: DepConstraint[];           // Cross-parameter Dep/DepParm constraints
   valToMapToMap?: { [kwd: string]: { [val: string]: string } }; // Val→MapTo for Dep evaluation
+  defaultValMap?: { [kwd: string]: string };   // Keyword → default display value (Dft attribute)
 }
 
 export interface SubmitMessage {
@@ -196,6 +197,7 @@ export interface PrompterState {
   convertParmValueToUpperCase: boolean; // Whether to auto-convert variables, operators, and built-in functions within parameter values to uppercase
   depConstraints: DepConstraint[];  // Cross-parameter Dep/DepParm constraints
   valToMapToMap: { [kwd: string]: { [val: string]: string } }; // Val→MapTo translation map
+  defaultValMap: { [kwd: string]: string };    // Keyword → default display value (Dft attribute)
 }
 
 // Dep/DepParm cross-parameter constraint types

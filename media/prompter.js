@@ -40,7 +40,8 @@ let state = {
     elementsToTrack: [], // Elements to attach listeners to after initialization
     convertParmValueToUpperCase: true, // Default to true (traditional behavior)
     depConstraints: [],
-    valToMapToMap: {}
+    valToMapToMap: {},
+    defaultValMap: {}
 };
 const vscode = typeof window !== 'undefined' ? window.vscodeApi : undefined;
 // Helper: Check if restricted
@@ -585,7 +586,7 @@ function buildConstraintHint(suggestions) {
                 parts.push(`= ${val}`);
                 break;
             case 'NE':
-                parts.push(`\u2260 ${val}`);
+                parts.push(`<> ${val}`);
                 break;
         }
     }
@@ -610,7 +611,7 @@ function buildConstraintHint(suggestions) {
                 parts.push(`= ${cmpKwd}`);
                 break;
             case 'NE':
-                parts.push(`\u2260 ${cmpKwd}`);
+                parts.push(`<> ${cmpKwd}`);
                 break;
         }
     }
@@ -715,7 +716,7 @@ function configureRelValidation(input, suggestions, container) {
                     case 'GT': return '>';
                     case 'LT': return '<';
                     case 'EQ': return '=';
-                    case 'NE': return '\u2260';
+                    case 'NE': return '<>';
                     default: return op;
                 }
             };
@@ -771,7 +772,7 @@ function configureDepRelValidation(input, suggestions, container) {
             case 'GT': return '>';
             case 'LT': return '<';
             case 'EQ': return '=';
-            case 'NE': return '\u2260';
+            case 'NE': return '<>';
             default: return op;
         }
     };
@@ -2498,7 +2499,16 @@ function assembleCurrentParmMap() {
                 if (hasElem) {
                     const elemParts = parm.querySelectorAll(':scope > Elem');
                     // Check parent SngVal or first ELEM SpcVal
-                    const firstElemInput = inst.querySelector(`[name="${kwd}_INST${instIdx}_ELEM0"]`);
+                    // When first ELEM is a QUAL type, its input is named _ELEM0_QUAL0 (not _ELEM0)
+                    const firstElem = elemParts[0];
+                    const firstElemType = firstElem?.getAttribute('Type') || 'CHAR';
+                    let firstElemInput;
+                    if (firstElemType === 'QUAL') {
+                        firstElemInput = inst.querySelector(`[name="${kwd}_INST${instIdx}_ELEM0_QUAL0"]`);
+                    }
+                    else {
+                        firstElemInput = inst.querySelector(`[name="${kwd}_INST${instIdx}_ELEM0"]`);
+                    }
                     const firstElemVal = (firstElemInput?.value || '').trim();
                     console.log(`[DEBUG] ${kwd} instance ELEM0 value: "${firstElemVal}"`);
                     // Skip instance if first ELEM is empty (user never filled it)
@@ -2536,7 +2546,7 @@ function assembleCurrentParmMap() {
                             if (elemType === 'QUAL') {
                                 const parts = [];
                                 for (let j = 0;; j++) {
-                                    const q = inst.querySelector(`[name="${kwd}_ELEM${i}_QUAL${j}"]`);
+                                    const q = inst.querySelector(`[name="${kwd}_INST${instIdx}_ELEM${i}_QUAL${j}"]`);
                                     if (!q)
                                         break;
                                     parts.push((q.value || '').trim());
@@ -2588,7 +2598,7 @@ function assembleCurrentParmMap() {
                             if (elemType === 'QUAL') {
                                 const parts = [];
                                 for (let j = 0;; j++) {
-                                    const q = inst.querySelector(`[name="${kwd}_ELEM${i}_QUAL${j}"]`);
+                                    const q = inst.querySelector(`[name="${kwd}_INST${instIdx}_ELEM${i}_QUAL${j}"]`);
                                     if (!q)
                                         break;
                                     parts.push((q.value || '').trim());
@@ -3180,6 +3190,20 @@ function getFieldRawValue(kwd) {
     return input ? input.value.trim() : '';
 }
 /**
+ * Determine whether a field was "specified" by the user (differs from its default).
+ * IBM i SPCFD semantics: the parameter is considered specified only when its value
+ * is non-empty AND differs from the Dft attribute value supplied with the command XML.
+ */
+function isFieldSpecified(kwd) {
+    const rawVal = getFieldRawValue(kwd);
+    if (!rawVal)
+        return false;
+    const defaultVal = state.defaultValMap[kwd];
+    if (defaultVal !== undefined && rawVal === defaultVal)
+        return false;
+    return true;
+}
+/**
  * Evaluate a single DepParm entry against the current form values.
  * Returns true if the condition holds (DepParm "passes").
  */
@@ -3187,8 +3211,7 @@ function evaluateDepParm(dp) {
     const rawVal = getFieldRawValue(dp.kwd);
     const val = resolveToInternal(dp.kwd, rawVal);
     if (dp.rel === 'SPCFD') {
-        // "Was the field specified?" — approximate as: value is non-empty
-        return rawVal.length > 0;
+        return isFieldSpecified(dp.kwd);
     }
     if (dp.cmpKwd) {
         // Compare against another parameter's current value
@@ -3221,7 +3244,7 @@ function evaluateDepConstraint(constraint) {
                 conditionMet = compareDepValues(ctlVal, 'NE', constraint.cmpVal ?? '');
                 break;
             case 'SPCFD':
-                conditionMet = ctlRaw.length > 0;
+                conditionMet = isFieldSpecified(constraint.ctlKwd);
                 break;
             default:
                 return null; // Unknown — skip
@@ -3268,7 +3291,7 @@ function evaluateDepConstraint(constraint) {
  */
 function buildDepErrorMessage(constraint, trueCount) {
     const opSymbols = {
-        GT: '>', GE: '>=', NL: '>=', LT: '<', LE: '<=', NG: '<=', EQ: '=', NE: '\u2260'
+        GT: '>', GE: '>=', NL: '>=', LT: '<', LE: '<=', NG: '<=', EQ: '=', NE: '<>'
     };
     const kwds = [...new Set(constraint.depParms.map(dp => dp.kwd))];
     const kwdList = kwds.join(', ');
@@ -3287,6 +3310,17 @@ function buildDepErrorMessage(constraint, trueCount) {
             break;
         case 'LE':
             require = `at most ${constraint.nbrTrue}`;
+            break;
+        case 'NE':
+            if (constraint.nbrTrue === 0) {
+                require = 'at least one';
+            }
+            else if (constraint.nbrTrue === total) {
+                require = 'none';
+            }
+            else {
+                require = `a count other than ${constraint.nbrTrue}`;
+            }
             break;
         default: require = String(constraint.nbrTrue);
     }
@@ -3496,6 +3530,7 @@ function resetPrompterState() {
     state.allowedValsMap = {};
     state.depConstraints = [];
     state.valToMapToMap = {};
+    state.defaultValMap = {};
     state.originalParmMap = {};
     state.cmdName = '';
     state.hasProcessedFormData = false;
@@ -3528,6 +3563,7 @@ window.addEventListener('message', event => {
         state.allowedValsMap = message.allowedValsMap || {};
         state.depConstraints = message.depConstraints || [];
         state.valToMapToMap = message.valToMapToMap || {};
+        state.defaultValMap = message.defaultValMap || {};
         state.cmdName = message.cmdName || '';
         // Update main title with command name and prompt
         const cmdPrompt = message.cmdPrompt || '';

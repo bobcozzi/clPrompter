@@ -2,7 +2,7 @@
   "name": "clprompter",
   "displayName": "Bob Cozzi's CL Prompter and Formatter for IBM i",
   "description": "IBM i CL prompting and formatting—rebuilt for modern development",
-  "version": "0.0.53",
+  "version": "0.0.54",
   "author": {
     "name": "Bob Cozzi",
     "url": "https://github.com/bobcozzi"

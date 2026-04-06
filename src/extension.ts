@@ -49,7 +49,7 @@ import {
 import * as fs from 'fs';
 import * as path from 'path';
 import { buildAPI2PartName, buildQualName } from './QlgPathName';
-import { collectCLCmd, buildAllowedValsMap, buildDepConstraints, buildValToMapToMap } from './extractor';
+import { collectCLCmd, buildAllowedValsMap, buildDepConstraints, buildValToMapToMap, buildDefaultValMap } from './extractor';
 import { getCMDXML } from './getcmdxml';
 
 import {
@@ -611,6 +611,7 @@ export class ClPromptPanel {
                 const allowedValsMap = buildAllowedValsMap(xml);
                 const depConstraints = buildDepConstraints(xml);
                 const valToMapToMap = buildValToMapToMap(xml);
+                const defaultValMap = buildDefaultValMap(xml);
                 const config = vscode.workspace.getConfiguration('clPrompter');
                 const keywordColor = config.get('kwdColor');
                 const valueColor = config.get('kwdValueColor');
@@ -623,6 +624,7 @@ export class ClPromptPanel {
                     allowedValsMap,
                     depConstraints,
                     valToMapToMap,
+                    defaultValMap,
                     cmdName,
                     cmdPrompt: cmdPrompt,
                     paramMap: this._parmMap,
@@ -958,6 +960,7 @@ export class ClPromptPanel {
                         const allowedValsMap = buildAllowedValsMap(this._xml);
                         const depConstraints = buildDepConstraints(this._xml);
                         const valToMapToMap = buildValToMapToMap(this._xml);
+                        const defaultValMap = buildDefaultValMap(this._xml);
                         const config = vscode.workspace.getConfiguration('clPrompter');
                         const keywordColor = config.get('kwdColor');
                         const valueColor = config.get('kwdValueColor');
@@ -971,6 +974,7 @@ export class ClPromptPanel {
                             allowedValsMap,
                             depConstraints,
                             valToMapToMap,
+                            defaultValMap,
                             cmdName: this._cmdName,
                             cmdPrompt: cmdPrompt,
                             parmMap: this._parmMap,
@@ -999,6 +1003,7 @@ export class ClPromptPanel {
                             const allowedValsMap = buildAllowedValsMap(this._xml);
                             const depConstraints = buildDepConstraints(this._xml);
                             const valToMapToMap = buildValToMapToMap(this._xml);
+                            const defaultValMap = buildDefaultValMap(this._xml);
                             const config = vscode.workspace.getConfiguration('clPrompter');
                             const keywordColor = config.get('kwdColor');
                             const valueColor = config.get('kwdValueColor');
@@ -1022,6 +1027,7 @@ export class ClPromptPanel {
                                 allowedValsMap,
                                 depConstraints,
                                 valToMapToMap,
+                                defaultValMap,
                                 cmdName: this._cmdName,
                                 cmdPrompt: cmdPrompt,
                                 parmMap: this._parmMap,
