@@ -31,8 +31,11 @@
     <textarea id="cmdComment" maxlength="6000" rows="5"></textarea>
   </div>
 
-  <button id="cancelBtn">Cancel</button>
-  <button id="submitBtn">Enter</button>
+  <div class="button-row">
+    <button id="cancelBtn">Cancel</button>
+    <button id="submitBtn">Enter</button>
+    <button id="viewAllParmsBtn" type="button">View all parameters</button>
+  </div>
 
   <script nonce="{{nonce}}">
     const vscode = acquireVsCodeApi();

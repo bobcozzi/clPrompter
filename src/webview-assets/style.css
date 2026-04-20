@@ -419,6 +419,31 @@ button {
   font-size: 1.1em;
 }
 
+/* PmtCtl: hide parameters whose prompt-control condition is not met */
+.pmtctl-hidden {
+  display: none !important;
+}
+
+/* Button row: Cancel / Enter left-aligned, View All right-aligned */
+.button-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+#viewAllParmsBtn {
+  margin-left: auto;
+  margin-right: 12px;
+  background-color: var(--vscode-button-secondaryBackground, #3a3d41);
+  color: var(--vscode-button-secondaryForeground, #cccccc);
+  border: 1px solid var(--vscode-button-border, transparent);
+  cursor: pointer;
+}
+
+#viewAllParmsBtn:hover {
+  background-color: var(--vscode-button-secondaryHoverBackground, #45494e);
+}
+
 .clvar-input {
   margin-left: 0.5em;
   width: 16ch;

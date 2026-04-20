@@ -164,6 +164,7 @@ export interface FormDataMessage {
   depConstraints?: DepConstraint[];           // Cross-parameter Dep/DepParm constraints
   valToMapToMap?: { [kwd: string]: { [val: string]: string } }; // Val→MapTo for Dep evaluation
   defaultValMap?: { [kwd: string]: string };   // Keyword → default display value (Dft attribute)
+  pmtCtlMap?: PmtCtlMap;                       // Prompt-control visibility rules per keyword
 }
 
 export interface SubmitMessage {
@@ -198,6 +199,8 @@ export interface PrompterState {
   depConstraints: DepConstraint[];  // Cross-parameter Dep/DepParm constraints
   valToMapToMap: { [kwd: string]: { [val: string]: string } }; // Val→MapTo translation map
   defaultValMap: { [kwd: string]: string };    // Keyword → default display value (Dft attribute)
+  pmtCtlMap: PmtCtlMap;          // Prompt-control visibility rules per keyword
+  showAllParms: boolean;         // When true, suppress all pmtCtl hiding (F10 "View all")
 }
 
 // Dep/DepParm cross-parameter constraint types
@@ -217,6 +220,22 @@ export interface DepConstraint {
   msgId: string;      // e.g. "CPD2830"
   depParms: DepParmEntry[];
 }
+
+// PmtCtl (Prompt Control) types — used to show/hide parameters based on controlling field values
+export interface PmtCtlCond {
+  rel: string;    // EQ, NE, GT, LT, GE, LE, NL, NG, SPCFD, UNSPCFD
+  cmpVal: string; // internal/MapTo value to compare against
+}
+
+export interface PmtCtlGroup {
+  ctlKwd: string;     // controlling keyword
+  nbrTrueRel: string; // EQ, NE, GT, LT, GE, LE, NL, NG
+  nbrTrue: number;    // threshold count
+  lglRel?: string;    // AND | OR (logical relation to previous group; undefined = first group)
+  conds: PmtCtlCond[];
+}
+
+export type PmtCtlMap = { [kwd: string]: PmtCtlGroup[] };
 
 // Utility types
 export type ParmValue = string | string[] | (string | string[])[] | ParmValue[]; // For simple, QUAL, ELEM, multi-instance

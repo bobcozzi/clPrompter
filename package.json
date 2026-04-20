@@ -2,7 +2,7 @@
   "name": "clprompter",
   "displayName": "Bob Cozzi's CL Prompter and Formatter for IBM i",
   "description": "IBM i CL prompting and formatting—rebuilt for modern development",
-  "version": "0.0.54",
+  "version": "0.0.55",
   "author": {
     "name": "Bob Cozzi",
     "url": "https://github.com/bobcozzi"
@@ -157,6 +157,11 @@
           "default": 70,
           "minimum": 40,
           "description": "Last position where data or continuation symbols (+ or -) may appear. Default: 72."
+        },
+        "clPrompter.sessionWarmupCommand": {
+          "type": "string",
+          "default": "DSPLIBL",
+          "description": "IBM i ILE command to run silently when a connection is established, to pre-warm the Mapepire/JVM service job. Leave blank to disable. Default: DSPLIBL."
         }
       }
     },

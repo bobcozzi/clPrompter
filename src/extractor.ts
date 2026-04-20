@@ -26,7 +26,7 @@
 import * as vscode from 'vscode';
 
 import { DOMParser, Element as XMLElement, Node as XMLNode } from '@xmldom/xmldom';
-import { DepConstraint, DepParmEntry } from './types';
+import { DepConstraint, DepParmEntry, PmtCtlCond, PmtCtlGroup, PmtCtlMap } from './types';
 
 export interface AllowedValuesMap {
     [key: string]: string[] & { _noCustomInput?: boolean };
@@ -364,14 +364,11 @@ function processNestedElements(
  * Build the complete allowed values map from XML parameters
  */
 // ✅ Fix the main function around line 130
-export function buildAllowedValsMap(xmlContent: string): AllowedValuesMap {
+function buildAllowedValsMapFromDoc(xmlDoc: any): AllowedValuesMap {
     console.log('[clPrompter] Building allowed values map from XML');
 
     const allowedValsMap: AllowedValuesMap = {};
 
-    // Parse XML
-    const parser = new DOMParser();
-    const xmlDoc = parser.parseFromString(xmlContent, "text/xml");
     const parms = Array.from(xmlDoc.getElementsByTagName("Parm")) as XMLElement[];
 
     if (!parms.length) {
@@ -514,6 +511,12 @@ export function buildAllowedValsMap(xmlContent: string): AllowedValuesMap {
     return allowedValsMap;
 }
 
+export function buildAllowedValsMap(xmlContent: string): AllowedValuesMap {
+    const parser = new DOMParser();
+    const xmlDoc = parser.parseFromString(xmlContent, 'text/xml');
+    return buildAllowedValsMapFromDoc(xmlDoc);
+}
+
 /**
  * Extract just the range information from allowed values
  */
@@ -551,10 +554,8 @@ export function getSpecialValues(allowedVals: string[]): string[] {
  * Used in the webview to translate user inputs to internal values when evaluating Dep constraints
  * (which compare against MapTo values, not user-visible Val values).
  */
-export function buildValToMapToMap(xmlContent: string): { [kwd: string]: { [val: string]: string } } {
+function buildValToMapToMapFromDoc(xmlDoc: any): { [kwd: string]: { [val: string]: string } } {
     const result: { [kwd: string]: { [val: string]: string } } = {};
-    const parser = new DOMParser();
-    const xmlDoc = parser.parseFromString(xmlContent, 'text/xml');
     const parms = Array.from(xmlDoc.getElementsByTagName('Parm')) as XMLElement[];
 
     for (const parm of parms) {
@@ -585,15 +586,19 @@ export function buildValToMapToMap(xmlContent: string): { [kwd: string]: { [val:
     return result;
 }
 
+export function buildValToMapToMap(xmlContent: string): { [kwd: string]: { [val: string]: string } } {
+    const parser = new DOMParser();
+    const xmlDoc = parser.parseFromString(xmlContent, 'text/xml');
+    return buildValToMapToMapFromDoc(xmlDoc);
+}
+
 /**
  * Build a map of keyword → default display value (Dft attribute) from command XML.
  * Used to determine whether a parameter is "specified" (differs from its default)
  * for evaluating SPCFD Dep constraints.
  */
-export function buildDefaultValMap(xmlContent: string): { [kwd: string]: string } {
+function buildDefaultValMapFromDoc(xmlDoc: any): { [kwd: string]: string } {
     const result: { [kwd: string]: string } = {};
-    const parser = new DOMParser();
-    const xmlDoc = parser.parseFromString(xmlContent, 'text/xml');
     const parms = Array.from(xmlDoc.getElementsByTagName('Parm')) as XMLElement[];
     for (const parm of parms) {
         const kwd = parm.getAttribute('Kwd');
@@ -605,16 +610,20 @@ export function buildDefaultValMap(xmlContent: string): { [kwd: string]: string 
     return result;
 }
 
+export function buildDefaultValMap(xmlContent: string): { [kwd: string]: string } {
+    const parser = new DOMParser();
+    const xmlDoc = parser.parseFromString(xmlContent, 'text/xml');
+    return buildDefaultValMapFromDoc(xmlDoc);
+}
+
 /**
  * Build a structured list of Dep constraints from command XML.
  * Covers all CtlKwdRel types: ALWAYS, EQ, NE, SPCFD.
  * Each DepParm can compare by CmpVal (literal MapTo) or CmpKwd (other parameter's value)
  * or check SPCFD (was it specified by the user).
  */
-export function buildDepConstraints(xmlContent: string): DepConstraint[] {
+function buildDepConstraintsFromDoc(xmlDoc: any): DepConstraint[] {
     const constraints: DepConstraint[] = [];
-    const parser = new DOMParser();
-    const xmlDoc = parser.parseFromString(xmlContent, 'text/xml');
     const deps = Array.from(xmlDoc.getElementsByTagName('Dep')) as XMLElement[];
 
     for (const dep of deps) {
@@ -646,4 +655,89 @@ export function buildDepConstraints(xmlContent: string): DepConstraint[] {
     }
 
     return constraints;
+}
+
+export function buildDepConstraints(xmlContent: string): DepConstraint[] {
+    const parser = new DOMParser();
+    const xmlDoc = parser.parseFromString(xmlContent, 'text/xml');
+    return buildDepConstraintsFromDoc(xmlDoc);
+}
+
+/**
+ * Builds a map from parameter keyword → PmtCtlGroup[] for parameters
+ * whose Parm element has PmtCtl="PMTCTL" (conditional prompt visibility).
+ * Parameters with PmtCtl="PMTRQS" are always shown and not included.
+ */
+function buildPmtCtlMapFromDoc(xmlDoc: any): PmtCtlMap {
+    const result: PmtCtlMap = {};
+    const parms = Array.from(xmlDoc.getElementsByTagName('Parm')) as XMLElement[];
+
+    for (const parm of parms) {
+        const pmtCtlAttr = parm.getAttribute('PmtCtl');
+        if (pmtCtlAttr !== 'PMTCTL' && pmtCtlAttr !== 'PMTRQS') continue;
+        const kwd = parm.getAttribute('Kwd');
+        if (!kwd) continue;
+
+        // PMTRQS = always hidden until user requests all parms (empty groups = sentinel)
+        if (pmtCtlAttr === 'PMTRQS') {
+            result[kwd] = [];
+            continue;
+        }
+
+        const groups: PmtCtlGroup[] = [];
+        const pmtCtlEls = Array.from(parm.getElementsByTagName('PmtCtl')) as XMLElement[];
+        for (const el of pmtCtlEls) {
+            const ctlKwd = el.getAttribute('CtlKwd');
+            if (!ctlKwd) continue;
+            const nbrTrueRel = el.getAttribute('NbrTrueRel') || 'EQ';
+            const nbrTrue = parseInt(el.getAttribute('NbrTrue') || '1', 10);
+            const lglRel = el.getAttribute('LglRel') || undefined;
+
+            const conds: PmtCtlCond[] = [];
+            const condEls = Array.from(el.getElementsByTagName('PmtCtlCond')) as XMLElement[];
+            for (const cond of condEls) {
+                const rel = cond.getAttribute('Rel');
+                const cmpVal = cond.getAttribute('CmpVal');
+                if (rel !== null && cmpVal !== null) {
+                    conds.push({ rel, cmpVal });
+                }
+            }
+
+            groups.push({ ctlKwd, nbrTrueRel, nbrTrue, lglRel, conds });
+        }
+
+        if (groups.length > 0) {
+            result[kwd] = groups;
+        }
+    }
+
+    return result;
+}
+
+export function buildPmtCtlMap(xmlContent: string): PmtCtlMap {
+    const parser = new DOMParser();
+    const xmlDoc = parser.parseFromString(xmlContent, 'text/xml');
+    return buildPmtCtlMapFromDoc(xmlDoc);
+}
+
+/**
+ * Parse the command XML once and build all five data maps in a single pass.
+ * Avoids 5 separate DOMParser.parseFromString() calls for better performance.
+ */
+export function buildAllMaps(xmlContent: string): {
+    allowedValsMap: AllowedValuesMap;
+    depConstraints: DepConstraint[];
+    valToMapToMap: { [kwd: string]: { [val: string]: string } };
+    defaultValMap: { [kwd: string]: string };
+    pmtCtlMap: PmtCtlMap;
+} {
+    const parser = new DOMParser();
+    const xmlDoc = parser.parseFromString(xmlContent, 'text/xml');
+    return {
+        allowedValsMap: buildAllowedValsMapFromDoc(xmlDoc),
+        depConstraints: buildDepConstraintsFromDoc(xmlDoc),
+        valToMapToMap: buildValToMapToMapFromDoc(xmlDoc),
+        defaultValMap: buildDefaultValMapFromDoc(xmlDoc),
+        pmtCtlMap: buildPmtCtlMapFromDoc(xmlDoc),
+    };
 }

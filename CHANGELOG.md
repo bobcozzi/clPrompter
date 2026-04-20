@@ -2,6 +2,59 @@
 
 All notable changes to this project are documented in this file.
 
+## [0.0.55] - 2026-04-20
+
+### Added
+
+- **PMTCTL (Prompt Control) support**: The prompter now honours `<PmtCtl>` / `<PmtCtlParm>` definitions embedded in IBM i Command Definition XML.
+  - Parameters that carry a `PmtCtl` condition are shown or hidden in real time as dependent field values change, exactly as IBM i's own green-screen prompter behaves.
+  - Supported conditions: `SPCFD` (user specified a value), `PARM` (field equals/contains a value), logical relations `AND` / `OR` across multiple groups.
+  - Visibility is re-evaluated live on every field change and on initial form load, so the form always reflects the current state without a round-trip to the host.
+
+- **DEP / DEPPARM cross-parameter constraint validation**: The prompter now evaluates `<Dep>` dependency constraints defined in Command Definition XML.
+  - All relational operators are supported: `EQ`, `NE`, `GT`, `LT`, `GE`, `LE`, `NL` (not less-than), `NG` (not greater-than).
+  - `NbrTrueRel` / `NbrTrue` counting logic determines how many `<DepParm>` conditions must be true for the constraint to apply.
+  - Violations are surfaced as a readable error banner above the Submit button, listing which parameters conflict and why.
+  - Constraint hints (e.g. `> 0`, `1 to 100`, `<> *NONE`) are shown inline beside inputs.
+  - `SPCFD` semantics are implemented: a field is only considered "specified" when its value genuinely differs from the `Dft` attribute in the command XML — pre-filled defaults are never treated as user input.
+
+- **Command Definition XML cache**: Eliminated the dominant performance bottleneck — the 15–21 second delay experienced when prompting a command for the first time in a VS Code session.
+
+  **Background for the VS Code for IBM i team:**
+  When CL Prompter needs to display a command's parameter form, it calls the IBM i API `QCDRCMDD` (via `CALL QCDRCMDD PARM(...)`) using Code for IBM i's `connection.runCommand()` with `environment: 'ile'`. On the first call of a VS Code session, **Mapepire** (the IBM i database and command middleware used by Code for IBM i) must start a new ILE service job on the IBM i host. Starting that service job requires Mapepire to launch a fresh JVM — and **JVM cold-start on IBM i is well-known to take 15–25+ seconds**. Once the JVM and service job are warm, Mapepire reuses that JVM on subsequent calls, which complete in milliseconds. The lag is therefore entirely a Mapepire/JVM cold-start artifact, not a fault of Code for IBM i or CL Prompter itself.
+
+  **What CL Prompter now does:**
+  - The XML returned by `QCDRCMDD` is stored in a module-level `Map<string, string>` keyed by the qualified command name (e.g. `CPYF`, `MYLIB_MYCMD`).
+  - On any subsequent prompt of the same command — whether in the same source file or a different one — the cached XML is returned immediately, with zero IBM i round-trips and zero IFS reads.
+  - The cache lives for the lifetime of the VS Code extension host process (i.e. until VS Code is closed or the extension is reloaded).
+  - On disconnect from IBM i, the entire cache is cleared automatically so that stale definitions from one system are never reused after reconnecting to a different IBM i.
+  - `clearCMDXMLCache(cmdKey?)` is exported for programmatic invalidation of one entry or the whole cache.
+
+  **Measured results (CPYF, 14 parameters, XML length ≈ 7,800 bytes):**
+  | Operation | Before cache | After cache (first prompt) | After cache (repeat prompt) |
+  |---|---|---|---|
+  | `CALL QCDRCMDD` (IBM i) | ~21,000ms | ~21,000ms | **0ms** |
+  | IFS read via `openTextDocument` | ~490ms | ~490ms | **0ms** |
+  | `buildAllMaps` (XML parse, 5 maps) | ~9ms | ~9ms | ~9ms |
+  | Webview render (14 parms) | ~9ms | ~9ms | ~9ms |
+  | **Total** | **~21,500ms** | **~21,500ms** | **~18ms** |
+
+- **Session warm-up on connect**: A configurable ILE command is fired silently in the background when Code for IBM i establishes a connection, giving Mapepire's JVM service job a head-start before the user prompts their first command.
+  - Setting: `clPrompter.sessionWarmupCommand` (default `"DSPLIBL"`). Set to blank string to disable.
+  - Uses Code for IBM i's `instance.subscribe(context, 'connected', ...)` API so the subscription is automatically cleaned up when CL Prompter deactivates.
+  - Note: whether the warm-up job is the same job that ultimately handles `QCDRCMDD` depends on Mapepire's internal connection pooling. The XML cache is the authoritative fix; the warm-up is a best-effort reduction of first-prompt latency.
+
+- **Single XML parse pass (`buildAllMaps`)**: Previously, each time the prompter loaded a command form, the command XML was parsed five separate times — once for each data structure (allowed values, dep constraints, value-to-map translations, default values, PMTCTL map). Refactored `extractor.ts` to expose `buildAllMaps(xmlContent)`, which parses the XML exactly once and returns all five maps in a single call. The per-prompt XML parse overhead dropped from ~45ms to ~9ms.
+
+### Fixes
+
+- **SRCSEQ (and similar PMTRQS ELEM parameters) incorrectly visible**: Fixed parameters that use `PMTRQS` with child `<Elem>` defaults but no `Dft` attribute at the `<Parm>` level appearing in the prompter when they should be hidden. `isFieldSpecified()` now treats `undefined` (no Parm-level Dft) as "not specified" rather than falling through to a truthy `return true`.
+
+- **TypeScript compiler warnings resolved**:
+  - Removed unused `import * as fs` and `import * as path` from `prompter.ts` (a browser/webview file — Node modules are not available in that context).
+  - Upgraded `tsconfig.json` from deprecated `"module": "commonjs"` / `"moduleResolution": "node"` pair to `"module": "node16"` / `"moduleResolution": "node16"`.
+  - Removed deprecated `"downlevelIteration": true` (redundant since `"target": "es2020"` has native iterator support).
+
 ## [0.0.54] - 2026-04-06
 ### Fixes
 - **ELEM(QUAL) parameter values not returned**: Fixed `BNDSRVPGM` and similar parameters whose first `<Elem>` is of type `QUAL` being silently dropped on submit.

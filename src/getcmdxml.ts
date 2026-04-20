@@ -27,6 +27,18 @@ import { code4i } from './extension';
 
 import { buildQlgPathNameHex, buildAPI2PartName, buildQualName } from './QlgPathName';
 
+// In-memory cache: qualified command key -> XML string
+// Survives for the lifetime of the extension host process.
+const _xmlCache = new Map<string, string>();
+
+/** Clear the XML cache (call when the user explicitly wants a fresh fetch). */
+export function clearCMDXMLCache(cmdKey?: string): void {
+    if (cmdKey) {
+        _xmlCache.delete(cmdKey);
+    } else {
+        _xmlCache.clear();
+    }
+}
 
 // Utility: Fetch or return XML for a command
 export async function getCMDXML(cmdString: string): Promise<string> {
@@ -66,23 +78,34 @@ export async function getCMDXML(cmdString: string): Promise<string> {
     const outFile = `${c4iConfig.tempDir.replace(/\/?$/, '/')}${cmdXMLName}.cmd`;
     const fileParm = buildQlgPathNameHex(outFile);  // Create an QlgPathName_T for this outfile
 
+    // --- Cache check: skip the 20+ second IBM i round-trip on repeat prompts ---
+    if (_xmlCache.has(cmdXMLName)) {
+        console.log(`[clPrompter] getCMDXML cache HIT for ${cmdXMLName}`);
+        return _xmlCache.get(cmdXMLName)!;
+    }
 
     const QCDRCMDD = `CALL QCDRCMDD PARM('${cmdNameStr}' X'${fileParm}' 'DEST0200' ' ' 'CMDD0200' X'000000000000')`;
     console.log(`[clPrompter] Calling API: ${QCDRCMDD}`);
 
     // Use VSCODEforIBMi to get the Command Definition XML file from the IFS
+    const t0 = Date.now();
     const result = await connection.runCommand({
         command: QCDRCMDD,
         environment: `ile`
     });
+    console.log(`[clPrompter] runCommand (QCDRCMDD) took ${Date.now() - t0}ms, code=${result.code}`);
     if (result.code === 0) {
+        const t1 = Date.now();
         const cmdxml = await vscode.workspace.openTextDocument(vscode.Uri.from({
             scheme: 'streamfile',
             path: outFile,
-            query: 'readonly=true' // Optional: open in read-only mode
+            query: 'readonly=true'
         }));
+        console.log(`[clPrompter] openTextDocument (IFS read) took ${Date.now() - t1}ms, total getCMDXML=${Date.now() - t0}ms`);
         if (cmdxml) {
-            return cmdxml.getText();
+            const xml = cmdxml.getText();
+            _xmlCache.set(cmdXMLName, xml);
+            return xml;
         }
 
     } else {

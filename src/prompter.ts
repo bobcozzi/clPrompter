@@ -22,8 +22,6 @@
  * SOFTWARE.
  */
 
-import * as fs from 'fs';
-import * as path from 'path';
 import { buildQlgPathNameHex, buildAPI2PartName, buildQualName } from './QlgPathName.js';
 import { CBInput, createCBInput } from './webview-assets/cbinput.js';
 
@@ -53,7 +51,9 @@ import {
   SubmitMessage,
   CancelMessage,
   DepConstraint,
-  DepParmEntry
+  DepParmEntry,
+  PmtCtlGroup,
+  PmtCtlMap
 } from './types.js';
 
 // Global state (typed)
@@ -74,7 +74,9 @@ let state: PrompterState = {
   convertParmValueToUpperCase: true, // Default to true (traditional behavior)
   depConstraints: [],
   valToMapToMap: {},
-  defaultValMap: {}
+  defaultValMap: {},
+  pmtCtlMap: {},
+  showAllParms: false
 };
 
 // VS Code API
@@ -2293,6 +2295,7 @@ function addMultiInstanceControls(container: HTMLElement, parm: ParmElement, kwd
 // Main form renderer
 function loadForm(): void {
   const ts = new Date().toISOString().substring(11, 23);
+  const _tLF = performance.now();
   console.log(`[${ts}] [loadForm] START`);
   state.isInitializing = true;
   state.touchedFields.clear();
@@ -2303,6 +2306,7 @@ function loadForm(): void {
   if (!form) return;
   form.innerHTML = '';
 
+  const _tRender = performance.now();
   state.parms.forEach(parm => {
     const kwd = parm.getAttribute('Kwd');
     if (!kwd) return;
@@ -2323,19 +2327,33 @@ function loadForm(): void {
       form.appendChild(renderParmInstance(parm, kwd, 0, 1, null));
     }
   });
+  console.log(`[PERF]   renderParmInstances (${state.parms.length} parms): ${(performance.now() - _tRender).toFixed(1)}ms`);
 
   // Calculate and apply optimal label width after all parameters are rendered
+  const _tOpt = performance.now();
   optimizeLabelWidth();
+  console.log(`[PERF]   optimizeLabelWidth: ${(performance.now() - _tOpt).toFixed(1)}ms`);
 
   // Form initialization complete - now track user touches
   const ts2 = new Date().toISOString().substring(11, 23);
   console.log(`[${ts2}] [loadForm] Setting isInitializing = false`);
   state.isInitializing = false;
   console.log(`[${ts2}] [loadForm] About to call attachStoredListeners()`);
+  const _tAsl = performance.now();
   attachStoredListeners();
+  console.log(`[PERF]   attachStoredListeners: ${(performance.now() - _tAsl).toFixed(1)}ms`);
+  const _tAifc = performance.now();
   applyInitialFieldColors();
+  console.log(`[PERF]   applyInitialFieldColors: ${(performance.now() - _tAifc).toFixed(1)}ms`);
+  const _tTab = performance.now();
   configureTabOrder(); // Configure tab navigation to move between input fields
+  console.log(`[PERF]   configureTabOrder: ${(performance.now() - _tTab).toFixed(1)}ms`);
+  const _tFocus = performance.now();
   configureFocusIndicators(); // Add visual focus indicators (arrows) to all inputs
+  console.log(`[PERF]   configureFocusIndicators: ${(performance.now() - _tFocus).toFixed(1)}ms`);
+  const _tPmtctl = performance.now();
+  applyPmtCtlVisibility(); // Apply initial prompt-control show/hide based on current field values
+  console.log(`[PERF]   applyPmtCtlVisibility: ${(performance.now() - _tPmtctl).toFixed(1)}ms`);
   console.log(`[${ts2}] [loadForm] END - Form ready for user interaction`);
 }
 
@@ -3432,6 +3450,19 @@ function normalizeNewlinesInValues(values: Record<string, any>): void {
  * Translate a user-visible value (e.g. "*NO") to its internal MapTo form (e.g. "N")
  * using the valToMapToMap loaded from XML. Falls back to returning val unchanged.
  */
+/**
+ * Resolve an IBM i hex literal like X'40' to its actual character value.
+ * X'40' = EBCDIC space = a single ASCII space ' '. Handles any X'hh' form.
+ * In comparisons, an empty field ('' after trim) also equals a space literal.
+ */
+function resolveHexLiteral(val: string): string {
+  const m = val.match(/^X'([0-9A-Fa-f]{2})'$/);
+  if (!m) return val;
+  const code = parseInt(m[1], 16);
+  // EBCDIC 0x40 = space; treat all single-byte hex literals as their character
+  return String.fromCharCode(code === 0x40 ? 0x20 : code);
+}
+
 function resolveToInternal(kwd: string, val: string): string {
   const kwdMap = state.valToMapToMap[kwd];
   if (!kwdMap) return val;
@@ -3479,32 +3510,148 @@ function compareDepValues(a: string, op: string, b: string): boolean {
 
 /**
  * Get the current (internal/resolved) value for a parameter keyword from the DOM.
- * Searches for the first matching input[name="kwd"] and translates via valToMapToMap.
+ * Searches for the first matching input/textarea[name="kwd"] and translates via valToMapToMap.
+ * For QUAL-type parameters (no direct element), falls back to the QUAL0 sub-field.
  */
 function getFieldInternalValue(kwd: string): string {
-  const input = document.querySelector<HTMLInputElement>(`input[name="${kwd}"]`);
-  const raw = input ? input.value.trim() : '';
+  const raw = getFieldRawValue(kwd);
   return resolveToInternal(kwd, raw);
 }
 
-/** Get the raw user value for a keyword (no MapTo translation). */
+/**
+ * Get the raw user value for a keyword (no MapTo translation).
+ * For QUAL-type parameters the inputs are named kwd_QUAL0, kwd_QUAL1, …
+ * so we fall back to QUAL0 when no direct element exists.
+ */
 function getFieldRawValue(kwd: string): string {
-  const input = document.querySelector<HTMLInputElement>(`input[name="${kwd}"]`);
-  return input ? input.value.trim() : '';
+  const el = document.querySelector<HTMLInputElement>(`input[name="${kwd}"], textarea[name="${kwd}"]`);
+  if (el) return el.value.trim();
+  // QUAL-type parameters: the first sub-field (QUAL0) holds the object name or single-value
+  // alternative (e.g. *NONE). Use it as a proxy for the whole parameter's current value.
+  const qual0 = document.querySelector<HTMLInputElement>(`input[name="${kwd}_QUAL0"]`);
+  if (qual0) return qual0.value.trim();
+  // ELEM/QUAL at any nesting depth: find the first visible input in the first instance.
+  const firstInst = document.querySelector(`.parm-multi-group[data-kwd="${kwd}"] .parm-instance,` +
+    ` .parm-instance[data-kwd="${kwd}"]`);
+  if (firstInst) {
+    const firstInput = firstInst.querySelector<HTMLInputElement>('input:not([type="hidden"]), textarea');
+    if (firstInput) return firstInput.value.trim();
+  }
+  return '';
 }
 
 /**
  * Determine whether a field was "specified" by the user (differs from its default).
  * IBM i SPCFD semantics: the parameter is considered specified only when its value
  * is non-empty AND differs from the Dft attribute value supplied with the command XML.
+ * For multi-list ELEM parameters (SPCVAL, VALUES, SNGVAL, …) there is no direct field;
+ * instead we check whether any filled instance exists in the parm-multi-group.
  */
 function isFieldSpecified(kwd: string): boolean {
   const rawVal = getFieldRawValue(kwd);
-  if (!rawVal) return false;
-  const defaultVal = state.defaultValMap[kwd];
-  if (defaultVal !== undefined && rawVal === defaultVal) return false;
-  return true;
+  if (rawVal) {
+    const defaultVal = state.defaultValMap[kwd];
+    // If the Parm has no Dft attribute (undefined), we can't distinguish a user-supplied
+    // value from a child Elem pre-filling its own default — treat as not specified.
+    if (defaultVal === undefined || rawVal === defaultVal) return false;
+    return true;
+  }
+  // Multi-list ELEM parameters: check if any instance has a non-empty first input.
+  // Uses a broad query so it handles arbitrary ELEM/QUAL nesting depth.
+  const group = document.querySelector(`.parm-multi-group[data-kwd="${kwd}"]`);
+  if (group) {
+    const instances = group.querySelectorAll('.parm-instance');
+    for (const inst of Array.from(instances)) {
+      const firstInput = inst.querySelector<HTMLInputElement>('input:not([type="hidden"]), textarea');
+      if (firstInput && firstInput.value.trim()) return true;
+    }
+  }
+  return false;
 }
+
+// ─── PmtCtl Visibility Engine ────────────────────────────────────────────────
+
+/**
+ * Evaluates one PmtCtlGroup to determine whether its "show" condition is met.
+ * Returns true when the parameter should be visible based on this group alone.
+ */
+function evaluatePmtCtlGroup(group: PmtCtlGroup): boolean {
+  const ctlRaw = getFieldRawValue(group.ctlKwd);
+  const ctlVal = resolveToInternal(group.ctlKwd, ctlRaw);
+  const defaultVal = state.defaultValMap[group.ctlKwd] || '';
+
+  let trueCount = 0;
+  for (const cond of group.conds) {
+    let condMet = false;
+    if (cond.rel === 'SPCFD') {
+      // Specified: has a value (even default counts as specified)
+      condMet = ctlRaw !== '' && ctlRaw !== ' ';
+    } else if (cond.rel === 'UNSPCFD') {
+      // Not specified: field is blank (default not yet accepted by user)
+      condMet = ctlRaw === '' || ctlRaw === ' ';
+    } else {
+      const cmpResolved = resolveHexLiteral(cond.cmpVal);
+      const ctlNorm = ctlVal === '' ? ' ' : ctlVal;
+      condMet = compareDepValues(ctlNorm, cond.rel, cmpResolved);
+    }
+    if (condMet) trueCount++;
+  }
+
+  // Compare trueCount to nbrTrue using nbrTrueRel
+  switch (group.nbrTrueRel) {
+    case 'EQ': return trueCount === group.nbrTrue;
+    case 'NE': return trueCount !== group.nbrTrue;
+    case 'GT': return trueCount > group.nbrTrue;
+    case 'LT': return trueCount < group.nbrTrue;
+    case 'GE': case 'NL': return trueCount >= group.nbrTrue;
+    case 'LE': case 'NG': return trueCount <= group.nbrTrue;
+    default: return trueCount >= group.nbrTrue;
+  }
+}
+
+/**
+ * Returns true when the parameter with the given keyword should be visible.
+ * Chains multiple PmtCtlGroups using their lglRel (AND/OR).
+ */
+function isParmVisible(kwd: string): boolean {
+  if (state.showAllParms) return true;
+  const groups = state.pmtCtlMap[kwd];
+  if (groups === undefined) return true;   // not in map → always visible
+  if (groups.length === 0) return isFieldSpecified(kwd); // PMTRQS: show only if user supplied a value
+
+  let result = evaluatePmtCtlGroup(groups[0]);
+  for (let i = 1; i < groups.length; i++) {
+    const g = groups[i];
+    const gResult = evaluatePmtCtlGroup(g);
+    if ((g.lglRel || 'AND').toUpperCase() === 'OR') {
+      result = result || gResult;
+    } else {
+      result = result && gResult;
+    }
+  }
+  return result;
+}
+
+/**
+ * Applies show/hide to every parameter row that has a PmtCtl condition.
+ * Uses .pmtctl-hidden (display:none) to hide rows that don't meet their condition.
+ */
+function applyPmtCtlVisibility(): void {
+  for (const kwd of Object.keys(state.pmtCtlMap)) {
+    // Each parm is rendered as a direct child of #clForm with data-kwd attribute.
+    // Multi-instance params are wrapped in .parm-multi-group[data-kwd]; single params
+    // are .parm-instance[data-kwd]. Both have data-kwd so we can query either.
+    const row = document.querySelector<HTMLElement>(`#clForm > [data-kwd="${kwd}"]`);
+    if (!row) continue;
+    if (isParmVisible(kwd)) {
+      row.classList.remove('pmtctl-hidden');
+    } else {
+      row.classList.add('pmtctl-hidden');
+    }
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 
 /**
  * Evaluate a single DepParm entry against the current form values.
@@ -3525,8 +3672,11 @@ function evaluateDepParm(dp: DepParmEntry): boolean {
   }
 
   if (dp.cmpVal !== undefined) {
-    // Compare against a literal internal value
-    return compareDepValues(val, dp.rel, dp.cmpVal);
+    // Compare against a literal internal value; resolve hex literals (e.g. X'40' = space = blank)
+    const cmpResolved = resolveHexLiteral(dp.cmpVal);
+    // An empty field (blank) equals a space literal
+    const valNorm = val === '' ? ' ' : val;
+    return compareDepValues(valNorm, dp.rel, cmpResolved);
   }
 
   return true; // Unknown pattern — treat as passing
@@ -3537,6 +3687,21 @@ function evaluateDepParm(dp: DepParmEntry): boolean {
  * description string if it is violated.
  */
 function evaluateDepConstraint(constraint: DepConstraint): string | null {
+  // Only show errors for constraints where the user has touched at least one involved field.
+  // This prevents spurious errors on form load when all fields are still at defaults.
+  const involvedKwds = new Set<string>();
+  if (constraint.ctlKwd) involvedKwds.add(constraint.ctlKwd);
+  for (const dp of constraint.depParms) {
+    involvedKwds.add(dp.kwd);
+    if (dp.cmpKwd) involvedKwds.add(dp.cmpKwd);
+  }
+  // Expand QUAL/ELEM sub-field names into their base keyword for touched-field lookup
+  const anyTouched = [...state.touchedFields].some(f => {
+    const base = f.replace(/_QUAL\d+$/, '').replace(/_INST\d+_ELEM\d+$/, '').replace(/_INST\d+$/, '');
+    return involvedKwds.has(base) || involvedKwds.has(f);
+  });
+  if (!anyTouched) return null;
+
   // Step 1: Check the control condition
   if (constraint.ctlKwdRel !== 'ALWAYS') {
     if (!constraint.ctlKwd) return null; // Malformed — skip
@@ -3622,20 +3787,36 @@ function buildDepErrorMessage(constraint: DepConstraint, trueCount: number): str
     return `${cmpKwdEntry.kwd} must be ${sym} ${cmpKwdEntry.cmpKwd}${cmpKwdRaw ? ` (${cmpKwdRaw})` : ''}`;
   }
 
-  // Pattern: conditional EQ/NE on control keyword
+  // Pattern: conditional EQ/NE/SPCFD on control keyword
   if (constraint.ctlKwd) {
-    const ctlRaw = getFieldRawValue(constraint.ctlKwd);
-    const ctlDisplay = ctlRaw || constraint.ctlKwd;
+    // Build a readable description of the control condition (e.g. "CHOICE = *PGM" or "CHOICEPGM <> *NONE")
+    const ctlOp = opSymbols[constraint.ctlKwdRel] || constraint.ctlKwdRel;
+    // Reverse-lookup cmpVal internal value → display value (e.g. 'N' → '*OUTFILE')
+    const ctlCmpDisplay = (() => {
+      if (!constraint.cmpVal) return getFieldRawValue(constraint.ctlKwd!) || constraint.ctlKwd!;
+      const kwdMap = state.valToMapToMap[constraint.ctlKwd!];
+      if (kwdMap) {
+        for (const [display, internal] of Object.entries(kwdMap)) {
+          if (internal === constraint.cmpVal) return display;
+        }
+      }
+      return constraint.cmpVal;
+    })();
+    const ctlCondStr = constraint.ctlKwdRel === 'SPCFD'
+      ? `${constraint.ctlKwd} is specified`
+      : `${constraint.ctlKwd} ${ctlOp} ${ctlCmpDisplay}`;
     if (constraint.nbrTrueRel === 'EQ' && constraint.nbrTrue === total) {
       // All must be true
       const conditions = constraint.depParms.map(dp => {
         if (dp.cmpVal !== undefined) {
           const sym = opSymbols[dp.rel] || dp.rel;
-          return `${dp.kwd} ${sym} ${dp.cmpVal}`;
+          const resolved = resolveHexLiteral(dp.cmpVal);
+          const isBlank = resolved.trim() === '';
+          return isBlank ? `${dp.kwd} must be specified` : `${dp.kwd} ${sym} ${dp.cmpVal}`;
         }
         return `${dp.kwd} SPCFD`;
       }).join(' and ');
-      return `When ${constraint.ctlKwd} = ${ctlDisplay}: ${conditions}`;
+      return `When ${ctlCondStr}: ${conditions}`;
     }
     if (constraint.nbrTrueRel === 'GT' && constraint.nbrTrue === 0) {
       // At least one must be true — OR between them
@@ -3643,7 +3824,7 @@ function buildDepErrorMessage(constraint: DepConstraint, trueCount: number): str
         const sym = opSymbols[dp.rel] || dp.rel;
         return `${dp.kwd} ${sym} ${dp.cmpVal ?? dp.cmpKwd ?? ''}`;
       }).join(' or ');
-      return `When ${constraint.ctlKwd} = ${ctlDisplay}: ${conditions}`;
+      return `When ${ctlCondStr}: ${conditions}`;
     }
   }
 
@@ -3678,9 +3859,9 @@ function showDepErrorBanner(errors: string[]): void {
     banner = document.createElement('div');
     banner.id = 'dep-error-banner';
     banner.className = 'dep-error-banner';
-    const submitBtn = document.getElementById('submitBtn');
-    if (submitBtn && submitBtn.parentNode) {
-      submitBtn.parentNode.insertBefore(banner, submitBtn);
+    const buttonRow = document.querySelector<HTMLElement>('.button-row');
+    if (buttonRow && buttonRow.parentNode) {
+      buttonRow.parentNode.insertBefore(banner, buttonRow);
     } else {
       document.body.appendChild(banner);
     }
@@ -3826,6 +4007,21 @@ function wirePrompterControls(): void {
       const errors = evaluateAllDepConstraints();
       showDepErrorBanner(errors);
     }, true); // capture phase catches all blur events inside the form
+
+    // PmtCtl visibility re-evaluation: re-check show/hide on any field blur
+    depForm.addEventListener('blur', () => {
+      applyPmtCtlVisibility();
+    }, true); // capture phase catches all blur events inside the form
+  }
+
+  // Wire "View all parameters" / "Limit to basic parameters" toggle button
+  const viewAllBtn = document.getElementById('viewAllParmsBtn') as HTMLButtonElement | null;
+  if (viewAllBtn) {
+    viewAllBtn.addEventListener('click', () => {
+      state.showAllParms = !state.showAllParms;
+      viewAllBtn.textContent = state.showAllParms ? 'Limit to basic parameters' : 'View all parameters';
+      applyPmtCtlVisibility();
+    });
   }
 }
 
@@ -3837,6 +4033,8 @@ function resetPrompterState(): void {
   state.depConstraints = [];
   state.valToMapToMap = {};
   state.defaultValMap = {};
+  state.pmtCtlMap = {};
+  state.showAllParms = false;
   state.originalParmMap = {};
   state.cmdName = '';
   state.hasProcessedFormData = false;
@@ -3852,11 +4050,14 @@ window.addEventListener('message', event => {
   console.log('[clPrompter] Received message:', event.data);  // Add this
   const message = event.data as WebviewMessage;
   if (message.type === 'formData') {
-    console.log('[clPrompter] Processing formData');  // Add this
+    const _t0 = performance.now();
+    console.log(`[PERF] formData message received`);
     if (state.hasProcessedFormData) return;
     state.hasProcessedFormData = true;
     const parser = new DOMParser();
     state.xmlDoc = parser.parseFromString(message.xml, 'text/xml');
+    const _tParsed = performance.now();
+    console.log(`[PERF] XML parse: ${(_tParsed - _t0).toFixed(1)}ms  (xml length=${message.xml.length})`);
     state.parms = Array.from(state.xmlDoc.querySelectorAll('Parm')) as ParmElement[];
     // Sort parameters by PosNbr to ensure correct display order
     state.parms.sort((a, b) => {
@@ -3869,6 +4070,8 @@ window.addEventListener('message', event => {
     state.depConstraints = (message as any).depConstraints || [];
     state.valToMapToMap = (message as any).valToMapToMap || {};
     state.defaultValMap = (message as any).defaultValMap || {};
+    state.pmtCtlMap = (message as any).pmtCtlMap || {};
+    state.showAllParms = false;
     state.cmdName = message.cmdName || '';
 
     // Update main title with command name and prompt
@@ -3895,11 +4098,19 @@ window.addEventListener('message', event => {
       console.log('[clPrompter] convertParmValueToUpperCase set to:', state.convertParmValueToUpperCase);
     }
 
+    const _tPreLoad = performance.now();
     loadForm();
+    const _tPostLoad = performance.now();
+    console.log(`[PERF] loadForm(): ${(_tPostLoad - _tPreLoad).toFixed(1)}ms`);
     wirePrompterControls();
     if (Object.keys(state.originalParmMap).length > 0) {
-      requestAnimationFrame(() => populateFormFromValues(state.originalParmMap));
+      requestAnimationFrame(() => {
+        populateFormFromValues(state.originalParmMap);
+        // Re-evaluate PmtCtl visibility now that pre-filled values are in the DOM
+        applyPmtCtlVisibility();
+      });
     }
+    console.log(`[PERF] formData total (sync): ${(performance.now() - _t0).toFixed(1)}ms`);
   } else if (message.type === 'setLabel') {
     // Handle label and comment message
     state.cmdLabel = (message as any).label || '';

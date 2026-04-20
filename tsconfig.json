@@ -1,7 +1,7 @@
 // File: tsconfig.json
 {
   "compilerOptions": {
-    "module": "commonjs",  // Node.js modules for extension
+    "module": "node16",  // Node.js modules for extension
     "target": "es2020",
     "lib": [
       "es2020"
@@ -11,8 +11,7 @@
     "rootDir": "src",
     "strict": true,
     "esModuleInterop": true,
-    "downlevelIteration": true,  // Allow iteration over Map/Set/Array
-    "moduleResolution": "node",  // Node.js resolution
+    "moduleResolution": "node16",  // Node.js resolution
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true
   },

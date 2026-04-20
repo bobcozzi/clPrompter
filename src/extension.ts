@@ -49,8 +49,8 @@ import {
 import * as fs from 'fs';
 import * as path from 'path';
 import { buildAPI2PartName, buildQualName } from './QlgPathName';
-import { collectCLCmd, buildAllowedValsMap, buildDepConstraints, buildValToMapToMap, buildDefaultValMap } from './extractor';
-import { getCMDXML } from './getcmdxml';
+import { collectCLCmd, buildAllowedValsMap, buildDepConstraints, buildValToMapToMap, buildDefaultValMap, buildPmtCtlMap, buildAllMaps } from './extractor';
+import { getCMDXML, clearCMDXMLCache } from './getcmdxml';
 
 import {
     tokenizeCL,
@@ -69,6 +69,31 @@ export async function activate(context: vscode.ExtensionContext) {
             await baseExtension.activate();
         }
         code4i = baseExtension.exports;
+
+        // Subscribe to IBM i connection events.
+        // On connect: run a configurable ILE command to pre-warm the Mapepire/JVM
+        // service job before the user prompts their first command.
+        // On disconnect: clear the XML cache so stale definitions from the previous
+        // IBM i system are never reused after reconnecting to a different system.
+        code4i.instance.subscribe(context, 'connected', 'clPrompter-warmup', async () => {
+            const warmupCmd = vscode.workspace.getConfiguration('clPrompter').get<string>('sessionWarmupCommand', 'DSPLIBL').trim();
+            if (!warmupCmd) { return; }
+            const connection = code4i?.instance?.getConnection();
+            if (!connection) { return; }
+            try {
+                const t0 = Date.now();
+                console.log(`[clPrompter] Warming up IBM i session with: ${warmupCmd}`);
+                await connection.runCommand({ command: warmupCmd, environment: 'ile' });
+                console.log(`[clPrompter] IBM i session warm-up took ${Date.now() - t0}ms`);
+            } catch (e) {
+                // Best-effort — never block the user over a warm-up failure
+                console.log(`[clPrompter] Session warm-up skipped: ${e}`);
+            }
+        });
+        code4i.instance.subscribe(context, 'disconnected', 'clPrompter-cache-clear', () => {
+            clearCMDXMLCache();
+            console.log('[clPrompter] Disconnected — XML cache cleared');
+        });
     } else {
         vscode.window.showErrorMessage("Code for IBM i extension is not installed or not found.");
     }
@@ -608,10 +633,9 @@ export class ClPromptPanel {
 
                 console.log('[clPrompter] webviewReady: Extracted cmdPrompt:', cmdPrompt);
 
-                const allowedValsMap = buildAllowedValsMap(xml);
-                const depConstraints = buildDepConstraints(xml);
-                const valToMapToMap = buildValToMapToMap(xml);
-                const defaultValMap = buildDefaultValMap(xml);
+                const t0 = Date.now();
+                const { allowedValsMap, depConstraints, valToMapToMap, defaultValMap, pmtCtlMap } = buildAllMaps(xml);
+                console.log(`[clPrompter] buildAllMaps took ${Date.now() - t0}ms`);
                 const config = vscode.workspace.getConfiguration('clPrompter');
                 const keywordColor = config.get('kwdColor');
                 const valueColor = config.get('kwdValueColor');
@@ -625,6 +649,7 @@ export class ClPromptPanel {
                     depConstraints,
                     valToMapToMap,
                     defaultValMap,
+                    pmtCtlMap,
                     cmdName,
                     cmdPrompt: cmdPrompt,
                     paramMap: this._parmMap,
@@ -957,10 +982,7 @@ export class ClPromptPanel {
                         this._panel.webview.postMessage({ type: 'formXml', xml: this._xml, cmdName: this._cmdName, cmdPrompt: cmdPrompt });
                         this._panel.webview.postMessage({ type: 'setLabel', label: this._cmdLabel, comment: this._cmdComment });
 
-                        const allowedValsMap = buildAllowedValsMap(this._xml);
-                        const depConstraints = buildDepConstraints(this._xml);
-                        const valToMapToMap = buildValToMapToMap(this._xml);
-                        const defaultValMap = buildDefaultValMap(this._xml);
+                        const { allowedValsMap, depConstraints, valToMapToMap, defaultValMap } = buildAllMaps(this._xml);
                         const config = vscode.workspace.getConfiguration('clPrompter');
                         const keywordColor = config.get('kwdColor');
                         const valueColor = config.get('kwdValueColor');
@@ -1000,10 +1022,7 @@ export class ClPromptPanel {
                             }
 
                             // Resend the form data to reinitialize the webview
-                            const allowedValsMap = buildAllowedValsMap(this._xml);
-                            const depConstraints = buildDepConstraints(this._xml);
-                            const valToMapToMap = buildValToMapToMap(this._xml);
-                            const defaultValMap = buildDefaultValMap(this._xml);
+                            const { allowedValsMap, depConstraints, valToMapToMap, defaultValMap } = buildAllMaps(this._xml);
                             const config = vscode.workspace.getConfiguration('clPrompter');
                             const keywordColor = config.get('kwdColor');
                             const valueColor = config.get('kwdValueColor');
