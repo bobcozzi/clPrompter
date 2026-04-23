@@ -89,12 +89,34 @@ export async function getCMDXML(cmdString: string): Promise<string> {
 
     // Use VSCODEforIBMi to get the Command Definition XML file from the IFS
     const t0 = Date.now();
-    const result = await connection.runCommand({
-        command: QCDRCMDD,
-        environment: `ile`
-    });
-    console.log(`[clPrompter] runCommand (QCDRCMDD) took ${Date.now() - t0}ms, code=${result.code}`);
-    if (result.code === 0) {
+
+    // NEW: run QCDRCMDD through the Mapepire SQL job (reuses c4i's existing JVM).
+    // REVERT: delete the let/if/else block below and restore:
+    //   const result = await connection.runCommand({ command: QCDRCMDD, environment: `ile` });
+    //   console.log(`[clPrompter] runCommand (QCDRCMDD) took ${Date.now() - t0}ms, code=${result.code}`);
+    //   if (result.code === 0) { ...IFS read block... } else { vscode.window.showWarningMessage(...) }
+    let cmdSucceeded = false;
+    if (connection.sqlRunnerAvailable()) {
+        try {
+            await connection.runSQL('@' + QCDRCMDD);
+            console.log(`[clPrompter] runSQL (QCDRCMDD) took ${Date.now() - t0}ms`);
+            cmdSucceeded = true;
+        } catch (e: any) {
+            console.log(`[clPrompter] runSQL (QCDRCMDD) failed after ${Date.now() - t0}ms: ${e.message || e}`);
+            vscode.window.showWarningMessage(`QCDRCMDD failed: ${e.message || e}`);
+        }
+    } else {
+        // Fallback: original runCommand path (also the revert target)
+        const result = await connection.runCommand({ command: QCDRCMDD, environment: `ile` });
+        console.log(`[clPrompter] runCommand (QCDRCMDD) took ${Date.now() - t0}ms, code=${result.code}`);
+        if (result.code !== 0) {
+            vscode.window.showWarningMessage(`Command completed with code ${result.code}: ${result.stderr || result.stdout}`);
+        } else {
+            cmdSucceeded = true;
+        }
+    }
+
+    if (cmdSucceeded) {
         const t1 = Date.now();
         const cmdxml = await vscode.workspace.openTextDocument(vscode.Uri.from({
             scheme: 'streamfile',
@@ -107,9 +129,6 @@ export async function getCMDXML(cmdString: string): Promise<string> {
             _xmlCache.set(cmdXMLName, xml);
             return xml;
         }
-
-    } else {
-        vscode.window.showWarningMessage(`Command completed with code ${result.code}: ${result.stderr || result.stdout}`);
     }
     // Placeholder for unknown commands
     return `<QcdCLCmd><Cmd CmdName="${cmdNameStr}"></Cmd></QcdCLCmd>`;

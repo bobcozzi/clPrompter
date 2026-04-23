@@ -53,7 +53,7 @@ function isRestricted(el) {
 }
 // Create a label with prompt text and keyword styling
 // Returns a label element with properly styled prompt and keyword spans
-function createPromptLabel(promptText, kwd, inputName) {
+function createPromptLabel(promptText, kwd, inputName, required = false) {
     const label = document.createElement('label');
     // Create prompt text span
     const promptSpan = document.createElement('span');
@@ -65,6 +65,14 @@ function createPromptLabel(promptText, kwd, inputName) {
     label.appendChild(promptSpan);
     label.appendChild(kwdSpan);
     label.appendChild(document.createTextNode(':'));
+    // Append required asterisk AFTER the colon when this PARM is mandatory (Min >= 1)
+    if (required) {
+        const asterisk = document.createElement('span');
+        asterisk.className = 'required-asterisk';
+        asterisk.textContent = ' *';
+        asterisk.title = 'Required — must enter a value';
+        label.appendChild(asterisk);
+    }
     label.htmlFor = inputName;
     return label;
 }
@@ -1621,7 +1629,7 @@ function renderSimpleParm(parm, kwd, container, dft, required, instanceId) {
     }
     if (showLabel) {
         const promptText = String(parm.getAttribute('Prompt') || kwd);
-        const label = createPromptLabel(promptText, kwd, inputName);
+        const label = createPromptLabel(promptText, kwd, inputName, required);
         formGroup.appendChild(label);
     }
     else {
@@ -1662,6 +1670,8 @@ function renderQualParm(parm, kwd, container, prompt, idx, max) {
     console.log('[clPrompter] ', 'renderQualParm start');
     const qualParts = parm.querySelectorAll(':scope > Qual');
     const numParts = qualParts.length || 2;
+    // Required marker is on the PARM-level label (first QUAL), not on child-level Min
+    const qualParmRequired = parseInt(parm.getAttribute('Min') || '0', 10) >= 1;
     for (let i = 0; i < numParts; i++) {
         const qual = qualParts[i];
         const qualDiv = document.createElement('div');
@@ -1677,15 +1687,15 @@ function renderQualParm(parm, kwd, container, prompt, idx, max) {
             qualPrompt = String(qual?.getAttribute('Prompt') || `Qualifier ${i}`);
         }
         const qualName = `${kwd}_QUAL${i}`;
-        // Create label: first QUAL gets keyword, others don't
+        // Create label: first QUAL gets keyword (and required asterisk), others don't
         let label;
         if (i === 0) {
             // Check if prompt already contains keyword in parentheses and strip it if present
             const kwdPattern = /\s*\(([A-Z][A-Z0-9]*)\)\s*$/i;
             const match = qualPrompt.match(kwdPattern);
             const promptTextOnly = match ? qualPrompt.substring(0, match.index).trim() : qualPrompt;
-            // Use reusable function to create label with keyword styling
-            label = createPromptLabel(promptTextOnly, kwd, qualName);
+            // Use reusable function to create label with keyword styling and required marker
+            label = createPromptLabel(promptTextOnly, kwd, qualName, qualParmRequired);
         }
         else {
             // Subsequent QUALs - simple label without keyword
@@ -1753,6 +1763,15 @@ function renderElemParm(parm, kwd, idx, container, prompt, dft, max) {
     kwdSpan.textContent = ` (${kwd})`;
     // Color applied via CSS using .parm-kwd class with theme-aware variables
     legend.appendChild(kwdSpan);
+    // Required marker on the PARM-level legend (not child-level Min)
+    const elemParmRequired = parseInt(parm.getAttribute('Min') || '0', 10) >= 1;
+    if (elemParmRequired) {
+        const asterisk = document.createElement('span');
+        asterisk.className = 'required-asterisk';
+        asterisk.textContent = ' *';
+        asterisk.title = 'Required — must enter a value';
+        legend.appendChild(asterisk);
+    }
     fieldset.appendChild(legend);
     const elemParts = parm.querySelectorAll(':scope > Elem');
     elemParts.forEach((elem, i) => {
@@ -1919,7 +1938,7 @@ function renderParmInstance(parm, kwd, idx, max, multiGroupDiv) {
         // For multi-instance restricted fields with no explicit default, use first allowed value
         dft = getFirstAllowedValue(parm);
     }
-    const required = parm.getAttribute('Min') === '1';
+    const required = parseInt(parm.getAttribute('Min') || '0', 10) >= 1;
     const instanceId = `${kwd}_INST${idx}`;
     const hasElem = !!parm.querySelector(':scope > Elem');
     const hasQual = !!parm.querySelector(':scope > Qual');
@@ -3250,10 +3269,18 @@ function isFieldSpecified(kwd) {
     const rawVal = getFieldRawValue(kwd);
     if (rawVal) {
         const defaultVal = state.defaultValMap[kwd];
-        // If the Parm has no Dft attribute (undefined), we can't distinguish a user-supplied
-        // value from a child Elem pre-filling its own default — treat as not specified.
-        if (defaultVal === undefined || rawVal === defaultVal)
+        if (rawVal === defaultVal)
             return false;
+        if (defaultVal === undefined) {
+            // No Dft attribute in the XML. For ELEM/QUAL parameters the child inputs can
+            // pre-fill themselves with their own defaults even when the parent was never
+            // touched — in that case we can't distinguish user input from a pre-fill, so
+            // treat as not specified. For plain scalar parameters (no parm-multi-group in
+            // the DOM) any non-empty value the user entered IS a specified value.
+            const hasElemChildren = document.querySelector(`.parm-multi-group[data-kwd="${kwd}"]`) !== null;
+            if (hasElemChildren)
+                return false;
+        }
         return true;
     }
     // Multi-list ELEM parameters: check if any instance has a non-empty first input.
@@ -3384,24 +3411,28 @@ function evaluateDepParm(dp) {
  * Evaluate one Dep block. Returns null if the constraint passes, or an error
  * description string if it is violated.
  */
-function evaluateDepConstraint(constraint) {
-    // Only show errors for constraints where the user has touched at least one involved field.
-    // This prevents spurious errors on form load when all fields are still at defaults.
-    const involvedKwds = new Set();
-    if (constraint.ctlKwd)
-        involvedKwds.add(constraint.ctlKwd);
-    for (const dp of constraint.depParms) {
-        involvedKwds.add(dp.kwd);
-        if (dp.cmpKwd)
-            involvedKwds.add(dp.cmpKwd);
+function evaluateDepConstraint(constraint, atSubmit = false) {
+    // During live validation (blur), only show errors when the user has touched at least
+    // one involved field — this prevents spurious errors on initial form load.
+    // At submit time (atSubmit=true) we always evaluate, so "specify at least one" rules
+    // fire even when the user pressed Enter/OK without touching any field.
+    if (!atSubmit) {
+        const involvedKwds = new Set();
+        if (constraint.ctlKwd)
+            involvedKwds.add(constraint.ctlKwd);
+        for (const dp of constraint.depParms) {
+            involvedKwds.add(dp.kwd);
+            if (dp.cmpKwd)
+                involvedKwds.add(dp.cmpKwd);
+        }
+        // Expand QUAL/ELEM sub-field names into their base keyword for touched-field lookup
+        const anyTouched = [...state.touchedFields].some(f => {
+            const base = f.replace(/_QUAL\d+$/, '').replace(/_INST\d+_ELEM\d+$/, '').replace(/_INST\d+$/, '');
+            return involvedKwds.has(base) || involvedKwds.has(f);
+        });
+        if (!anyTouched)
+            return null;
     }
-    // Expand QUAL/ELEM sub-field names into their base keyword for touched-field lookup
-    const anyTouched = [...state.touchedFields].some(f => {
-        const base = f.replace(/_QUAL\d+$/, '').replace(/_INST\d+_ELEM\d+$/, '').replace(/_INST\d+$/, '');
-        return involvedKwds.has(base) || involvedKwds.has(f);
-    });
-    if (!anyTouched)
-        return null;
     // Step 1: Check the control condition
     if (constraint.ctlKwdRel !== 'ALWAYS') {
         if (!constraint.ctlKwd)
@@ -3553,15 +3584,122 @@ function buildDepErrorMessage(constraint, trueCount) {
 /**
  * Evaluate ALL Dep constraints and return an array of error messages.
  * Empty array means all constraints pass.
+ * Pass atSubmit=true to bypass the touched-field guard (used at form submit time).
  */
-function evaluateAllDepConstraints() {
+function evaluateAllDepConstraints(atSubmit = false) {
     const errors = [];
     for (const constraint of state.depConstraints) {
-        const err = evaluateDepConstraint(constraint);
+        const err = evaluateDepConstraint(constraint, atSubmit);
         if (err)
             errors.push(err);
     }
     return errors;
+}
+// ─── Required Parameter Validation ───────────────────────────────────────────
+/**
+ * Find the primary visible input element for a given parameter keyword.
+ * Handles simple parms (name="KWD"), QUAL parms (name="KWD_QUAL0"),
+ * single-instance ELEM parms (first input in the INST0 group), and
+ * multi-instance parms (first input inside the parm-multi-group).
+ */
+function findPrimaryInput(kwd) {
+    return (document.querySelector(`input[name="${kwd}"]`) ??
+        document.querySelector(`textarea[name="${kwd}"]`) ??
+        document.querySelector(`input[name="${kwd}_QUAL0"]`) ??
+        document.querySelector(`input[name^="${kwd}_INST0"]`) ??
+        document.querySelector(`.parm-multi-group[data-kwd="${kwd}"] input`) ??
+        null);
+}
+/**
+ * Show or clear the required-field inline error for one parameter keyword.
+ * The error span is appended inside the input's immediate parent container
+ * (which may be a .parm-validation-wrapper or the .form-group itself) so it
+ * appears to the right of the input, consistent with other validation errors.
+ * A one-time `input`/`change` listener is wired to clear the error as soon as
+ * the user enters a value (so feedback is immediate after a failed submit).
+ */
+function setRequiredParmError(kwd, show) {
+    const input = findPrimaryInput(kwd);
+    if (!input)
+        return;
+    input.classList.toggle('validation-error', show);
+    // The "widget" is the outermost element that represents the whole input control.
+    // For a plain <input> that is just the input itself.
+    // For a CBInput (input + dropdown button), the outer container is .cbinput-container —
+    // we must treat the whole container as the widget so the button stays inside it and the
+    // error span appears to the right of both input AND button, not between them.
+    const cbContainer = input.parentElement?.classList.contains('cbinput-container')
+        ? input.parentElement
+        : null;
+    const widget = cbContainer ?? input;
+    // The error span must be a flex-sibling of the widget so it appears to its right.
+    // If the widget is already inside a .parm-validation-wrapper or .range-validation-wrapper
+    // (added by range/rel/rstd/full validation), reuse that container.
+    // Otherwise, on the first show, wrap the widget in a new parm-validation-wrapper so the
+    // error span sits inline to its right rather than spilling into a new CSS grid row.
+    let parent = widget.parentElement;
+    if (!parent)
+        return;
+    const inWrapper = parent.classList.contains('parm-validation-wrapper') ||
+        parent.classList.contains('range-validation-wrapper');
+    if (show && !inWrapper) {
+        const wrapper = document.createElement('div');
+        wrapper.className = 'parm-validation-wrapper';
+        parent.replaceChild(wrapper, widget);
+        wrapper.appendChild(widget);
+        parent = wrapper;
+    }
+    else if (!show && !inWrapper) {
+        // No wrapper was ever created for this field — nothing to clear
+        return;
+    }
+    // parent is now a flex wrapper (existing or newly created)
+    let errSpan = parent.querySelector(`[data-required-err="${kwd}"]`);
+    if (!errSpan && show) {
+        errSpan = document.createElement('span');
+        errSpan.className = 'prompter-error-msg';
+        errSpan.setAttribute('data-required-err', kwd);
+        parent.appendChild(errSpan);
+    }
+    if (errSpan) {
+        errSpan.textContent = show ? 'Required' : '';
+        errSpan.classList.toggle('visible', show);
+    }
+    // Wire a one-time live-clear listener so the error disappears once the user
+    // starts typing (prevents the error staying visible while the user is fixing it).
+    if (show && input.dataset.reqErrWired !== 'true') {
+        input.dataset.reqErrWired = 'true';
+        const clear = () => {
+            if (input.value.trim()) {
+                setRequiredParmError(kwd, false);
+            }
+        };
+        input.addEventListener('input', clear);
+        input.addEventListener('change', clear);
+    }
+}
+/**
+ * Validate all PARM-level required parameters (Min >= 1 on the <Parm> element).
+ * Child QUAL/ELEM Min values are intentionally ignored here — the PARM Min takes
+ * priority.  Returns the number of parameters that are missing a value.
+ * As a side-effect, shows or clears the per-field "Required" error indicator for
+ * every required parameter.
+ */
+function checkRequiredParms() {
+    let missingCount = 0;
+    for (const parm of state.parms) {
+        const min = parseInt(parm.getAttribute('Min') || '0', 10);
+        if (min < 1)
+            continue;
+        const kwd = parm.getAttribute('Kwd') || '';
+        if (!kwd)
+            continue;
+        const specified = isFieldSpecified(kwd);
+        setRequiredParmError(kwd, !specified);
+        if (!specified)
+            missingCount++;
+    }
+    return missingCount;
 }
 /**
  * Show or hide the Dep error banner above the submit button.
@@ -3599,8 +3737,17 @@ function onSubmit() {
     const values = assembleCurrentParmMap();
     // Normalize newlines in all parameter values (textarea fields can have Shift+Enter)
     normalizeNewlinesInValues(values);
-    // Evaluate cross-parameter Dep constraints and block submission if there are violations
-    const depErrors = evaluateAllDepConstraints();
+    // Check required parameters (Min >= 1 at PARM level) first.
+    // Per-field "Required" error messages are shown inline next to each missing field.
+    const missingRequired = checkRequiredParms();
+    if (missingRequired > 0) {
+        console.log('[clPrompter] onSubmit blocked: ' + missingRequired + ' required parameter(s) missing');
+        return;
+    }
+    // Evaluate cross-parameter Dep constraints and block submission if there are violations.
+    // atSubmit=true bypasses the touched-field guard so "specify at least one" rules fire
+    // even when the user pressed Enter without touching any involved field.
+    const depErrors = evaluateAllDepConstraints(true);
     showDepErrorBanner(depErrors);
     if (depErrors.length > 0) {
         console.log('[clPrompter] onSubmit blocked by Dep constraint violations:', depErrors);

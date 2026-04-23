@@ -2,6 +2,29 @@
 
 All notable changes to this project are documented in this file.
 
+## [0.0.56] - 2026-04-23
+
+### Added
+
+- **Eliminated separate IBM i service job for command definitions**: CL Prompter previously fetched command definition XML by running an IBM i command through a dedicated service job, which required its own warm-up before the first prompt of a session. CL Prompter now fetches command definitions through the same JVM connection that Code for IBM i already has open, sharing its warm service job rather than starting and maintaining a separate one. The session warm-up introduced in v0.0.55 is still present but is now a lightweight SQL ping/backup rather than an ILE command call.
+
+- **Required parameter enforcement**: Parameters whose `<Parm Min="1">` attribute is set are now enforced at submit time.
+  - A red `*` asterisk is appended to the parameter label at render time so required fields are immediately visible without submitting.
+  - On submit, any required parameter left empty shows an inline red `Required` message to the right of its input field — consistent with the existing range/rel/rstd validation style.
+  - For parameters with a dropdown (CBInput), the `Required` message appears to the right of the dropdown arrow rather than between the text box and the button.
+  - The inline error clears automatically as soon as the user begins typing in the field.
+  - Submit is blocked until all required parameters carry a value.
+  - Child-level `Min` attributes on `<Qual>` or `<Elem>` sub-elements are intentionally ignored; only the top-level `<Parm Min>` is enforced (the PARM-level requirement takes priority).
+
+### Fixes
+
+- **DEP constraint not evaluated when no field was touched**: Submitting a form without touching any parameter (e.g. pressing Enter immediately on `DLYJOB`) could bypass `Dep` constraints even when the constraint required at least one of the involved parameters to be specified.
+  - `evaluateDepConstraint` now accepts an `atSubmit` flag. When called from `onSubmit()`, the touched-field guard is bypassed so all constraints are evaluated unconditionally.
+  - Live (on-blur) validation behaviour is unchanged — constraints still only fire when the user has touched an involved field, preventing false positives on initial form load.
+
+- **`isFieldSpecified` incorrectly excluded plain scalar parameters with no `Dft` attribute**: Parameters like `DLY` on `DLYJOB` (numeric, no `Dft` in the XML) were treated as "not specified" even after the user entered a value, because the `defaultVal === undefined` branch returned `false` unconditionally.
+  - The branch now only applies to ELEM/QUAL parameters (those with a `.parm-multi-group` in the DOM). Plain scalars with any non-empty value are correctly treated as specified.
+
 ## [0.0.55] - 2026-04-20
 
 ### Added

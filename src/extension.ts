@@ -82,8 +82,18 @@ export async function activate(context: vscode.ExtensionContext) {
             if (!connection) { return; }
             try {
                 const t0 = Date.now();
-                console.log(`[clPrompter] Warming up IBM i session with: ${warmupCmd}`);
-                await connection.runCommand({ command: warmupCmd, environment: 'ile' });
+                // NEW: warm the Mapepire SQL job (reuses c4i's existing JVM) when available.
+                // CL display commands like DSPLIBL cannot run unattended in a batch/Mapepire job,
+                // so we use a trivial SQL statement as the warm-up instead.
+                // REVERT: remove the if/else below and restore:
+                //   await connection.runCommand({ command: warmupCmd, environment: 'ile' });
+                if (connection.sqlRunnerAvailable()) {
+                    console.log(`[clPrompter] Warming up Mapepire SQL job`);
+                    await connection.runSQL('VALUES CURRENT_SERVER');
+                } else {
+                    console.log(`[clPrompter] Warming up IBM i session with: ${warmupCmd}`);
+                    await connection.runCommand({ command: warmupCmd, environment: 'ile' });
+                }
                 console.log(`[clPrompter] IBM i session warm-up took ${Date.now() - t0}ms`);
             } catch (e) {
                 // Best-effort — never block the user over a warm-up failure
