@@ -2,6 +2,18 @@
 
 All notable changes to this project are documented in this file.
 
+## [0.0.57] - 2026-04-24
+
+### Added
+
+- **Warmup on extension activation**: The Mapepire/JVM warm-up now also runs immediately when the extension activates while an IBM i connection is already open. Previously the warm-up only fired on the `connected` event, so reloading the extension (e.g. after installing a new build) while already connected would skip it, leaving the first F4 press to cold-start the batch job (~20+ seceond lag).
+
+### Fixes
+
+- **Invalid command no longer opens the prompter panel**: When F4 is pressed on a command that does not exist on the IBM i system, the extension now aborts before opening the Prompter panel. A warning message is shown (`Cannot prompt 'CMDNAME': [CPF9801] Object not found`) and the source line is "touched" to trigger the IBM-CLLE syntax checker so the IBM i diagnostic also appears as a squiggle in the editor.
+
+---
+
 ## [0.0.56] - 2026-04-23
 
 ### Added

@@ -103,14 +103,14 @@ export async function getCMDXML(cmdString: string): Promise<string> {
             cmdSucceeded = true;
         } catch (e: any) {
             console.log(`[clPrompter] runSQL (QCDRCMDD) failed after ${Date.now() - t0}ms: ${e.message || e}`);
-            vscode.window.showWarningMessage(`QCDRCMDD failed: ${e.message || e}`);
+            vscode.window.showWarningMessage(`Cannot prompt '${cmdString.trim().toUpperCase()}': ${e.message || e}`);
         }
     } else {
         // Fallback: original runCommand path (also the revert target)
         const result = await connection.runCommand({ command: QCDRCMDD, environment: `ile` });
         console.log(`[clPrompter] runCommand (QCDRCMDD) took ${Date.now() - t0}ms, code=${result.code}`);
         if (result.code !== 0) {
-            vscode.window.showWarningMessage(`Command completed with code ${result.code}: ${result.stderr || result.stdout}`);
+            vscode.window.showWarningMessage(`Cannot prompt '${cmdString.trim().toUpperCase()}': ${result.stderr || result.stdout}`);
         } else {
             cmdSucceeded = true;
         }

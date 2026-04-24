@@ -1296,17 +1296,22 @@ function createInputForType(type, name, dft, len, suggestions, isRestricted = fa
         else {
             console.log(`[createInputForType] ✗ F4 handler NOT enabled for ${name}`);
         }
-        // cbInput change handler - replace textarea content when user selects a value
+        // When user selects a predefined value from dropdown, immediately transfer to textarea
         const cbInputElement = cbinput.getInputElement();
-        cbInputElement.addEventListener('blur', () => {
+        cbInputElement.addEventListener('change', () => {
             const selectedValue = cbInputElement.value;
             if (selectedValue) {
-                // Normalize value against allowed values (case-insensitive match)
                 const normalizedValue = normalizeValue(selectedValue, displaySuggestions, null);
                 textarea.value = normalizedValue;
-                cbInputElement.value = normalizedValue;
-                textarea.focus();
-                // Clear cbInput after transferring value
+                cbInputElement.value = '';
+            }
+        });
+        // When user manually types a value and leaves the cbInput, transfer to textarea
+        cbInputElement.addEventListener('blur', () => {
+            const typedValue = cbInputElement.value.trim();
+            if (typedValue) {
+                const normalizedValue = normalizeValue(typedValue, displaySuggestions, null);
+                textarea.value = normalizedValue;
                 cbInputElement.value = '';
             }
         });
@@ -3272,12 +3277,17 @@ function isFieldSpecified(kwd) {
         if (rawVal === defaultVal)
             return false;
         if (defaultVal === undefined) {
-            // No Dft attribute in the XML. For ELEM/QUAL parameters the child inputs can
-            // pre-fill themselves with their own defaults even when the parent was never
-            // touched — in that case we can't distinguish user input from a pre-fill, so
-            // treat as not specified. For plain scalar parameters (no parm-multi-group in
-            // the DOM) any non-empty value the user entered IS a specified value.
-            const hasElemChildren = document.querySelector(`.parm-multi-group[data-kwd="${kwd}"]`) !== null;
+            // No Dft attribute on the <Parm> element. For ELEM parameters the child inputs
+            // pre-fill themselves with their own Elem-level defaults even when the parent was
+            // never touched — so we can't distinguish user input from a pre-fill; treat as
+            // not specified.
+            // QUAL parameters (sub-inputs named KWORD_QUAL0 / KWORD_QUAL1) are NOT like this:
+            // getFieldRawValue() already returned their QUAL0 value, which is user-supplied.
+            // We only suppress "specified" for true ELEM parameters, detected by the presence
+            // of a KWORD_INST0_ELEM0 sub-input (and confirmed by absence of KWORD_QUAL0).
+            const hasElemChildren = document.querySelector(`.parm-multi-group[data-kwd="${kwd}"]`) !== null ||
+                (document.querySelector(`input[name="${kwd}_INST0_ELEM0"], textarea[name="${kwd}_INST0_ELEM0"]`) !== null &&
+                    document.querySelector(`input[name="${kwd}_QUAL0"]`) === null);
             if (hasElemChildren)
                 return false;
         }
@@ -3690,6 +3700,11 @@ function checkRequiredParms() {
     for (const parm of state.parms) {
         const min = parseInt(parm.getAttribute('Min') || '0', 10);
         if (min < 1)
+            continue;
+        // Skip constant and null-type parameters — they have no rendered input
+        const constant = parm.getAttribute('Constant');
+        const type = parm.getAttribute('Type');
+        if (constant || type?.toLowerCase() === 'null')
             continue;
         const kwd = parm.getAttribute('Kwd') || '';
         if (!kwd)

@@ -75,7 +75,7 @@ export async function activate(context: vscode.ExtensionContext) {
         // service job before the user prompts their first command.
         // On disconnect: clear the XML cache so stale definitions from the previous
         // IBM i system are never reused after reconnecting to a different system.
-        code4i.instance.subscribe(context, 'connected', 'clPrompter-warmup', async () => {
+        const runWarmup = async () => {
             const warmupCmd = vscode.workspace.getConfiguration('clPrompter').get<string>('sessionWarmupCommand', 'DSPLIBL').trim();
             if (!warmupCmd) { return; }
             const connection = code4i?.instance?.getConnection();
@@ -88,8 +88,20 @@ export async function activate(context: vscode.ExtensionContext) {
                 // REVERT: remove the if/else below and restore:
                 //   await connection.runCommand({ command: warmupCmd, environment: 'ile' });
                 if (connection.sqlRunnerAvailable()) {
-                    console.log(`[clPrompter] Warming up Mapepire SQL job`);
+                    console.log(`[clPrompter] Warming up Mapepire SQL job (SQL + @ paths)`);
+                    // Phase 1: warm the SQL engine itself.
                     await connection.runSQL('VALUES CURRENT_SERVER');
+                    // Phase 2: warm the @ CL-command execution path.
+                    // runSQL('@cmd') is dispatched differently inside Mapepire than plain SQL.
+                    // If we only run plain SQL the first QCDRCMDD call still cold-starts that
+                    // path (or re-cold-starts it after an IBM i job idle-timeout).
+                    // A comment-only string is a true no-op through QCMDEXC (treated as *RQS).
+                    try {
+                        await connection.runSQL(`@/* clPrompter warm-up */`);
+                    } catch (e2) {
+                        // Non-critical — log and continue
+                        console.log(`[clPrompter] @ path warm-up failed (non-critical): ${e2}`);
+                    }
                 } else {
                     console.log(`[clPrompter] Warming up IBM i session with: ${warmupCmd}`);
                     await connection.runCommand({ command: warmupCmd, environment: 'ile' });
@@ -99,7 +111,15 @@ export async function activate(context: vscode.ExtensionContext) {
                 // Best-effort — never block the user over a warm-up failure
                 console.log(`[clPrompter] Session warm-up skipped: ${e}`);
             }
-        });
+        };
+        code4i.instance.subscribe(context, 'connected', 'clPrompter-warmup', runWarmup);
+        // Also warm up immediately if already connected when the extension (re-)activates.
+        // The 'connected' event only fires on new connections, so without this an extension
+        // reload while connected (e.g. after install) would skip the warmup entirely and
+        // leave the first F4 press cold-starting the Mapepire/JVM job (~20 s lag).
+        if (code4i.instance.getConnection()) {
+            runWarmup();
+        }
         code4i.instance.subscribe(context, 'disconnected', 'clPrompter-cache-clear', () => {
             clearCMDXMLCache();
             console.log('[clPrompter] Disconnected — XML cache cleared');
@@ -462,6 +482,22 @@ export class ClPromptPanel {
             }
         } catch (err) {
             console.error('[clPrompter] Failed to parse XML for command prompt:', err);
+        }
+
+        // If cmdPrompt is empty the Cmd element has no Prompt attribute —
+        // QCDRCMDD returned a placeholder because the command doesn't exist.
+        // getCMDXML already showed the warning; just abort without opening a panel.
+        if (!cmdPrompt) {
+            console.log(`[clPrompter] '${cmdName}' returned no command definition — aborting prompter.`);
+            // Touch the source line so the IBM-CLLE syntax checker fires and surfaces
+            // the IBM i diagnostic alongside our popup warning.
+            if (editor && commandRange) {
+                const line = editor.document.lineAt(commandRange.startLine);
+                await editor.edit(editBuilder => {
+                    editBuilder.replace(line.range, line.text);
+                });
+            }
+            return;
         }
 
         if (ClPromptPanel.currentPanel) {

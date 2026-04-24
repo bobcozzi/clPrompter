@@ -212,6 +212,14 @@ export async function CLPrompter(
                 console.error('[CLPrompter] Failed to parse XML for command prompt:', err);
             }
 
+            // If the XML has no Prompt attribute, QCDRCMDD returned a placeholder
+            // (command not found / invalid). getCMDXML already showed the warning.
+            if (!cmdPrompt) {
+                console.log(`[clPrompter] '${cmdName}' returned no command definition — aborting prompter.`);
+                resolve(command);
+                return;
+            }
+
             // Determine which column to show the panel in
             const column = vscode.window.activeTextEditor?.viewColumn ?? vscode.ViewColumn.One;
 
