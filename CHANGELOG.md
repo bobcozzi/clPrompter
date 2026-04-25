@@ -2,13 +2,27 @@
 
 All notable changes to this project are documented in this file.
 
+## [0.0.58] - 2026-04-25
+
+### What's fixed
+
+- **Parameters with `Max > 1`, `Rstd="YES"`, and no `Dft` attribute** in the XML (e.g. `OBJTYPE` on `CRTDUPOBJ`) were incorrectly pre-filled with the first entry in their allowed-values list. Because `SngVal` appears before `SpcVal` in the XML, `*ALL` was always selected as the initial value, making the field appear populated even though the user had not entered anything.
+
+- **Multi-value restricted parameters no longer report "Required" after a valid value is entered**: `isFieldSpecified` was checking for a `.parm-multi-group` container (present on all multi-instance parameters) as a proxy for ELEM-type parameters. This caused `OBJTYPE`, `FILEATR`, and any other `Max > 1` simple-list parameter to be treated as ELEM-like and always return `false`, so submit was always blocked with a "Required" error regardless of what the user typed. The check now only applies to parameters that have actual `_INST0_ELEM0`-named sub-inputs — the definitive marker of a true ELEM parameter.
+
+- **PMTCTL-controlled parameters (e.g. `DATA`, `CST`, `TRG`, `FILEID`, `ACCCTL` on `CRTDUPOBJ`) now appear correctly when `*FILE` or `*ALL` is entered in `OBJTYPE`**: The two bugs above prevented the PMTCTL condition from ever being met on initial form load and blocked the blur-triggered visibility re-evaluation from working. With the pre-fill and `isFieldSpecified` fixes in place, the PMTCTL engine — which already re-evaluates on every field blur — now correctly shows or hides these parameters in response to the `OBJTYPE` value the user actually enters.
+
+- **Dropdown arrow button misaligned / clipped on parameters revealed by "View all parameters"**: Parameters hidden at form-load time (those tagged `PmtCtl="PMTRQS"`, such as `PRINT`, `RCDFMT`, and `TORCD` on `CPYF`) had their combobox arrow button height calculated while the row was hidden (`display: none`). Because `offsetHeight` is `0` for hidden elements, the button received an explicit `height: 0px` inline style from a `requestAnimationFrame` callback and stayed that way after the row was revealed. The `requestAnimationFrame` measurement has been removed and the container's flex alignment changed from `flex-start` to `stretch`, so the button height is now determined purely by CSS and always matches the input field regardless of when the row becomes visible.
+
+---
+
 ## [0.0.57] - 2026-04-24
 
-### Added
+### What's New
 
 - **Warmup on extension activation**: The Mapepire/JVM warm-up now also runs immediately when the extension activates while an IBM i connection is already open. Previously the warm-up only fired on the `connected` event, so reloading the extension (e.g. after installing a new build) while already connected would skip it, leaving the first F4 press to cold-start the batch job (~20+ seceond lag).
 
-### Fixes
+### What's Fixed
 
 - **Invalid command no longer opens the prompter panel**: When F4 is pressed on a command that does not exist on the IBM i system, the extension now aborts before opening the Prompter panel. A warning message is shown (`Cannot prompt 'CMDNAME': [CPF9801] Object not found`) and the source line is "touched" to trigger the IBM-CLLE syntax checker so the IBM i diagnostic also appears as a squiggle in the editor.
 

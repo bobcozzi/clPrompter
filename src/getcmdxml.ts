@@ -31,6 +31,11 @@ import { buildQlgPathNameHex, buildAPI2PartName, buildQualName } from './QlgPath
 // Survives for the lifetime of the extension host process.
 const _xmlCache = new Map<string, string>();
 
+// In-flight dedup: tracks promises for commands currently being fetched.
+// Concurrent getCMDXML calls for the same key share one promise instead of
+// each spinning up their own cold Mapepire/JVM service job.
+const _inflight = new Map<string, Promise<string>>();
+
 /** Clear the XML cache (call when the user explicitly wants a fresh fetch). */
 export function clearCMDXMLCache(cmdKey?: string): void {
     if (cmdKey) {
@@ -84,52 +89,69 @@ export async function getCMDXML(cmdString: string): Promise<string> {
         return _xmlCache.get(cmdXMLName)!;
     }
 
-    const QCDRCMDD = `CALL QCDRCMDD PARM('${cmdNameStr}' X'${fileParm}' 'DEST0200' ' ' 'CMDD0200' X'000000000000')`;
-    console.log(`[clPrompter] Calling API: ${QCDRCMDD}`);
+    // --- In-flight dedup: coalesce concurrent requests for the same command key ---
+    // Prevents multiple simultaneous F4 presses (or any other concurrent callers)
+    // from each acquiring their own cold Mapepire/JVM service job for the same command.
+    const existing = _inflight.get(cmdXMLName);
+    if (existing) {
+        console.log(`[clPrompter] getCMDXML in-flight HIT for ${cmdXMLName}`);
+        return existing;
+    }
 
-    // Use VSCODEforIBMi to get the Command Definition XML file from the IFS
-    const t0 = Date.now();
+    // Build and register the fetch promise SYNCHRONOUSLY (before the first await)
+    // so any concurrent call arriving after this point will find it in _inflight.
+    const fetchPromise: Promise<string> = (async () => {
+        const QCDRCMDD = `CALL QCDRCMDD PARM('${cmdNameStr}' X'${fileParm}' 'DEST0200' ' ' 'CMDD0200' X'000000000000')`;
+        console.log(`[clPrompter] Calling API: ${QCDRCMDD}`);
 
-    // NEW: run QCDRCMDD through the Mapepire SQL job (reuses c4i's existing JVM).
-    // REVERT: delete the let/if/else block below and restore:
-    //   const result = await connection.runCommand({ command: QCDRCMDD, environment: `ile` });
-    //   console.log(`[clPrompter] runCommand (QCDRCMDD) took ${Date.now() - t0}ms, code=${result.code}`);
-    //   if (result.code === 0) { ...IFS read block... } else { vscode.window.showWarningMessage(...) }
-    let cmdSucceeded = false;
-    if (connection.sqlRunnerAvailable()) {
-        try {
-            await connection.runSQL('@' + QCDRCMDD);
-            console.log(`[clPrompter] runSQL (QCDRCMDD) took ${Date.now() - t0}ms`);
-            cmdSucceeded = true;
-        } catch (e: any) {
-            console.log(`[clPrompter] runSQL (QCDRCMDD) failed after ${Date.now() - t0}ms: ${e.message || e}`);
-            vscode.window.showWarningMessage(`Cannot prompt '${cmdString.trim().toUpperCase()}': ${e.message || e}`);
-        }
-    } else {
-        // Fallback: original runCommand path (also the revert target)
-        const result = await connection.runCommand({ command: QCDRCMDD, environment: `ile` });
-        console.log(`[clPrompter] runCommand (QCDRCMDD) took ${Date.now() - t0}ms, code=${result.code}`);
-        if (result.code !== 0) {
-            vscode.window.showWarningMessage(`Cannot prompt '${cmdString.trim().toUpperCase()}': ${result.stderr || result.stdout}`);
+        // Use VSCODEforIBMi to get the Command Definition XML file from the IFS
+        const t0 = Date.now();
+
+        // NEW: run QCDRCMDD through the Mapepire SQL job (reuses c4i's existing JVM).
+        // REVERT: delete the let/if/else block below and restore:
+        //   const result = await connection.runCommand({ command: QCDRCMDD, environment: `ile` });
+        //   console.log(`[clPrompter] runCommand (QCDRCMDD) took ${Date.now() - t0}ms, code=${result.code}`);
+        //   if (result.code === 0) { ...IFS read block... } else { vscode.window.showWarningMessage(...) }
+        let cmdSucceeded = false;
+        if (connection.sqlRunnerAvailable()) {
+            try {
+                await connection.runSQL('@' + QCDRCMDD);
+                console.log(`[clPrompter] runSQL (QCDRCMDD) took ${Date.now() - t0}ms`);
+                cmdSucceeded = true;
+            } catch (e: any) {
+                console.log(`[clPrompter] runSQL (QCDRCMDD) failed after ${Date.now() - t0}ms: ${e.message || e}`);
+                vscode.window.showWarningMessage(`Cannot prompt '${cmdString.trim().toUpperCase()}': ${e.message || e}`);
+            }
         } else {
-            cmdSucceeded = true;
+            // Fallback: original runCommand path (also the revert target)
+            const result = await connection.runCommand({ command: QCDRCMDD, environment: `ile` });
+            console.log(`[clPrompter] runCommand (QCDRCMDD) took ${Date.now() - t0}ms, code=${result.code}`);
+            if (result.code !== 0) {
+                vscode.window.showWarningMessage(`Cannot prompt '${cmdString.trim().toUpperCase()}': ${result.stderr || result.stdout}`);
+            } else {
+                cmdSucceeded = true;
+            }
         }
-    }
 
-    if (cmdSucceeded) {
-        const t1 = Date.now();
-        const cmdxml = await vscode.workspace.openTextDocument(vscode.Uri.from({
-            scheme: 'streamfile',
-            path: outFile,
-            query: 'readonly=true'
-        }));
-        console.log(`[clPrompter] openTextDocument (IFS read) took ${Date.now() - t1}ms, total getCMDXML=${Date.now() - t0}ms`);
-        if (cmdxml) {
-            const xml = cmdxml.getText();
-            _xmlCache.set(cmdXMLName, xml);
-            return xml;
+        if (cmdSucceeded) {
+            const t1 = Date.now();
+            const cmdxml = await vscode.workspace.openTextDocument(vscode.Uri.from({
+                scheme: 'streamfile',
+                path: outFile,
+                query: 'readonly=true'
+            }));
+            console.log(`[clPrompter] openTextDocument (IFS read) took ${Date.now() - t1}ms, total getCMDXML=${Date.now() - t0}ms`);
+            if (cmdxml) {
+                const xml = cmdxml.getText();
+                _xmlCache.set(cmdXMLName, xml);
+                return xml;
+            }
         }
-    }
-    // Placeholder for unknown commands
-    return `<QcdCLCmd><Cmd CmdName="${cmdNameStr}"></Cmd></QcdCLCmd>`;
+        // Placeholder for unknown commands
+        return `<QcdCLCmd><Cmd CmdName="${cmdNameStr}"></Cmd></QcdCLCmd>`;
+    })();
+
+    _inflight.set(cmdXMLName, fetchPromise);
+    fetchPromise.finally(() => _inflight.delete(cmdXMLName));
+    return fetchPromise;
 }

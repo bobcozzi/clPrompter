@@ -30,7 +30,7 @@ export class CBInput {
         this.container.className = 'cbinput-container';
         this.container.style.position = 'relative';
         this.container.style.display = 'inline-flex';
-        this.container.style.alignItems = 'flex-start';
+        this.container.style.alignItems = 'stretch';
         this.container.style.width = opts.width || 'auto';
         this.container.style.minWidth = opts.minWidth || '150px';
         // Create text input - match styling of other input elements
@@ -99,11 +99,6 @@ export class CBInput {
         this.container.appendChild(this.input);
         this.container.appendChild(this.button);
         this.container.appendChild(this.dropdown);
-        // After adding to DOM, measure input height and apply to button
-        requestAnimationFrame(() => {
-            const inputHeight = this.input.offsetHeight;
-            this.button.style.height = `${inputHeight}px`;
-        });
         // Attach event listeners
         this.attachListeners();
     }

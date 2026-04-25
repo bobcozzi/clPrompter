@@ -1937,12 +1937,11 @@ function renderParmInstance(parm, kwd, idx, max, multiGroupDiv) {
     const type = parm.getAttribute('Type') || '';
     const prompt = parm.getAttribute('Prompt') || kwd;
     const isMultiInstance = max > 1;
-    // For multi-instance parameters, still need proper default for restricted fields
-    let dft = parm.getAttribute('Dft') || '';
-    if (isMultiInstance && !dft && isRestricted(parm)) {
-        // For multi-instance restricted fields with no explicit default, use first allowed value
-        dft = getFirstAllowedValue(parm);
-    }
+    // Use the explicit Dft attribute only — do NOT pre-fill multi-instance restricted fields
+    // with the first allowed value. For parameters like OBJTYPE (Max>1, no Dft, Rstd=YES),
+    // pre-filling with SngVal/*ALL would both display the wrong initial value and confuse
+    // the isFieldSpecified check (which uses defaultValMap, which comes from the XML Dft attr).
+    const dft = parm.getAttribute('Dft') || '';
     const required = parseInt(parm.getAttribute('Min') || '0', 10) >= 1;
     const instanceId = `${kwd}_INST${idx}`;
     const hasElem = !!parm.querySelector(':scope > Elem');
@@ -3285,11 +3284,19 @@ function isFieldSpecified(kwd) {
             // getFieldRawValue() already returned their QUAL0 value, which is user-supplied.
             // We only suppress "specified" for true ELEM parameters, detected by the presence
             // of a KWORD_INST0_ELEM0 sub-input (and confirmed by absence of KWORD_QUAL0).
-            const hasElemChildren = document.querySelector(`.parm-multi-group[data-kwd="${kwd}"]`) !== null ||
-                (document.querySelector(`input[name="${kwd}_INST0_ELEM0"], textarea[name="${kwd}_INST0_ELEM0"]`) !== null &&
-                    document.querySelector(`input[name="${kwd}_QUAL0"]`) === null);
-            if (hasElemChildren)
+            // IMPORTANT: Multi-instance simple parameters (e.g. OBJTYPE with Max>1, Rstd=YES)
+            // also live in a parm-multi-group, but their inputs ARE named directly by kwd.
+            // Do NOT use parm-multi-group presence as a proxy for ELEM-like behaviour —
+            // only the actual _INST0_ELEM0 sub-inputs signal a true ELEM parameter.
+            const hasElemChildren = document.querySelector(`input[name="${kwd}_INST0_ELEM0"], textarea[name="${kwd}_INST0_ELEM0"]`) !== null &&
+                document.querySelector(`input[name="${kwd}_QUAL0"]`) === null;
+            if (hasElemChildren) {
+                // An ELEM param that was present in the original command IS specified —
+                // its inputs were populated from the user's source, not from Elem-level defaults.
+                if (state.originalParmMap && kwd in state.originalParmMap)
+                    return true;
                 return false;
+            }
         }
         return true;
     }
@@ -3879,12 +3886,12 @@ function wirePrompterControls() {
             applyPmtCtlVisibility();
         }, true); // capture phase catches all blur events inside the form
     }
-    // Wire "View all parameters" / "Limit to basic parameters" toggle button
+    // Wire "View all parameters" / "View basic parameters" toggle button
     const viewAllBtn = document.getElementById('viewAllParmsBtn');
     if (viewAllBtn) {
         viewAllBtn.addEventListener('click', () => {
             state.showAllParms = !state.showAllParms;
-            viewAllBtn.textContent = state.showAllParms ? 'Limit to basic parameters' : 'View all parameters';
+            viewAllBtn.textContent = state.showAllParms ? 'View basic parameters' : 'View all parameters';
             applyPmtCtlVisibility();
         });
     }

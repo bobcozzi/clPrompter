@@ -93,9 +93,9 @@ export async function activate(context: vscode.ExtensionContext) {
                     await connection.runSQL('VALUES CURRENT_SERVER');
                     // Phase 2: warm the @ CL-command execution path.
                     // runSQL('@cmd') is dispatched differently inside Mapepire than plain SQL.
-                    // If we only run plain SQL the first QCDRCMDD call still cold-starts that
-                    // path (or re-cold-starts it after an IBM i job idle-timeout).
-                    // A comment-only string is a true no-op through QCMDEXC (treated as *RQS).
+                    // A comment-only CL string warms the @ dispatch path without issuing any
+                    // real command — no *ESCAPE messages, no side effects, returns quickly so
+                    // the connection slot is free before the user presses F4.
                     try {
                         await connection.runSQL(`@/* clPrompter warm-up */`);
                     } catch (e2) {
@@ -120,6 +120,44 @@ export async function activate(context: vscode.ExtensionContext) {
         if (code4i.instance.getConnection()) {
             runWarmup();
         }
+
+        // Keep-alive: send a trivial no-op to the Mapepire SQL job every 20 seconds so
+        // the JVM service job never goes idle between F4 presses.  Without this, opening
+        // a second source member after a short pause causes a ~22 s cold-start because
+        // the Mapepire job is recycled/reset while the IDE sits idle.
+        let keepAliveInterval: ReturnType<typeof setInterval> | undefined;
+
+        const startKeepAlive = () => {
+            if (keepAliveInterval) { clearInterval(keepAliveInterval); }
+            keepAliveInterval = setInterval(async () => {
+                const conn = code4i?.instance?.getConnection();
+                if (!conn || !conn.sqlRunnerAvailable()) { return; }
+                try {
+                    await conn.runSQL('@/* clPrompter keep-alive */');
+                } catch (_) {
+                    // Non-critical — silently ignore
+                }
+            }, 20_000);
+        };
+
+        const stopKeepAlive = () => {
+            if (keepAliveInterval) {
+                clearInterval(keepAliveInterval);
+                keepAliveInterval = undefined;
+            }
+        };
+
+        code4i.instance.subscribe(context, 'connected', 'clPrompter-keepalive-start', startKeepAlive);
+        code4i.instance.subscribe(context, 'disconnected', 'clPrompter-keepalive-stop', stopKeepAlive);
+
+        // Start immediately if already connected when the extension activates.
+        if (code4i.instance.getConnection()) {
+            startKeepAlive();
+        }
+
+        // Ensure the interval is cleared when the extension is deactivated.
+        context.subscriptions.push({ dispose: stopKeepAlive });
+
         code4i.instance.subscribe(context, 'disconnected', 'clPrompter-cache-clear', () => {
             clearCMDXMLCache();
             console.log('[clPrompter] Disconnected — XML cache cleared');

@@ -21,7 +21,8 @@
     "src/clParmInput.ts",
     "src/QlgPathName.ts",
     "src/prompter.ts",  // Add this (main webview logic)
-    "src/types.ts"      // Add this (interfaces and types)
+    "src/types.ts",     // Add this (interfaces and types)
+    "src/webview-assets/cbinput.ts"
   ],
   "exclude": [
     "node_modules",

@@ -24,6 +24,7 @@
     "out",
     "backup",
     "src/prompter.ts",  // Exclude webview files
+    "src/webview-assets/**/*",  // Exclude webview assets (compiled by tsconfig.webview.json)
     "src/test/**/*"     // Exclude entire test folder from builds
   ]
 }
