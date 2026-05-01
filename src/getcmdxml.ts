@@ -48,10 +48,16 @@ export function clearCMDXMLCache(cmdKey?: string): void {
 // Utility: Fetch or return XML for a command
 export async function getCMDXML(cmdString: string): Promise<string> {
     if (!code4i) {
-        vscode.window.showErrorMessage("Code for IBM i extension is not available.");
+        vscode.window.showErrorMessage("Code for IBM i (CodeForIBMi) extension is not found and is required.");
         return '';
     }
+    // Check if connection was good, if not inform the end-user
+    // that they must be connected to IBM i host or prompting is unavailable.
     const connection = code4i.instance.getConnection();
+    if (!connection) {
+        vscode.window.showErrorMessage("Not connected to IBM i host. CL prompting not available.");
+        return '';
+    }
     const c4iConfig = connection.getConfig();
     console.log(`Using CodeFori: tempDir="${c4iConfig.tempDir}"`);
     // The input cmdString can be full CL Command (with or without parameters)

@@ -265,6 +265,74 @@ function valueToLayoutTokens(value: CLValue, context: { inWrappedExpr?: boolean 
 }
 
 /**
+ * Detected inner command info extracted from an array CLValue.
+ */
+interface NestedCommandInfo {
+    cmdName: string;
+    params: Array<{ kwd: string; tokens: CLToken[] }>;
+}
+
+/**
+ * Detect whether a CLValue array represents a nested CL command of the form
+ *   CMD(INNERCMD KWD1(VAL1) KWD2(VAL2) ...)
+ *
+ * The parser produces an alternating array for such values:
+ *   [unwrapped([INNERCMD, space, KWD1]), wrapped([VAL1]), unwrapped([KWD2]), wrapped([VAL2]), ...]
+ *
+ * Returns extracted command info, or null if the value does not match the pattern.
+ */
+function detectNestedCommand(value: CLValue): NestedCommandInfo | null {
+    // Must be an array with an even number of elements >= 2
+    if (!Array.isArray(value) || value.length < 2 || value.length % 2 !== 0) return null;
+
+    // Every element must be an expression object (no plain strings, no CLNodes, no nested arrays)
+    for (const v of value) {
+        if (typeof v !== 'object' || v === null || Array.isArray(v) ||
+            !('type' in v) || (v as any).type !== 'expression') {
+            return null;
+        }
+    }
+
+    // Even-indexed elements must be unwrapped and contain only keyword/space tokens.
+    // Odd-indexed elements must be wrapped.
+    for (let i = 0; i < value.length; i++) {
+        const v = value[i] as any;
+        if (i % 2 === 0) {
+            if (v.wrapped !== false) return null;
+            for (const tok of v.tokens as CLToken[]) {
+                if (tok.type !== 'keyword' && tok.type !== 'space') return null;
+            }
+        } else {
+            if (v.wrapped !== true) return null;
+        }
+    }
+
+    // First unwrapped expression must have at least 2 keyword tokens:
+    // the inner command name and the first parameter keyword.
+    const first = value[0] as any;
+    const firstKwds = (first.tokens as CLToken[]).filter((t: CLToken) => t.type === 'keyword');
+    if (firstKwds.length < 2) return null;
+
+    const cmdName = firstKwds[0].value;
+    const firstParamKwd = firstKwds[firstKwds.length - 1].value;
+
+    const params: NestedCommandInfo['params'] = [];
+
+    // First param: last keyword in value[0] + wrapped value in value[1]
+    params.push({ kwd: firstParamKwd, tokens: (value[1] as any).tokens as CLToken[] });
+
+    // Subsequent params: each even-indexed slot must have exactly one keyword
+    for (let i = 2; i < value.length; i += 2) {
+        const kwdExpr = value[i] as any;
+        const kwds = (kwdExpr.tokens as CLToken[]).filter((t: CLToken) => t.type === 'keyword');
+        if (kwds.length !== 1) return null;
+        params.push({ kwd: kwds[0].value, tokens: (value[i + 1] as any).tokens as CLToken[] });
+    }
+
+    return { cmdName, params };
+}
+
+/**
  * Convert a command parameter to layout tokens
  */
 function parameterToLayoutTokens(name: string, value: CLValue): LayoutToken[] {
@@ -287,6 +355,40 @@ function parameterToLayoutTokens(name: string, value: CLValue): LayoutToken[] {
             atomic: true
         });
         return tokens;
+    }
+
+    // Detect nested CL command: CMD(INNERCMD KWD1(VAL1) KWD2(VAL2) ...)
+    // Format the inner command's parameters with the same line-break rules as the outer command.
+    if (Array.isArray(value)) {
+        const nested = detectNestedCommand(value);
+        if (nested) {
+            // Outer parm name + '(' + inner command name kept atomic (never split)
+            tokens.push({ text: name + '(' + nested.cmdName, type: 'text', atomic: true });
+
+            for (const { kwd, tokens: innerTokens } of nested.params) {
+                // Space between inner parameters (same as between outer parameters)
+                tokens.push({ text: '', type: 'space', atomic: false });
+                // Reconstruct the inner parameter value as a plain string so the
+                // existing short-string / long-value optimization in this function applies.
+                const innerValueStr = (innerTokens as CLToken[]).map((t: CLToken) => t.value).join('');
+                tokens.push(...parameterToLayoutTokens(kwd, innerValueStr));
+            }
+
+            // Closing ')' for the outer parameter — merge onto the last inner token
+            if (tokens.length > 0) {
+                const lastTok = tokens[tokens.length - 1];
+                if (lastTok.atomic && (lastTok.type === 'break-after' || lastTok.type === 'text')) {
+                    lastTok.text += ')';
+                    lastTok.type = 'break-after';
+                } else {
+                    tokens.push({ text: ')', type: 'break-after', atomic: false });
+                }
+            } else {
+                tokens.push({ text: ')', type: 'break-after', atomic: false });
+            }
+
+            return tokens;
+        }
     }
 
     // For complex or long values, tokenize separately
