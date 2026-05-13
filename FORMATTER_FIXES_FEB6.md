@@ -52,7 +52,6 @@ Ran comprehensive test suite on testCLCommands.clle commands:
    - testSimple.ts: Focused test for the two known issues
    - testAllCommands.ts: Comprehensive test suite (not yet fully working)
    - runTest.ts: Mock vscode module for Node.js testing
-   - vscode-mock.ts: Mock implementation
 
 ### Next Steps (Optional)
 
