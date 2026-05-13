@@ -6,7 +6,7 @@ All notable changes to this project are documented in this file.
 
 ### What's New
 
-- **Nested CL command formatting**: The CL formatter now recognizes when a parameter value is itself a CL command (e.g. `CMD(DSPJOBLOG OUTPUT(*PRINT) JOBQ(QBATCH))` on `SBMJOB`) and formats it as a proper command — inner keyword/value pairs break at the continuation column using the same line-wrap rules as the outer command's parameters. This applies both when a nested command is returned from the CL Prompter and during a standalone reformat of existing source.
+- **Nested CL command formatting**: The CL formatter now recognizes when a parameter value is itself a CL command (e.g. `SBMJOB CMD(DSPJOBLOG OUTPUT(*PRINT) JOBQ(QBATCH))`) and formats it as a proper command — inner keyword/value pairs break at the continuation column using the same line-wrap rules as the outer command's parameters. This applies both when a nested command is returned from the CL Prompter and during a standalone CL formatter command is used on existing source.
 
 ---
 
