@@ -18,7 +18,7 @@ const config = {
 };
 
 // Read the test file
-const testFilePath = path.join(__dirname, '..', 'src', 'testCLCommands.clle');
+const testFilePath = path.join(__dirname, 'testCLCommands.clle');
 const content = fs.readFileSync(testFilePath, 'utf-8');
 const lines = content.split('\n');
 

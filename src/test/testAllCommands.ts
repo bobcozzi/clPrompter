@@ -180,7 +180,7 @@ function compareOutputs(expected: string, actual: string): { match: boolean; iss
 
 // Main test execution
 // When compiled, __dirname will be 'out', so go up one level to find src
-const testFilePath = path.join(__dirname, '..', 'src', 'testCLCommands.clle');
+const testFilePath = path.join(__dirname, 'testCLCommands.clle');
 
 // Standard CL formatting config (matching VS Code defaults)
 const formatConfig = {
