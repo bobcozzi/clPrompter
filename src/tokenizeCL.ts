@@ -287,6 +287,13 @@ export function mapPositionalToMetaValue(meta: AnyMeta, raw: string) {
  * Converts leading __posN parameters to real keywords using parmMetas order.
  * Stops mapping as soon as a named keyword is seen. Positionals after that are ignored.
  */
+/**
+ * PRESERVED — not currently called, but retained for future use.
+ * resolvePositionalsToKeywords() can replace rewriteLeadingPositionalsByList()
+ * once ParmMeta[] is available at positional-rewrite time. It maps __posN tokens
+ * to their correct keyword names using the metadata order, and skips positionals
+ * that appear after the first named keyword.
+ */
 export function resolvePositionalsToKeywords(ast: import('./types').CLNode, parmMetas: AnyMeta[]) {
     const mapped: import('./types').CLParsedParm[] = [];
     let metaIdx = 0;
@@ -409,7 +416,13 @@ function isThrowawayMeta(m: any): boolean {
   return type === 'NULL' || hasConstantAttr;
 }
 
-// Ensure rewriteLeadingPositionals filters with isThrowawayMeta
+/**
+ * PRESERVED — not currently called (rewriteLeadingPositionalsByList is used instead),
+ * but retained because this version has more sophisticated logic: it sorts candidates
+ * by PosNbr, filters out throwaway meta entries (Constant/NULL parameters), and
+ * handles the full ParmMeta[] structure. Prefer this over rewriteLeadingPositionalsByList
+ * if ParmMeta[] becomes available at the call site.
+ */
 export function rewriteLeadingPositionals(fullCmd: string, parmMetas: any[], cmdMaxPos?: number): string {
   const tokens = tokenizeCL(fullCmd);
   if (!tokens.length) return fullCmd;
@@ -612,7 +625,13 @@ export function formatCLCmd(label: string | undefined, cmdName: string, parmStr:
 
     // Tokenize and parse the full command (command name + params)
     const tokens = tokenizeCL(`${cmdName} ${actualParmStr}`);
-    const ast = parseCL(tokens, actualComment);
+    let ast: CLNode;
+    try {
+        ast = parseCL(tokens, actualComment);
+    } catch (err) {
+        console.error('[clPrompter] formatCLCmd: failed to parse command, returning unformatted:', err);
+        return [label ? label.trim() + ':' : '', cmdName, actualParmStr].filter(Boolean).join(' ');
+    }
 
     // Ensure command name is set as provided
     ast.name = cmdName;
@@ -659,14 +678,19 @@ export function formatCLCmd(label: string | undefined, cmdName: string, parmStr:
     }
 
     // Use the unified formatter (v2)
-    return formatCLCommand_v2(ast, label, {
-        leftMargin: config.get<number>('formatCmdPosition', 14),
-        rightMargin: config.get<number>('formatRightMargin', 70),
-        contIndent: config.get<number>('formatContinuePosition', 27),
-        continuationChar: '+',
-        labelPosition: config.get<number>('formatLabelPosition', 2),
-        kwdPosition: config.get<number>('formatKwdPosition', 25)
-    });
+    try {
+        return formatCLCommand_v2(ast, label, {
+            leftMargin: config.get<number>('formatCmdPosition', 14),
+            rightMargin: config.get<number>('formatRightMargin', 70),
+            contIndent: config.get<number>('formatContinuePosition', 27),
+            continuationChar: '+',
+            labelPosition: config.get<number>('formatLabelPosition', 2),
+            kwdPosition: config.get<number>('formatKwdPosition', 25)
+        });
+    } catch (err) {
+        console.error('[clPrompter] formatCLCmd: formatter failed, returning unformatted:', err);
+        return [label ? label.trim() + ':' : '', cmdName, actualParmStr].filter(Boolean).join(' ');
+    }
 }
 
 /** Formatter */

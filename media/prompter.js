@@ -1362,6 +1362,7 @@ function createInputForType(type, name, dft, len, suggestions, isRestricted = fa
             minWidth: '150px'
         });
         const inputElement = cbinput.getInputElement();
+        inputElement.dataset.default = normalizedDft; // mirrors what non-cbInput paths do; used by isFieldSpecified
         attachTouchTracking(inputElement);
         // Add blur handler to normalize values against allowed values
         inputElement.addEventListener('blur', () => {
@@ -1490,6 +1491,7 @@ function createParmInput(name, suggestions, isRestricted, dft, len, type, full) 
             minWidth: '150px'
         });
         const inputElement = cbinput.getInputElement();
+        inputElement.dataset.default = normalizedDft; // mirrors what non-cbInput paths do; used by isFieldSpecified
         attachTouchTracking(inputElement);
         // Attach Rstd validation (shows "Value entered is not valid" for values outside the allowed list)
         setTimeout(() => {
@@ -1963,6 +1965,36 @@ function renderParmInstance(parm, kwd, idx, max, multiGroupDiv) {
     return instDiv;
 }
 // Add multi-instance controls
+function showBtnTooltip(btn, text) {
+    hideBtnTooltip();
+    const tip = document.createElement('div');
+    tip.id = 'btn-hover-tooltip';
+    tip.textContent = text;
+    Object.assign(tip.style, {
+        position: 'fixed', background: '#616161', color: '#fff',
+        padding: '4px 8px', borderRadius: '4px', fontSize: '12px',
+        pointerEvents: 'none', zIndex: '15000', whiteSpace: 'nowrap'
+    });
+    document.body.appendChild(tip);
+    // Defer positioning so the browser has laid out the element and offsetWidth is accurate
+    setTimeout(() => {
+        if (!document.getElementById('btn-hover-tooltip'))
+            return;
+        const r = btn.getBoundingClientRect();
+        const tw = tip.offsetWidth;
+        const margin = 8;
+        let left = r.left + r.width / 2 - tw / 2;
+        if (left < margin)
+            left = margin;
+        if (left + tw > window.innerWidth - margin)
+            left = window.innerWidth - tw - margin;
+        tip.style.left = `${left}px`;
+        tip.style.top = `${r.bottom + 6}px`;
+    }, 0);
+}
+function hideBtnTooltip() {
+    document.getElementById('btn-hover-tooltip')?.remove();
+}
 function addMultiInstanceControls(container, parm, kwd, idx, max, multiGroupDiv) {
     console.log('[clPrompter] ', 'addMultiInstanceControls start');
     const btnBar = document.createElement('div');
@@ -1972,8 +2004,9 @@ function addMultiInstanceControls(container, parm, kwd, idx, max, multiGroupDiv)
         addBtn.type = 'button';
         addBtn.className = 'add-parm-btn';
         addBtn.textContent = '+';
-        addBtn.title = 'Add entry';
         addBtn.tabIndex = -1; // Remove from tab order
+        addBtn.addEventListener('mouseenter', () => showBtnTooltip(addBtn, 'Add entry'));
+        addBtn.addEventListener('mouseleave', hideBtnTooltip);
         addBtn.onclick = () => {
             const instances = multiGroupDiv.querySelectorAll('.parm-instance');
             if (instances.length < max) {
@@ -2007,8 +2040,9 @@ function addMultiInstanceControls(container, parm, kwd, idx, max, multiGroupDiv)
         removeBtn.type = 'button';
         removeBtn.className = 'remove-parm-btn';
         removeBtn.textContent = '—'; // em dash
-        removeBtn.title = 'Remove entry';
         removeBtn.tabIndex = -1; // Remove from tab order
+        removeBtn.addEventListener('mouseenter', () => showBtnTooltip(removeBtn, 'Remove entry'));
+        removeBtn.addEventListener('mouseleave', hideBtnTooltip);
         removeBtn.onclick = () => {
             // Remember which element had focus
             const activeElement = document.activeElement;
@@ -3295,6 +3329,16 @@ function isFieldSpecified(kwd) {
                 // its inputs were populated from the user's source, not from Elem-level defaults.
                 if (state.originalParmMap && kwd in state.originalParmMap)
                     return true;
+                // The user may also have filled in the ELEM via the form on a fresh prompt.
+                // Compare rawVal (= ELEM0's current value) against ELEM0's own pre-filled default
+                // (stored in dataset.default at render time). If they differ, the user typed something.
+                // Falls back to the conservative "not specified" for cbInput-based ELEM0 elements
+                // (which don't carry dataset.default) to avoid false positives.
+                const elem0Input = document.querySelector(`input[name="${kwd}_INST0_ELEM0"], textarea[name="${kwd}_INST0_ELEM0"]`);
+                const elem0Dft = elem0Input?.dataset?.default;
+                if (elem0Dft !== undefined) {
+                    return rawVal.trim() !== elem0Dft.trim();
+                }
                 return false;
             }
         }
@@ -3302,12 +3346,22 @@ function isFieldSpecified(kwd) {
     }
     // Multi-list ELEM parameters: check if any instance has a non-empty first input.
     // Uses a broad query so it handles arbitrary ELEM/QUAL nesting depth.
-    const group = document.querySelector(`.parm-multi-group[data-kwd="${kwd}"]`);
-    if (group) {
-        const instances = group.querySelectorAll('.parm-instance');
-        for (const inst of Array.from(instances)) {
-            const firstInput = inst.querySelector('input:not([type="hidden"]), textarea');
-            if (firstInput && firstInput.value.trim())
+    // Scan ALL inputs in the parameter's row. This covers:
+    //   • Single-instance ELEM params (e.g. DEFVAR with ELEM0 + ELEM1): getFieldRawValue
+    //     only returns ELEM0, so clearing ELEM0 alone must not hide the row when ELEM1
+    //     still holds a non-default value.
+    //   • Multi-instance params: parm-multi-group contains every parm-instance; checking
+    //     all inputs is strictly more thorough than checking only firstInput per instance.
+    // Each input has dataset.default set at render time, so we compare against that rather
+    // than against the parent parm's defaultValMap entry (which covers the whole field, not
+    // individual ELEMs).
+    const paramRow = document.querySelector(`#clForm > [data-kwd="${kwd}"]`);
+    if (paramRow) {
+        const allInputs = paramRow.querySelectorAll('input:not([type="hidden"]), textarea');
+        for (const input of Array.from(allInputs)) {
+            const val = input.value.trim();
+            const dft = (input.dataset.default ?? '').trim();
+            if (val && val !== dft)
                 return true;
         }
     }
@@ -3395,7 +3449,14 @@ function applyPmtCtlVisibility() {
             row.classList.remove('pmtctl-hidden');
         }
         else {
-            row.classList.add('pmtctl-hidden');
+            // Do NOT hide a parameter that currently holds a non-default value.
+            // If the user entered something and then changed the controlling parameter
+            // (e.g. DEFVAR filled then STG changed from *DEFINED to *BASED), leaving
+            // the field visible forces the user to see and clear the conflict.
+            // Dep constraints will fire, making the error explicit rather than silent.
+            if (!isFieldSpecified(kwd)) {
+                row.classList.add('pmtctl-hidden');
+            }
         }
     }
 }
@@ -3582,7 +3643,7 @@ function buildDepErrorMessage(constraint, trueCount) {
                     const isBlank = resolved.trim() === '';
                     return isBlank ? `${dp.kwd} must be specified` : `${dp.kwd} ${sym} ${dp.cmpVal}`;
                 }
-                return `${dp.kwd} SPCFD`;
+                return `${dp.kwd} must be specified`;
             }).join(' and ');
             return `When ${ctlCondStr}: ${conditions}`;
         }

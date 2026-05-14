@@ -54,7 +54,6 @@ import { getCMDXML, clearCMDXMLCache } from './getcmdxml';
 
 import {
     tokenizeCL,
-    rewriteLeadingPositionals,
     safeExtractKwdArg,
     rewriteLeadingPositionalsByList
 } from './tokenizeCL';

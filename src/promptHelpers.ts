@@ -238,43 +238,48 @@ export function parseSpaceSeparatedValues(str: string): string[] {
  * Parse ELEM values, respecting parentheses and quotes.
  * For simple values like "0 0 *SECLVL", splits on spaces.
  * For nested values like "(*BEFORE 'text') (*AFTER 'text')", preserves groups.
+ *
+ * Uses independent SQ/DQ boolean flags so that a single quote inside a
+ * double-quoted string (and vice versa) does not toggle the opposing quote
+ * state — consistent with IBM i CL quoting rules.
  */
 export function parseElemValues(str: string): string[] {
     const values: string[] = [];
     let current = '';
     let parenDepth = 0;
-    let inQuotes = false;
-    let quoteChar = '';
+    let inSQ = false;  // inside single-quoted string
+    let inDQ = false;  // inside double-quoted string
 
     for (let i = 0; i < str.length; i++) {
         const char = str[i];
 
-        // Track quote state
-        if (!inQuotes && (char === "'" || char === '"')) {
-            inQuotes = true;
-            quoteChar = char;
-            current += char;
-        } else if (inQuotes && char === quoteChar) {
-            inQuotes = false;
-            current += char;
-        }
+        // Track quote state independently for each quote type.
+        // A single quote inside a double-quoted string (and vice versa) does NOT toggle state.
+        if (char === "'" && !inDQ) { inSQ = !inSQ; current += char; continue; }
+        if (char === '"' && !inSQ) { inDQ = !inDQ; current += char; continue; }
+
+        const inQuotes = inSQ || inDQ;
+
         // Track parentheses depth (only when not in quotes)
-        else if (!inQuotes && char === '(') {
+        if (!inQuotes && char === '(') {
             parenDepth++;
             current += char;
-        } else if (!inQuotes && char === ')') {
+            continue;
+        }
+        if (!inQuotes && char === ')') {
             parenDepth--;
             current += char;
+            continue;
         }
-        // Split on space only when not in quotes and at depth 0
-        else if (!inQuotes && parenDepth === 0 && /\s/.test(char)) {
+        // Split on whitespace only when not in quotes and at top-level depth
+        if (!inQuotes && parenDepth === 0 && /\s/.test(char)) {
             if (current.trim()) {
                 values.push(current.trim());
                 current = '';
             }
-        } else {
-            current += char;
+            continue;
         }
+        current += char;
     }
 
     if (current.trim()) {
@@ -301,53 +306,6 @@ export function parseParenthesizedContent(str: string): string[] {
     return parseElemValues(trimmed);
 }
 
-export function parseCLCmd(cmd: string): Record<string, string[]> {
-    // Remove command name
-    const parts = cmd.trim().split(/\s+/);
-    parts.shift();
-
-    const result: Record<string, string[]> = {};
-    let i = 0;
-    while (i < parts.length) {
-        let part = parts[i];
-        const eqIdx = part.indexOf('(');
-        if (eqIdx > 0) {
-            // Parameter with parenthesis value
-            const param = part.substring(0, eqIdx);
-            let val = part.substring(eqIdx);
-            // If value is split across tokens, join until closing paren
-            while (val.split('(').length > val.split(')').length && i + 1 < parts.length) {
-                i++;
-                val += ' ' + parts[i];
-            }
-            val = val.replace(/^\(/, '').replace(/\)$/, '');
-            // Split by spaces, but keep quoted strings together
-            const vals = val.match(/'[^']*'|"[^"]*"|\S+/g) || [];
-            result[param] = vals.map(v => v.replace(/^['"]|['"]$/g, ''));
-        } else if (part.includes('(')) {
-            // Handles case where param and value are split
-            const param = part.replace(/\(.*/, '');
-            let val = part.substring(part.indexOf('('));
-            while (val.split('(').length > val.split(')').length && i + 1 < parts.length) {
-                i++;
-                val += ' ' + parts[i];
-            }
-            val = val.replace(/^\(/, '').replace(/\)$/, '');
-            const vals = val.match(/'[^']*'|"[^"]*"|\S+/g) || [];
-            result[param] = vals.map(v => v.replace(/^['"]|['"]$/g, ''));
-        } else if (part.includes('=')) {
-            // Not standard CL, but just in case
-            const [param, val] = part.split('=');
-            result[param] = [val];
-        } else {
-            // Parameter with single value
-            const param = part;
-            if (i + 1 < parts.length && !parts[i + 1].includes('(') && !parts[i + 1].includes('=')) {
-                i++;
-                result[param] = [parts[i].replace(/^['"]|['"]$/g, '')];
-            }
-        }
-        i++;
-    }
-    return result;
-}
+// parseCLCmd has been removed — it was dead code (exported but never called).
+// All CL command parsing is handled by parseCLParms() in parseCL.ts which correctly
+// handles QUAL, ELEM, nested structures, multi-instance parameters, and quoted values.

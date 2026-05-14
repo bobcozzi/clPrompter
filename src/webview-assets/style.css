@@ -326,9 +326,6 @@ textarea.long-text-input:focus {
 .add-parm-btn,
 .remove-parm-btn {
   font-size: 0.9em;
-  padding: 0 0.3em;
-  border-radius: 50%;
-  width: 1.5em;
   height: 1.5em;
   min-width: 0;
   min-height: 0;
@@ -346,9 +343,15 @@ textarea.long-text-input:focus {
 
 .add-parm-btn {
   background: lightgrey;
+  border-radius: 4px;
+  padding: 0 0.55em;
+  width: auto;
 }
 .remove-parm-btn {
-    background: pink;
+  background: pink;
+  border-radius: 50%;
+  padding: 0 0.3em;
+  width: 1.5em;
 }
 
 /* 5250-style form group with grid layout */

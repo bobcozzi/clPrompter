@@ -2,6 +2,30 @@
 
 All notable changes to this project are documented in this file.
 
+## [0.0.60] - 2026-05-14
+
+### What's Fixed
+
+- **`parseElemValues()` quote-state logic corrected**: Single quotes inside double-quoted strings (and vice versa) no longer toggle the opposing quote state. Independent `inSQ` / `inDQ` boolean flags are now used, consistent with IBM i CL quoting rules. Previously a value like `'it\'s'` inside a `CMD(...)` could confuse the parser and produce wrong split points.
+
+- **`isFieldSpecified()` now compares against per-input defaults**: Each input element's `dataset.default` is set at render time and compared against the live value, replacing the old approach of checking only the first input in a multi-instance group. This fixes cases where editing a non-ELEM0 field (e.g. ELEM1 of a two-part ELEM parameter) was incorrectly reported as "not specified". CBInput-based inputs now also receive `dataset.default` at render time so the same comparison works for dropdown fields.
+
+- **PMTCTL no longer silently hides a parameter that holds a non-default value**: `applyPmtCtlVisibility()` skips the `pmtctl-hidden` class when `isFieldSpecified()` reports that the row already contains user-entered data. Previously, changing a controlling parameter could hide a filled-in field without warning; now the field stays visible so the user can see and resolve the conflict explicitly.
+
+- **`formatCLCmd()` is now fault-tolerant**: Both the `parseCL()` call and the `formatCLCommand_v2()` call are now wrapped in `try/catch`. If either throws, the function logs the error and returns the command in its original unformatted form rather than propagating an exception to the caller.
+
+### What's New
+
+- **Custom tooltips on multi-instance `+` / `—` buttons**: The native `title` attribute tooltip (which VS Code WebViews suppress or delay) has been replaced with a lightweight DOM tooltip (`showBtnTooltip` / `hideBtnTooltip`). The tooltip appears centered below the button on `mouseenter` and is viewport-clamped so it never clips at the window edge.
+
+### Code Quality
+
+- **Duplicate token-splitter functions removed**: `clp_splitTopLevelTokens()` in `parseCL.ts`, `parseCLCmd()` and the `splitTopLevelParenGroups()` duplicate in `parseCL.ts` have been deleted. All call sites now route through the single canonical `parseElemValues()` exported from `promptHelpers.ts`. `rewriteLeadingPositionals` import removed from `extension.ts` (no longer called there).
+
+- **JSDoc preservation notices added** to `resolvePositionalsToKeywords()` and `rewriteLeadingPositionals()` in `tokenizeCL.ts`, documenting why they are retained despite not being called in the current code path.
+
+---
+
 ## [0.0.59] - 2026-05-01
 
 ### What's New

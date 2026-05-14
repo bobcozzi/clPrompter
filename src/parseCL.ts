@@ -24,6 +24,7 @@
 
 import { DOMParser } from '@xmldom/xmldom';
 import { ParmMeta, ElemMeta, ParsedParms } from './types';
+import { parseElemValues } from './promptHelpers';
 
 
 function parseElem(e: Element): ElemMeta {
@@ -98,29 +99,6 @@ function isElementWithNameElem(n: unknown): n is Element {
 }
 function isElementWithNameQual(n: unknown): n is Element {
   return isElementWithName(n, 'QUAL');
-}
-
-
-
-export function splitTopLevelParenGroups(str: string): string[] {
-  const results: string[] = [];
-  let depth = 0;
-  let group = '';
-  for (let i = 0; i < str.length; i++) {
-    const c = str[i];
-    if (c === '(') {
-      if (depth === 0) group = ''; // Start a new group
-      depth++;
-    }
-    if (depth > 0) group += c;
-    if (c === ')') {
-      depth--;
-      if (depth === 0) {
-        results.push(group.trim());
-      }
-    }
-  }
-  return results;
 }
 
 
@@ -269,28 +247,7 @@ function clp_stripOuterParens(s: string): string {
   const t = s.trim();
   return (t.startsWith('(') && t.endsWith(')')) ? t.slice(1, -1).trim() : t;
 }
-function clp_splitTopLevelTokens(s: string): string[] {
-  const out: string[] = [];
-  let buf = '';
-  let depth = 0;
-  let inSQ = false, inDQ = false;
-  for (let i = 0; i < s.length; i++) {
-    const ch = s[i];
-    if (ch === "'" && !inDQ) { inSQ = !inSQ; buf += ch; continue; }
-    if (ch === '"' && !inSQ) { inDQ = !inDQ; buf += ch; continue; }
-    if (!inSQ && !inDQ) {
-      if (ch === '(') { depth++; buf += ch; continue; }
-      if (ch === ')') { depth = Math.max(0, depth - 1); buf += ch; continue; }
-      if (/\s/.test(ch) && depth === 0) {
-        if (buf.length) { out.push(buf.trim()); buf = ''; }
-        continue;
-      }
-    }
-    buf += ch;
-  }
-  if (buf.length) out.push(buf.trim());
-  return out;
-}
+// clp_splitTopLevelTokens removed — consolidated into parseElemValues() from promptHelpers.ts
 function clp_findFirstTopLevelParen(s: string): number {
   let depth = 0;
   let inSQ = false, inDQ = false;
@@ -319,7 +276,7 @@ function clp_splitQualValue(raw: string, expectedParts: number): string[] {
     // XML order is typically Qual0=Name, Qual1=Library
     return [obj || '', lib || ''].slice(0, Math.max(expectedParts, 2));
   }
-  const toks = clp_splitTopLevelTokens(s);
+  const toks = parseElemValues(s);
   return toks.slice(0, Math.max(expectedParts, toks.length));
 }
 // Is this ELEM strictly flat (no QUAL children, no nested ELEM children)?
@@ -384,7 +341,7 @@ function parseElemParam(cmd: string, i: number, meta: ParmMeta | ElemMeta, level
 function parseElemParamSingle(inner: string, meta: ParmMeta | ElemMeta): string[] {
   // If no children meta, split as plain tokens
   if (!meta || !Array.isArray((meta as any).Elems) || (meta as any).Elems.length === 0) {
-    return splitCLMultiInstance ? splitCLMultiInstance(inner) : clp_splitTopLevelTokens(inner);
+    return splitCLMultiInstance ? splitCLMultiInstance(inner) : parseElemValues(inner);
   }
 
   const children = (meta as any).Elems as any[];
@@ -395,7 +352,7 @@ function parseElemParamSingle(inner: string, meta: ParmMeta | ElemMeta): string[
 
   // Simple flat ELEM: split by spaces inside the single paren
   if (!hasQualChild && !hasNestedElemChild) {
-    const flat = splitCLMultiInstance ? splitCLMultiInstance(inner) : clp_splitTopLevelTokens(inner);
+    const flat = splitCLMultiInstance ? splitCLMultiInstance(inner) : parseElemValues(inner);
     return flat;
   }
 
@@ -436,7 +393,7 @@ function parseElemParamSingle(inner: string, meta: ParmMeta | ElemMeta): string[
       if (groupStr[k] !== '(') {
         // Might be SngVal like "*ALL" (container special value)
         // Consume next token and keep it as a single string
-        const toks = clp_splitTopLevelTokens(groupStr);
+        const toks = parseElemValues(groupStr);
         const special = toks.length ? toks[0] : '';
         if (special) {
           results.push([special]); // keep as single-item array
@@ -458,7 +415,7 @@ function parseElemParamSingle(inner: string, meta: ParmMeta | ElemMeta): string[
 
       if (clp_isSimpleElem(child)) {
         // Split directly into child leaf values
-        const tokens = splitCLMultiInstance ? splitCLMultiInstance(subInner) : clp_splitTopLevelTokens(subInner);
+        const tokens = splitCLMultiInstance ? splitCLMultiInstance(subInner) : parseElemValues(subInner);
         results.push(tokens);
       } else {
         // Recurse for nested ELEM
@@ -471,7 +428,7 @@ function parseElemParamSingle(inner: string, meta: ParmMeta | ElemMeta): string[
     }
 
     // Leaf value inside a complex group: take next token
-    const toks = clp_splitTopLevelTokens(groupStr);
+    const toks = parseElemValues(groupStr);
     const leaf = toks.length ? toks[0] : '';
     results.push(leaf);
     if (leaf) {
