@@ -1,0 +1,17 @@
+<QcdCLCmd DTDVersion="2.0">
+    <Cmd CmdName="SHOWHIDE" CmdLib="COZTEST" CCSID="37" MaxPos="99" Prompt="Show or hide input parm test" MsgF="QCPFMSG"
+        MsgFLib="__LIBL" ExecBatch="YES" ChgCmdExit="NO" RtvCmdExit="NO">
+        <Parm Kwd="SHOWME" PosNbr="1" KeyParm="NO" RtnVal="NO" PassVal="DFT" Type="CHAR" Min="1" Max="1" Len="10"
+            Rstd="NO" AlwUnprt="YES" AlwVar="YES" Expr="NO" Full="YES" DspInput="YES" Vary="NO" PassAtr="NO"
+            Case="MIXED" CCSID="JOB" IsDtaAra="NO" IsFile="NO" IsPgm="NO" Choice="Character value"></Parm>
+        <Parm Kwd="NOSHOW" PosNbr="2" KeyParm="NO" RtnVal="NO" PassVal="DFT" Type="CHAR" Min="1" Max="1" Len="10"
+            Rstd="NO" AlwUnprt="YES" AlwVar="YES" Expr="NO" Full="YES" DspInput="NO" Vary="NO" PassAtr="NO" Case="MIXED"
+            CCSID="JOB" IsDtaAra="NO" IsFile="NO" IsPgm="NO" Choice="Character value"></Parm>
+        <Parm Kwd="SHOWME2" PosNbr="3" KeyParm="NO" RtnVal="NO" PassVal="DFT" Type="CHAR" Min="1" Max="1" Len="10"
+            Rstd="NO" AlwUnprt="YES" AlwVar="YES" Expr="NO" Full="NO" DspInput="PROMPT" Vary="NO" PassAtr="NO"
+            Case="MONO" CCSID="JOB" InlPmtLen="10" IsDtaAra="NO" IsFile="NO" IsPgm="NO" Choice="Character value"></Parm>
+        <Parm Kwd="NOSHOW2" PosNbr="4" KeyParm="NO" RtnVal="NO" PassVal="DFT" Type="CHAR" Min="1" Max="1" Len="10"
+            Rstd="NO" AlwUnprt="YES" AlwVar="YES" Expr="NO" Full="NO" DspInput="PROMPT" Vary="NO" PassAtr="NO"
+            Case="MONO" CCSID="JOB" InlPmtLen="10" IsDtaAra="NO" IsFile="NO" IsPgm="NO" Choice="Character value"></Parm>
+    </Cmd>
+</QcdCLCmd>

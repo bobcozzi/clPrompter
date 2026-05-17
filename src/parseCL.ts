@@ -89,7 +89,8 @@ export function extractParmMetas(xml: string): ParmMeta[] {
     const Elems = elemNodes.length
       ? elemNodes.map(parseElem)
       : undefined;
-    return { Kwd, Type, Max, Quals, Elems };
+    const Case = parm.getAttribute('Case') || undefined;
+    return { Kwd, Type, Max, Case, Quals, Elems };
   });
 }
 

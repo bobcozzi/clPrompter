@@ -1,0 +1,1315 @@
+<QcdCLCmd DTDVersion="2.0">
+    <Cmd CmdName="CHGUSRPRF" CmdLib="__LIBL" CCSID="37" HlpPnlGrp="QHSYCMD1" HlpPnlGrpLib="__LIBL" HlpID="CHGUSRPRF"
+        MaxPos="3" Prompt="Change User Profile" PromptMsgID="TXT0036" PmtOvrPgm="QSYPRPOP" PmtOvrLib="QSYS"
+        MsgF="QCPFMSG" MsgFLib="__LIBL" PmtFile="QCPFPMT" PmtFileLib="*LIBL" PmtFileMsg="DYNAMIC" ExecBatch="YES"
+        ChgCmdExit="NO" RtvCmdExit="NO">
+        <Parm Kwd="OPTION" KeyParm="YES" Type="INT2" Min="1" Vary="NO" PassAtr="NO" Constant="2"></Parm>
+        <Parm Kwd="USRPRF" PosNbr="1" KeyParm="YES" RtnVal="NO" PassVal="DFT" Type="SNAME" Min="1" Max="1"
+            Prompt="User profile" PromptMsgID="TXT0771" Len="10" Rstd="NO" AlwUnprt="YES" AlwVar="YES" Expr="YES"
+            Full="NO" DspInput="YES" Vary="NO" PassAtr="NO" Case="MONO" CCSID="JOB" InlPmtLen="10" IsDtaAra="NO"
+            IsFile="NO" IsPgm="NO" Choice="Name"></Parm>
+        <Parm Kwd="PASSWORD" PosNbr="2" KeyParm="NO" RtnVal="NO" PassVal="DFT" Type="CHAR" Min="0" Max="1"
+            Prompt="User password" PromptMsgID="TXT0773" Len="128" Rstd="NO" Dft="*SAME" AlwUnprt="YES" AlwVar="YES"
+            Expr="YES" Full="NO" DspInput="PROMPT" Vary="NO" PassAtr="NO" Case="MIXED" CCSID="JOB" InlPmtLen="PWD"
+            IsDtaAra="NO" IsFile="NO" IsPgm="NO" Choice="Character value">
+            <SpcVal>
+                <Value Val="*SAME" MapTo="*SAME" />
+                <Value Val="*NONE" MapTo="*NONE" />
+            </SpcVal>
+        </Parm>
+        <Parm Kwd="PWDLEN" KeyParm="NO" Type="INT4" Min="0" Vary="NO" PassAtr="NO" Constant="-1"></Parm>
+        <Parm Kwd="PWDCCSID" KeyParm="NO" Type="INT4" Min="0" Vary="NO" PassAtr="NO" Constant="-1"></Parm>
+        <Parm Kwd="SPCAUT" PosNbr="12" KeyParm="NO" PmtCtl="PMTRQS" RtnVal="NO" PassVal="DFT" Type="CHAR" Min="0"
+            Max="8" Prompt="Special authority" PromptMsgID="TXT0712" Len="4" Rstd="YES" Dft="*SAME" AlwUnprt="YES"
+            AlwVar="YES" Expr="YES" Full="NO" DspInput="YES" Vary="NO" PassAtr="NO" Case="MONO" CCSID="JOB"
+            IsDtaAra="NO" IsFile="NO" IsPgm="NO" Choice="*SAME, *USRCLS, *NONE...">
+            <SngVal>
+                <Value Val="*SAME" MapTo="*" />
+                <Value Val="*USRCLS" MapTo="*USR" />
+                <Value Val="*NONE" MapTo="X&apos;00000000&apos;" />
+            </SngVal>
+            <SpcVal>
+                <Value Val="*ALLOBJ" MapTo="X&apos;80000000&apos;" />
+                <Value Val="*AUDIT" MapTo="X&apos;00200000&apos;" />
+                <Value Val="*IOSYSCFG" MapTo="X&apos;00080000&apos;" />
+                <Value Val="*JOBCTL" MapTo="X&apos;01000000&apos;" />
+                <Value Val="*SAVSYS" MapTo="X&apos;70000000&apos;" />
+                <Value Val="*SECADM" MapTo="*ADM" />
+                <Value Val="*SERVICE" MapTo="X&apos;00400000&apos;" />
+                <Value Val="*SPLCTL" MapTo="X&apos;00100000&apos;" />
+            </SpcVal>
+        </Parm>
+        <Parm Kwd="PWDEXP" PosNbr="3" KeyParm="NO" RtnVal="NO" PassVal="DFT" Type="CHAR" Min="0" Max="1"
+            Prompt="Set password to expired" PromptMsgID="TXT4773" Len="1" Rstd="YES" Dft="*SAME" AlwUnprt="YES"
+            AlwVar="YES" Expr="YES" Full="NO" DspInput="YES" Vary="NO" PassAtr="NO" Case="MONO" CCSID="JOB"
+            IsDtaAra="NO" IsFile="NO" IsPgm="NO" Choice="*SAME, *NO, *YES">
+            <SpcVal>
+                <Value Val="*SAME" MapTo="S" />
+                <Value Val="*NO" MapTo="N" />
+                <Value Val="*YES" MapTo="Y" />
+            </SpcVal>
+        </Parm>
+        <Parm Kwd="STATUS" PosNbr="4" KeyParm="NO" RtnVal="NO" PassVal="DFT" Type="CHAR" Min="0" Max="1" Prompt="Status"
+            PromptMsgID="TXT0724" Len="1" Rstd="YES" Dft="*SAME" AlwUnprt="YES" AlwVar="YES" Expr="YES" Full="NO"
+            DspInput="YES" Vary="NO" PassAtr="NO" Case="MONO" CCSID="JOB" IsDtaAra="NO" IsFile="NO" IsPgm="NO"
+            Choice="*SAME, *ENABLED, *DISABLED">
+            <SpcVal>
+                <Value Val="*SAME" MapTo="S" />
+                <Value Val="*ENABLED" MapTo="X&apos;40&apos;" />
+                <Value Val="*DISABLED" MapTo="D" />
+            </SpcVal>
+        </Parm>
+        <Parm Kwd="USRCLS" PosNbr="5" KeyParm="NO" RtnVal="NO" PassVal="DFT" Type="INT2" Min="0" Max="1"
+            Prompt="User class" PromptMsgID="TXT5057" Rstd="YES" Dft="*SAME" AlwUnprt="YES" AlwVar="YES" Expr="YES"
+            Full="NO" DspInput="YES" Vary="NO" PassAtr="NO" Case="MONO" CCSID="JOB" IsDtaAra="NO" IsFile="NO" IsPgm="NO"
+            Choice="*SAME, *USER, *SYSOPR...">
+            <SpcVal>
+                <Value Val="*SAME" MapTo="-1" />
+                <Value Val="*USER" MapTo="100" />
+                <Value Val="*SYSOPR" MapTo="200" />
+                <Value Val="*PGMR" MapTo="300" />
+                <Value Val="*SECADM" MapTo="400" />
+                <Value Val="*SECOFR" MapTo="500" />
+            </SpcVal>
+        </Parm>
+        <Parm Kwd="ASTLVL" PosNbr="6" KeyParm="NO" RtnVal="NO" PassVal="DFT" Type="CHAR" Min="0" Max="1"
+            Prompt="Assistance level" PromptMsgID="TXT6348" Len="1" Rstd="YES" Dft="*SAME" AlwUnprt="YES" AlwVar="YES"
+            Expr="YES" Full="NO" DspInput="YES" Vary="NO" PassAtr="NO" Case="MONO" CCSID="JOB" IsDtaAra="NO" IsFile="NO"
+            IsPgm="NO" Choice="*SAME, *SYSVAL, *BASIC...">
+            <SpcVal>
+                <Value Val="*SAME" MapTo="S" />
+                <Value Val="*SYSVAL" MapTo="X&apos;40&apos;" />
+                <Value Val="*BASIC" MapTo="B" />
+                <Value Val="*INTERMED" MapTo="I" />
+                <Value Val="*ADVANCED" MapTo="A" />
+            </SpcVal>
+        </Parm>
+        <Parm Kwd="SPCENV" PosNbr="13" KeyParm="NO" PmtCtl="PMTRQS" RtnVal="NO" PassVal="DFT" Type="CHAR" Min="0"
+            Max="1" Prompt="Special environment" PromptMsgID="TXT5058" Len="1" Rstd="YES" Dft="*SAME" AlwUnprt="YES"
+            AlwVar="YES" Expr="YES" Full="NO" DspInput="YES" Vary="NO" PassAtr="NO" Case="MONO" CCSID="JOB"
+            IsDtaAra="NO" IsFile="NO" IsPgm="NO" Choice="*SAME, *SYSVAL, *NONE, *S36">
+            <SpcVal>
+                <Value Val="*SAME" MapTo="S" />
+                <Value Val="*SYSVAL" MapTo="X&apos;40&apos;" />
+                <Value Val="*NONE" MapTo="N" />
+                <Value Val="*S36" MapTo="3" />
+            </SpcVal>
+        </Parm>
+        <Parm Kwd="DSPSGNINF" PosNbr="14" KeyParm="NO" PmtCtl="PMTRQS" RtnVal="NO" PassVal="DFT" Type="CHAR" Min="0"
+            Max="1" Prompt="Display sign-on information" PromptMsgID="TXT4772" Len="1" Rstd="YES" Dft="*SAME"
+            AlwUnprt="YES" AlwVar="YES" Expr="YES" Full="NO" DspInput="YES" Vary="NO" PassAtr="NO" Case="MONO"
+            CCSID="JOB" IsDtaAra="NO" IsFile="NO" IsPgm="NO" Choice="*SAME, *NO, *YES, *SYSVAL">
+            <SpcVal>
+                <Value Val="*SAME" MapTo="S" />
+                <Value Val="*NO" MapTo="N" />
+                <Value Val="*YES" MapTo="Y" />
+                <Value Val="*SYSVAL" MapTo="X&apos;40&apos;" />
+            </SpcVal>
+        </Parm>
+        <Parm Kwd="PWDEXPITV" PosNbr="15" KeyParm="NO" PmtCtl="PMTRQS" RtnVal="NO" PassVal="DFT" Type="INT2" Min="0"
+            Max="1" Prompt="Password expiration interval" PromptMsgID="TXT4780" Rstd="NO" Dft="*SAME" RangeMinVal="1"
+            RangeMaxVal="366" AlwUnprt="YES" AlwVar="YES" Expr="YES" Full="NO" DspInput="YES" Vary="NO" PassAtr="NO"
+            Case="MONO" CCSID="JOB" IsDtaAra="NO" IsFile="NO" IsPgm="NO" Choice="1-366">
+            <SpcVal>
+                <Value Val="*SAME" MapTo="-1" />
+                <Value Val="*SYSVAL" MapTo="0" />
+                <Value Val="*NOMAX" MapTo="32767" />
+            </SpcVal>
+        </Parm>
+        <Parm Kwd="LCLPWDMGT" PosNbr="17" KeyParm="NO" PmtCtl="PMTRQS" RtnVal="NO" PassVal="DFT" Type="CHAR" Min="0"
+            Max="1" Prompt="Local password management" PromptMsgID="TXTC985" Len="1" Rstd="YES" Dft="*SAME"
+            AlwUnprt="YES" AlwVar="YES" Expr="YES" Full="NO" DspInput="YES" Vary="NO" PassAtr="NO" Case="MONO"
+            CCSID="JOB" IsDtaAra="NO" IsFile="NO" IsPgm="NO" Choice="*SAME, *YES, *NO">
+            <SpcVal>
+                <Value Val="*SAME" MapTo="X&apos;40&apos;" />
+                <Value Val="*YES" MapTo="X&apos;00&apos;" />
+                <Value Val="*NO" MapTo="X&apos;01&apos;" />
+            </SpcVal>
+        </Parm>
+        <Parm Kwd="LMTDEVSSN" PosNbr="18" KeyParm="NO" PmtCtl="PMTRQS" RtnVal="NO" PassVal="DFT" Type="CHAR" Min="0"
+            Max="1" Prompt="Limit device sessions" PromptMsgID="TXT4781" Len="1" Rstd="YES" Dft="*SAME" AlwUnprt="YES"
+            AlwVar="YES" Expr="YES" Full="NO" DspInput="YES" Vary="NO" PassAtr="NO" Case="MONO" CCSID="JOB"
+            IsDtaAra="NO" IsFile="NO" IsPgm="NO" Choice="*SAME, *SYSVAL, *YES, *NO...">
+            <SpcVal>
+                <Value Val="*SAME" MapTo="S" />
+                <Value Val="*SYSVAL" MapTo="X&apos;40&apos;" />
+                <Value Val="*YES" MapTo="Y" />
+                <Value Val="*NO" MapTo="N" />
+                <Value Val="0" MapTo="0" />
+                <Value Val="1" MapTo="1" />
+                <Value Val="2" MapTo="2" />
+                <Value Val="3" MapTo="3" />
+                <Value Val="4" MapTo="4" />
+                <Value Val="5" MapTo="5" />
+                <Value Val="6" MapTo="6" />
+                <Value Val="7" MapTo="7" />
+                <Value Val="8" MapTo="8" />
+                <Value Val="9" MapTo="9" />
+            </SpcVal>
+        </Parm>
+        <Parm Kwd="KBDBUF" PosNbr="19" KeyParm="NO" PmtCtl="PMTRQS" RtnVal="NO" PassVal="DFT" Type="CHAR" Min="0"
+            Max="1" Prompt="Keyboard buffering" PromptMsgID="TXT6327" Len="1" Rstd="YES" Dft="*SAME" AlwUnprt="YES"
+            AlwVar="YES" Expr="YES" Full="NO" DspInput="YES" Vary="NO" PassAtr="NO" Case="MONO" CCSID="JOB"
+            IsDtaAra="NO" IsFile="NO" IsPgm="NO" Choice="*SAME, *SYSVAL, *NO...">
+            <SpcVal>
+                <Value Val="*SAME" MapTo="S" />
+                <Value Val="*SYSVAL" MapTo="X&apos;40&apos;" />
+                <Value Val="*NO" MapTo="0" />
+                <Value Val="*TYPEAHEAD" MapTo="2" />
+                <Value Val="*YES" MapTo="1" />
+            </SpcVal>
+        </Parm>
+        <Parm Kwd="MAXSTG" PosNbr="21" KeyParm="NO" PmtCtl="PMTRQS" RtnVal="NO" PassVal="DFT" Type="INT4" Min="0"
+            Max="1" Prompt="Maximum allowed storage" PromptMsgID="TXT1021" Rstd="NO" Dft="*SAME" Rel="GE" RelVal="0"
+            AlwUnprt="YES" AlwVar="YES" Expr="YES" Full="NO" DspInput="YES" Vary="NO" PassAtr="YES" Case="MONO"
+            CCSID="JOB" IsDtaAra="NO" IsFile="NO" IsPgm="NO" Choice="Kilobytes, *SAME, *NOMAX" ChoiceMsgID="TXT5706">
+            <SpcVal>
+                <Value Val="*SAME" MapTo="-1" />
+                <Value Val="*NOMAX" MapTo="2147483647" />
+            </SpcVal>
+        </Parm>
+        <Parm Kwd="PTYLMT" PosNbr="22" KeyParm="NO" PmtCtl="PMTRQS" RtnVal="NO" PassVal="DFT" Type="CHAR" Min="0"
+            Max="1" Prompt="Highest schedule priority" PromptMsgID="TXT1063" Len="1" Rstd="NO" Dft="*SAME"
+            RangeMinVal="0" RangeMaxVal="9" AlwUnprt="YES" AlwVar="YES" Expr="YES" Full="NO" DspInput="YES" Vary="NO"
+            PassAtr="NO" Case="MONO" CCSID="JOB" InlPmtLen="5" IsDtaAra="NO" IsFile="NO" IsPgm="NO" Choice="0-9">
+            <SpcVal>
+                <Value Val="*SAME" MapTo="*" />
+            </SpcVal>
+        </Parm>
+        <Parm Kwd="CURLIB" PosNbr="7" KeyParm="NO" RtnVal="NO" PassVal="DFT" Type="NAME" Min="0" Max="1"
+            Prompt="Current library" PromptMsgID="TXT4730" Len="10" Rstd="NO" Dft="*SAME" Rel="NE" RelVal="QTEMP"
+            AlwUnprt="YES" AlwVar="YES" Expr="YES" Full="NO" DspInput="YES" Vary="NO" PassAtr="NO" Case="MONO"
+            CCSID="JOB" InlPmtLen="10" IsDtaAra="NO" IsFile="NO" IsPgm="NO" Choice="Name">
+            <SpcVal>
+                <Value Val="*SAME" MapTo="*SAME" />
+                <Value Val="*CRTDFT" MapTo="X&apos;40404040404040404040&apos;" />
+            </SpcVal>
+        </Parm>
+        <Parm Kwd="INLPGM" PosNbr="8" KeyParm="NO" ListDspl="INT2" RtnVal="NO" PassVal="DFT" Type="QUAL" Min="0" Max="1"
+            Prompt="Initial program to call" PromptMsgID="TXT0530" Rstd="NO" Dft="*SAME" AlwUnprt="YES" AlwVar="YES"
+            Expr="YES" Full="NO" DspInput="YES" IsDtaAra="NO" IsFile="NO" IsPgm="YES" Choice="*SAME, *NONE">
+            <SngVal>
+                <Value Val="*SAME" MapTo="*SAME" />
+                <Value Val="*NONE" MapTo="X&apos;40&apos;" />
+            </SngVal>
+            <Qual Type="NAME" Min="1" Max="1" Len="10" Rstd="NO" AlwUnprt="YES" AlwVar="YES" Expr="YES" Full="NO"
+                DspInput="YES" Vary="NO" PassAtr="NO" InlPmtLen="10" Choice="Name"></Qual>
+            <Qual Type="NAME" Min="0" Max="1" Prompt="Library" PromptMsgID="TXT0909" Len="10" Rstd="NO" Dft="*LIBL"
+                AlwUnprt="YES" AlwVar="YES" Expr="YES" Full="NO" DspInput="YES" Vary="NO" PassAtr="NO" InlPmtLen="10"
+                Choice="Name">
+                <SpcVal>
+                    <Value Val="*LIBL" MapTo="*LIBL" />
+                    <Value Val="*CURLIB" MapTo="*CURLIB   " />
+                </SpcVal>
+            </Qual>
+        </Parm>
+        <Parm Kwd="INLMNU" PosNbr="9" KeyParm="NO" ListDspl="INT2" RtnVal="NO" PassVal="DFT" Type="QUAL" Min="0" Max="1"
+            Prompt="Initial menu" PromptMsgID="TXT4739" Rstd="NO" Dft="*SAME" AlwUnprt="YES" AlwVar="YES" Expr="YES"
+            Full="NO" DspInput="YES" IsDtaAra="NO" IsFile="NO" IsPgm="NO" Choice="*SAME, *SIGNOFF">
+            <SngVal>
+                <Value Val="*SAME" MapTo="*SAME" />
+                <Value Val="*SIGNOFF" MapTo="*SIGNOFF" />
+            </SngVal>
+            <Qual Type="NAME" Min="1" Max="1" Len="10" Rstd="NO" AlwUnprt="YES" AlwVar="YES" Expr="YES" Full="NO"
+                DspInput="YES" Vary="NO" PassAtr="NO" InlPmtLen="10" Choice="Name"></Qual>
+            <Qual Type="NAME" Min="0" Max="1" Prompt="Library" PromptMsgID="TXT0909" Len="10" Rstd="NO" Dft="*LIBL"
+                AlwUnprt="YES" AlwVar="YES" Expr="YES" Full="NO" DspInput="YES" Vary="NO" PassAtr="NO" InlPmtLen="10"
+                Choice="Name">
+                <SpcVal>
+                    <Value Val="*LIBL" MapTo="*LIBL" />
+                    <Value Val="*CURLIB" MapTo="*CURLIB   " />
+                </SpcVal>
+            </Qual>
+        </Parm>
+        <Parm Kwd="LMTCPB" PosNbr="10" KeyParm="NO" RtnVal="NO" PassVal="DFT" Type="CHAR" Min="0" Max="1"
+            Prompt="Limit capabilities" PromptMsgID="TXT5195" Len="1" Rstd="YES" Dft="*SAME" AlwUnprt="YES" AlwVar="YES"
+            Expr="YES" Full="NO" DspInput="YES" Vary="NO" PassAtr="NO" Case="MONO" CCSID="JOB" IsDtaAra="NO" IsFile="NO"
+            IsPgm="NO" Choice="*SAME, *NO, *PARTIAL, *YES">
+            <SpcVal>
+                <Value Val="*SAME" MapTo="S" />
+                <Value Val="*NO" MapTo="X&apos;40&apos;" />
+                <Value Val="*PARTIAL" MapTo="P" />
+                <Value Val="*YES" MapTo="Y" />
+            </SpcVal>
+        </Parm>
+        <Parm Kwd="JOBD" PosNbr="23" KeyParm="NO" PmtCtl="PMTRQS" ListDspl="INT2" RtnVal="NO" PassVal="DFT" Type="QUAL"
+            Min="0" Max="1" Prompt="Job description" PromptMsgID="TXT0841" Rstd="NO" Dft="*SAME" AlwUnprt="YES"
+            AlwVar="YES" Expr="YES" Full="NO" DspInput="YES" IsDtaAra="NO" IsFile="NO" IsPgm="NO" Choice="*SAME">
+            <SngVal>
+                <Value Val="*SAME" MapTo="*SAME" />
+            </SngVal>
+            <Qual Type="NAME" Min="0" Max="1" Len="10" Rstd="NO" Dft="QDFTJOBD" AlwUnprt="YES" AlwVar="YES" Expr="YES"
+                Full="NO" DspInput="YES" Vary="NO" PassAtr="NO" InlPmtLen="10" Choice="Name"></Qual>
+            <Qual Type="NAME" Min="0" Max="1" Prompt="Library" PromptMsgID="TXT0909" Len="10" Rstd="NO" Dft="*LIBL"
+                AlwUnprt="YES" AlwVar="YES" Expr="YES" Full="NO" DspInput="YES" Vary="NO" PassAtr="NO" InlPmtLen="10"
+                Choice="Name">
+                <SpcVal>
+                    <Value Val="*LIBL" MapTo="*LIBL" />
+                    <Value Val="*CURLIB" MapTo="*CURLIB   " />
+                </SpcVal>
+            </Qual>
+        </Parm>
+        <Parm Kwd="GRPPRF" PosNbr="24" KeyParm="NO" PmtCtl="PMTRQS" RtnVal="NO" PassVal="DFT" Type="NAME" Min="0"
+            Max="1" Prompt="Group profile" PromptMsgID="TXT3678" Len="10" Rstd="NO" Dft="*SAME" AlwUnprt="YES"
+            AlwVar="YES" Expr="YES" Full="NO" DspInput="YES" Vary="NO" PassAtr="NO" Case="MONO" CCSID="JOB"
+            InlPmtLen="10" IsDtaAra="NO" IsFile="NO" IsPgm="NO" Choice="Name">
+            <SpcVal>
+                <Value Val="*SAME" MapTo="*SAME" />
+                <Value Val="*NONE" MapTo="X&apos;40&apos;" />
+            </SpcVal>
+        </Parm>
+        <Parm Kwd="OWNER" PosNbr="25" KeyParm="NO" PmtCtl="PMTRQS" RtnVal="NO" PassVal="DFT" Type="CHAR" Min="0" Max="1"
+            Prompt="Owner" PromptMsgID="TXT3679" Len="1" Rstd="YES" Dft="*SAME" AlwUnprt="YES" AlwVar="YES" Expr="YES"
+            Full="NO" DspInput="YES" Vary="NO" PassAtr="NO" Case="MONO" CCSID="JOB" IsDtaAra="NO" IsFile="NO" IsPgm="NO"
+            Choice="*SAME, *USRPRF, *GRPPRF">
+            <SpcVal>
+                <Value Val="*SAME" MapTo="X&apos;98&apos;" />
+                <Value Val="*USRPRF" MapTo="X&apos;99&apos;" />
+                <Value Val="*GRPPRF" MapTo="X&apos;03&apos;" />
+            </SpcVal>
+        </Parm>
+        <Parm Kwd="GRPAUT" PosNbr="26" KeyParm="NO" PmtCtl="PMTRQS" RtnVal="NO" PassVal="DFT" Type="CHAR" Min="0"
+            Max="1" Prompt="Group authority" PromptMsgID="TXT3680" Len="1" Rstd="YES" Dft="*SAME" AlwUnprt="YES"
+            AlwVar="YES" Expr="YES" Full="NO" DspInput="YES" Vary="NO" PassAtr="NO" Case="MONO" CCSID="JOB"
+            IsDtaAra="NO" IsFile="NO" IsPgm="NO" Choice="*SAME, *NONE, *ALL...">
+            <SpcVal>
+                <Value Val="*SAME" MapTo="X&apos;98&apos;" />
+                <Value Val="*NONE" MapTo="X&apos;00&apos;" />
+                <Value Val="*ALL" MapTo="X&apos;02&apos;" />
+                <Value Val="*CHANGE" MapTo="X&apos;01&apos;" />
+                <Value Val="*USE" MapTo="X&apos;05&apos;" />
+                <Value Val="*EXCLUDE" MapTo="X&apos;06&apos;" />
+            </SpcVal>
+        </Parm>
+        <Parm Kwd="GRPAUTTYP" PosNbr="27" KeyParm="NO" PmtCtl="PMTRQS" RtnVal="NO" PassVal="DFT" Type="CHAR" Min="0"
+            Max="1" Prompt="Group authority type" PromptMsgID="TXT7279" Len="1" Rstd="YES" Dft="*SAME" AlwUnprt="YES"
+            AlwVar="YES" Expr="YES" Full="NO" DspInput="YES" Vary="NO" PassAtr="NO" Case="MONO" CCSID="JOB"
+            IsDtaAra="NO" IsFile="NO" IsPgm="NO" Choice="*PRIVATE, *PGP, *SAME">
+            <SpcVal>
+                <Value Val="*PRIVATE" MapTo="X&apos;00&apos;" />
+                <Value Val="*PGP" MapTo="X&apos;01&apos;" />
+                <Value Val="*SAME" MapTo="S" />
+            </SpcVal>
+        </Parm>
+        <Parm Kwd="SUPGRPPRF" PosNbr="28" KeyParm="NO" PmtCtl="PMTRQS" RtnVal="NO" PassVal="DFT" Type="NAME" Min="0"
+            Max="15" Prompt="Supplemental groups" PromptMsgID="TXT7280" Len="10" Rstd="NO" Dft="*SAME" AlwUnprt="YES"
+            AlwVar="YES" Expr="YES" Full="NO" DspInput="YES" Vary="NO" PassAtr="NO" Case="MONO" CCSID="JOB"
+            InlPmtLen="10" IsDtaAra="NO" IsFile="NO" IsPgm="NO" Choice="Name">
+            <SngVal>
+                <Value Val="*SAME" MapTo="*SAME" />
+                <Value Val="*NONE" MapTo="X&apos;40&apos;" />
+            </SngVal>
+        </Parm>
+        <Parm Kwd="ACGCDE" PosNbr="29" KeyParm="NO" PmtCtl="PMTRQS" RtnVal="NO" PassVal="DFT" Type="CHAR" Min="0"
+            Max="1" Prompt="Accounting code" PromptMsgID="TXT3707" Len="15" Rstd="NO" Dft="*SAME" AlwUnprt="NO"
+            AlwVar="YES" Expr="YES" Full="NO" DspInput="YES" Vary="NO" PassAtr="YES" Case="MONO" CCSID="JOB"
+            InlPmtLen="15" IsDtaAra="NO" IsFile="NO" IsPgm="NO" Choice="Character value">
+            <SpcVal>
+                <Value Val="*SAME" MapTo="*SAME" />
+                <Value Val="*BLANK" MapTo="X&apos;404040404040404040404040404040&apos;" />
+            </SpcVal>
+        </Parm>
+        <Parm Kwd="DOCPWD" PosNbr="30" KeyParm="NO" PmtCtl="PMTRQS" RtnVal="NO" PassVal="DFT" Type="NAME" Min="0"
+            Max="1" Prompt="Document password" PromptMsgID="TXT4044" Len="8" Rstd="NO" Dft="*SAME" AlwUnprt="YES"
+            AlwVar="YES" Expr="YES" Full="NO" DspInput="PROMPT" Vary="INT2" PassAtr="NO" Case="MONO" CCSID="JOB"
+            InlPmtLen="8" IsDtaAra="NO" IsFile="NO" IsPgm="NO" Choice="Name">
+            <SpcVal>
+                <Value Val="*SAME" MapTo="*SAME" />
+                <Value Val="*NONE" MapTo="*NONE" />
+            </SpcVal>
+        </Parm>
+        <Parm Kwd="MSGQ" PosNbr="31" KeyParm="NO" PmtCtl="PMTRQS" ListDspl="INT2" RtnVal="NO" PassVal="DFT" Type="QUAL"
+            Min="0" Max="1" Prompt="Message queue" PromptMsgID="TXT0604" Rstd="NO" Dft="*SAME" AlwUnprt="YES"
+            AlwVar="YES" Expr="YES" Full="NO" DspInput="YES" IsDtaAra="NO" IsFile="NO" IsPgm="NO"
+            Choice="*SAME, *USRPRF">
+            <SngVal>
+                <Value Val="*SAME" MapTo="*SAME" />
+                <Value Val="*USRPRF" MapTo="*USRPRF" />
+            </SngVal>
+            <Qual Type="NAME" Min="1" Max="1" Len="10" Rstd="NO" AlwUnprt="YES" AlwVar="YES" Expr="YES" Full="NO"
+                DspInput="YES" Vary="NO" PassAtr="NO" InlPmtLen="10" Choice="Name"></Qual>
+            <Qual Type="NAME" Min="0" Max="1" Prompt="Library" PromptMsgID="TXT0909" Len="10" Rstd="NO" Dft="*LIBL"
+                AlwUnprt="YES" AlwVar="YES" Expr="YES" Full="NO" DspInput="YES" Vary="NO" PassAtr="NO" InlPmtLen="10"
+                Choice="Name">
+                <SpcVal>
+                    <Value Val="*LIBL" MapTo="*LIBL" />
+                    <Value Val="*CURLIB" MapTo="*CURLIB   " />
+                </SpcVal>
+            </Qual>
+        </Parm>
+        <Parm Kwd="DLVRY" PosNbr="32" KeyParm="NO" PmtCtl="PMTRQS" RtnVal="NO" PassVal="DFT" Type="CHAR" Min="0" Max="1"
+            Prompt="Delivery" PromptMsgID="TXT0467" Len="1" Rstd="YES" Dft="*SAME" AlwUnprt="YES" AlwVar="YES"
+            Expr="YES" Full="NO" DspInput="YES" Vary="NO" PassAtr="NO" Case="MONO" CCSID="JOB" IsDtaAra="NO" IsFile="NO"
+            IsPgm="NO" Choice="*SAME, *NOTIFY, *BREAK...">
+            <SpcVal>
+                <Value Val="*SAME" MapTo="S" />
+                <Value Val="*NOTIFY" MapTo="X&apos;40&apos;" />
+                <Value Val="*BREAK" MapTo="B" />
+                <Value Val="*HOLD" MapTo="H" />
+                <Value Val="*DFT" MapTo="D" />
+            </SpcVal>
+        </Parm>
+        <Parm Kwd="SEV" PosNbr="33" KeyParm="NO" PmtCtl="PMTRQS" RtnVal="NO" PassVal="DFT" Type="INT2" Min="0" Max="1"
+            Prompt="Severity code filter" PromptMsgID="TXT1090" Rstd="NO" Dft="*SAME" RangeMinVal="0" RangeMaxVal="99"
+            AlwUnprt="YES" AlwVar="YES" Expr="YES" Full="NO" DspInput="YES" Vary="NO" PassAtr="NO" Case="MONO"
+            CCSID="JOB" IsDtaAra="NO" IsFile="NO" IsPgm="NO" Choice="0-99">
+            <SpcVal>
+                <Value Val="*SAME" MapTo="-1" />
+            </SpcVal>
+        </Parm>
+        <Parm Kwd="PRTDEV" PosNbr="34" KeyParm="NO" PmtCtl="PMTRQS" RtnVal="NO" PassVal="DFT" Type="NAME" Min="0"
+            Max="1" Prompt="Print device" PromptMsgID="TXT3614" Len="10" Rstd="NO" Dft="*SAME" AlwUnprt="YES"
+            AlwVar="YES" Expr="YES" Full="NO" DspInput="YES" Vary="NO" PassAtr="NO" Case="MONO" CCSID="JOB"
+            InlPmtLen="10" IsDtaAra="NO" IsFile="NO" IsPgm="NO" Choice="Name">
+            <SpcVal>
+                <Value Val="*SAME" MapTo="*SAME" />
+                <Value Val="*WRKSTN" MapTo="X&apos;40404040404040404040&apos;" />
+                <Value Val="*SYSVAL" MapTo="*SYSVAL" />
+            </SpcVal>
+        </Parm>
+        <Parm Kwd="OUTQ" PosNbr="35" KeyParm="NO" PmtCtl="PMTRQS" ListDspl="INT2" RtnVal="NO" PassVal="DFT" Type="QUAL"
+            Min="0" Max="1" Prompt="Output queue" PromptMsgID="TXT0716" Rstd="NO" Dft="*SAME" AlwUnprt="YES"
+            AlwVar="YES" Expr="YES" Full="NO" DspInput="YES" IsDtaAra="NO" IsFile="NO" IsPgm="NO"
+            Choice="*SAME, *WRKSTN, *DEV">
+            <SngVal>
+                <Value Val="*SAME" MapTo="*SAME" />
+                <Value Val="*WRKSTN" MapTo="X&apos;40404040404040404040&apos;" />
+                <Value Val="*DEV" MapTo="*DEV" />
+            </SngVal>
+            <Qual Type="NAME" Min="1" Max="1" Len="10" Rstd="NO" AlwUnprt="YES" AlwVar="YES" Expr="YES" Full="NO"
+                DspInput="YES" Vary="NO" PassAtr="NO" InlPmtLen="10" Choice="Name"></Qual>
+            <Qual Type="NAME" Min="0" Max="1" Prompt="Library" PromptMsgID="TXT0909" Len="10" Rstd="NO" Dft="*LIBL"
+                AlwUnprt="YES" AlwVar="YES" Expr="YES" Full="NO" DspInput="YES" Vary="NO" PassAtr="NO" InlPmtLen="10"
+                Choice="Name">
+                <SpcVal>
+                    <Value Val="*LIBL" MapTo="*LIBL" />
+                    <Value Val="*CURLIB" MapTo="*CURLIB   " />
+                </SpcVal>
+            </Qual>
+        </Parm>
+        <Parm Kwd="ATNPGM" PosNbr="36" KeyParm="NO" PmtCtl="PMTRQS" ListDspl="INT2" RtnVal="NO" PassVal="DFT"
+            Type="QUAL" Min="0" Max="1" Prompt="Attention program" PromptMsgID="TXT5061" Rstd="NO" Dft="*SAME"
+            AlwUnprt="YES" AlwVar="YES" Expr="YES" Full="NO" DspInput="YES" IsDtaAra="NO" IsFile="NO" IsPgm="NO"
+            Choice="*SAME, *SYSVAL, *NONE...">
+            <SngVal>
+                <Value Val="*SAME" MapTo="*SAME" />
+                <Value Val="*SYSVAL" MapTo="*SYSVAL" />
+                <Value Val="*NONE" MapTo="X&apos;40404040404040404040&apos;" />
+                <Value Val="*ASSIST" MapTo="*ASSIST" />
+            </SngVal>
+            <Qual Type="NAME" Min="1" Max="1" Len="10" Rstd="NO" AlwUnprt="YES" AlwVar="YES" Expr="YES" Full="NO"
+                DspInput="YES" Vary="NO" PassAtr="NO" InlPmtLen="10" Choice="Name"></Qual>
+            <Qual Type="NAME" Min="0" Max="1" Prompt="Library" PromptMsgID="TXT0909" Len="10" Rstd="NO" Dft="*LIBL"
+                AlwUnprt="YES" AlwVar="YES" Expr="YES" Full="NO" DspInput="YES" Vary="NO" PassAtr="NO" InlPmtLen="10"
+                Choice="Name">
+                <SpcVal>
+                    <Value Val="*LIBL" MapTo="*LIBL" />
+                    <Value Val="*CURLIB" MapTo="*CURLIB   " />
+                </SpcVal>
+            </Qual>
+        </Parm>
+        <Parm Kwd="SRTSEQ" PosNbr="37" KeyParm="NO" PmtCtl="PMTRQS" ListDspl="INT2" RtnVal="NO" PassVal="DFT"
+            Type="QUAL" Min="0" Max="1" Prompt="Sort sequence" PromptMsgID="TXT5882" Rstd="NO" Dft="*SAME"
+            AlwUnprt="YES" AlwVar="YES" Expr="YES" Full="NO" DspInput="YES" IsDtaAra="NO" IsFile="NO" IsPgm="NO"
+            Choice="*SAME, *SYSVAL, *HEX...">
+            <SngVal>
+                <Value Val="*SAME" MapTo="*SAME" />
+                <Value Val="*SYSVAL" MapTo="*SYSVAL" />
+                <Value Val="*HEX" MapTo="*HEX" />
+                <Value Val="*LANGIDSHR" MapTo="*LANGIDSHR" />
+                <Value Val="*LANGIDUNQ" MapTo="*LANGIDUNQ" />
+            </SngVal>
+            <Qual Type="NAME" Min="1" Max="1" Len="10" Rstd="NO" AlwUnprt="YES" AlwVar="YES" Expr="YES" Full="NO"
+                DspInput="YES" Vary="NO" PassAtr="NO" InlPmtLen="10" Choice="Name"></Qual>
+            <Qual Type="NAME" Min="0" Max="1" Prompt="Library" PromptMsgID="TXT0909" Len="10" Rstd="NO" Dft="*LIBL"
+                AlwUnprt="YES" AlwVar="YES" Expr="YES" Full="NO" DspInput="YES" Vary="NO" PassAtr="NO" InlPmtLen="10"
+                Choice="Name">
+                <SpcVal>
+                    <Value Val="*LIBL" MapTo="*LIBL" />
+                    <Value Val="*CURLIB" MapTo="*CURLIB   " />
+                </SpcVal>
+            </Qual>
+        </Parm>
+        <Parm Kwd="LANGID" PosNbr="38" KeyParm="NO" PmtCtl="PMTRQS" RtnVal="NO" PassVal="DFT" Type="CHAR" Min="0"
+            Max="1" Prompt="Language ID" PromptMsgID="TXT5777" Len="3" Rstd="NO" Dft="*SAME" AlwUnprt="YES" AlwVar="YES"
+            Expr="YES" Full="NO" DspInput="YES" Vary="NO" PassAtr="NO" Case="MONO" CCSID="JOB" InlPmtLen="7"
+            IsDtaAra="NO" IsFile="NO" IsPgm="NO" Choice="__PGM" ChoicePgm="QLGPMCHC" ChoiceLib="QSYS">
+            <SpcVal>
+                <Value Val="*SAME" MapTo="S  " />
+                <Value Val="*SYSVAL" MapTo="X&apos;404040&apos;" />
+            </SpcVal>
+            <ChoicePgmText Text="*SAME, *SYSVAL..."></ChoicePgmText>
+            <ChoicePgmValues>
+                <Value Val="*SAME" />
+                <Value Val="*SYSVAL" />
+                <Value Val="AFR Afrikaans" />
+                <Value Val="SQI Albanian" />
+                <Value Val="ARA Arabic" />
+                <Value Val="NLB Belgian Dutch" />
+                <Value Val="FRB Belgian French" />
+                <Value Val="ENB Belgium English" />
+                <Value Val="PTB Brazilian Portuguese" />
+                <Value Val="BGR Bulgarian" />
+                <Value Val="BEL Byelorussian" />
+                <Value Val="FRC Canadian French" />
+                <Value Val="CAT Catalan" />
+                <Value Val="HRV Croatian" />
+                <Value Val="CSY Czech" />
+                <Value Val="DAN Danish" />
+                <Value Val="NLD Dutch" />
+                <Value Val="ENA English Australian" />
+                <Value Val="ENP English Upper Case" />
+                <Value Val="EST Estonian" />
+                <Value Val="FAR Farsi" />
+                <Value Val="FIN Finnish" />
+                <Value Val="FRA French" />
+                <Value Val="DEU German" />
+                <Value Val="ELL Greek" />
+                <Value Val="HEB Hebrew" />
+                <Value Val="HUN Hungarian" />
+                <Value Val="ISL Icelandic" />
+                <Value Val="GAE Irish Gaelic" />
+                <Value Val="ITA Italian" />
+                <Value Val="JPN Japanese Katakana" />
+                <Value Val="KOR Korean" />
+                <Value Val="LAO Lao" />
+                <Value Val="LVA Latvian" />
+                <Value Val="LTU Lithuanian" />
+                <Value Val="MKD Macedonian" />
+                <Value Val="NOR Norwegian - Bokmal" />
+                <Value Val="NON Norwegian - Nynorsk" />
+                <Value Val="PLK Polish" />
+                <Value Val="PTG Portuguese" />
+                <Value Val="RMS Rhaeto-Romanic" />
+                <Value Val="ROM Romanian" />
+                <Value Val="RUS Russian" />
+                <Value Val="SRB Serbian" />
+                <Value Val="SRB Serbian Cyrillic" />
+                <Value Val="SRL Serbian Latin" />
+                <Value Val="CHS Simplified Chinese" />
+                <Value Val="SKY Slovakian" />
+                <Value Val="SLO Slovenian" />
+                <Value Val="ESP Spanish" />
+                <Value Val="SVE Swedish" />
+                <Value Val="FRS Swiss French" />
+                <Value Val="DES Swiss German" />
+                <Value Val="ITS Swiss Italian" />
+                <Value Val="THA Thai" />
+                <Value Val="CHT Traditional Chinese" />
+                <Value Val="TRK Turkish" />
+                <Value Val="UKR Ukrainian" />
+                <Value Val="URD Urdu" />
+                <Value Val="ENG UK English" />
+                <Value Val="ENU US English" />
+                <Value Val="VIE Vietnamese" />
+            </ChoicePgmValues>
+        </Parm>
+        <Parm Kwd="CNTRYID" PosNbr="39" KeyParm="NO" PmtCtl="PMTRQS" RtnVal="NO" PassVal="DFT" Type="CHAR" Min="0"
+            Max="1" Prompt="Country or region ID" PromptMsgID="TXT5051" Len="2" Rstd="NO" Dft="*SAME" AlwUnprt="YES"
+            AlwVar="YES" Expr="YES" Full="NO" DspInput="YES" Vary="NO" PassAtr="NO" Case="MONO" CCSID="JOB"
+            InlPmtLen="7" IsDtaAra="NO" IsFile="NO" IsPgm="NO" Choice="__PGM" ChoicePgm="QLGPMCHC" ChoiceLib="QSYS">
+            <SpcVal>
+                <Value Val="*SAME" MapTo="S " />
+                <Value Val="*SYSVAL" MapTo="X&apos;4040&apos;" />
+            </SpcVal>
+            <ChoicePgmText Text="*SAME, *SYSVAL..."></ChoicePgmText>
+            <ChoicePgmValues>
+                <Value Val="*SAME" />
+                <Value Val="*SYSVAL" />
+                <Value Val="AF Afghanistan" />
+                <Value Val="AX Aland Islands" />
+                <Value Val="AL Albania" />
+                <Value Val="DZ Algeria" />
+                <Value Val="AS American Samoa" />
+                <Value Val="AD Andorra" />
+                <Value Val="AO Angola" />
+                <Value Val="AI Anguilla" />
+                <Value Val="AQ Antarctica" />
+                <Value Val="AG Antigua and Barbuda" />
+                <Value Val="AR Argentina" />
+                <Value Val="AM Armenia" />
+                <Value Val="AW Aruba" />
+                <Value Val="AU Australia" />
+                <Value Val="AT Austria" />
+                <Value Val="AZ Azerbaijan" />
+                <Value Val="BS Bahamas" />
+                <Value Val="BH Bahrain" />
+                <Value Val="BD Bangladesh" />
+                <Value Val="BB Barbados" />
+                <Value Val="BY Belarus" />
+                <Value Val="BE Belgium" />
+                <Value Val="BZ Belize" />
+                <Value Val="BJ Benin" />
+                <Value Val="BM Bermuda" />
+                <Value Val="BT Bhutan" />
+                <Value Val="BO Bolivia" />
+                <Value Val="BA Bosnia and Herzegovina" />
+                <Value Val="BA Bosnia/Herzegovina" />
+                <Value Val="BW Botswana" />
+                <Value Val="BV Bouvet Island" />
+                <Value Val="BR Brazil" />
+                <Value Val="IO British Indian Ocean Territor" />
+                <Value Val="BN Brunei Darussalam" />
+                <Value Val="BG Bulgaria" />
+                <Value Val="BF Burkina Faso" />
+                <Value Val="BI Burundi" />
+                <Value Val="KH Cambodia" />
+                <Value Val="CM Cameroon, United Republic of" />
+                <Value Val="CA Canada" />
+                <Value Val="CV Cape Verde" />
+                <Value Val="KY Cayman Islands" />
+                <Value Val="CF Central African Republic" />
+                <Value Val="TD Chad" />
+                <Value Val="CL Chile" />
+                <Value Val="CN China" />
+                <Value Val="HK China (Hong Kong S.A.R.)" />
+                <Value Val="MO China (Macau S.A.R.)" />
+                <Value Val="CX Christmas Island" />
+                <Value Val="CC Cocos (Keeling) Islands" />
+                <Value Val="CO Colombia" />
+                <Value Val="KM Comoros" />
+                <Value Val="CG Congo" />
+                <Value Val="CD Congo, The Democratic Republi" />
+                <Value Val="CK Cook Islands" />
+                <Value Val="CR Costa Rica" />
+                <Value Val="HR Croatia" />
+                <Value Val="CU Cuba" />
+                <Value Val="CY Cyprus" />
+                <Value Val="CZ Czech Republic" />
+                <Value Val="DK Denmark" />
+                <Value Val="DJ Djibouti" />
+                <Value Val="DM Dominica" />
+                <Value Val="DO Dominican Republic" />
+                <Value Val="EC Ecuador" />
+                <Value Val="EG Egypt" />
+                <Value Val="SV El Salvador" />
+                <Value Val="GQ Equatorial Guinea" />
+                <Value Val="ER Eritrea" />
+                <Value Val="EE Estonia" />
+                <Value Val="ET Ethiopia" />
+                <Value Val="FK Falkland Islands (Malvinas)" />
+                <Value Val="FO Faroe Islands" />
+                <Value Val="FJ Fiji" />
+                <Value Val="FI Finland" />
+                <Value Val="FR France" />
+                <Value Val="GF French Guiana" />
+                <Value Val="PF French Polynesia" />
+                <Value Val="TF French Southern Territories" />
+                <Value Val="GA Gabon" />
+                <Value Val="GM Gambia" />
+                <Value Val="GE Georgia" />
+                <Value Val="DE Germany" />
+                <Value Val="GH Ghana" />
+                <Value Val="GI Gibraltar" />
+                <Value Val="GR Greece" />
+                <Value Val="GL Greenland" />
+                <Value Val="GD Grenada" />
+                <Value Val="GP Guadeloupe" />
+                <Value Val="GU Guam" />
+                <Value Val="GT Guatemala" />
+                <Value Val="GG Guernsey" />
+                <Value Val="GN Guinea" />
+                <Value Val="GW Guinea-Bissau" />
+                <Value Val="GY Guyana" />
+                <Value Val="HT Haiti" />
+                <Value Val="HM Heard and MacDonald Islands" />
+                <Value Val="VA Holy See (Vatican City State)" />
+                <Value Val="HN Honduras" />
+                <Value Val="HU Hungary" />
+                <Value Val="IS Iceland" />
+                <Value Val="IN India" />
+                <Value Val="ID Indonesia" />
+                <Value Val="IR Iran (Islamic Republic of)" />
+                <Value Val="IQ Iraq" />
+                <Value Val="IE Ireland" />
+                <Value Val="IM Isle of Man" />
+                <Value Val="IL Israel" />
+                <Value Val="IT Italy" />
+                <Value Val="CI Ivory Coast" />
+                <Value Val="JM Jamaica" />
+                <Value Val="JP Japan" />
+                <Value Val="JE Jersey" />
+                <Value Val="JO Jordan" />
+                <Value Val="KZ Kazakhstan" />
+                <Value Val="KE Kenya" />
+                <Value Val="KI Kiribati" />
+                <Value Val="KP Korea, Democratic People s Re" />
+                <Value Val="KR Korea, Republic of" />
+                <Value Val="KW Kuwait" />
+                <Value Val="KG Kyrgystan" />
+                <Value Val="LA Lao People s Democratic Repub" />
+                <Value Val="LV Latvia" />
+                <Value Val="LB Lebanon" />
+                <Value Val="LS Lesotho" />
+                <Value Val="LR Liberia" />
+                <Value Val="LY Libyan Arab Jamahiriya" />
+                <Value Val="LI Liechtenstein" />
+                <Value Val="LT Lithuania" />
+                <Value Val="LU Luxembourg" />
+                <Value Val="MK Macedonia" />
+                <Value Val="MG Madagascar" />
+                <Value Val="MW Malawi" />
+                <Value Val="MY Malaysia" />
+                <Value Val="MV Maldives" />
+                <Value Val="ML Mali" />
+                <Value Val="MT Malta" />
+                <Value Val="MH Marshall Islands" />
+                <Value Val="MQ Martinique" />
+                <Value Val="MR Mauritania" />
+                <Value Val="MU Mauritius" />
+                <Value Val="YT Mayotte" />
+                <Value Val="MX Mexico" />
+                <Value Val="FM Micronesia" />
+                <Value Val="MD Moldava, Republic of" />
+                <Value Val="MC Monaco" />
+                <Value Val="MN Mongolia" />
+                <Value Val="ME Montenegro" />
+                <Value Val="MS Montserrat" />
+                <Value Val="MA Morocco" />
+                <Value Val="MZ Mozambique" />
+                <Value Val="MM Myanmar" />
+                <Value Val="NA Namibia" />
+                <Value Val="NR Nauru" />
+                <Value Val="NP Nepal" />
+                <Value Val="NL Netherlands" />
+                <Value Val="AN Netherlands Antilles" />
+                <Value Val="NC New Caledonia" />
+                <Value Val="NZ New Zealand" />
+                <Value Val="NI Nicaragua" />
+                <Value Val="NE Niger" />
+                <Value Val="NG Nigeria" />
+                <Value Val="NU Niue" />
+                <Value Val="NF Norfolk Island" />
+                <Value Val="MP Northern Mariana Islands" />
+                <Value Val="NO Norway" />
+                <Value Val="OM Oman" />
+                <Value Val="PK Pakistan" />
+                <Value Val="PW Palau" />
+                <Value Val="PS Palestenian Territories" />
+                <Value Val="PA Panama" />
+                <Value Val="PG Papua New Guinea" />
+                <Value Val="PY Paraguay" />
+                <Value Val="PE Peru" />
+                <Value Val="PH Philippines" />
+                <Value Val="PN Pitcairn" />
+                <Value Val="PL Poland" />
+                <Value Val="PT Portugal" />
+                <Value Val="PR Puerto Rico" />
+                <Value Val="QA Qatar" />
+                <Value Val="RE Reunion" />
+                <Value Val="RO Romania" />
+                <Value Val="RU Russian Federation" />
+                <Value Val="RW Rwanda" />
+                <Value Val="SH Saint Helena" />
+                <Value Val="KN Saint Kitts and Nevis" />
+                <Value Val="LC Saint Lucia" />
+                <Value Val="PM Saint Pierre and Miquelon" />
+                <Value Val="VC Saint Vincent and the Grenadi" />
+                <Value Val="WS Samoa" />
+                <Value Val="SM San Marino" />
+                <Value Val="ST Sao Tome and Principe" />
+                <Value Val="SA Saudi Arabia" />
+                <Value Val="SN Senegal" />
+                <Value Val="RS Serbia" />
+                <Value Val="SC Seychelles" />
+                <Value Val="SL Sierra Leone" />
+                <Value Val="SG Singapore" />
+                <Value Val="SK Slovakia" />
+                <Value Val="SI Slovenia" />
+                <Value Val="SB Solomon Islands" />
+                <Value Val="SO Somalia" />
+                <Value Val="ZA South Africa" />
+                <Value Val="GS South Georgia and Sandwich Is" />
+                <Value Val="ES Spain" />
+                <Value Val="LK Sri Lanka" />
+                <Value Val="SD Sudan" />
+                <Value Val="SR Suriname" />
+                <Value Val="SJ Svalbard and Jan Mayen Island" />
+                <Value Val="SZ Swaziland" />
+                <Value Val="SE Sweden" />
+                <Value Val="CH Switzerland" />
+                <Value Val="SY Syrian Arab Republic" />
+                <Value Val="TW Taiwan" />
+                <Value Val="TJ Tajikistan" />
+                <Value Val="TZ Tanzania, United Republic of" />
+                <Value Val="TH Thailand" />
+                <Value Val="TL Timor-Leste" />
+                <Value Val="TG Togo" />
+                <Value Val="TK Tokelau" />
+                <Value Val="TO Tonga" />
+                <Value Val="TT Trinidad and Tobago" />
+                <Value Val="TN Tunisia" />
+                <Value Val="TR Turkey" />
+                <Value Val="TM Turkmenistan" />
+                <Value Val="TC Turks and Caicos Islands" />
+                <Value Val="TV Tuvalu" />
+                <Value Val="UG Uganda" />
+                <Value Val="UA Ukraine" />
+                <Value Val="AE United Arab Emirates" />
+                <Value Val="GB United Kingdom" />
+                <Value Val="US United States of America" />
+                <Value Val="UM United States Minor Outlying" />
+                <Value Val="UY Uruguay" />
+                <Value Val="UZ Uzbekistan" />
+                <Value Val="VU Vanuatu" />
+                <Value Val="VE Venezuela" />
+                <Value Val="VN Vietnam" />
+                <Value Val="VG Virgin Islands (British)" />
+                <Value Val="VI Virgin Islands (U.S.)" />
+                <Value Val="WF Wallis and Futuna Islands" />
+                <Value Val="EH Western Sahara" />
+                <Value Val="YE Yemen, Republic of" />
+                <Value Val="ZM Zambia" />
+                <Value Val="ZW Zimbabwe" />
+            </ChoicePgmValues>
+        </Parm>
+        <Parm Kwd="CCSID" PosNbr="40" KeyParm="NO" PmtCtl="PMTRQS" RtnVal="NO" PassVal="DFT" Type="INT4" Min="0" Max="1"
+            Prompt="Coded character set ID" PromptMsgID="TXT5052" Rstd="NO" Dft="*SAME" Rel="GE" RelVal="0"
+            AlwUnprt="YES" AlwVar="YES" Expr="YES" Full="NO" DspInput="YES" Vary="NO" PassAtr="NO" Case="MONO"
+            CCSID="JOB" IsDtaAra="NO" IsFile="NO" IsPgm="NO" Choice="__PGM" ChoicePgm="QTBCCLST" ChoiceLib="QSYS">
+            <SpcVal>
+                <Value Val="*SAME" MapTo="-1" />
+                <Value Val="*SYSVAL" MapTo="-2" />
+                <Value Val="*HEX" MapTo="65535" />
+            </SpcVal>
+            <ChoicePgmText Text="*SAME, *SYSVAL, *HEX..."></ChoicePgmText>
+            <ChoicePgmValues>
+                <Value Val="*SAME" />
+                <Value Val="*SYSVAL" />
+                <Value Val="*HEX" />
+                <Value Val="37" />
+                <Value Val="256" />
+                <Value Val="273" />
+                <Value Val="277" />
+                <Value Val="278" />
+                <Value Val="280" />
+                <Value Val="284" />
+                <Value Val="285" />
+                <Value Val="290" />
+                <Value Val="297" />
+                <Value Val="420" />
+                <Value Val="423" />
+                <Value Val="424" />
+                <Value Val="425" />
+                <Value Val="500" />
+                <Value Val="833" />
+                <Value Val="836" />
+                <Value Val="838" />
+                <Value Val="870" />
+                <Value Val="871" />
+                <Value Val="875" />
+                <Value Val="880" />
+                <Value Val="905" />
+                <Value Val="918" />
+                <Value Val="924" />
+                <Value Val="930" />
+                <Value Val="933" />
+                <Value Val="935" />
+                <Value Val="937" />
+                <Value Val="939" />
+                <Value Val="1025" />
+                <Value Val="1026" />
+                <Value Val="1027" />
+                <Value Val="1047" />
+                <Value Val="1097" />
+                <Value Val="1112" />
+                <Value Val="1122" />
+                <Value Val="1123" />
+                <Value Val="1130" />
+                <Value Val="1132" />
+                <Value Val="1137" />
+                <Value Val="1140" />
+                <Value Val="1141" />
+                <Value Val="1142" />
+                <Value Val="1143" />
+                <Value Val="1144" />
+                <Value Val="1145" />
+                <Value Val="1146" />
+                <Value Val="1147" />
+                <Value Val="1148" />
+                <Value Val="1149" />
+                <Value Val="1153" />
+                <Value Val="1154" />
+                <Value Val="1155" />
+                <Value Val="1156" />
+                <Value Val="1157" />
+                <Value Val="1158" />
+                <Value Val="1160" />
+                <Value Val="1164" />
+                <Value Val="1166" />
+                <Value Val="1175" />
+                <Value Val="1364" />
+                <Value Val="1371" />
+                <Value Val="1377" />
+                <Value Val="1388" />
+                <Value Val="1399" />
+                <Value Val="4971" />
+                <Value Val="5026" />
+                <Value Val="5035" />
+                <Value Val="5123" />
+                <Value Val="5233" />
+                <Value Val="8612" />
+                <Value Val="9030" />
+                <Value Val="12708" />
+                <Value Val="13121" />
+                <Value Val="13124" />
+                <Value Val="28709" />
+                <Value Val="57777" />
+                <Value Val="61175" />
+                <Value Val="62211" />
+                <Value Val="62224" />
+                <Value Val="62235" />
+                <Value Val="62245" />
+                <Value Val="62251" />
+                <Value Val="65535" />
+            </ChoicePgmValues>
+        </Parm>
+        <Parm Kwd="CHRIDCTL" PosNbr="41" KeyParm="NO" PmtCtl="PMTRQS" RtnVal="NO" PassVal="DFT" Type="CHAR" Min="0"
+            Max="1" Prompt="Character identifier control" PromptMsgID="TXTC532" Len="10" Rstd="YES" Dft="*SAME"
+            AlwUnprt="YES" AlwVar="YES" Expr="YES" Full="NO" DspInput="YES" Vary="NO" PassAtr="NO" Case="MONO"
+            CCSID="JOB" IsDtaAra="NO" IsFile="NO" IsPgm="NO" Choice="*SAME, *SYSVAL, *DEVD...">
+            <SpcVal>
+                <Value Val="*SAME" MapTo="S" />
+                <Value Val="*SYSVAL" MapTo="X&apos;40&apos;" />
+                <Value Val="*DEVD" MapTo="D" />
+                <Value Val="*JOBCCSID" MapTo="J" />
+            </SpcVal>
+        </Parm>
+        <Parm Kwd="SETJOBATR" PosNbr="42" KeyParm="NO" PmtCtl="PMTRQS" RtnVal="NO" PassVal="DFT" Type="CHAR" Min="0"
+            Max="6" Prompt="Locale job attributes" PromptMsgID="TXTA033" Len="2" Rstd="YES" Dft="*SAME" AlwUnprt="YES"
+            AlwVar="YES" Expr="YES" Full="NO" DspInput="YES" Vary="NO" PassAtr="NO" Case="MONO" CCSID="JOB"
+            IsDtaAra="NO" IsFile="NO" IsPgm="NO" Choice="*SAME, *SYSVAL, *NONE...">
+            <SngVal>
+                <Value Val="*SAME" MapTo="* " />
+                <Value Val="*SYSVAL" MapTo="X&apos;8000&apos;" />
+                <Value Val="*NONE" MapTo="X&apos;0000&apos;" />
+            </SngVal>
+            <SpcVal>
+                <Value Val="*CCSID" MapTo="X&apos;4000&apos;" />
+                <Value Val="*DATFMT" MapTo="X&apos;2000&apos;" />
+                <Value Val="*DATSEP" MapTo="X&apos;1000&apos;" />
+                <Value Val="*DECFMT" MapTo="X&apos;0200&apos;" />
+                <Value Val="*SRTSEQ" MapTo="X&apos;0800&apos;" />
+                <Value Val="*TIMSEP" MapTo="X&apos;0400&apos;" />
+            </SpcVal>
+        </Parm>
+        <Parm Kwd="LOCALE" PosNbr="43" KeyParm="NO" PmtCtl="PMTRQS" RtnVal="NO" PassVal="DFT" Type="PNAME" Min="0"
+            Max="1" Prompt="Locale" PromptMsgID="TXTA032" Len="2048" Rstd="NO" Dft="*SAME" AlwUnprt="YES" AlwVar="YES"
+            Expr="YES" Full="NO" DspInput="YES" Vary="INT4" PassAtr="NO" Case="MIXED" CCSID="UTF16" InlPmtLen="2048"
+            IsDtaAra="NO" IsFile="NO" IsPgm="NO" Choice="Path name">
+            <SpcVal>
+                <Value Val="*SAME" MapTo="*SAME" />
+                <Value Val="*SYSVAL" MapTo="*SYSVAL   " />
+                <Value Val="*NONE" MapTo="*NONE     " />
+                <Value Val="*C" MapTo="*C        " />
+                <Value Val="*POSIX" MapTo="*POSIX    " />
+            </SpcVal>
+        </Parm>
+        <Parm Kwd="USROPT" PosNbr="44" KeyParm="NO" PmtCtl="PMTRQS" RtnVal="NO" PassVal="DFT" Type="CHAR" Min="0"
+            Max="7" Prompt="User options" PromptMsgID="TXT5063" Len="10" Rstd="YES" Dft="*SAME" AlwUnprt="YES"
+            AlwVar="YES" Expr="YES" Full="NO" DspInput="YES" Vary="NO" PassAtr="NO" Case="MONO" CCSID="JOB"
+            IsDtaAra="NO" IsFile="NO" IsPgm="NO" Choice="*SAME, *NONE, *CLKWD...">
+            <SngVal>
+                <Value Val="*SAME" MapTo="*SAME" />
+                <Value Val="*NONE" MapTo="*NONE" />
+            </SngVal>
+            <SpcVal>
+                <Value Val="*CLKWD" MapTo="*CLKWD" />
+                <Value Val="*EXPERT" MapTo="*EXPERT" />
+                <Value Val="*ROLLKEY" MapTo="*ROLLKEY" />
+                <Value Val="*NOSTSMSG" MapTo="*NOSTSMSG" />
+                <Value Val="*STSMSG" MapTo="*STSMSG" />
+                <Value Val="*HLPFULL" MapTo="*HLPFULL" />
+                <Value Val="*PRTMSG" MapTo="*PRTMSG" />
+            </SpcVal>
+        </Parm>
+        <Parm Kwd="UID" PosNbr="45" KeyParm="NO" PmtCtl="PMTRQS" RtnVal="NO" PassVal="DFT" Type="DEC" Min="0" Max="1"
+            Prompt="User ID number" PromptMsgID="TXT7281" Len="10.0" Rstd="NO" Dft="*SAME" RangeMinVal="1"
+            RangeMaxVal="4294967294" AlwUnprt="YES" AlwVar="YES" Expr="YES" Full="NO" DspInput="YES" Vary="NO"
+            PassAtr="NO" Case="MONO" CCSID="JOB" IsDtaAra="NO" IsFile="NO" IsPgm="NO" Choice="1-4294967294">
+            <SpcVal>
+                <Value Val="*SAME" MapTo="4294967297" />
+            </SpcVal>
+        </Parm>
+        <Parm Kwd="GID" PosNbr="46" KeyParm="NO" PmtCtl="PMTRQS" RtnVal="NO" PassVal="DFT" Type="DEC" Min="0" Max="1"
+            Prompt="Group ID number" PromptMsgID="TXT7282" Len="10.0" Rstd="NO" Dft="*SAME" RangeMinVal="1"
+            RangeMaxVal="4294967294" AlwUnprt="YES" AlwVar="YES" Expr="YES" Full="NO" DspInput="YES" Vary="NO"
+            PassAtr="NO" Case="MONO" CCSID="JOB" IsDtaAra="NO" IsFile="NO" IsPgm="NO" Choice="1-4294967294">
+            <SpcVal>
+                <Value Val="*SAME" MapTo="4294967297" />
+                <Value Val="*GEN" MapTo="4294967296" />
+                <Value Val="*NONE" MapTo="0" />
+            </SpcVal>
+        </Parm>
+        <Parm Kwd="HOMEDIR" PosNbr="47" KeyParm="NO" PmtCtl="PMTRQS" RtnVal="NO" PassVal="DFT" Type="PNAME" Min="0"
+            Max="1" Prompt="Home directory" PromptMsgID="TXT7283" Len="2048" Rstd="NO" Dft="*SAME" AlwUnprt="YES"
+            AlwVar="YES" Expr="YES" Full="NO" DspInput="YES" Vary="INT4" PassAtr="NO" Case="MIXED" CCSID="UTF16"
+            InlPmtLen="2048" IsDtaAra="NO" IsFile="NO" IsPgm="NO" Choice="Path name">
+            <SpcVal>
+                <Value Val="*USRPRF" MapTo="" />
+                <Value Val="*SAME" MapTo="*SAME" />
+            </SpcVal>
+        </Parm>
+        <Parm Kwd="EIMASSOC" PosNbr="48" KeyParm="NO" PmtCtl="PMTRQS" ListDspl="INT2" RtnVal="NO" PassVal="DFT"
+            Type="ELEM" Min="0" Max="1" Prompt="EIM association" PromptMsgID="TXTC980" Rstd="NO" Dft="*NOCHG"
+            AlwUnprt="YES" AlwVar="YES" Expr="NO" Full="NO" DspInput="YES" IsDtaAra="NO" IsFile="NO" IsPgm="NO"
+            Choice="*NOCHG">
+            <SngVal>
+                <Value Val="*NOCHG" MapTo="*NOCHG" />
+            </SngVal>
+            <Elem Type="CHAR" Min="1" Max="1" Prompt="EIM identifier" PromptMsgID="TXTC981" Len="128" Rstd="NO"
+                AlwUnprt="YES" AlwVar="YES" Expr="NO" Full="NO" DspInput="YES" Vary="INT2" PassAtr="NO" Case="MONO"
+                CCSID="JOB" InlPmtLen="32" IsDtaAra="NO" IsFile="NO" IsPgm="NO" Choice="Character value">
+                <SpcVal>
+                    <Value Val="*USRPRF" MapTo="*USRPRF" />
+                </SpcVal>
+            </Elem>
+            <Elem Type="CHAR" Min="1" Max="1" Prompt="Association type" PromptMsgID="TXTC982" Len="10" Rstd="YES"
+                AlwUnprt="YES" AlwVar="YES" Expr="NO" Full="NO" DspInput="YES" Vary="NO" PassAtr="NO" Case="MONO"
+                CCSID="JOB" IsDtaAra="NO" IsFile="NO" IsPgm="NO" Choice="*TARGET, *SOURCE, *TGTSRC...">
+                <SpcVal>
+                    <Value Val="*TARGET" MapTo="*TARGET" />
+                    <Value Val="*SOURCE" MapTo="*SOURCE" />
+                    <Value Val="*TGTSRC" MapTo="*TGTSRC" />
+                    <Value Val="*ADMIN" MapTo="*ADMIN" />
+                    <Value Val="*ALL" MapTo="*ALL" />
+                </SpcVal>
+            </Elem>
+            <Elem Type="CHAR" Min="0" Max="1" Prompt="Association action" PromptMsgID="TXTC983" Len="10" Rstd="YES"
+                Dft="*REPLACE" AlwUnprt="YES" AlwVar="YES" Expr="NO" Full="NO" DspInput="YES" Vary="NO" PassAtr="NO"
+                Case="MONO" CCSID="JOB" IsDtaAra="NO" IsFile="NO" IsPgm="NO" Choice="*REPLACE, *ADD, *REMOVE">
+                <SpcVal>
+                    <Value Val="*REPLACE" MapTo="*REPLACE" />
+                    <Value Val="*ADD" MapTo="*ADD" />
+                    <Value Val="*REMOVE" MapTo="*REMOVE" />
+                </SpcVal>
+            </Elem>
+            <Elem Type="CHAR" Min="0" Max="1" Prompt="Create EIM identifier" PromptMsgID="TXTC984" Len="12" Rstd="YES"
+                Dft="*NOCRTEIMID" AlwUnprt="YES" AlwVar="YES" Expr="NO" Full="NO" DspInput="YES" Vary="NO" PassAtr="NO"
+                Case="MONO" CCSID="JOB" IsDtaAra="NO" IsFile="NO" IsPgm="NO" Choice="*NOCRTEIMID, *CRTEIMID">
+                <SpcVal>
+                    <Value Val="*NOCRTEIMID" MapTo="*NOCRTEIMID" />
+                    <Value Val="*CRTEIMID" MapTo="*CRTEIMID" />
+                </SpcVal>
+            </Elem>
+        </Parm>
+        <Parm Kwd="PWDCHGBLK" PosNbr="16" KeyParm="NO" PmtCtl="PMTRQS" RtnVal="NO" PassVal="DFT" Type="INT2" Min="0"
+            Max="1" Prompt="Block password change" PromptMsgID="TXTD6B6" Rstd="NO" Dft="*SAME" RangeMinVal="1"
+            RangeMaxVal="99" AlwUnprt="YES" AlwVar="YES" Expr="YES" Full="NO" DspInput="YES" Vary="NO" PassAtr="NO"
+            Case="MONO" CCSID="JOB" IsDtaAra="NO" IsFile="NO" IsPgm="NO" Choice="1-99">
+            <SpcVal>
+                <Value Val="*SAME" MapTo="-1" />
+                <Value Val="*SYSVAL" MapTo="-2" />
+                <Value Val="*NONE" MapTo="0" />
+            </SpcVal>
+        </Parm>
+        <Parm Kwd="USREXPDATE" PosNbr="49" KeyParm="NO" PmtCtl="PMTRQS" RtnVal="NO" PassVal="DFT" Type="DATE" Min="0"
+            Max="1" Prompt="User expiration date" PromptMsgID="TXTE261" Rstd="NO" Dft="*SAME" AlwUnprt="YES"
+            AlwVar="YES" Expr="YES" Full="NO" DspInput="YES" Vary="NO" PassAtr="NO" Case="MONO" CCSID="JOB"
+            IsDtaAra="NO" IsFile="NO" IsPgm="NO" Choice="Date">
+            <SpcVal>
+                <Value Val="*NONE" MapTo="0000000" />
+                <Value Val="*USREXPITV" MapTo="9999999" />
+                <Value Val="*SAME" MapTo="0999998" />
+            </SpcVal>
+        </Parm>
+        <Parm Kwd="USREXPITV" PosNbr="50" KeyParm="NO" PmtCtl="PMTRQS" RtnVal="NO" PassVal="DFT" Type="INT2" Min="0"
+            Max="1" Prompt="User expiration interval" PromptMsgID="TXTE260" Rstd="NO" RangeMinVal="1" RangeMaxVal="366"
+            AlwUnprt="YES" AlwVar="YES" Expr="YES" Full="NO" DspInput="YES" Vary="NO" PassAtr="NO" Case="MONO"
+            CCSID="JOB" IsDtaAra="NO" IsFile="NO" IsPgm="NO" Choice="1-366"></Parm>
+        <Parm Kwd="MAXSTGLRG" PosNbr="20" KeyParm="NO" PmtCtl="PMTRQS" RtnVal="NO" PassVal="DFT" Type="CHAR" Min="0"
+            Max="1" Prompt="Maximum allowed storage large" PromptMsgID="TXTE27C" Len="20" Rstd="NO" Dft="*SAME"
+            AlwUnprt="YES" AlwVar="YES" Expr="YES" Full="NO" DspInput="YES" Vary="NO" PassAtr="YES" Case="MONO"
+            CCSID="JOB" InlPmtLen="20" IsDtaAra="NO" IsFile="NO" IsPgm="NO" Choice="Kilobytes, *SAME, *NOMAX"
+            ChoiceMsgID="TXT5706">
+            <SpcVal>
+                <Value Val="*SAME" MapTo="*SAME" />
+                <Value Val="*NOMAX" MapTo="*NOMAX" />
+            </SpcVal>
+        </Parm>
+        <Parm Kwd="AUT" KeyParm="NO" Type="CHAR" Min="0" Len="10" Vary="NO" PassAtr="NO" Constant="*SAME"></Parm>
+        <Parm Kwd="TEXT" PosNbr="11" KeyParm="NO" RtnVal="NO" PassVal="DFT" Type="CHAR" Min="0" Max="1"
+            Prompt="Text &apos;description&apos;" PromptMsgID="TXT0742" Len="50" Rstd="NO" Dft="*SAME" AlwUnprt="YES"
+            AlwVar="YES" Expr="YES" Full="NO" DspInput="YES" Vary="INT2" PassAtr="NO" Case="MONO" CCSID="JOB"
+            InlPmtLen="50" IsDtaAra="NO" IsFile="NO" IsPgm="NO" Choice="Character value">
+            <SpcVal>
+                <Value Val="*SAME" MapTo="*SAME" />
+                <Value Val="*BLANK" MapTo="" />
+            </SpcVal>
+        </Parm>
+        <Dep CtlKwdRel="SPCFD" CtlKwd="USRPRF" NbrTrueRel="EQ" NbrTrue="0" MsgID="CPD2201">
+            <DepParm Kwd="USRPRF" Rel="EQ" CmpVal="QANZAGENT" />
+            <DepParm Kwd="USRPRF" Rel="EQ" CmpVal="QAUTPROF" />
+            <DepParm Kwd="USRPRF" Rel="EQ" CmpVal="QCLUMGT" />
+            <DepParm Kwd="USRPRF" Rel="EQ" CmpVal="QCLUSTER" />
+            <DepParm Kwd="USRPRF" Rel="EQ" CmpVal="QCOLSRV" />
+            <DepParm Kwd="USRPRF" Rel="EQ" CmpVal="QDBSHR" />
+            <DepParm Kwd="USRPRF" Rel="EQ" CmpVal="QDBSHRDO" />
+            <DepParm Kwd="USRPRF" Rel="EQ" CmpVal="QDFTOWN" />
+            <DepParm Kwd="USRPRF" Rel="EQ" CmpVal="QDIRSRV" />
+            <DepParm Kwd="USRPRF" Rel="EQ" CmpVal="QDLFM" />
+            <DepParm Kwd="USRPRF" Rel="EQ" CmpVal="QDOC" />
+            <DepParm Kwd="USRPRF" Rel="EQ" CmpVal="QDSNX" />
+            <DepParm Kwd="USRPRF" Rel="EQ" CmpVal="QFNC" />
+            <DepParm Kwd="USRPRF" Rel="EQ" CmpVal="QGATE" />
+            <DepParm Kwd="USRPRF" Rel="EQ" CmpVal="QIBMHELP" />
+            <DepParm Kwd="USRPRF" Rel="EQ" CmpVal="QIPP" />
+            <DepParm Kwd="USRPRF" Rel="EQ" CmpVal="QLPAUTO" />
+        </Dep>
+        <Dep CtlKwdRel="SPCFD" CtlKwd="USRPRF" NbrTrueRel="EQ" NbrTrue="0" MsgID="CPD2201">
+            <DepParm Kwd="USRPRF" Rel="EQ" CmpVal="QLPINSTALL" />
+            <DepParm Kwd="USRPRF" Rel="EQ" CmpVal="QMGTC" />
+            <DepParm Kwd="USRPRF" Rel="EQ" CmpVal="QMSF" />
+            <DepParm Kwd="USRPRF" Rel="EQ" CmpVal="QNTP" />
+            <DepParm Kwd="USRPRF" Rel="EQ" CmpVal="QPEX" />
+            <DepParm Kwd="USRPRF" Rel="EQ" CmpVal="QPM400" />
+            <DepParm Kwd="USRPRF" Rel="EQ" CmpVal="QSNADS" />
+            <DepParm Kwd="USRPRF" Rel="EQ" CmpVal="QSPL" />
+            <DepParm Kwd="USRPRF" Rel="EQ" CmpVal="QSPLJOB" />
+            <DepParm Kwd="USRPRF" Rel="EQ" CmpVal="QSRVAGT" />
+            <DepParm Kwd="USRPRF" Rel="EQ" CmpVal="QSYS" />
+            <DepParm Kwd="USRPRF" Rel="EQ" CmpVal="QTCP" />
+            <DepParm Kwd="USRPRF" Rel="EQ" CmpVal="QTFTP" />
+            <DepParm Kwd="USRPRF" Rel="EQ" CmpVal="QTSTRQS" />
+            <DepParm Kwd="USRPRF" Rel="EQ" CmpVal="QYCMCIMOM" />
+            <DepParm Kwd="USRPRF" Rel="EQ" CmpVal="QYPSJSVR" />
+        </Dep>
+        <Dep CtlKwdRel="EQ" CtlKwd="USRPRF" CmpVal="QSECOFR" NbrTrueRel="EQ" NbrTrue="7" MsgID="CPD2202">
+            <DepParm Kwd="SPCAUT" Rel="EQ" CmpVal="*" />
+            <DepParm Kwd="MAXSTG" Rel="EQ" CmpVal="-1" />
+            <DepParm Kwd="LMTCPB" Rel="EQ" CmpVal="S" />
+            <DepParm Kwd="PTYLMT" Rel="EQ" CmpVal="*" />
+            <DepParm Kwd="UID" Rel="EQ" CmpVal="4294967297" />
+            <DepParm Kwd="LCLPWDMGT" Rel="EQ" CmpVal="X&apos;40&apos;" />
+            <DepParm Kwd="MAXSTGLRG" Rel="EQ" CmpVal="*SAME" />
+        </Dep>
+        <Dep CtlKwdRel="EQ" CtlKwd="USRPRF" CmpVal="QTCM" NbrTrueRel="EQ" NbrTrue="7" MsgID="CPD2270">
+            <DepParm Kwd="SPCAUT" Rel="EQ" CmpVal="*" />
+            <DepParm Kwd="MAXSTG" Rel="EQ" CmpVal="-1" />
+            <DepParm Kwd="STATUS" Rel="EQ" CmpVal="S" />
+            <DepParm Kwd="PTYLMT" Rel="EQ" CmpVal="*" />
+            <DepParm Kwd="USRCLS" Rel="EQ" CmpVal="-1" />
+            <DepParm Kwd="MSGQ" Rel="EQ" CmpVal="*SAME" />
+            <DepParm Kwd="MAXSTGLRG" Rel="EQ" CmpVal="*SAME" />
+        </Dep>
+        <Dep CtlKwdRel="EQ" CtlKwd="GRPPRF" CmpVal="X&apos;40&apos;" NbrTrueRel="EQ" NbrTrue="1" MsgID="CPD22B2">
+            <DepParm Kwd="SUPGRPPRF" Rel="NE" CmpVal="*SAME" />
+            <DepParm Kwd="SUPGRPPRF" Rel="NE" CmpVal="X&apos;40&apos;" />
+        </Dep>
+        <Dep CtlKwdRel="ALWAYS" NbrTrueRel="EQ" NbrTrue="0" MsgID="CPD2252">
+            <DepParm Kwd="GRPPRF" Rel="EQ" CmpVal="QANZAGENT" />
+            <DepParm Kwd="GRPPRF" Rel="EQ" CmpVal="QAUTPROF" />
+            <DepParm Kwd="GRPPRF" Rel="EQ" CmpVal="QCLUMGT" />
+            <DepParm Kwd="GRPPRF" Rel="EQ" CmpVal="QCLUSTER" />
+            <DepParm Kwd="GRPPRF" Rel="EQ" CmpVal="QDBSHR" />
+            <DepParm Kwd="GRPPRF" Rel="EQ" CmpVal="QDBSHRDO" />
+            <DepParm Kwd="GRPPRF" Rel="EQ" CmpVal="QDFTOWN" />
+            <DepParm Kwd="GRPPRF" Rel="EQ" CmpVal="QDIRSRV" />
+            <DepParm Kwd="GRPPRF" Rel="EQ" CmpVal="QDLFM" />
+            <DepParm Kwd="GRPPRF" Rel="EQ" CmpVal="QDOC" />
+            <DepParm Kwd="GRPPRF" Rel="EQ" CmpVal="QDSNX" />
+            <DepParm Kwd="GRPPRF" Rel="EQ" CmpVal="QEJB" />
+            <DepParm Kwd="GRPPRF" Rel="EQ" CmpVal="QFNC" />
+            <DepParm Kwd="GRPPRF" Rel="EQ" CmpVal="QGATE" />
+            <DepParm Kwd="GRPPRF" Rel="EQ" CmpVal="QIBMHELP" />
+            <DepParm Kwd="GRPPRF" Rel="EQ" CmpVal="QIPP" />
+        </Dep>
+        <Dep CtlKwdRel="ALWAYS" NbrTrueRel="EQ" NbrTrue="0" MsgID="CPD2252">
+            <DepParm Kwd="GRPPRF" Rel="EQ" CmpVal="QLPAUTO" />
+            <DepParm Kwd="GRPPRF" Rel="EQ" CmpVal="QLPINSTALL" />
+            <DepParm Kwd="GRPPRF" Rel="EQ" CmpVal="QLWISVR" />
+            <DepParm Kwd="GRPPRF" Rel="EQ" CmpVal="QMGTC" />
+            <DepParm Kwd="GRPPRF" Rel="EQ" CmpVal="QMSF" />
+            <DepParm Kwd="GRPPRF" Rel="EQ" CmpVal="QNETSPLF" />
+            <DepParm Kwd="GRPPRF" Rel="EQ" CmpVal="QNFSANON" />
+            <DepParm Kwd="GRPPRF" Rel="EQ" CmpVal="QNTP" />
+            <DepParm Kwd="GRPPRF" Rel="EQ" CmpVal="QPEX" />
+            <DepParm Kwd="GRPPRF" Rel="EQ" CmpVal="QPM400" />
+            <DepParm Kwd="GRPPRF" Rel="EQ" CmpVal="QRJE" />
+            <DepParm Kwd="GRPPRF" Rel="EQ" CmpVal="QSNADS" />
+        </Dep>
+        <Dep CtlKwdRel="ALWAYS" NbrTrueRel="EQ" NbrTrue="0" MsgID="CPD2252">
+            <DepParm Kwd="GRPPRF" Rel="EQ" CmpVal="QSPL" />
+            <DepParm Kwd="GRPPRF" Rel="EQ" CmpVal="QSPLJOB" />
+            <DepParm Kwd="GRPPRF" Rel="EQ" CmpVal="QSRV" />
+            <DepParm Kwd="GRPPRF" Rel="EQ" CmpVal="QSRVBAS" />
+            <DepParm Kwd="GRPPRF" Rel="EQ" CmpVal="QSYS" />
+            <DepParm Kwd="GRPPRF" Rel="EQ" CmpVal="QTCM" />
+            <DepParm Kwd="GRPPRF" Rel="EQ" CmpVal="QTCP" />
+            <DepParm Kwd="GRPPRF" Rel="EQ" CmpVal="QTFTP" />
+            <DepParm Kwd="GRPPRF" Rel="EQ" CmpVal="QTSTRQS" />
+            <DepParm Kwd="GRPPRF" Rel="EQ" CmpVal="QWEBADMIN" />
+            <DepParm Kwd="GRPPRF" Rel="EQ" CmpVal="QWSERVICE" />
+            <DepParm Kwd="GRPPRF" Rel="EQ" CmpVal="QYCMCIMOM" />
+            <DepParm Kwd="GRPPRF" Rel="EQ" CmpVal="QYPSJSVR" />
+        </Dep>
+        <Dep CtlKwdRel="EQ" CtlKwd="USRPRF" CmpVal="QSRV" NbrTrueRel="EQ" NbrTrue="1" MsgID="CPD225B">
+            <DepParm Kwd="GID" Rel="NE" CmpVal="4294967297" />
+            <DepParm Kwd="GID" Rel="NE" CmpVal="0" />
+        </Dep>
+        <Dep CtlKwdRel="EQ" CtlKwd="USRPRF" CmpVal="QSRVBAS" NbrTrueRel="EQ" NbrTrue="1" MsgID="CPD225B">
+            <DepParm Kwd="GID" Rel="NE" CmpVal="4294967297" />
+            <DepParm Kwd="GID" Rel="NE" CmpVal="0" />
+        </Dep>
+        <Dep CtlKwdRel="EQ" CtlKwd="USRPRF" CmpVal="QRJE" NbrTrueRel="EQ" NbrTrue="1" MsgID="CPD225B">
+            <DepParm Kwd="GID" Rel="NE" CmpVal="4294967297" />
+            <DepParm Kwd="GID" Rel="NE" CmpVal="0" />
+        </Dep>
+        <Dep CtlKwdRel="EQ" CtlKwd="USRPRF" CmpVal="QNETSPLF" NbrTrueRel="EQ" NbrTrue="1" MsgID="CPD225B">
+            <DepParm Kwd="GID" Rel="NE" CmpVal="4294967297" />
+            <DepParm Kwd="GID" Rel="NE" CmpVal="0" />
+        </Dep>
+        <Dep CtlKwdRel="EQ" CtlKwd="USRPRF" CmpVal="QNFSANON" NbrTrueRel="EQ" NbrTrue="1" MsgID="CPD225B">
+            <DepParm Kwd="GID" Rel="NE" CmpVal="4294967297" />
+            <DepParm Kwd="GID" Rel="NE" CmpVal="0" />
+        </Dep>
+        <Dep CtlKwdRel="EQ" CtlKwd="USRPRF" CmpVal="QEJB" NbrTrueRel="EQ" NbrTrue="1" MsgID="CPD225B">
+            <DepParm Kwd="GID" Rel="NE" CmpVal="4294967297" />
+            <DepParm Kwd="GID" Rel="NE" CmpVal="0" />
+        </Dep>
+        <Dep CtlKwdRel="EQ" CtlKwd="USRPRF" CmpVal="QTCM" NbrTrueRel="EQ" NbrTrue="1" MsgID="CPD225B">
+            <DepParm Kwd="GID" Rel="NE" CmpVal="4294967297" />
+            <DepParm Kwd="GID" Rel="NE" CmpVal="0" />
+        </Dep>
+        <Dep CtlKwdRel="EQ" CtlKwd="USRPRF" CmpVal="QLWISVR" NbrTrueRel="EQ" NbrTrue="1" MsgID="CPD225B">
+            <DepParm Kwd="GID" Rel="NE" CmpVal="4294967297" />
+            <DepParm Kwd="GID" Rel="NE" CmpVal="0" />
+        </Dep>
+        <Dep CtlKwdRel="EQ" CtlKwd="USRPRF" CmpVal="QWEBADMIN" NbrTrueRel="EQ" NbrTrue="1" MsgID="CPD225B">
+            <DepParm Kwd="GID" Rel="NE" CmpVal="4294967297" />
+            <DepParm Kwd="GID" Rel="NE" CmpVal="0" />
+        </Dep>
+        <Dep CtlKwdRel="EQ" CtlKwd="USRPRF" CmpVal="QWSERVICE" NbrTrueRel="EQ" NbrTrue="1" MsgID="CPD225B">
+            <DepParm Kwd="GID" Rel="NE" CmpVal="4294967297" />
+            <DepParm Kwd="GID" Rel="NE" CmpVal="0" />
+        </Dep>
+        <Dep CtlKwdRel="EQ" CtlKwd="USRPRF" CmpVal="QSRV" NbrTrueRel="EQ" NbrTrue="1" MsgID="CPD2253">
+            <DepParm Kwd="GRPPRF" Rel="NE" CmpVal="*SAME" />
+            <DepParm Kwd="GRPPRF" Rel="NE" CmpVal="X&apos;40&apos;" />
+        </Dep>
+        <Dep CtlKwdRel="EQ" CtlKwd="USRPRF" CmpVal="QSRVBAS" NbrTrueRel="EQ" NbrTrue="1" MsgID="CPD2253">
+            <DepParm Kwd="GRPPRF" Rel="NE" CmpVal="*SAME" />
+            <DepParm Kwd="GRPPRF" Rel="NE" CmpVal="X&apos;40&apos;" />
+        </Dep>
+        <Dep CtlKwdRel="EQ" CtlKwd="USRPRF" CmpVal="QRJE" NbrTrueRel="EQ" NbrTrue="1" MsgID="CPD2253">
+            <DepParm Kwd="GRPPRF" Rel="NE" CmpVal="*SAME" />
+            <DepParm Kwd="GRPPRF" Rel="NE" CmpVal="X&apos;40&apos;" />
+        </Dep>
+        <Dep CtlKwdRel="EQ" CtlKwd="USRPRF" CmpVal="QSECOFR" NbrTrueRel="EQ" NbrTrue="1" MsgID="CPD2253">
+            <DepParm Kwd="GRPPRF" Rel="NE" CmpVal="*SAME" />
+            <DepParm Kwd="GRPPRF" Rel="NE" CmpVal="X&apos;40&apos;" />
+        </Dep>
+        <Dep CtlKwdRel="EQ" CtlKwd="USRPRF" CmpVal="QNFSANON" NbrTrueRel="EQ" NbrTrue="1" MsgID="CPD2253">
+            <DepParm Kwd="GRPPRF" Rel="NE" CmpVal="*SAME" />
+            <DepParm Kwd="GRPPRF" Rel="NE" CmpVal="X&apos;40&apos;" />
+        </Dep>
+        <Dep CtlKwdRel="EQ" CtlKwd="USRPRF" CmpVal="QTCM" NbrTrueRel="EQ" NbrTrue="1" MsgID="CPD2253">
+            <DepParm Kwd="GRPPRF" Rel="NE" CmpVal="*SAME" />
+            <DepParm Kwd="GRPPRF" Rel="NE" CmpVal="X&apos;40&apos;" />
+        </Dep>
+        <Dep CtlKwdRel="EQ" CtlKwd="USRPRF" CmpVal="QLWISVR" NbrTrueRel="EQ" NbrTrue="1" MsgID="CPD2253">
+            <DepParm Kwd="GRPPRF" Rel="NE" CmpVal="*SAME" />
+            <DepParm Kwd="GRPPRF" Rel="NE" CmpVal="X&apos;40&apos;" />
+        </Dep>
+        <Dep CtlKwdRel="EQ" CtlKwd="USRPRF" CmpVal="QWEBADMIN" NbrTrueRel="EQ" NbrTrue="1" MsgID="CPD2253">
+            <DepParm Kwd="GRPPRF" Rel="NE" CmpVal="*SAME" />
+            <DepParm Kwd="GRPPRF" Rel="NE" CmpVal="X&apos;40&apos;" />
+        </Dep>
+        <Dep CtlKwdRel="EQ" CtlKwd="USRPRF" CmpVal="QWSERVICE" NbrTrueRel="EQ" NbrTrue="1" MsgID="CPD2253">
+            <DepParm Kwd="GRPPRF" Rel="NE" CmpVal="*SAME" />
+            <DepParm Kwd="GRPPRF" Rel="NE" CmpVal="X&apos;40&apos;" />
+        </Dep>
+        <Dep CtlKwdRel="EQ" CtlKwd="USRPRF" CmpVal="QNETSPLF" NbrTrueRel="EQ" NbrTrue="1" MsgID="CPD2279">
+            <DepParm Kwd="PASSWORD" Rel="NE" CmpVal="*NONE" />
+            <DepParm Kwd="PASSWORD" Rel="NE" CmpVal="*SAME" />
+        </Dep>
+        <Dep CtlKwdRel="EQ" CtlKwd="USRPRF" CmpVal="QNFSANON" NbrTrueRel="EQ" NbrTrue="1" MsgID="CPD2279">
+            <DepParm Kwd="PASSWORD" Rel="NE" CmpVal="*NONE" />
+            <DepParm Kwd="PASSWORD" Rel="NE" CmpVal="*SAME" />
+        </Dep>
+        <Dep CtlKwdRel="EQ" CtlKwd="USRPRF" CmpVal="QTMHHTP1" NbrTrueRel="EQ" NbrTrue="1" MsgID="CPD2279">
+            <DepParm Kwd="PASSWORD" Rel="NE" CmpVal="*NONE" />
+            <DepParm Kwd="PASSWORD" Rel="NE" CmpVal="*SAME" />
+        </Dep>
+        <Dep CtlKwdRel="EQ" CtlKwd="USRPRF" CmpVal="QTCM" NbrTrueRel="EQ" NbrTrue="1" MsgID="CPD2279">
+            <DepParm Kwd="PASSWORD" Rel="NE" CmpVal="*NONE" />
+            <DepParm Kwd="PASSWORD" Rel="NE" CmpVal="*SAME" />
+        </Dep>
+        <Dep CtlKwdRel="EQ" CtlKwd="USRPRF" CmpVal="QNETSPLF" NbrTrueRel="EQ" NbrTrue="0" MsgID="CPD2201">
+            <DepParm Kwd="MSGQ" Rel="NE" CmpVal="*SAME" />
+        </Dep>
+        <Dep CtlKwdRel="ALWAYS" NbrTrueRel="EQ" NbrTrue="0" MsgID="CPD2255">
+            <DepParm Kwd="USRPRF" Rel="EQ" CmpKwd="GRPPRF" />
+        </Dep>
+        <Dep CtlKwdRel="EQ" CtlKwd="GRPPRF" CmpVal="X&apos;40&apos;" NbrTrueRel="EQ" NbrTrue="2" MsgID="CPD2261">
+            <DepParm Kwd="GRPAUT" Rel="EQ" CmpVal="X&apos;98&apos;" />
+            <DepParm Kwd="GRPAUT" Rel="EQ" CmpVal="X&apos;00&apos;" />
+            <DepParm Kwd="OWNER" Rel="EQ" CmpVal="X&apos;98&apos;" />
+            <DepParm Kwd="OWNER" Rel="EQ" CmpVal="X&apos;99&apos;" />
+        </Dep>
+        <Dep CtlKwdRel="EQ" CtlKwd="USRPRF" CmpVal="QSECOFR" NbrTrueRel="EQ" NbrTrue="1" MsgID="CPD2207">
+            <DepParm Kwd="PASSWORD" Rel="NE" CmpVal="*NONE" />
+        </Dep>
+        <Dep CtlKwdRel="EQ" CtlKwd="USRPRF" CmpVal="QSRV" NbrTrueRel="EQ" NbrTrue="1" MsgID="CPD2278">
+            <DepParm Kwd="SPCAUT" Rel="EQ" CmpVal="*" />
+        </Dep>
+        <Dep CtlKwdRel="EQ" CtlKwd="PWDEXP" CmpVal="Y" NbrTrueRel="EQ" NbrTrue="0" MsgID="CPD2208">
+            <DepParm Kwd="PASSWORD" Rel="EQ" CmpVal="*NONE" />
+            <DepParm Kwd="LCLPWDMGT" Rel="EQ" CmpVal="X&apos;01&apos;" />
+        </Dep>
+        <Dep CtlKwdRel="EQ" CtlKwd="USRPRF" CmpVal="QEJB" NbrTrueRel="EQ" NbrTrue="1" MsgID="CPD2219">
+            <DepParm Kwd="USREXPDATE" Rel="NE" CmpVal="0000000" />
+            <DepParm Kwd="USREXPDATE" Rel="NE" CmpVal="0999998" />
+        </Dep>
+        <Dep CtlKwdRel="EQ" CtlKwd="USRPRF" CmpVal="QEJBSVR" NbrTrueRel="EQ" NbrTrue="1" MsgID="CPD2219">
+            <DepParm Kwd="USREXPDATE" Rel="NE" CmpVal="0000000" />
+            <DepParm Kwd="USREXPDATE" Rel="NE" CmpVal="0999998" />
+        </Dep>
+        <Dep CtlKwdRel="EQ" CtlKwd="USRPRF" CmpVal="QNETSPLF" NbrTrueRel="EQ" NbrTrue="1" MsgID="CPD2219">
+            <DepParm Kwd="USREXPDATE" Rel="NE" CmpVal="0000000" />
+            <DepParm Kwd="USREXPDATE" Rel="NE" CmpVal="0999998" />
+        </Dep>
+        <Dep CtlKwdRel="EQ" CtlKwd="USRPRF" CmpVal="QNFSANON" NbrTrueRel="EQ" NbrTrue="1" MsgID="CPD2219">
+            <DepParm Kwd="USREXPDATE" Rel="NE" CmpVal="0000000" />
+            <DepParm Kwd="USREXPDATE" Rel="NE" CmpVal="0999998" />
+        </Dep>
+        <Dep CtlKwdRel="EQ" CtlKwd="USRPRF" CmpVal="QSECOFR" NbrTrueRel="EQ" NbrTrue="1" MsgID="CPD2219">
+            <DepParm Kwd="USREXPDATE" Rel="NE" CmpVal="0000000" />
+            <DepParm Kwd="USREXPDATE" Rel="NE" CmpVal="0999998" />
+        </Dep>
+        <Dep CtlKwdRel="EQ" CtlKwd="USRPRF" CmpVal="QTCM" NbrTrueRel="EQ" NbrTrue="1" MsgID="CPD2219">
+            <DepParm Kwd="USREXPDATE" Rel="NE" CmpVal="0000000" />
+            <DepParm Kwd="USREXPDATE" Rel="NE" CmpVal="0999998" />
+        </Dep>
+        <Dep CtlKwdRel="EQ" CtlKwd="USRPRF" CmpVal="QTMHHTTP" NbrTrueRel="EQ" NbrTrue="1" MsgID="CPD2219">
+            <DepParm Kwd="USREXPDATE" Rel="NE" CmpVal="0000000" />
+            <DepParm Kwd="USREXPDATE" Rel="NE" CmpVal="0999998" />
+        </Dep>
+        <Dep CtlKwdRel="EQ" CtlKwd="USRPRF" CmpVal="QTMHHTP1" NbrTrueRel="EQ" NbrTrue="1" MsgID="CPD2219">
+            <DepParm Kwd="USREXPDATE" Rel="NE" CmpVal="0000000" />
+            <DepParm Kwd="USREXPDATE" Rel="NE" CmpVal="0999998" />
+        </Dep>
+        <Dep CtlKwdRel="EQ" CtlKwd="USRPRF" CmpVal="QLWISVR" NbrTrueRel="EQ" NbrTrue="1" MsgID="CPD2219">
+            <DepParm Kwd="USREXPDATE" Rel="NE" CmpVal="0000000" />
+            <DepParm Kwd="USREXPDATE" Rel="NE" CmpVal="0999998" />
+        </Dep>
+        <Dep CtlKwdRel="EQ" CtlKwd="USRPRF" CmpVal="QWEBADMIN" NbrTrueRel="EQ" NbrTrue="1" MsgID="CPD2219">
+            <DepParm Kwd="USREXPDATE" Rel="NE" CmpVal="0000000" />
+            <DepParm Kwd="USREXPDATE" Rel="NE" CmpVal="0999998" />
+        </Dep>
+        <Dep CtlKwdRel="EQ" CtlKwd="USRPRF" CmpVal="QWSERVICE" NbrTrueRel="EQ" NbrTrue="1" MsgID="CPD2219">
+            <DepParm Kwd="USREXPDATE" Rel="NE" CmpVal="0000000" />
+            <DepParm Kwd="USREXPDATE" Rel="NE" CmpVal="0999998" />
+        </Dep>
+        <Dep CtlKwdRel="NE" CtlKwd="USREXPITV" CmpVal="0" NbrTrueRel="EQ" NbrTrue="1" MsgID="CPD221C">
+            <DepParm Kwd="USREXPDATE" Rel="NE" CmpVal="9999999" />
+            <DepParm Kwd="USREXPDATE" Rel="NE" CmpVal="0999998" />
+        </Dep>
+        <Dep CtlKwdRel="EQ" CtlKwd="USREXPDATE" CmpVal="9999999" NbrTrueRel="EQ" NbrTrue="1" MsgID="CPD221D">
+            <DepParm Kwd="USREXPITV" Rel="SPCFD" />
+        </Dep>
+        <Dep CtlKwdRel="SPCFD" CtlKwd="MAXSTGLRG" NbrTrueRel="EQ" NbrTrue="0" MsgID="CPD221E">
+            <DepParm Kwd="MAXSTG" Rel="SPCFD" />
+        </Dep>
+    </Cmd>
+</QcdCLCmd>

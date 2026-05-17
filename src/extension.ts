@@ -308,9 +308,11 @@ export async function activate(context: vscode.ExtensionContext) {
 
 
 export class ClPromptPanel {
-    public static currentPanel: ClPromptPanel | undefined;
+    /** Map from source-file URI string → open prompter panel (one per file). */
+    public static panels = new Map<string, ClPromptPanel>();
     private readonly _panel: vscode.WebviewPanel;
     private readonly _extensionUri: vscode.Uri;
+    private _panelKey: string = '';
     private _disposables: vscode.Disposable[] = [];
     private _editor: vscode.TextEditor | undefined;
     private _selection: vscode.Selection | undefined;
@@ -443,10 +445,19 @@ export class ClPromptPanel {
             )
             : undefined;
 
+        // Key each panel by source-file URI so each file gets its own distinct panel.
+        const panelKey = editor?.document.uri.toString() ?? 'no-file';
+
         // Handle label-only lines (e.g., "ENDPGM:")
         if (!cmdName && cmdLabel) {
             // Label-only line - create a minimal prompter with just Label and Comment fields
             console.log(`[clPrompter] Label-only line detected: ${cmdLabel}`);
+            const existingPanel = ClPromptPanel.panels.get(panelKey);
+            if (existingPanel) {
+                existingPanel._panel.reveal(column);
+                await existingPanel.setXML('', '', editor, selection, '', fullCmd, cmdLabel, cmdComment);
+                return;
+            }
             const panel = vscode.window.createWebviewPanel(
                 'clPrompter',
                 `Label: ${cmdLabel}`,
@@ -457,8 +468,10 @@ export class ClPromptPanel {
                     localResourceRoots: [vscode.Uri.joinPath(extensionUri, 'media')]
                 }
             );
-            ClPromptPanel.currentPanel = new ClPromptPanel(
+            const instance = new ClPromptPanel(
                 panel, extensionUri, '', cmdLabel, '', editor, selection, fullCmd, cmdComment);
+            instance._panelKey = panelKey;
+            ClPromptPanel.panels.set(panelKey, instance);
             return;
         }
 
@@ -537,9 +550,10 @@ export class ClPromptPanel {
             return;
         }
 
-        if (ClPromptPanel.currentPanel) {
-            ClPromptPanel.currentPanel._panel.reveal(column);
-            await ClPromptPanel.currentPanel.setXML(cmdName, xml, editor, selection, cmdPrompt);
+        if (ClPromptPanel.panels.has(panelKey)) {
+            const existingPanel = ClPromptPanel.panels.get(panelKey)!;
+            existingPanel._panel.reveal(column);
+            await existingPanel.setXML(cmdName, xml, editor, selection, cmdPrompt, fullCmd, cmdLabel, cmdComment);
         } else {
             const panel = vscode.window.createWebviewPanel(
                 'clPrompter',
@@ -551,8 +565,10 @@ export class ClPromptPanel {
                     localResourceRoots: [vscode.Uri.joinPath(extensionUri, 'media')]
                 }
             );
-            ClPromptPanel.currentPanel = new ClPromptPanel(
+            const instance = new ClPromptPanel(
                 panel, extensionUri, cmdName, cmdLabel, xml, editor, selection, fullCmd, cmdComment);
+            instance._panelKey = panelKey;
+            ClPromptPanel.panels.set(panelKey, instance);
         }
     }
 
@@ -689,7 +705,7 @@ export class ClPromptPanel {
                 // For label-only lines (no command), skip XML processing and just send label/comment
                 if (!this._cmdName || this._cmdName.trim() === '') {
                     console.log('[clPrompter] Label-only prompter (webviewReady), skipping XML processing');
-                    panel.webview.postMessage({ type: "setLabel", label: cmdLabel, comment: cmdComment });
+                    panel.webview.postMessage({ type: "setLabel", label: this._cmdLabel, comment: this._cmdComment });
                     this._sentFormData = true;
                     return;
                 }
@@ -698,7 +714,7 @@ export class ClPromptPanel {
                 let cmdPrompt = '';
                 try {
                     const parser = new DOMParser();
-                    const xmlDoc = parser.parseFromString(xml, 'application/xml');
+                    const xmlDoc = parser.parseFromString(this._xml, 'application/xml');
                     const cmdNodes = xmlDoc.getElementsByTagName('Cmd');
                     console.log('[clPrompter] webviewReady: Found', cmdNodes.length, 'Cmd nodes');
                     if (cmdNodes.length > 0) {
@@ -717,30 +733,32 @@ export class ClPromptPanel {
                 console.log('[clPrompter] webviewReady: Extracted cmdPrompt:', cmdPrompt);
 
                 const t0 = Date.now();
-                const { allowedValsMap, depConstraints, valToMapToMap, defaultValMap, pmtCtlMap } = buildAllMaps(xml);
+                const { allowedValsMap, depConstraints, valToMapToMap, defaultValMap, pmtCtlMap } = buildAllMaps(this._xml);
                 console.log(`[clPrompter] buildAllMaps took ${Date.now() - t0}ms`);
                 const config = vscode.workspace.getConfiguration('clPrompter');
                 const keywordColor = config.get('kwdColor');
                 const valueColor = config.get('kwdValueColor');
                 const autoAdjust = config.get('kwdColorAutoAdjust');
                 const convertParmValueToUpperCase = config.get('convertParmValueToUpperCase', true);
+                const parmExpansionMax = config.get('parmExpansionMax', 5000);
+                const parmExpansionSize = config.get('parmExpansionSize', 16);
 
                 panel.webview.postMessage({
                     type: 'formData',
-                    xml,
+                    xml: this._xml,
                     allowedValsMap,
                     depConstraints,
                     valToMapToMap,
                     defaultValMap,
                     pmtCtlMap,
-                    cmdName,
+                    cmdName: this._cmdName,
                     cmdPrompt: cmdPrompt,
                     paramMap: this._parmMap,
                     parmMap: this._parmMap,
                     parmMetas: this._parmMetas,
-                    config: { keywordColor, valueColor, autoAdjust, convertParmValueToUpperCase }
+                    config: { keywordColor, valueColor, autoAdjust, convertParmValueToUpperCase, parmExpansionMax, parmExpansionSize }
                 });
-                panel.webview.postMessage({ type: "setLabel", label: cmdLabel, comment: cmdComment });
+                panel.webview.postMessage({ type: "setLabel", label: this._cmdLabel, comment: this._cmdComment });
                 this._sentFormData = true;
             }
         })
@@ -774,7 +792,7 @@ export class ClPromptPanel {
 
             // ✅ DON'T call this.dispose() here - it creates recursion
             // ✅ Just clean up the static reference and disposables
-            ClPromptPanel.currentPanel = undefined;
+            if (this._panelKey) { ClPromptPanel.panels.delete(this._panelKey); }
 
             while (this._disposables.length) {
                 const disposable = this._disposables.pop();
@@ -1070,6 +1088,8 @@ export class ClPromptPanel {
                         const keywordColor = config.get('kwdColor');
                         const valueColor = config.get('kwdValueColor');
                         const autoAdjust = config.get('kwdColorAutoAdjust');
+                        const parmExpansionMax = config.get('parmExpansionMax', 5000);
+                        const parmExpansionSize = config.get('parmExpansionSize', 16);
 
                         console.log('[clPrompter] loadForm → sending formData with keys:', Object.keys(this._parmMap || {}));
 
@@ -1085,7 +1105,7 @@ export class ClPromptPanel {
                             parmMap: this._parmMap,
                             paramMap: this._parmMap,
                             parmMetas: this._parmMetas,
-                            config: { keywordColor, valueColor, autoAdjust }
+                            config: { keywordColor, valueColor, autoAdjust, parmExpansionMax, parmExpansionSize }
                         });
                         this._sentFormData = true;
                         break;
@@ -1110,6 +1130,8 @@ export class ClPromptPanel {
                             const keywordColor = config.get('kwdColor');
                             const valueColor = config.get('kwdValueColor');
                             const autoAdjust = config.get('kwdColorAutoAdjust');
+                            const parmExpansionMax = config.get('parmExpansionMax', 5000);
+                            const parmExpansionSize = config.get('parmExpansionSize', 16);
 
                             let cmdPrompt = '';
                             try {
@@ -1135,7 +1157,7 @@ export class ClPromptPanel {
                                 parmMap: this._parmMap,
                                 paramMap: this._parmMap,
                                 parmMetas: this._parmMetas,
-                                config: { keywordColor, valueColor, autoAdjust }
+                                config: { keywordColor, valueColor, autoAdjust, parmExpansionMax, parmExpansionSize }
                             });
                             this._panel.webview.postMessage({ type: 'setLabel', label: this._cmdLabel, comment: this._cmdComment });
                             this._sentFormData = true;
@@ -1150,7 +1172,7 @@ export class ClPromptPanel {
     }
 
     // ✅ Update setXML to handle multi-line commands
-    public async setXML(cmdName: string, xml: string, editor?: vscode.TextEditor, selection?: vscode.Selection, cmdPrompt?: string) {
+    public async setXML(cmdName: string, xml: string, editor?: vscode.TextEditor, selection?: vscode.Selection, cmdPrompt?: string, fullCmd?: string, cmdLabel?: string, cmdComment?: string) {
         console.log('[clPrompter] setXML called - resetting state');
         this.resetWebviewState();
         this._sentFormData = false; // allow new formData send
@@ -1160,6 +1182,8 @@ export class ClPromptPanel {
         this._xml = xml;
         this._editor = editor;
         this._selection = selection;
+        if (cmdLabel !== undefined) { this._cmdLabel = cmdLabel; }
+        if (cmdComment !== undefined) { this._cmdComment = cmdComment; }
 
         // ✅ Update document URI to current editor
         this._documentUri = editor?.document.uri;
@@ -1167,6 +1191,50 @@ export class ClPromptPanel {
         // Update panel title
         if (cmdName) {
             this._panel.title = `${cmdName} Prompt`;
+        }
+
+        // Rebuild parm maps for the new command so pre-populated values are correct
+        this._parmMetas = [];
+        this._parmMap = {};
+        this._presentParms = new Set();
+        if (fullCmd && cmdName && cmdName.trim() !== '') {
+            this._parmMetas = extractParmMetas(xml);
+            const throwawayKwds = getThrowawayKwdsFromXML(xml);
+            const posOrder = getPositionalKwdsFromXML(xml);
+            const posOrderByArrival = getPositionalKwdsFromXMLByArrival(xml);
+            const posIndex = new Map<string, number>();
+            posOrder.forEach((k, i) => posIndex.set(k, i));
+            this._parmMetas = this._parmMetas.filter(m => !throwawayKwds.has(String((m as any).Kwd || '').toUpperCase()));
+            this._parmMetas = this._parmMetas
+                .map((m, idx) => ({ m, idx, p: posIndex.get(String((m as any).Kwd || '').toUpperCase()) }))
+                .sort((a, b) => {
+                    const aHas = Number.isFinite(a.p as number);
+                    const bHas = Number.isFinite(b.p as number);
+                    if (aHas && bHas) return (a.p as number) - (b.p as number);
+                    if (aHas && !bHas) return -1;
+                    if (!aHas && bHas) return 1;
+                    return a.idx - b.idx;
+                })
+                .map(x => x.m);
+            const maxPos = getMaxPos(xml);
+            const cmdWithKeywords =
+                (maxPos ?? 0) > 0 && posOrderByArrival.length > 0
+                    ? rewriteLeadingPositionalsByList(fullCmd, posOrderByArrival, maxPos)
+                    : fullCmd;
+            try {
+                this._parmMap = parseCLParms(cmdWithKeywords, this._parmMetas);
+            } catch (e) {
+                console.warn('[clPrompter] setXML: parseCLParms failed:', e);
+                this._parmMap = {};
+            }
+            if (Object.keys(this._parmMap).length) {
+                const filtered: Record<string, any> = {};
+                for (const [k, v] of Object.entries(this._parmMap)) {
+                    if (!throwawayKwds.has(k.toUpperCase())) { filtered[k] = v; }
+                }
+                this._parmMap = orderParmMapByMetas(this._parmMetas, filtered);
+            }
+            this._presentParms = new Set(Object.keys(this._parmMap));
         }
 
         const html = await this.getHtmlForPrompter(this._panel.webview, this._cmdName, this._xml);
@@ -1178,8 +1246,8 @@ export class ClPromptPanel {
     public dispose() {
         console.log('[clPrompter] Disposing ClPromptPanel');
 
-        // ✅ Clear the current panel reference BEFORE disposing
-        ClPromptPanel.currentPanel = undefined;
+        // ✅ Clear the panel map entry BEFORE disposing
+        if (this._panelKey) { ClPromptPanel.panels.delete(this._panelKey); }
 
         // ✅ Dispose of the panel LAST
         this._panel.dispose();
@@ -1554,7 +1622,6 @@ export function getHtmlForPrompter(
     console.log(`[clPrompter] styleUri: ${styleUri}`);
     console.log('[clPrompter] extensionUri:', extensionUri.toString());
     console.log('[clPrompter] mediaUri:', vscode.Uri.joinPath(extensionUri, 'media').toString());
-    console.log('[clPrompter] vscodeELementsBundle:', vscodeElementsBundle);
 
 
     return new Promise((resolve, reject) => {

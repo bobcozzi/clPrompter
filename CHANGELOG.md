@@ -2,6 +2,24 @@
 
 All notable changes to this project are documented in this file.
 
+## [0.0.61] - 2026-05-17
+
+### What's New
+
+- **Per-file prompter panels**: Each source member now gets its own independent prompter panel. Prompting a command in file A and then prompting a command in file B opens two fully distinct prompter panels rather than reusing a single shared panel. Panels are keyed by source file URI; now when you prompt a command and go back to the source view without completing or cancelling the prompt panel, and then prompt a different command, the panel is refreshed with the new command's prompt — updating the existing prompt panel.
+- **`&` field expansion on regular prompt inputs**: Typing `&` alone in any regular prompt input field and tabbing away or pressing Enter expands the field width. This mirrors the IBM i green-screen CL prompter's `&` expand behavior — configuration settings for maximum expansion size and increment size are available in the extension settings. Textarea fields (long-text parameters such as the CMD parameter of the SBMJOB command) already have a drag-to-resize handle and do not require the `&` to expand feature.
+
+
+- **"Fetching definition" progress notification**: A VS Code progress panel is displayed when fetching a command's prompter definition. The notification dismisses automatically when the fetch completes. Subsequent prompts for the same command use a new in-memory cache.
+
+### What's Fixed
+
+- **Wrong prompter panel shown when switching source files**: The `webviewReady` message handler had a closure bug — it captured `xml`, `cmdName`, `cmdLabel`, and `cmdComment` from the constructor scope. After `setXML` updated those fields and reloaded the webview, the handler sent the original (first) command's XML to the new webview. Fixed by reading `this._xml`, `this._cmdName`, `this._cmdLabel`, and `this._cmdComment` at the time the message fires.
+
+- **`setXML` now fully reinitializes panel state for the new command**: When reusing an existing panel for a different command, `_parmMetas`, `_parmMap`, and `_presentParms` are now rebuilt from the incoming XML — preventing stale parameter metadata from the previous command from leaking into the new prompt.
+
+---
+
 ## [0.0.60] - 2026-05-14
 
 ### What's Fixed

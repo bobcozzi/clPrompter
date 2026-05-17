@@ -76,7 +76,9 @@ let state: PrompterState = {
   valToMapToMap: {},
   defaultValMap: {},
   pmtCtlMap: {},
-  showAllParms: false
+  showAllParms: false,
+  parmExpansionMax: 5000,
+  parmExpansionSize: 16
 };
 
 // VS Code API
@@ -125,6 +127,18 @@ function createPromptLabel(promptText: string, kwd: string, inputName: string, r
   return label;
 }
 
+// Resolve InlPmtLen attribute string to a display-width number.
+// *PWD / PWD => 10 (use 10-char initial width for password fields)
+// *CALC or empty => undefined (let Len govern)
+// numeric string => parsed number
+function resolveInlPmtLen(val: string): number | undefined {
+  const upper = val.trim().toUpperCase();
+  if (upper === 'PWD' || upper === '*PWD') { return 10; }
+  if (!upper || upper === '*CALC') { return undefined; }
+  const n = Number.parseInt(val, 10);
+  return Number.isFinite(n) ? n : undefined;
+}
+
 // Ensure inputs are wide enough to display content and XML sizing hints.
 // Uses 'ch' units so width matches character counts.
 // Automatically expands to fit CL variable names (e.g., &OUTPUTPTY).
@@ -151,12 +165,13 @@ function ensureMinInputWidth(
   const clVarMatch = current.match(/&[A-Z_][A-Z0-9_]*/gi);
   const clVarLen = clVarMatch ? Math.max(...clVarMatch.map(v => v.length)) : 0;
 
-  // Use the longest of: parameter length, inline prompt length, current value length, or CL variable length
-  // Add extra padding to prevent truncation of the last character
-  const minCh = Math.max(4, len, inl, valueLen, clVarLen) + 1;
+  // InlPmtLen governs initial display width when set; otherwise use Len.
+  // The field can always expand to show the current value.
+  const baseLen = inl > 0 ? inl : len;
+  const minCh = Math.max(4, baseLen, valueLen, clVarLen) + 1;
 
   // Only set 'size' for text-like inputs, NEVER for <select> (setting size > 1 turns it into a list box)
-  if (tag === 'input' && (type === 'text' || type === 'search' || type === 'email' || type === 'url')) {
+  if (tag === 'input' && (type === 'text' || type === 'search' || type === 'email' || type === 'url' || type === 'password')) {
     if ('size' in anyEl && typeof anyEl.size === 'number') {
       anyEl.size = minCh;
     }
@@ -378,7 +393,7 @@ function parseRange(suggestions: string[]): { min: string, max: string } | null 
 }
 
 // Helper: Configure range validation on an input element using native HTML attributes
-function configureRangeValidation(input: HTMLInputElement, suggestions: string[], container?: HTMLElement): void {
+function configureRangeValidation(input: HTMLInputElement, suggestions: string[], container?: HTMLElement, alwVar?: boolean): void {
   const range = parseRange(suggestions);
   if (!range) return;
 
@@ -435,8 +450,16 @@ function configureRangeValidation(input: HTMLInputElement, suggestions: string[]
 
     const valueUpper = input.value.toUpperCase();
 
-    // Allow CL variables (start with &) - no validation needed
+    // CL variable handling — respect AlwVar attribute
     if (input.value.startsWith('&')) {
+      if (alwVar === false) {
+        const msg = 'CL variable not allowed for this parameter';
+        input.setCustomValidity(msg);
+        input.classList.add('validation-error');
+        errorSpan.textContent = msg;
+        errorSpan.classList.add('visible');
+        return;
+      }
       input.setCustomValidity('');
       input.style.color = '#006400'; // Valid - dark green
       input.classList.remove('validation-error');
@@ -509,7 +532,7 @@ function configureRangeValidation(input: HTMLInputElement, suggestions: string[]
 }
 
 // Validate Full="YES" fields - exact length required unless CL variable/expression
-function configureFullValidation(input: HTMLInputElement, requiredLength: number, container?: HTMLElement): void {
+function configureFullValidation(input: HTMLInputElement, requiredLength: number, container?: HTMLElement, alwVar?: boolean): void {
   if (!requiredLength || requiredLength <= 0) return;
 
   // Create error message span
@@ -542,8 +565,16 @@ function configureFullValidation(input: HTMLInputElement, requiredLength: number
       return;
     }
 
-    // Allow CL variables or expressions containing &
+    // CL variable handling — respect AlwVar attribute
     if (input.value.includes('&')) {
+      if (alwVar === false) {
+        const msg = 'CL variable not allowed for this parameter';
+        input.setCustomValidity(msg);
+        input.classList.add('validation-error');
+        errorSpan.textContent = msg;
+        errorSpan.classList.add('visible');
+        return;
+      }
       input.setCustomValidity('');
       input.style.color = '#006400'; // Valid - dark green
       input.classList.remove('validation-error');
@@ -594,7 +625,7 @@ function configureFullValidation(input: HTMLInputElement, requiredLength: number
 }
 
 // Validate Rstd=Y fields — value must match one of the allowed values exactly (case-insensitive)
-function configureRstdValidation(input: HTMLInputElement, suggestions: string[], container?: HTMLElement): void {
+function configureRstdValidation(input: HTMLInputElement, suggestions: string[], container?: HTMLElement, alwVar?: boolean): void {
   // Filter metadata entries; only keep actual display values
   const displayValues = suggestions.filter(s => !s.startsWith('_RANGE_') && !s.startsWith('_REL_'));
   if (displayValues.length === 0) return;
@@ -625,8 +656,16 @@ function configureRstdValidation(input: HTMLInputElement, suggestions: string[],
       return;
     }
 
-    // CL variables (start with &) bypass Rstd restriction
+    // CL variable handling — respect AlwVar attribute
     if (input.value.startsWith('&')) {
+      if (alwVar === false) {
+        const msg = 'CL variable not allowed for this parameter';
+        input.setCustomValidity(msg);
+        input.classList.add('validation-error');
+        errorSpan.textContent = msg;
+        errorSpan.classList.add('visible');
+        return;
+      }
       input.setCustomValidity('');
       input.style.color = '#006400';
       input.classList.remove('validation-error');
@@ -705,7 +744,7 @@ function buildConstraintHint(suggestions: string[]): string {
 }
 
 // Validate Rel/RelVal constraint fields — value must satisfy the relational constraint
-function configureRelValidation(input: HTMLInputElement, suggestions: string[], container?: HTMLElement): void {
+function configureRelValidation(input: HTMLInputElement, suggestions: string[], container?: HTMLElement, alwVar?: boolean): void {
   const constraints = parseRelConstraints(suggestions);
   if (constraints.length === 0) return;
 
@@ -737,8 +776,16 @@ function configureRelValidation(input: HTMLInputElement, suggestions: string[], 
       return;
     }
 
-    // CL variables bypass constraint validation
+    // CL variable handling — respect AlwVar attribute
     if (input.value.startsWith('&')) {
+      if (alwVar === false) {
+        const msg = 'CL variable not allowed for this parameter';
+        input.setCustomValidity(msg);
+        input.classList.add('validation-error');
+        errorSpan.textContent = msg;
+        errorSpan.classList.add('visible');
+        return;
+      }
       input.setCustomValidity('');
       input.style.color = '#006400';
       input.classList.remove('validation-error');
@@ -836,7 +883,7 @@ function parseDepRelConstraints(suggestions: string[]): { op: string; cmpKwd: st
 }
 
 // Validate cross-parameter constraints — e.g. AMOUNT must be > the value of parameter B
-function configureDepRelValidation(input: HTMLInputElement, suggestions: string[], container?: HTMLElement): void {
+function configureDepRelValidation(input: HTMLInputElement, suggestions: string[], container?: HTMLElement, alwVar?: boolean): void {
   const constraints = parseDepRelConstraints(suggestions);
   if (constraints.length === 0) return;
 
@@ -876,7 +923,16 @@ function configureDepRelValidation(input: HTMLInputElement, suggestions: string[
       errorSpan.textContent = '';
       return;
     }
+    // CL variable handling — respect AlwVar attribute
     if (input.value.startsWith('&')) {
+      if (alwVar === false) {
+        const msg = 'CL variable not allowed for this parameter';
+        input.setCustomValidity(msg);
+        input.classList.add('validation-error');
+        errorSpan.textContent = msg;
+        errorSpan.classList.add('visible');
+        return;
+      }
       input.setCustomValidity('');
       input.style.color = '#006400';
       input.classList.remove('validation-error');
@@ -951,6 +1007,89 @@ function configureDepRelValidation(input: HTMLInputElement, suggestions: string[
   });
 }
 
+// Validate AlwVar=NO fields — CL variables (starting with &) are not allowed
+function configureAlwVarValidation(input: HTMLInputElement, container?: HTMLElement): void {
+  const errorSpan = document.createElement('span');
+  errorSpan.className = 'prompter-error-msg';
+
+  const targetElement = container || input;
+  const parent = targetElement.parentElement || targetElement.parentNode;
+  if (parent) {
+    const wrapper = document.createElement('div');
+    wrapper.className = 'parm-validation-wrapper';
+    parent.replaceChild(wrapper, targetElement);
+    wrapper.appendChild(targetElement);
+    wrapper.appendChild(errorSpan);
+  }
+
+  const validateAlwVar = () => {
+    if (!input.value || !input.value.startsWith('&')) {
+      input.setCustomValidity('');
+      input.classList.remove('validation-error');
+      errorSpan.classList.remove('visible');
+      errorSpan.textContent = '';
+      return;
+    }
+    const msg = 'CL variable not allowed for this parameter';
+    input.setCustomValidity(msg);
+    input.classList.add('validation-error');
+    errorSpan.textContent = msg;
+    errorSpan.classList.add('visible');
+  };
+
+  input.addEventListener('blur', validateAlwVar);
+  input.addEventListener('keydown', (e: KeyboardEvent) => {
+    if (e.key === 'Enter') validateAlwVar();
+  });
+}
+
+// Validate RtnVal=YES fields — value MUST be a CL variable name
+function configureRtnValValidation(input: HTMLInputElement, container?: HTMLElement): void {
+  input.placeholder = '&variable';
+
+  const errorSpan = document.createElement('span');
+  errorSpan.className = 'prompter-error-msg';
+
+  const targetElement = container || input;
+  const parent = targetElement.parentElement || targetElement.parentNode;
+  if (parent) {
+    const wrapper = document.createElement('div');
+    wrapper.className = 'parm-validation-wrapper';
+    parent.replaceChild(wrapper, targetElement);
+    wrapper.appendChild(targetElement);
+    wrapper.appendChild(errorSpan);
+  }
+
+  const CL_VAR_PATTERN = /^&[A-Z][A-Z0-9_]{0,21}$/i;
+  const validateRtnVal = () => {
+    if (!input.value) {
+      input.setCustomValidity('');
+      input.classList.remove('validation-error');
+      errorSpan.classList.remove('visible');
+      errorSpan.textContent = '';
+      return;
+    }
+    if (CL_VAR_PATTERN.test(input.value)) {
+      input.setCustomValidity('');
+      input.style.color = '#006400';
+      input.classList.remove('validation-error');
+      errorSpan.classList.remove('visible');
+      errorSpan.textContent = '';
+      return;
+    }
+    const msg = 'A CL variable name is required (e.g., &VARNAME)';
+    input.setCustomValidity(msg);
+    input.classList.add('validation-error');
+    errorSpan.textContent = msg;
+    errorSpan.classList.add('visible');
+  };
+
+  input.addEventListener('blur', validateRtnVal);
+  input.addEventListener('keydown', (e: KeyboardEvent) => {
+    if (e.key === 'Enter') validateRtnVal();
+  });
+}
+
 // ========================================
 // CENTRALIZED VALIDATION SETUP
 // ========================================
@@ -965,22 +1104,30 @@ interface ValidationAttributes {
   full?: string;                // For exact length validation (Full="YES")
   len?: string;                 // Parameter length
   isRestricted?: boolean;       // For Rstd=Y validation
+  alwVar?: boolean;             // AlwVar=NO: CL variables not permitted
+  rtnVal?: boolean;             // RtnVal=YES: only a CL variable may be specified
 }
 
 function setupValidations(input: HTMLInputElement, attrs: ValidationAttributes, container?: HTMLElement): void {
   // Defer all validation setup until after DOM insertion
   // This ensures the input element is in the DOM before we try to wrap it
   setTimeout(() => {
+    // RtnVal=YES: only a CL variable is permitted — skip all other validators
+    if (attrs.rtnVal) {
+      configureRtnValValidation(input, container);
+      return;
+    }
+
     // Range validation (RangeMinVal/RangeMaxVal)
     if (attrs.suggestions && parseRange(attrs.suggestions)) {
-      configureRangeValidation(input, attrs.suggestions, container);
+      configureRangeValidation(input, attrs.suggestions, container, attrs.alwVar);
     }
 
     // Full length validation (Full="YES")
     if (attrs.full?.toUpperCase() === 'YES' && attrs.len) {
       const requiredLength = parseInt(attrs.len, 10);
       if (!isNaN(requiredLength) && requiredLength > 0) {
-        configureFullValidation(input, requiredLength, container);
+        configureFullValidation(input, requiredLength, container, attrs.alwVar);
       }
     }
 
@@ -988,18 +1135,30 @@ function setupValidations(input: HTMLInputElement, attrs: ValidationAttributes, 
     if (attrs.isRestricted && attrs.suggestions) {
       const displayVals = attrs.suggestions.filter(s => !s.startsWith('_RANGE_') && !s.startsWith('_REL_') && !s.startsWith('_DEPREL_'));
       if (displayVals.length > 0) {
-        configureRstdValidation(input, attrs.suggestions, container);
+        configureRstdValidation(input, attrs.suggestions, container, attrs.alwVar);
       }
     }
 
     // Rel/RelVal constraint validation
     if (attrs.suggestions && parseRelConstraints(attrs.suggestions).length > 0) {
-      configureRelValidation(input, attrs.suggestions, container);
+      configureRelValidation(input, attrs.suggestions, container, attrs.alwVar);
     }
 
     // Cross-parameter Dep/DepParm constraint validation
     if (attrs.suggestions && parseDepRelConstraints(attrs.suggestions).length > 0) {
-      configureDepRelValidation(input, attrs.suggestions, container);
+      configureDepRelValidation(input, attrs.suggestions, container, attrs.alwVar);
+    }
+
+    // AlwVar=NO: reject CL variables — add standalone check if no other validator covers it
+    if (attrs.alwVar === false) {
+      const hasRangeValidation = attrs.suggestions && parseRange(attrs.suggestions);
+      const hasFullValidation = attrs.full?.toUpperCase() === 'YES' && attrs.len && !isNaN(parseInt(attrs.len, 10));
+      const hasRstdValidation = attrs.isRestricted && attrs.suggestions?.some(s => !s.startsWith('_RANGE_') && !s.startsWith('_REL_') && !s.startsWith('_DEPREL_'));
+      const hasRelValidation = attrs.suggestions && parseRelConstraints(attrs.suggestions).length > 0;
+      const hasDepRelValidation = attrs.suggestions && parseDepRelConstraints(attrs.suggestions).length > 0;
+      if (!hasRangeValidation && !hasFullValidation && !hasRstdValidation && !hasRelValidation && !hasDepRelValidation) {
+        configureAlwVarValidation(input, container);
+      }
     }
   }, 0);
 }
@@ -1117,7 +1276,7 @@ function configureTabOrder(focusFirst: boolean = true): void {
 
   // Get all focusable input elements from the form in DOM order
   const formInputs = Array.from(form.querySelectorAll<HTMLElement>(
-    'input[type="text"], textarea, select, .cbinput-input'
+    'input[type="text"], input[type="password"], textarea, select, .cbinput-input'
   ));
   allInputs.push(...formInputs);
 
@@ -1358,7 +1517,7 @@ function configureFocusIndicators(): void {
 }
 
 
-function createInputForType(type: string, name: string, dft: string, len: string, suggestions: string[], isRestricted: boolean = false, full?: string): HTMLElement {
+function createInputForType(type: string, name: string, dft: string, len: string, suggestions: string[], isRestricted: boolean = false, full?: string, alwVar?: boolean, dspInput?: string, rtnVal?: boolean): HTMLElement {
   const effectiveLen = len ? parseInt(len, 10) : getDefaultLengthForType(type);
   const dftLen = (dft || '').length;
   const typeUpper = type.toUpperCase();
@@ -1367,7 +1526,8 @@ function createInputForType(type: string, name: string, dft: string, len: string
   // CMD/CMDSTR types should always use textarea for command strings (can be up to 20000 chars)
   // CMD is IBM-reserved for inline commands (IF, ELSE, etc), CMDSTR is user-available equivalent
   const isCmdType = typeUpper === 'CMD' || typeUpper === 'CMDSTR';
-  const useLongInput = isLglType || isCmdType || effectiveLen > 80 || dftLen > 80;
+  // DspInput=NO means password field — always use a single-line input, never textarea
+  const useLongInput = (dspInput === 'NO') ? false : (isLglType || isCmdType || effectiveLen > 80 || dftLen > 80);
 
   console.log(`[createInputForType] name=${name}, type=${type}, effectiveLen=${effectiveLen}, dftLen=${dftLen}, isRestricted=${isRestricted}, isLglType=${isLglType}, isCmdType=${isCmdType}, useLongInput=${useLongInput}, suggestions:`, suggestions, 'dft:', dft);
 
@@ -1473,6 +1633,27 @@ function createInputForType(type: string, name: string, dft: string, len: string
       input.classList.add(getLengthClass(effectiveLen));
       attachTouchTracking(input);
 
+      // Track the most-recent non-& value for & expansion.
+      input.dataset.preExpandValue = input.value;
+      input.addEventListener('input', () => {
+        if (input.value !== '&') {
+          input.dataset.preExpandValue = input.value;
+        }
+      });
+      // & expansion: a lone '&' tabbed away — expand the field and restore the prior value.
+      input.addEventListener('blur', () => {
+        if (input.value === '&') {
+          const currentSize = (typeof input.size === 'number' && input.size > 0) ? input.size : 10;
+          const newSize = Math.min(currentSize + state.parmExpansionSize, state.parmExpansionMax);
+          input.size = newSize;
+          const widthCss = `calc(${newSize}ch + 8px)`;
+          input.style.width = widthCss;
+          input.style.minWidth = widthCss;
+          input.value = input.dataset.preExpandValue ?? '';
+          input.focus();
+        }
+      });
+
       // Show constraint hint to right of input (e.g. "> 50", "1 to 100")
       const hint = buildConstraintHint(suggestions);
       if (hint) {
@@ -1483,11 +1664,11 @@ function createInputForType(type: string, name: string, dft: string, len: string
         hintSpan.className = 'constraint-hint';
         hintSpan.textContent = hint;
         hintContainer.appendChild(hintSpan);
-        setupValidations(input, { suggestions, full, len }, hintContainer);
+        setupValidations(input, { suggestions, full, len, alwVar, rtnVal }, hintContainer);
         return hintContainer;
       }
 
-      setupValidations(input, { suggestions, full, len });
+      setupValidations(input, { suggestions, full, len, alwVar, rtnVal });
       return input;
     }
 
@@ -1512,7 +1693,30 @@ function createInputForType(type: string, name: string, dft: string, len: string
 
     const inputElement = cbinput.getInputElement();
     inputElement.dataset.default = normalizedDft; // mirrors what non-cbInput paths do; used by isFieldSpecified
+    if (dspInput === 'NO') { inputElement.type = 'password'; }
     attachTouchTracking(inputElement);
+
+    // Track the most-recent non-& value for & expansion.
+    inputElement.dataset.preExpandValue = inputElement.value;
+    inputElement.addEventListener('input', () => {
+      if (inputElement.value !== '&') {
+        inputElement.dataset.preExpandValue = inputElement.value;
+      }
+    });
+    // & expansion: a lone '&' tabbed away — expand the cbInput container and restore the prior value.
+    inputElement.addEventListener('blur', () => {
+      if (inputElement.value === '&') {
+        const cbContainer = cbinput.getElement() as HTMLElement;
+        const widthMatch = cbContainer.style.width.match(/^(\d+(?:\.\d+)?)ch$/);
+        const currentCh = widthMatch ? parseFloat(widthMatch[1]) : 15;
+        const newCh = Math.min(currentCh + state.parmExpansionSize, state.parmExpansionMax);
+        cbContainer.style.width = `${newCh}ch`;
+        cbContainer.style.minWidth = `${newCh}ch`;
+        inputElement.value = inputElement.dataset.preExpandValue ?? '';
+        inputElement.focus();
+        return;
+      }
+    });
 
     // Add blur handler to normalize values against allowed values
     inputElement.addEventListener('blur', () => {
@@ -1527,7 +1731,7 @@ function createInputForType(type: string, name: string, dft: string, len: string
     if (parseRange(suggestions)) {
       const container = cbinput.getElement();
       setTimeout(() => {
-        configureRangeValidation(inputElement, suggestions, container);
+        configureRangeValidation(inputElement, suggestions, container, alwVar);
       }, 0);
     }
 
@@ -1535,7 +1739,7 @@ function createInputForType(type: string, name: string, dft: string, len: string
     if (parseRelConstraints(suggestions).length > 0) {
       const relContainer = cbinput.getElement();
       setTimeout(() => {
-        configureRelValidation(inputElement, suggestions, relContainer);
+        configureRelValidation(inputElement, suggestions, relContainer, alwVar);
       }, 0);
     }
 
@@ -1589,6 +1793,7 @@ function createInputForType(type: string, name: string, dft: string, len: string
   } else {
     const input = document.createElement('input');
     input.type = 'text';
+    if (dspInput === 'NO') { input.type = 'password'; }
     input.name = name;
     input.value = dft || '';
     input.dataset.default = dft || '';
@@ -1597,8 +1802,34 @@ function createInputForType(type: string, name: string, dft: string, len: string
 
     // Add blur handler for VARNAME validation only (no case conversion)
     console.log('[createInputForType] Attaching blur handler to:', name, 'type:', type);
+
+    // Track the most-recent non-& value so it can be restored after a & expansion.
+    input.dataset.preExpandValue = input.value;
+    input.addEventListener('input', () => {
+      if (input.value !== '&') {
+        input.dataset.preExpandValue = input.value;
+      }
+    });
+
     input.addEventListener('blur', () => {
       console.log('[blur handler] Fired for:', input.name, 'value:', input.value, 'type:', type);
+
+      // IBM i CL prompter expand: a lone '&' tabbed away — expand the field and restore the prior value.
+      // '&' alone (not '&NAME') signals the user wants more input space.
+      // Expansion is done on blur so partial CL variable names like '&N' are not prematurely widened.
+      if (input.value === '&') {
+        const currentSize = (typeof input.size === 'number' && input.size > 0) ? input.size : 10;
+        const newSize = Math.min(currentSize + state.parmExpansionSize, state.parmExpansionMax);
+        input.size = newSize;
+        // Set both width and minWidth as inline styles so they override the fixed CSS class width (e.g. .input-sm { width: 120px }).
+        const widthCss = `calc(${newSize}ch + 8px)`;
+        input.style.width = widthCss;
+        input.style.minWidth = widthCss;
+        input.value = input.dataset.preExpandValue ?? '';
+        input.focus();
+        return;
+      }
+
       const typeUpper = type.toUpperCase();
 
       // Type=VARNAME validation: must start with & and be max 11 chars total
@@ -1624,16 +1855,20 @@ function createInputForType(type: string, name: string, dft: string, len: string
       // Note: Case conversion is handled by buildCLCommand() based on convertParmValueToUpperCase setting
     });
 
-    // Configure all validations (range, full, future validations)
-    setupValidations(input, { suggestions, full, len });
+    // Configure all validations (range, full, alwVar, rtnVal, etc.)
+    setupValidations(input, { suggestions, full, len, alwVar, rtnVal });
 
     return input;
   }
 }
 
 // Create parm input (cbInput or textfield for all parameters to support CL variables)
-function createParmInput(name: string, suggestions: string[], isRestricted: boolean, dft: string, len?: string, type?: string, full?: string): HTMLElement {
+function createParmInput(name: string, suggestions: string[], isRestricted: boolean, dft: string, len?: string, type?: string, full?: string, alwVar?: boolean, dspInput?: string, rtnVal?: boolean): HTMLElement {
   console.log(`[createParmInput] ${name}: suggestions=`, suggestions, 'isRestricted=', isRestricted, 'type=', type, 'full=', full);
+  // RtnVal=YES: skip CBInput path — only a CL variable name may be specified
+  if (rtnVal) {
+    return createInputForType(type || 'CHAR', name, dft, len || '', suggestions, false, full, alwVar, dspInput, rtnVal);
+  }
   // Even restricted parameters must support CL variables, so always use cbInput when there are suggestions
   if (isRestricted && suggestions.length > 0) {
     // Filter metadata markers out of the display list for the dropdown options
@@ -1660,14 +1895,36 @@ function createParmInput(name: string, suggestions: string[], isRestricted: bool
 
     const inputElement = cbinput.getInputElement();
     inputElement.dataset.default = normalizedDft; // mirrors what non-cbInput paths do; used by isFieldSpecified
+    if (dspInput === 'NO') { inputElement.type = 'password'; }
     attachTouchTracking(inputElement);
+
+    // Track the most-recent non-& value for & expansion.
+    inputElement.dataset.preExpandValue = inputElement.value;
+    inputElement.addEventListener('input', () => {
+      if (inputElement.value !== '&') {
+        inputElement.dataset.preExpandValue = inputElement.value;
+      }
+    });
+    // & expansion: a lone '&' tabbed away — expand the cbInput container and restore the prior value.
+    inputElement.addEventListener('blur', () => {
+      if (inputElement.value === '&') {
+        const cbContainer = cbinput.getElement() as HTMLElement;
+        const widthMatch = cbContainer.style.width.match(/^(\d+(?:\.\d+)?)ch$/);
+        const currentCh = widthMatch ? parseFloat(widthMatch[1]) : 15;
+        const newCh = Math.min(currentCh + state.parmExpansionSize, state.parmExpansionMax);
+        cbContainer.style.width = `${newCh}ch`;
+        cbContainer.style.minWidth = `${newCh}ch`;
+        inputElement.value = inputElement.dataset.preExpandValue ?? '';
+        inputElement.focus();
+      }
+    });
 
     // Attach Rstd validation (shows "Value entered is not valid" for values outside the allowed list)
     setTimeout(() => {
-      configureRstdValidation(inputElement, suggestions, cbinput.getElement());
+      configureRstdValidation(inputElement, suggestions, cbinput.getElement(), alwVar);
       // Also attach Rel/RelVal constraint validation if any _REL_ entries exist
       if (parseRelConstraints(suggestions).length > 0) {
-        configureRelValidation(inputElement, suggestions);
+        configureRelValidation(inputElement, suggestions, undefined, alwVar);
       }
     }, 0);
 
@@ -1675,7 +1932,7 @@ function createParmInput(name: string, suggestions: string[], isRestricted: bool
     return cbinput.getElement();
   } else {
     console.log('[clPrompter] ', 'createParmInput end2');
-    return createInputForType(type || 'CHAR', name, dft, len || '', suggestions, isRestricted, full);
+    return createInputForType(type || 'CHAR', name, dft, len || '', suggestions, isRestricted, full, alwVar, dspInput, rtnVal);
   }
 }
 
@@ -1732,10 +1989,12 @@ function createQualInput(
   }
 
   // Size: prefer Qual Len and InlPmtLen; expand later on populate if value grows
-  const inl = Number.parseInt(String(qual?.getAttribute('InlPmtLen') || ''), 10) || undefined;
+  const inl = resolveInlPmtLen(String(qual?.getAttribute('InlPmtLen') || ''));
   const len = Number.parseInt(String(qual?.getAttribute('Len') || ''), 10) || undefined;
   const full = String(qual?.getAttribute('Full') || '');
-  const input = createParmInput(qualName, allowedVals, restricted, dft, qualLen, qualType, full);
+  const alwVar = qual?.getAttribute('AlwVar') !== 'NO';
+  const dspInput = String(qual?.getAttribute('DspInput') || '');
+  const input = createParmInput(qualName, allowedVals, restricted, dft, qualLen, qualType, full, alwVar, dspInput);
   ensureMinInputWidth(input as HTMLElement, { len, inlPmtLen: inl });
 
   return input;
@@ -1789,10 +2048,12 @@ function createElemInput(
     }
   }
 
-  const inl = Number.parseInt(String(elem?.getAttribute('InlPmtLen') || ''), 10) || undefined;
+  const inl = resolveInlPmtLen(String(elem?.getAttribute('InlPmtLen') || ''));
   const len = Number.parseInt(String(elem?.getAttribute('Len') || ''), 10) || undefined;
   const full = String(elem?.getAttribute('Full') || '');
-  const input = createParmInput(elemName, allowedVals, restricted, dft, elemLen, elemType, full);
+  const alwVar = elem?.getAttribute('AlwVar') !== 'NO';
+  const dspInput = String(elem?.getAttribute('DspInput') || '');
+  const input = createParmInput(elemName, allowedVals, restricted, dft, elemLen, elemType, full, alwVar, dspInput);
   ensureMinInputWidth(input as HTMLElement, { len, inlPmtLen: inl });
 
   return input;
@@ -1808,16 +2069,21 @@ function renderSimpleParm(parm: ParmElement, kwd: string, container: HTMLElement
   const lenAttr = String(parm.getAttribute('Len') || '');
   const fullAttr = String(parm.getAttribute('Full') || '');
   const inlPmtLen = String(parm.getAttribute('InlPmtLen') || '');
-  // Use Len if available, otherwise fall back to InlPmtLen (for types like CMD, PNAME, etc.)
-  const effectiveLenAttr = lenAttr || inlPmtLen;
+  // Prefer InlPmtLen for display width (it is the inline prompt display length).
+  // Len is the storage capacity; for fields like PASSWORD with Len=128 but InlPmtLen=PWD,
+  // we must not trigger useLongInput based on the storage length.
+  const inl = resolveInlPmtLen(inlPmtLen);
+  const effectiveLenAttr = inl !== undefined ? String(inl) : lenAttr;
 
   const inputName = kwd;
   const allowedVals = (state.allowedValsMap || {})[inputName] || [];
   const restricted = isRestricted(parm as unknown as Element);
 
   const len = Number.parseInt(lenAttr, 10) || undefined;
-  const inl = Number.parseInt(inlPmtLen, 10) || undefined;
-  const input = createParmInput(inputName, allowedVals, restricted, dft, effectiveLenAttr, type, fullAttr);
+  const alwVar = parm.getAttribute('AlwVar') !== 'NO';
+  const dspInput = String(parm.getAttribute('DspInput') || '');
+  const rtnVal = parm.getAttribute('RtnVal') === 'YES';
+  const input = createParmInput(inputName, allowedVals, restricted, dft, effectiveLenAttr, type, fullAttr, alwVar, dspInput, rtnVal);
   ensureMinInputWidth(input as HTMLElement, { len, inlPmtLen: inl });
 
   // Wrap in form-group for 5250-style grid layout with prompt and keyword in label
@@ -1977,7 +2243,7 @@ function populateSimpleParm(kwd: string, parm: Element, value: string) {
 
     input.value = normalizedValue;
     const len = Number.parseInt(String(parm.getAttribute('Len') || ''), 10) || undefined;
-    const inl = Number.parseInt(String(parm.getAttribute('InlPmtLen') || ''), 10) || undefined;
+    const inl = resolveInlPmtLen(String(parm.getAttribute('InlPmtLen') || ''));
     ensureMinInputWidth(input as HTMLElement, { len, inlPmtLen: inl, valueLen: normalizedValue.length });
   }
 }
@@ -2710,6 +2976,14 @@ function populateFormFromValues(values: ParmMap): void {
   // Validate all range inputs after population
   requestAnimationFrame(() => validateAllRangeInputs());
 
+  // After programmatic population, sync preExpandValue for all inputs that use & expansion.
+  // Setting input.value programmatically does NOT fire the 'input' event, so the listener
+  // that normally tracks preExpandValue never ran. Update it now so blur-based expansion
+  // restores the correct populated value rather than the empty initial default.
+  document.querySelectorAll<HTMLInputElement>('input[data-pre-expand-value]').forEach(el => {
+    el.dataset.preExpandValue = el.value;
+  });
+
   console.log('[clPrompter] populateFormFromValues end');
 }
 
@@ -2771,7 +3045,7 @@ function populateElemInputs(parm: ParmElement, parmMeta: ParmMetaMap[string], kw
             input.value = normalizedVal;
             console.log(`[clPrompter] Set ${kwd}_INST${idx}_ELEM${i}_SUB${j} to "${input.value}"`);
             const len = Number.parseInt(String(sNode?.getAttribute('Len') || ''), 10) || undefined;
-            const inl = Number.parseInt(String(sNode?.getAttribute('InlPmtLen') || ''), 10) || undefined;
+            const inl = resolveInlPmtLen(String(sNode?.getAttribute('InlPmtLen') || ''));
             ensureMinInputWidth(input as HTMLElement, { len, inlPmtLen: inl, valueLen: String(subPart ?? '').length });
           } else {
             console.log(`[clPrompter] Input not found for ${kwd}_INST${idx}_ELEM${i}_SUB${j}`);
@@ -2798,7 +3072,7 @@ function populateElemInputs(parm: ParmElement, parmMeta: ParmMetaMap[string], kw
           input.value = normalizedVal;
           console.log(`[clPrompter] Set ${kwd}_INST${idx}_ELEM${i} to "${input.value}"`);
           const len = Number.parseInt(String(elem.getAttribute('Len') || ''), 10) || undefined;
-          const inl = Number.parseInt(String(elem.getAttribute('InlPmtLen') || ''), 10) || undefined;
+          const inl = resolveInlPmtLen(String(elem.getAttribute('InlPmtLen') || ''));
           ensureMinInputWidth(input as HTMLElement, { len, inlPmtLen: inl, valueLen: String(elemValue ?? '').length });
         } else {
           console.log(`[clPrompter] Input not found for ${kwd}_INST${idx}_ELEM${i}`);
@@ -4230,6 +4504,15 @@ function wirePrompterControls(): void {
       // For regular inputs, Enter should submit the form
       e.preventDefault();
       if (form) {
+        // A lone '&' means the user wants field expansion, not form submission.
+        // Blur to trigger the expansion handler and stop here.
+        if ((target as HTMLInputElement).value === '&') {
+          (target as HTMLElement).blur();
+          return;
+        }
+        // Blur the active element first so blur-dependent handlers run (e.g. & field expansion)
+        // before form values are collected for submission.
+        (target as HTMLElement).blur();
         console.log('[Enter key] Submitting form from:', target.tagName, 'name:', (target as HTMLInputElement).name);
         (form as HTMLFormElement).requestSubmit();
       }
@@ -4340,6 +4623,18 @@ window.addEventListener('message', event => {
     if (config && typeof config.convertParmValueToUpperCase === 'boolean') {
       state.convertParmValueToUpperCase = config.convertParmValueToUpperCase;
       console.log('[clPrompter] convertParmValueToUpperCase set to:', state.convertParmValueToUpperCase);
+    }
+
+    // Store the parmExpansionMax setting
+    if (config && typeof config.parmExpansionMax === 'number' && config.parmExpansionMax >= 16) {
+      state.parmExpansionMax = config.parmExpansionMax;
+      console.log('[clPrompter] parmExpansionMax set to:', state.parmExpansionMax);
+    }
+
+    // Store the parmExpansionSize setting
+    if (config && typeof config.parmExpansionSize === 'number' && config.parmExpansionSize >= 1) {
+      state.parmExpansionSize = config.parmExpansionSize;
+      console.log('[clPrompter] parmExpansionSize set to:', state.parmExpansionSize);
     }
 
     const _tPreLoad = performance.now();

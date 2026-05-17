@@ -227,9 +227,10 @@ export function buildCLCommand(
 
       const allowedVals = allowedValsMap[kwd] || [];
       const parmType = updatedTypeMap[kwd] || "";
+      const isMixedCase = metaForKwd?.Case?.toUpperCase() === 'MIXED';
       const qualStrings = qualInstances.map(instanceArr =>
         instanceArr
-          .map((v, idx) => quoteIfNeeded(v, allowedVals, parmType, convertParmValueToUpperCase))
+          .map((v, idx) => quoteIfNeeded(v, allowedVals, parmType, convertParmValueToUpperCase, isMixedCase))
           .join('/')
       );
       cmd += ` ${kwd}(${qualStrings.join(' ')})`;
@@ -312,6 +313,7 @@ export function buildCLCommand(
 
     const allowedVals = allowedValsMap[key] || [];
     const parmType = updatedTypeMap[key] || "";
+    const isMixedCase = meta.Case?.toUpperCase() === 'MIXED';
 
     // --- BEGIN ELEM-EMIT ---
     if (hasElemChildren && Array.isArray(value)) {
@@ -321,16 +323,16 @@ export function buildCLCommand(
           if (Array.isArray(elemValue)) {
             // Only use slash notation for first ELEM in single-instance parameters
             if (i === 0 && elemValue.length === 2 && !isMultiInstance) {
-              const quoted = elemValue.map(v => quoteIfNeeded(v, allowedVals, parmType, convertParmValueToUpperCase)).reverse();
+              const quoted = elemValue.map(v => quoteIfNeeded(v, allowedVals, parmType, convertParmValueToUpperCase, isMixedCase)).reverse();
               elemParts.push(`${quoted[0]}/${quoted[1]}`);
             } else {
-              const quoted = elemValue.map(v => quoteIfNeeded(v, allowedVals, parmType, convertParmValueToUpperCase));
+              const quoted = elemValue.map(v => quoteIfNeeded(v, allowedVals, parmType, convertParmValueToUpperCase, isMixedCase));
               // For multi-instance, parts are already wrapped here
               elemParts.push(`(${quoted.join(' ')})`);
             }
           } else {
             // Single value - wrap it if multi-instance
-            const quotedValue = quoteIfNeeded(elemValue, allowedVals, parmType, convertParmValueToUpperCase);
+            const quotedValue = quoteIfNeeded(elemValue, allowedVals, parmType, convertParmValueToUpperCase, isMixedCase);
             elemParts.push(isMultiInstance ? `(${quotedValue})` : quotedValue);
           }
         }
@@ -339,8 +341,8 @@ export function buildCLCommand(
       } else {
         const elemParts = value.map((vArr: any) =>
           Array.isArray(vArr)
-            ? vArr.map((v: string) => quoteIfNeeded(v, allowedVals, parmType, convertParmValueToUpperCase)).join(' ')
-            : quoteIfNeeded(vArr, allowedVals, parmType, convertParmValueToUpperCase)
+            ? vArr.map((v: string) => quoteIfNeeded(v, allowedVals, parmType, convertParmValueToUpperCase, isMixedCase)).join(' ')
+            : quoteIfNeeded(vArr, allowedVals, parmType, convertParmValueToUpperCase, isMixedCase)
         );
         if (isMultiInstance) {
           const wrappedParts = elemParts.map(part => `(${part})`);
@@ -388,8 +390,8 @@ export function buildCLCommand(
       if (Array.isArray(value[0])) {
         const qualParts = value.map((vArr: any) =>
           Array.isArray(vArr)
-            ? vArr.slice().filter((x: any) => x !== undefined && x !== null && x !== '').map((v: string) => quoteIfNeeded(v, allowedVals, parmType, convertParmValueToUpperCase)).join('/')
-            : quoteIfNeeded(vArr, allowedVals, parmType, convertParmValueToUpperCase)
+            ? vArr.slice().filter((x: any) => x !== undefined && x !== null && x !== '').map((v: string) => quoteIfNeeded(v, allowedVals, parmType, convertParmValueToUpperCase, isMixedCase)).join('/')
+            : quoteIfNeeded(vArr, allowedVals, parmType, convertParmValueToUpperCase, isMixedCase)
         );
         if (isMultiInstance) {
           const wrappedParts = qualParts.map(part => `(${part})`);
@@ -398,24 +400,24 @@ export function buildCLCommand(
           cmd += ` ${key}(${qualParts.join(' ')})`;
         }
       } else {
-        const qualPart = value.slice().filter((x: any) => x !== undefined && x !== null && x !== '').map((v: string) => quoteIfNeeded(v, allowedVals, parmType, convertParmValueToUpperCase)).join('/');
+        const qualPart = value.slice().filter((x: any) => x !== undefined && x !== null && x !== '').map((v: string) => quoteIfNeeded(v, allowedVals, parmType, convertParmValueToUpperCase, isMixedCase)).join('/');
         cmd += ` ${key}(${qualPart})`;
       }
     } else if (Array.isArray(value)) {
       if (isMultiInstance) {
         if (hasElemChildren || hasQualChildren) {
-          const wrappedValues = value.map(v => `(${quoteIfNeeded(v, allowedVals, parmType, convertParmValueToUpperCase)})`);
+          const wrappedValues = value.map(v => `(${quoteIfNeeded(v, allowedVals, parmType, convertParmValueToUpperCase, isMixedCase)})`);
           cmd += ` ${key}(${wrappedValues.join(' ')})`;
         } else {
-          const quotedParts = value.filter(v => v !== undefined && v !== null && v !== '').map(v => quoteIfNeeded(v, allowedVals, parmType, convertParmValueToUpperCase));
+          const quotedParts = value.filter(v => v !== undefined && v !== null && v !== '').map(v => quoteIfNeeded(v, allowedVals, parmType, convertParmValueToUpperCase, isMixedCase));
           cmd += ` ${key}(${quotedParts.join(' ')})`;
         }
       } else {
-        const quotedParts = value.filter(v => v !== undefined && v !== null && v !== '').map(v => quoteIfNeeded(v, allowedVals, parmType, convertParmValueToUpperCase));
+        const quotedParts = value.filter(v => v !== undefined && v !== null && v !== '').map(v => quoteIfNeeded(v, allowedVals, parmType, convertParmValueToUpperCase, isMixedCase));
         cmd += ` ${key}(${quotedParts.join(' ')})`;
       }
     } else {
-      let q = quoteIfNeeded(String(value).trim(), allowedVals, parmType, convertParmValueToUpperCase);
+      let q = quoteIfNeeded(String(value).trim(), allowedVals, parmType, convertParmValueToUpperCase, isMixedCase);
       cmd += ` ${key}(${q})`;
     }
   }
@@ -573,7 +575,7 @@ function uppercaseVariablesInExpression(val: string): string {
   return result;
 }
 
-export function quoteIfNeeded(val: string, allowedVals: string[] = [], parmType: string = "", convertParmValueToUpperCase: boolean = true): string {
+export function quoteIfNeeded(val: string, allowedVals: string[] = [], parmType: string = "", convertParmValueToUpperCase: boolean = true, isMixedCase: boolean = false): string {
   const trimmed = val.trim();
   const type = parmType.toUpperCase().replace(/^[*]/, "");
 
@@ -628,14 +630,15 @@ export function quoteIfNeeded(val: string, allowedVals: string[] = [], parmType:
   }
 
   // 6. Library-qualified name like QGPL/CUST or with variables like &RMTLIB/&RMTFILE
-  // Split on '/' and validate each part (allows CL variables up to 22 chars)
-  const qualParts = trimmed.split('/');
-  if (qualParts.length === 2) {
-    const [lib, name] = qualParts;
-    const isLibValid = /^[A-Z$#@][A-Z0-9$#@_]{0,10}$/i.test(lib) || CL_VARIABLE_PATTERN.test(lib);
-    const isNameValid = /^[A-Z$#@][A-Z0-9$#@_]{0,10}$/i.test(name) || CL_VARIABLE_PATTERN.test(name);
-    if (isLibValid && isNameValid) {
-      return trimmed;
+  {
+    const qualParts = trimmed.split('/');
+    if (qualParts.length === 2) {
+      const [lib, name] = qualParts;
+      const isLibValid = /^[A-Z$#@][A-Z0-9$#@_]{0,10}$/i.test(lib) || CL_VARIABLE_PATTERN.test(lib);
+      const isNameValid = /^[A-Z$#@][A-Z0-9$#@_]{0,10}$/i.test(name) || CL_VARIABLE_PATTERN.test(name);
+      if (isLibValid && isNameValid) {
+        return trimmed;
+      }
     }
   }
 

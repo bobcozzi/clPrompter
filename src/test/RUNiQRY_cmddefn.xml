@@ -1,0 +1,219 @@
+<Cmd CmdName="RUNIQRY" CmdLib="IQUERY" CCSID="37" HlpPnlGrp="RUNIQRY" HlpPnlGrpLib="IQUERY" HlpID="RUNIQRY" MaxPos="99"
+    PrdLib="IQUERY" Prompt="Run SQL using iQuery" PromptMsgID="QFC0200" MsgF="COZLANGEN" MsgFLib="IQUERY"
+    PmtFile="COZLANGEN" PmtFileLib="IQUERY" PmtFileMsg="DYNAMIC" ExecBatch="YES" ChgCmdExit="NO" RtvCmdExit="NO">
+    <Parm Kwd="SQL" PosNbr="1" KeyParm="NO" RtnVal="NO" PassVal="DFT" Type="CHAR" Min="0" Max="1"
+        Prompt="SQL Stmt (use &amp; to expand)" Len="5000" Rstd="NO" Dft="*SRCF" AlwUnprt="YES" AlwVar="YES" Expr="YES"
+        Full="NO" DspInput="YES" Vary="INT2" PassAtr="NO" Case="MONO" CCSID="JOB" InlPmtLen="256" IsDtaAra="NO"
+        IsFile="NO" IsPgm="NO" Choice="Character value">
+        <SpcVal>
+            <Value Val="*STMF" MapTo="*STMF" />
+            <Value Val="*SRCF" MapTo="*SRCF" />
+            <Value Val="*SRCFILE" MapTo="*SRCF" />
+            <Value Val="*ACTJOB" MapTo="*ACTJOB" />
+            <Value Val="*ALLOBJ" MapTo="*ALLOBJ" />
+            <Value Val="*ALLUSR" MapTo="*ALLUSR" />
+            <Value Val="*DB2PTF" MapTo="*DB2PTF" />
+            <Value Val="*DSK" MapTo="*DSK" />
+            <Value Val="*GRPPRF" MapTo="*GRPPRF" />
+            <Value Val="*IBMBLOG" MapTo="*IBMBLOG" />
+            <Value Val="*JOBLOG" MapTo="*JOBLOG" />
+            <Value Val="*JOBSCD" MapTo="*JOBSCD" />
+            <Value Val="*JOBSCDE" MapTo="*JOBSCDE" />
+            <Value Val="*LIBL" MapTo="*LIBL" />
+            <Value Val="*OBJ" MapTo="*OBJ" />
+            <Value Val="*PTFBKPLVL" MapTo="*PTFBKPLVL" />
+            <Value Val="*PTFGRP" MapTo="*PTFGRP" />
+            <Value Val="*RCDLCK" MapTo="*RCDLCK" />
+            <Value Val="*SPCVAL" MapTo="*SPCVAL" />
+            <Value Val="*SYS" MapTo="*SYS" />
+            <Value Val="*SYSVAL" MapTo="*SYSVAL" />
+            <Value Val="*TCPIP" MapTo="*TCPIP" />
+            <Value Val="*TOPHOGS" MapTo="*TOPHOGS" />
+            <Value Val="*USRGRP" MapTo="*USRGRP" />
+            <Value Val="*USRPRF" MapTo="*USRPRF" />
+        </SpcVal>
+    </Parm>
+    <Parm Kwd="OUTPUT" PosNbr="2" KeyParm="NO" RtnVal="NO" PassVal="DFT" Type="CHAR" Min="0" Max="1" Prompt="Output"
+        PromptMsgID="QFC0104" Len="10" Rstd="YES" Dft="*DFT" AlwUnprt="YES" AlwVar="YES" Expr="YES" Full="NO"
+        DspInput="YES" Vary="NO" PassAtr="NO" Case="MONO" CCSID="JOB" IsDtaAra="NO" IsFile="NO" IsPgm="NO"
+        Choice="*, *PRINT, *EXCEL, *PDF">
+        <SpcVal>
+            <Value Val="*DFT" MapTo="X&apos;40&apos;" />
+            <Value Val="*" MapTo="*" />
+            <Value Val="*PRINT" MapTo="*PRINT" />
+            <Value Val="*FILE" MapTo="*FILE" />
+            <Value Val="*PDF" MapTo="*PDF" />
+            <Value Val="*TEXT" MapTo="*TXT" />
+            <Value Val="*CSV" MapTo="*CSV" />
+            <Value Val="*STMF" MapTo="*STMF" />
+            <Value Val="*XML" MapTo="*XML" />
+            <Value Val="*HTML" MapTo="*HTML" />
+            <Value Val="*ACSCSV" MapTo="*ACSCSV" />
+            <Value Val="*ACSTXT" MapTo="*ACSTXT" />
+            <Value Val="*ACSXLS" MapTo="*ACSXLS" />
+            <Value Val="*ACSXLSX" MapTo="*ACSXLSX" />
+            <Value Val="*ACSODS" MapTo="*ACSODS" />
+            <Value Val="*XLSX" MapTo="*XLSX" />
+            <Value Val="*EXCEL" MapTo="*EXCEL" />
+            <Value Val="*XLS" MapTo="*XLS" />
+            <Value Val="*ODS" MapTo="*ODS" />
+            <Value Val="*JSON" MapTo="*JSON" />
+            <Value Val="*CHART" MapTo="*CHART" />
+            <Value Val="*CHARTJS" MapTo="*CHARTJS" />
+            <Value Val="*SYLK" MapTo="*SLK" />
+            <Value Val="*SLK" MapTo="*SLK" />
+            <Value Val="*LIST" MapTo="*PRINT" />
+            <Value Val="*DTAARA" MapTo="*DTAARA" />
+            <Value Val="*DTAARAEX" MapTo="*DTAARAEX" />
+            <Value Val="*OUTFILE" MapTo="*FILE" />
+            <Value Val="*RPG" MapTo="*RPG" />
+            <Value Val="*RPGIO" MapTo="*RPGIO" />
+            <Value Val="*RPGI" MapTo="*RPGI" />
+            <Value Val="*RPGO" MapTo="*RPGO" />
+            <Value Val="*RPGDS" MapTo="*RPGDS" />
+            <Value Val="*RPGDCL" MapTo="*RPGDCL" />
+            <Value Val="*RPGDCLS" MapTo="*RPGDCLS" />
+            <Value Val="*RPGDCLDS" MapTo="*RPGDCLDS" />
+            <Value Val="*RPGDSO" MapTo="*RPGDSO" />
+            <Value Val="*SQL" MapTo="*SQL" />
+            <Value Val="*SQLINTO" MapTo="*SQLINTO" />
+            <Value Val="*SQLINTODS" MapTo="*SQLINTODS" />
+            <Value Val="*SQLDCL" MapTo="*SQLDCL" />
+            <Value Val="*SQLDCLS" MapTo="*SQLDCLS" />
+            <Value Val="*SQLEXEC" MapTo="*SQLEXEC" />
+            <Value Val="*SQLSRC" MapTo="*SQLSRC" />
+            <Value Val="*SQLSCRIPT" MapTo="*SQLSCRIPT" />
+            <Value Val="*SQLIMMED" MapTo="*SQLIMMED" />
+            <Value Val="*DISPLAY" MapTo="*" />
+        </SpcVal>
+    </Parm>
+    <Parm Kwd="COMMIT" PosNbr="3" KeyParm="NO" RtnVal="NO" PassVal="DFT" Type="CHAR" Min="0" Max="1"
+        Prompt="Commitment control" Len="10" Rstd="YES" Dft="*AUTO" AlwUnprt="YES" AlwVar="YES" Expr="YES" Full="NO"
+        DspInput="YES" Vary="NO" PassAtr="NO" Case="MONO" CCSID="JOB" IsDtaAra="NO" IsFile="NO" IsPgm="NO"
+        Choice="*CHG, *UR, *CS, *AUTO...">
+        <SpcVal>
+            <Value Val="*CHG" MapTo="*CHG" />
+            <Value Val="*UR" MapTo="*UR" />
+            <Value Val="*CS" MapTo="*CS" />
+            <Value Val="*AUTO" MapTo="*AUTO" />
+            <Value Val="*ALL" MapTo="*ALL" />
+            <Value Val="*RS" MapTo="*RS" />
+            <Value Val="*NONE" MapTo="*NONE" />
+            <Value Val="*NC" MapTo="*NC" />
+            <Value Val="*RR" MapTo="*RR" />
+            <Value Val="*YES" MapTo="*AUTO" />
+        </SpcVal>
+    </Parm>
+    <Parm Kwd="NAMING" PosNbr="4" KeyParm="NO" RtnVal="NO" PassVal="DFT" Type="CHAR" Min="0" Max="1" Prompt="Naming"
+        Len="10" Rstd="YES" Dft="*SYS" AlwUnprt="YES" AlwVar="YES" Expr="YES" Full="NO" DspInput="YES" Vary="NO"
+        PassAtr="NO" Case="MONO" CCSID="JOB" IsDtaAra="NO" IsFile="NO" IsPgm="NO" Choice="*SYS, *SQL">
+        <SpcVal>
+            <Value Val="*SYS" MapTo="*SYS" />
+            <Value Val="*SQL" MapTo="*SQL" />
+        </SpcVal>
+    </Parm>
+    <Parm Kwd="LOG" PosNbr="5" KeyParm="NO" RtnVal="NO" PassVal="DFT" Type="INT4" Min="0" Max="1" Prompt="Log options"
+        PromptMsgID="QFC0111" Rstd="YES" Dft="*NON…10" IsDtaAra="NO" IsFile="NO" IsPgm="NO" Choice="Character value">
+        <SpcVal>
+            <Value Val="*AUTO" MapTo="*AUTO" />
+        </SpcVal>
+        </Elem>
+        <Elem Type="X" Min="0" Max="1" Prompt="Variable value" Len="255.15.5" Rstd="NO" AlwUnprt="YES" AlwVar="YES"
+            Expr="YES" Full="NO" DspInput="YES" Vary="INT2" PassAtr="YES" Case="MONO" CCSID="JOB" InlPmtLen="257"
+            IsDtaAra="NO" IsFile="NO" IsPgm="NO" Choice="Character value"></Elem>
+        <Elem Type="INT2" Min="0" Max="1" Prompt="Match Whole Word Only" Rstd="YES" Dft="*YES" AlwUnprt="YES"
+            AlwVar="YES" Expr="NO" Full="NO" DspInput="YES" Vary="NO" PassAtr="NO" Case="MONO" CCSID="JOB" IsDtaAra="NO"
+            IsFile="NO" IsPgm="NO" Choice="*YES, *NO, *WHOLEWORD">
+            <SpcVal>
+                <Value Val="*YES" MapTo="1" />
+                <Value Val="*NO" MapTo="0" />
+                <Value Val="*WHOLEWORD" MapTo="1" />
+            </SpcVal>
+        </Elem>
+    </Parm>
+    <Parm Kwd="EMAIL" PosNbr="71" KeyParm="NO" RtnVal="NO" PassVal="DFT" Type="PNAME" Min="0" Max="30"
+        Prompt="email address (send to)" Len="128" Rstd="NO" Dft="*SCRIPT" AlwUnprt="YES" AlwVar="YES" Expr="YES"
+        Full="NO" DspInput="YES" Vary="INT2" PassAtr="NO" Case="MONO" CCSID="JOB" InlPmtLen="80" IsDtaAra="NO"
+        IsFile="NO" IsPgm="NO" Choice="Path name">
+        <SngVal>
+            <Value Val="*SCRIPT" MapTo="*" />
+            <Value Val="*NONE" MapTo="*NONE" />
+        </SngVal>
+    </Parm>
+    <Parm Kwd="SUBJECT" PosNbr="72" KeyParm="NO" PmtCtl="PMTCTL" RtnVal="NO" PassVal="NUL" Type="CHAR" Min="0" Max="1"
+        Prompt="email subject" Len="255" Rstd="NO" AlwUnprt="YES" AlwVar="YES" Expr="YES" Full="NO" DspInput="YES"
+        Vary="INT2" PassAtr="NO" Case="MONO" CCSID="JOB" InlPmtLen="32" IsDtaAra="NO" IsFile="NO" IsPgm="NO"
+        Choice="Character value">
+        <SpcVal>
+            <Value Val="*NONE" MapTo="*NONE" />
+        </SpcVal>
+        <PmtCtl CtlKwd="EMAIL" NbrTrueRel="GE" NbrTrue="1"></PmtCtl>
+    </Parm>
+    <Parm Kwd="EMAILBODY" PosNbr="73" KeyParm="NO" PmtCtl="PMTCTL" RtnVal="NO" PassVal="NUL" Type="CHAR" Min="0" Max="1"
+        Prompt="email message body" Len="2048" Rstd="NO" AlwUnprt="YES" AlwVar="YES" Expr="YES" Full="NO" DspInput="YES"
+        Vary="INT2" PassAtr="NO" Case="MONO" CCSID="JOB" InlPmtLen="80" IsDtaAra="NO" IsFile="NO" IsPgm="NO"
+        Choice="Character value">
+        <SpcVal>
+            <Value Val="*NONE" MapTo="*NONE" />
+        </SpcVal>
+        <PmtCtl CtlKwd="EMAIL" NbrTrueRel="GE" NbrTrue="1"></PmtCtl>
+    </Parm>
+    <Parm Kwd="EMAILPMT" PosNbr="74" KeyParm="NO" PmtCtl="PMTCTL" RtnVal="NO" PassVal="DFT" Type="INT4" Min="0" Max="1"
+        Prompt="Prompt email CL command" Rstd="YES" Dft="*NO" AlwUnprt="YES" AlwVar="YES" Expr="NO" Full="NO"
+        DspInput="YES" Vary="NO" PassAtr="NO" Case="MONO" CCSID="JOB" IsDtaAra="NO" IsFile="NO" IsPgm="NO"
+        Choice="*PROMPT, *NONE, *YES, *NO">
+        <SpcVal>
+            <Value Val="*PROMPT" MapTo="1" />
+            <Value Val="*NONE" MapTo="0" />
+            <Value Val="*YES" MapTo="1" />
+            <Value Val="*NO" MapTo="0" />
+        </SpcVal>
+        <PmtCtl CtlKwd="EMAIL" NbrTrueRel="GE" NbrTrue="1"></PmtCtl>
+    </Parm>
+    <Parm Kwd="EMAILCMD" PosNbr="75" KeyParm="NO" PmtCtl="PMTCTL" RtnVal="NO" PassVal="DFT" Type="INT4" Min="0" Max="1"
+        Prompt="email command" Rstd="YES" Dft="*DFT" AlwUnprt="YES" AlwVar="YES" Expr="NO" Full="NO" DspInput="YES"
+        Vary="NO" PassAtr="NO" Case="MONO" CCSID="JOB" IsDtaAra="NO" IsFile="NO" IsPgm="NO"
+        Choice="*DFT, *SENDMAIL, *IBM...">
+        <SpcVal>
+            <Value Val="*DFT" MapTo="0" />
+            <Value Val="*SENDMAIL" MapTo="1" />
+            <Value Val="*IBM" MapTo="2" />
+            <Value Val="*SNDDST" MapTo="3" />
+        </SpcVal>
+        <PmtCtl CtlKwd="EMAIL" NbrTrueRel="GE" NbrTrue="1"></PmtCtl>
+    </Parm>
+    <Parm Kwd="EMAILEMPTY" PosNbr="76" KeyParm="NO" PmtCtl="PMTCTL" RtnVal="NO" PassVal="DFT" Type="INT4" Min="0"
+        Max="1" Prompt="email empty resultSet" Rstd="YES" Dft="*NO" AlwUnprt="YES" AlwVar="YES" Expr="NO" Full="NO"
+        DspInput="YES" Vary="NO" PassAtr="NO" Case="MONO" CCSID="JOB" IsDtaAra="NO" IsFile="NO" IsPgm="NO"
+        Choice="*YES, *NO">
+        <SpcVal>
+            <Value Val="*YES" MapTo="1" />
+            <Value Val="*NO" MapTo="0" />
+        </SpcVal>
+        <PmtCtl CtlKwd="EMAIL" NbrTrueRel="GE" NbrTrue="1"></PmtCtl>
+    </Parm>
+    <Parm Kwd="EMAILJOBQ" PosNbr="77" KeyParm="NO" ListDspl="INT2" RtnVal="NO" PassVal="DFT" Type="QUAL" Min="0" Max="1"
+        Prompt="email Jobq (if any)" Rstd="NO" Dft="*NONE" AlwUnprt="YES" AlwVar="YES" Expr="YES" Full="NO"
+        DspInput="YES" IsDtaAra="NO" IsFile="NO" IsPgm="NO" Choice="*NONE, *NOMAX">
+        <SngVal>
+            <Value Val="*NONE" MapTo="*NONE" />
+            <Value Val="*NOMAX" MapTo="QUSRNOMAX" />
+        </SngVal>
+        <Qual Type="NAME" Min="0" Max="1" Len="10" Rstd="NO" AlwUnprt="YES" AlwVar="YES" Expr="YES" Full="NO"
+            DspInput="YES" Vary="NO" PassAtr="NO" InlPmtLen="10" Choice="Name"></Qual>
+        <Qual Type="NAME" Min="0" Max="1" Prompt="JobQ library" Len="10" Rstd="NO" Dft="*LIBL" AlwUnprt="YES"
+            AlwVar="YES" Expr="YES" Full="NO" DspInput="YES" Vary="NO" PassAtr="NO" InlPmtLen="10" Choice="Name">
+            <SpcVal>
+                <Value Val="*LIBL" MapTo="*LIBL" />
+                <Value Val="*CURLIB" MapTo="*CURLIB" />
+            </SpcVal>
+        </Qual>
+    </Parm>
+    <Dep CtlKwdRel="EQ" CtlKwd="SQL" CmpVal="*SRCF" NbrTrueRel="EQ" NbrTrue="0" MsgID="QFA0503">
+        <DepParm Kwd="SRCMBR" Rel="EQ" CmpVal="*NONE" />
+        <DepParm Kwd="SRCMBR" Rel="EQ" CmpVal="X&apos;40&apos;" />
+    </Dep>
+    <Dep CtlKwdRel="EQ" CtlKwd="SQL" CmpVal="*STMF" NbrTrueRel="EQ" NbrTrue="1" MsgID="QFA0503">
+        <DepParm Kwd="SRCSTMF" Rel="SPCFD" />
+    </Dep>
+</Cmd>

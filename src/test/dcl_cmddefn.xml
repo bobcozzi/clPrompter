@@ -1,0 +1,132 @@
+<QcdCLCmd DTDVersion="2.0">
+    <Cmd CmdName="DCL" CmdLib="__LIBL" CCSID="37" HlpPnlGrp="QHCLCMD" HlpPnlGrpLib="__LIBL" HlpID="DCL" MaxPos="4"
+        Prompt="Declare CL Variable" PromptMsgID="TXT0082" MsgF="QCPFMSG" MsgFLib="__LIBL" PmtFile="QCPFPMT"
+        PmtFileLib="*LIBL" PmtFileMsg="DYNAMIC" ExecBatch="NO" ChgCmdExit="NO" RtvCmdExit="NO">
+        <Parm Kwd="VAR" PosNbr="1" KeyParm="NO" RtnVal="NO" PassVal="DFT" Type="VARNAME" Min="1" Max="1"
+            Prompt="CL variable name" PromptMsgID="TXT1010" Len="11" Rstd="NO" AlwUnprt="YES" AlwVar="YES" Expr="NO"
+            Full="NO" DspInput="YES" Vary="NO" PassAtr="NO" Case="MONO" CCSID="JOB" IsDtaAra="NO" IsFile="NO" IsPgm="NO"
+            Choice="Variable name"></Parm>
+        <Parm Kwd="TYPE" PosNbr="2" KeyParm="NO" RtnVal="NO" PassVal="DFT" Type="INT2" Min="1" Max="1" Prompt="Type"
+            PromptMsgID="TXT0757" Rstd="YES" AlwUnprt="YES" AlwVar="NO" Expr="NO" Full="NO" DspInput="YES" Vary="NO"
+            PassAtr="NO" Case="MONO" CCSID="JOB" IsDtaAra="NO" IsFile="NO" IsPgm="NO"
+            Choice="*DEC, *CHAR, *LGL, *INT...">
+            <SpcVal>
+                <Value Val="*DEC" MapTo="2" />
+                <Value Val="*CHAR" MapTo="1" />
+                <Value Val="*LGL" MapTo="3" />
+                <Value Val="*INT" MapTo="4" />
+                <Value Val="*UINT" MapTo="5" />
+                <Value Val="*PTR" MapTo="6" />
+            </SpcVal>
+        </Parm>
+        <Parm Kwd="LEN" PosNbr="4" KeyParm="NO" PmtCtl="PMTCTL" ListDspl="INT2" RtnVal="NO" PassVal="DFT" Type="ELEM"
+            Min="0" Max="1" Prompt="Length of variable" PromptMsgID="TXT0415" Rstd="NO" AlwUnprt="YES" AlwVar="YES"
+            Expr="NO" Full="NO" DspInput="YES" IsDtaAra="NO" IsFile="NO" IsPgm="NO">
+            <PmtCtl CtlKwd="TYPE" NbrTrueRel="EQ" NbrTrue="1">
+                <PmtCtlCond Rel="NE" CmpVal="6" />
+            </PmtCtl>
+            <Elem Type="INT2" Min="1" Max="1" Prompt="Length" PromptMsgID="TXT1215" Rstd="NO" Rel="GE" RelVal="1"
+                AlwUnprt="YES" AlwVar="NO" Expr="NO" Full="NO" DspInput="YES" Vary="NO" PassAtr="NO" Case="MONO"
+                CCSID="JOB" IsDtaAra="NO" IsFile="NO" IsPgm="NO" Choice="Number"></Elem>
+            <Elem Type="INT2" Min="0" Max="1" Prompt="Decimal positions" PromptMsgID="TXT1216" Rstd="NO" Rel="GE"
+                RelVal="0" AlwUnprt="YES" AlwVar="NO" Expr="NO" Full="NO" DspInput="YES" Vary="NO" PassAtr="NO"
+                Case="MONO" CCSID="JOB" IsDtaAra="NO" IsFile="NO" IsPgm="NO" Choice="Number"></Elem>
+        </Parm>
+        <Parm Kwd="VALUE" PosNbr="5" KeyParm="NO" PmtCtl="PMTCTL" RtnVal="NO" PassVal="DFT" Type="CHAR" Min="0" Max="1"
+            Prompt="Initial value" PromptMsgID="TXT1005" Len="5000" Rstd="NO" AlwUnprt="YES" AlwVar="NO" Expr="NO"
+            Full="NO" DspInput="YES" Vary="INT2" PassAtr="NO" Case="MONO" CCSID="JOB" InlPmtLen="5000" IsDtaAra="NO"
+            IsFile="NO" IsPgm="NO" Choice="Character value">
+            <PmtCtl CtlKwd="TYPE" NbrTrueRel="EQ" NbrTrue="1" LglRel="AND">
+                <PmtCtlCond Rel="NE" CmpVal="6" />
+            </PmtCtl>
+            <PmtCtl CtlKwd="STG" NbrTrueRel="EQ" NbrTrue="1" LglRel="AND">
+                <PmtCtlCond Rel="NE" CmpVal="3" />
+            </PmtCtl>
+            <PmtCtl CtlKwd="STG" NbrTrueRel="EQ" NbrTrue="1">
+                <PmtCtlCond Rel="NE" CmpVal="4" />
+            </PmtCtl>
+        </Parm>
+        <Parm Kwd="STG" PosNbr="3" KeyParm="NO" RtnVal="NO" PassVal="DFT" Type="INT2" Min="0" Max="1" Prompt="Storage"
+            PromptMsgID="TXT0728" Rstd="YES" Dft="*AUTO" AlwUnprt="YES" AlwVar="NO" Expr="NO" Full="NO" DspInput="YES"
+            Vary="NO" PassAtr="NO" Case="MONO" CCSID="JOB" IsDtaAra="NO" IsFile="NO" IsPgm="NO"
+            Choice="*AUTO, *BASED, *DEFINED">
+            <SpcVal>
+                <Value Val="*AUTO" MapTo="1" />
+                <Value Val="*BASED" MapTo="3" />
+                <Value Val="*DEFINED" MapTo="4" />
+            </SpcVal>
+        </Parm>
+        <Parm Kwd="BASPTR" PosNbr="6" KeyParm="NO" PmtCtl="PMTCTL" RtnVal="NO" PassVal="DFT" Type="VARNAME" Min="0"
+            Max="1" Prompt="Basing pointer variable" PromptMsgID="TXT1204" Len="11" Rstd="NO" AlwUnprt="YES"
+            AlwVar="YES" Expr="NO" Full="NO" DspInput="YES" Vary="NO" PassAtr="NO" Case="MONO" CCSID="JOB" IsDtaAra="NO"
+            IsFile="NO" IsPgm="NO" Choice="Variable name">
+            <PmtCtl CtlKwd="STG" NbrTrueRel="EQ" NbrTrue="1">
+                <PmtCtlCond Rel="EQ" CmpVal="3" />
+            </PmtCtl>
+        </Parm>
+        <Parm Kwd="DEFVAR" PosNbr="7" KeyParm="NO" PmtCtl="PMTCTL" ListDspl="INT2" RtnVal="NO" PassVal="DFT" Type="ELEM"
+            Min="0" Max="1" Prompt="Defined on variable" PromptMsgID="TXTD526" Rstd="NO" AlwUnprt="YES" AlwVar="YES"
+            Expr="NO" Full="NO" DspInput="YES" IsDtaAra="NO" IsFile="NO" IsPgm="NO">
+            <PmtCtl CtlKwd="STG" NbrTrueRel="EQ" NbrTrue="1">
+                <PmtCtlCond Rel="EQ" CmpVal="4" />
+            </PmtCtl>
+            <Elem Type="VARNAME" Min="1" Max="1" Prompt="CL variable name" PromptMsgID="TXT1010" Len="11" Rstd="NO"
+                AlwUnprt="YES" AlwVar="YES" Expr="NO" Full="NO" DspInput="YES" Vary="NO" PassAtr="NO" Case="MONO"
+                CCSID="JOB" IsDtaAra="NO" IsFile="NO" IsPgm="NO" Choice="Variable name"></Elem>
+            <Elem Type="INT2" Min="0" Max="1" Prompt="Position" PromptMsgID="TXTD527" Rstd="NO" Dft="1" RangeMinVal="1"
+                RangeMaxVal="32767" AlwUnprt="YES" AlwVar="NO" Expr="NO" Full="NO" DspInput="YES" Vary="NO" PassAtr="NO"
+                Case="MONO" CCSID="JOB" IsDtaAra="NO" IsFile="NO" IsPgm="NO" Choice="1-32767"></Elem>
+        </Parm>
+        <Parm Kwd="ADDRESS" PosNbr="8" KeyParm="NO" PmtCtl="PMTCTL" ListDspl="INT2" RtnVal="NO" PassVal="DFT"
+            Type="ELEM" Min="0" Max="1" Prompt="Address" PromptMsgID="TXT4755" Rstd="NO" AlwUnprt="YES" AlwVar="YES"
+            Expr="NO" Full="NO" DspInput="YES" IsDtaAra="NO" IsFile="NO" IsPgm="NO" Choice="*NULL">
+            <SngVal>
+                <Value Val="*NULL" MapTo="*NULL" />
+            </SngVal>
+            <PmtCtl CtlKwd="TYPE" NbrTrueRel="EQ" NbrTrue="1" LglRel="AND">
+                <PmtCtlCond Rel="EQ" CmpVal="6" />
+            </PmtCtl>
+            <PmtCtl CtlKwd="STG" NbrTrueRel="EQ" NbrTrue="1" LglRel="AND">
+                <PmtCtlCond Rel="NE" CmpVal="3" />
+            </PmtCtl>
+            <PmtCtl CtlKwd="STG" NbrTrueRel="EQ" NbrTrue="1">
+                <PmtCtlCond Rel="NE" CmpVal="4" />
+            </PmtCtl>
+            <Elem Type="VARNAME" Min="1" Max="1" Prompt="CL variable name" PromptMsgID="TXT1010" Len="11" Rstd="NO"
+                AlwUnprt="YES" AlwVar="YES" Expr="NO" Full="NO" DspInput="YES" Vary="NO" PassAtr="NO" Case="MONO"
+                CCSID="JOB" IsDtaAra="NO" IsFile="NO" IsPgm="NO" Choice="Variable name"></Elem>
+            <Elem Type="INT2" Min="0" Max="1" Prompt="Offset" PromptMsgID="TXTD410" Rstd="NO" Dft="0" RangeMinVal="0"
+                RangeMaxVal="32766" AlwUnprt="YES" AlwVar="NO" Expr="NO" Full="NO" DspInput="YES" Vary="NO" PassAtr="NO"
+                Case="MONO" CCSID="JOB" IsDtaAra="NO" IsFile="NO" IsPgm="NO" Choice="0-32766"></Elem>
+        </Parm>
+        <Dep CtlKwdRel="SPCFD" CtlKwd="VALUE" NbrTrueRel="EQ" NbrTrue="0" MsgID="CPD084A">
+            <DepParm Kwd="TYPE" Rel="EQ" CmpVal="6" />
+        </Dep>
+        <Dep CtlKwdRel="SPCFD" CtlKwd="VALUE" NbrTrueRel="EQ" NbrTrue="0" MsgID="CPD084B">
+            <DepParm Kwd="STG" Rel="EQ" CmpVal="3" />
+            <DepParm Kwd="STG" Rel="EQ" CmpVal="4" />
+        </Dep>
+        <Dep CtlKwdRel="SPCFD" CtlKwd="DEFVAR" NbrTrueRel="EQ" NbrTrue="1" MsgID="CPD086D">
+            <DepParm Kwd="STG" Rel="EQ" CmpVal="4" />
+        </Dep>
+        <Dep CtlKwdRel="EQ" CtlKwd="STG" CmpVal="4" NbrTrueRel="EQ" NbrTrue="1" MsgID="CPD086C">
+            <DepParm Kwd="DEFVAR" Rel="SPCFD" />
+        </Dep>
+        <Dep CtlKwdRel="EQ" CtlKwd="STG" CmpVal="3" NbrTrueRel="EQ" NbrTrue="1" MsgID="CPD084D">
+            <DepParm Kwd="BASPTR" Rel="SPCFD" />
+        </Dep>
+        <Dep CtlKwdRel="SPCFD" CtlKwd="BASPTR" NbrTrueRel="EQ" NbrTrue="1" MsgID="CPD084E">
+            <DepParm Kwd="STG" Rel="EQ" CmpVal="3" />
+        </Dep>
+        <Dep CtlKwdRel="SPCFD" CtlKwd="ADDRESS" NbrTrueRel="EQ" NbrTrue="0" MsgID="CPD084C">
+            <DepParm Kwd="STG" Rel="EQ" CmpVal="3" />
+            <DepParm Kwd="STG" Rel="EQ" CmpVal="4" />
+        </Dep>
+        <Dep CtlKwdRel="SPCFD" CtlKwd="ADDRESS" NbrTrueRel="EQ" NbrTrue="1" MsgID="CPD085D">
+            <DepParm Kwd="TYPE" Rel="EQ" CmpVal="6" />
+        </Dep>
+        <Dep CtlKwdRel="SPCFD" CtlKwd="LEN" NbrTrueRel="EQ" NbrTrue="1" MsgID="CPD0849">
+            <DepParm Kwd="TYPE" Rel="NE" CmpVal="6" />
+        </Dep>
+    </Cmd>
+</QcdCLCmd>

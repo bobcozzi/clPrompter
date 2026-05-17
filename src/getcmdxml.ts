@@ -106,7 +106,12 @@ export async function getCMDXML(cmdString: string): Promise<string> {
 
     // Build and register the fetch promise SYNCHRONOUSLY (before the first await)
     // so any concurrent call arriving after this point will find it in _inflight.
-    const fetchPromise: Promise<string> = (async () => {
+    const fetchPromise: Promise<string> = Promise.resolve(vscode.window.withProgress({
+        location: vscode.ProgressLocation.Notification,
+        title: 'CL Prompter',
+        cancellable: false
+    }, async (progress) => {
+        progress.report({ message: `Fetching ${OBJNAME} definition from IBM i...` });
         const QCDRCMDD = `CALL QCDRCMDD PARM('${cmdNameStr}' X'${fileParm}' 'DEST0200' ' ' 'CMDD0200' X'000000000000')`;
         console.log(`[clPrompter] Calling API: ${QCDRCMDD}`);
 
@@ -155,7 +160,7 @@ export async function getCMDXML(cmdString: string): Promise<string> {
         }
         // Placeholder for unknown commands
         return `<QcdCLCmd><Cmd CmdName="${cmdNameStr}"></Cmd></QcdCLCmd>`;
-    })();
+    }));
 
     _inflight.set(cmdXMLName, fetchPromise);
     fetchPromise.finally(() => _inflight.delete(cmdXMLName));

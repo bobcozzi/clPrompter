@@ -148,7 +148,9 @@ export function tokenizeCL(input: string): CLToken[] {
             if (tokens.length === 0 && /^([A-Z][A-Z0-9]*\/)?[A-Z][A-Z0-9]*$/.test(upperVal)) {
                 tokens.push({ type: 'command', value: upperVal });
             } else if (/^[A-Z][A-Z0-9]*$/.test(upperVal)) {
-                tokens.push({ type: 'keyword', value: upperVal });
+                // Store original case; formatCLCmd applies case conversion to parameter names separately.
+                // This preserves mixed-case values (e.g. Case=MIXED params) through the formatter.
+                tokens.push({ type: 'keyword', value: val });
             } else {
                 tokens.push({ type: 'value', value: val });
             }
@@ -358,6 +360,7 @@ export function rewriteLeadingPositionalsByList(fullCmd: string, positionalKwds:
 
   let i = cmdIdx + 1;
   let posIdx = 0;
+  let madeChange = false;
 
   while (i < tokens.length && posIdx < kwdList.length) {
     const t = tokens[i];
@@ -380,12 +383,13 @@ export function rewriteLeadingPositionalsByList(fullCmd: string, positionalKwds:
       const kwd = kwdList[posIdx++];
       outVals[i] = `${kwd}(${inner})`;
       for (let k = i + 1; k <= closeIdx; k++) outVals[k] = '';
+      madeChange = true;
       i = closeIdx + 1;
       continue;
     }
 
     // Case 2: bare value-like token → positional
- const isBareKeyword = t.type === 'keyword' && tokens[i + 1]?.type !== 'paren_open';
+    const isBareKeyword = t.type === 'keyword' && tokens[i + 1]?.type !== 'paren_open';
     const isPositional =
       isBareKeyword ||
       t.type === 'value' ||
@@ -398,8 +402,13 @@ export function rewriteLeadingPositionalsByList(fullCmd: string, positionalKwds:
 
     const kwd = kwdList[posIdx++];
     outVals[i] = `${kwd}(${t.value})`;
+    madeChange = true;
     i++;
   }
+
+  // If no positionals were actually rewritten, return the original string unchanged.
+  // This preserves original case for parameter values (important for Case=MIXED params).
+  if (!madeChange) return fullCmd;
 
   return outVals.join('');
 }

@@ -89,6 +89,7 @@ export interface ParmMeta {
   Kwd: string;
   Type?: string;
   Max?: number;
+  Case?: string;  // Case=MIXED preserves user-entered case; Case=MONO (default) allows uppercase
   Quals?: { Prompt: string; Type?: string }[];
   Elems?: ElemMeta[];
   PosNbr?: number; // ← add
@@ -201,6 +202,8 @@ export interface PrompterState {
   defaultValMap: { [kwd: string]: string };    // Keyword → default display value (Dft attribute)
   pmtCtlMap: PmtCtlMap;          // Prompt-control visibility rules per keyword
   showAllParms: boolean;         // When true, suppress all pmtCtl hiding (F10 "View all")
+  parmExpansionMax: number;  // Maximum expanded input field width (chars); user-configurable
+  parmExpansionSize: number; // Characters added per & expansion; user-configurable
 }
 
 // Dep/DepParm cross-parameter constraint types

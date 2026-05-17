@@ -2,7 +2,7 @@
   "name": "clprompter",
   "displayName": "Bob Cozzi's CL Prompter and Formatter for IBM i",
   "description": "IBM i CL prompting and formatting—rebuilt for modern development",
-  "version": "0.0.60",
+  "version": "0.0.61",
   "author": {
     "name": "Bob Cozzi",
     "url": "https://github.com/bobcozzi"
@@ -162,6 +162,18 @@
           "type": "string",
           "default": "DSPLIBL",
           "description": "IBM i ILE command to run silently when a connection is established, to pre-warm the Mapepire/JVM service job. Leave blank to disable. Default: DSPLIBL."
+        },
+        "clPrompter.parmExpansionMax": {
+          "type": "number",
+          "default": 5000,
+          "minimum": 16,
+          "description": "Maximum number of characters a prompted input field can be expanded to by entering & and leaving the field. Default: 5000."
+        },
+        "clPrompter.parmExpansionSize": {
+          "type": "number",
+          "default": 16,
+          "minimum": 1,
+          "description": "Number of characters added to a prompted input field each time the user enters & and leaves the field. Default: 16."
         }
       }
     },
