@@ -4223,6 +4223,9 @@ function wirePrompterControls() {
     // Wire "View all parameters" / "View basic parameters" toggle button
     const viewAllBtn = document.getElementById('viewAllParmsBtn');
     if (viewAllBtn) {
+        const hasPmtCtl = Object.keys(state.pmtCtlMap).length > 0;
+        viewAllBtn.disabled = !hasPmtCtl;
+        viewAllBtn.title = hasPmtCtl ? '' : 'No conditional parameters (PMTCTL) in this command';
         viewAllBtn.addEventListener('click', () => {
             state.showAllParms = !state.showAllParms;
             viewAllBtn.textContent = state.showAllParms ? 'View basic parameters' : 'View all parameters';

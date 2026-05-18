@@ -2,6 +2,14 @@
 
 All notable changes to this project are documented in this file.
 
+## [0.0.63] - 2026-05-18
+
+### What's New
+
+- **"View all parameters" button disabled when no PMTCTL conditions exist**: The *View all parameters* toggle button is now greyed out (disabled) when the prompted command contains no conditional parameters (`PMTCTL` statements). The button remains visible on screen but a `disabled option` cursor and reduced opacity make it clear the feature is not applicable. A tooltip explains: *"No conditional parameters (PMTCTL) in this command"*. Commands that do have `PMTCTL` conditions continue to work exactly as before.
+
+---
+
 ## [0.0.61] - 2026-05-17
 
 ### What's New

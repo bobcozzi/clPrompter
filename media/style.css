@@ -443,8 +443,13 @@ button {
   cursor: pointer;
 }
 
-#viewAllParmsBtn:hover {
+#viewAllParmsBtn:hover:not(:disabled) {
   background-color: var(--vscode-button-secondaryHoverBackground, #45494e);
+}
+
+#viewAllParmsBtn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
 }
 
 .clvar-input {
