@@ -2,6 +2,15 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.0.0] - 2026-05-18
+
+### Release Candidate 1 (RC1)
+
+- **First release candidate** — CL Prompter graduates from Preview to its first production-ready release. The `preview` flag has been removed from the extension manifest and the Preview designation has been removed from the README.
+- No functional changes from `0.0.63`; this release is version-number and metadata only.
+
+---
+
 ## [0.0.63] - 2026-05-18
 
 ### What's New

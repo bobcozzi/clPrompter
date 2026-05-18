@@ -1,4 +1,4 @@
-# CL Prompter and Formatter — Professional IBM i CL Tools for VS Code (PREVIEW)
+# CL Prompter and Formatter — Professional IBM i CL Tools for VS Code
 
 A professional CL (Control Language) prompter and formatter for VS Code that brings both the familiar IBM i F4 CL prompter experience and intelligent code formatting to your modern IBM i CL development environment. Works seamlessly with the vscode-for-ibmi extension (Code4IBMi).
 
@@ -14,8 +14,6 @@ This extension brings two powerful capabilities to modern IBM i development:
 **CL Formatting** — Professional code formatting for CL source that intelligently handles single statements or entire files. The formatter understands CL syntax, preserves comments, properly handles qualified names, and respects your formatting preferences—bringing modern code formatting standards to IBM i CL development.
 
 Together, these tools enable developers to work with CL commands and source code outside of the traditional green-screen experience—without sacrificing fidelity, behavior, or control. The extension also exposes a callable API, making it suitable for automation, extension integration, and AI-assisted workflows.
-
-**CURRENTLY in PREVIEW** so keep your Cmd+Z (or Ctrl+Z on Windows) UNDO key ready.
 
 ## Getting Started
 
