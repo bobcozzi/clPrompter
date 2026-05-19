@@ -95,6 +95,54 @@ function isRestricted(el: Element | null): boolean {
   return rstd === 'YES' || rstd === 'Y' || rstd === '*YES' || rstd === '1' || rstd === 'TRUE';
 }
 
+// ── Parameter help helpers ────────────────────────────────────────────────────
+
+// Tracks the most-recently requested keyword so stale cached responses can be
+// discarded when the user clicks a second parameter before the first reply arrives.
+let pendingHelpKwd: string | null = null;
+
+// ── Loading toast for IBM i round-trip delay ──────────────────────────────
+let _helpToastTimer: ReturnType<typeof setTimeout> | null = null;
+function showHelpToast(): void {
+  const toast = document.getElementById('clp-help-toast');
+  if (!toast) { return; }
+  if (_helpToastTimer !== null) { clearTimeout(_helpToastTimer); }
+  toast.classList.add('visible');
+  // Safety valve: auto-dismiss after 15 s in case the extension never responds
+  _helpToastTimer = setTimeout(() => dismissHelpToast(), 15000);
+}
+function dismissHelpToast(): void {
+  const toast = document.getElementById('clp-help-toast');
+  if (!toast) { return; }
+  toast.classList.remove('visible');
+  if (_helpToastTimer !== null) { clearTimeout(_helpToastTimer); _helpToastTimer = null; }
+}
+
+function requestParamHelp(kwd: string): void {
+  const cleanKwd = kwd.replace(/_select$/, '').replace(/_INST\d+$/, '');
+  pendingHelpKwd = cleanKwd;
+  showHelpToast();
+  vscode?.postMessage({ type: 'getParamHelp', kwd: cleanKwd, cmdName: state.cmdName });
+}
+
+// Lightweight Markdown → HTML converter for IBM i parameter help text.
+// Handles the patterns produced by node-html-markdown from GENCMDDOC output.
+function showHelpOverlay(kwd: string, title: string, helpHtml: string): void {
+  const overlay = document.getElementById('clp-help-overlay');
+  const titleEl = document.getElementById('clp-help-title');
+  const bodyEl  = document.getElementById('clp-help-body');
+  if (!overlay || !titleEl || !bodyEl) { return; }
+  titleEl.textContent = title ? `${kwd} — ${title}` : kwd;
+  bodyEl.innerHTML    = helpHtml;
+  overlay.classList.add('visible');
+}
+
+function closeHelpOverlay(): void {
+  document.getElementById('clp-help-overlay')?.classList.remove('visible');
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 // Create a label with prompt text and keyword styling
 // Returns a label element with properly styled prompt and keyword spans
 function createPromptLabel(promptText: string, kwd: string, inputName: string, required = false): HTMLLabelElement {
@@ -122,7 +170,27 @@ function createPromptLabel(promptText: string, kwd: string, inputName: string, r
     label.appendChild(asterisk);
   }
 
+  // Help button — click to show IBM i parameter documentation
+  const helpBtn = document.createElement('button');
+  helpBtn.type = 'button';
+  helpBtn.className = 'param-help-btn';
+  helpBtn.textContent = '?';
+  helpBtn.setAttribute('data-tooltip', `Help for ${kwd}`);
+  helpBtn.setAttribute('aria-label', `Help for ${kwd}`);
+  helpBtn.addEventListener('click', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    requestParamHelp(kwd);
+  });
+  label.appendChild(helpBtn);
+
   label.htmlFor = inputName;
+
+  // Clicking anywhere on the label text also triggers help;
+  // the button's stopPropagation() prevents double-firing when the ? itself is clicked.
+  label.addEventListener('click', () => {
+    requestParamHelp(kwd);
+  });
 
   return label;
 }
@@ -1407,15 +1475,18 @@ function configureFocusIndicators(): void {
       if (label) {
         console.log('[focus] ✓ Adding indicator to label:', label.textContent?.substring(0, 30));
 
-        // Float the indicator right with a small margin to keep it visible
+        // Position the indicator at the right edge of the label.
+        // The label has position:relative so the arrow is pinned to its right edge.
         const indicator = document.createElement('span');
         indicator.className = 'focus-indicator';
         indicator.textContent = '▶';
-        indicator.style.float = 'right';
+        indicator.style.position = 'absolute';
+        indicator.style.right = '5px';
+        indicator.style.top = '50%';
+        indicator.style.transform = 'translateY(-50%)';
         indicator.style.color = 'var(--vscode-focusBorder, #0066cc)';
         indicator.style.fontSize = '14px';
         indicator.style.fontWeight = 'bold';
-        indicator.style.marginRight = '5px'; // Keep close to input field
         indicator.style.pointerEvents = 'none';
 
         label.appendChild(indicator);
@@ -2275,6 +2346,26 @@ function renderElemParm(parm: ParmElement, kwd: string, idx: number, container: 
     asterisk.title = 'Required — must enter a value';
     legend.appendChild(asterisk);
   }
+
+  // Help button for ELEM parameters
+  const elemHelpBtn = document.createElement('button');
+  elemHelpBtn.type = 'button';
+  elemHelpBtn.className = 'param-help-btn';
+  elemHelpBtn.textContent = '?';
+  elemHelpBtn.setAttribute('data-tooltip', `Help for ${kwd}`);
+  elemHelpBtn.setAttribute('aria-label', `Help for ${kwd}`);
+  elemHelpBtn.addEventListener('click', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    requestParamHelp(kwd);
+  });
+  legend.appendChild(elemHelpBtn);
+
+  // Clicking anywhere on the legend text also triggers help;
+  // the button's stopPropagation() prevents double-firing when the ? itself is clicked.
+  legend.addEventListener('click', () => {
+    requestParamHelp(kwd);
+  });
 
   fieldset.appendChild(legend);
 
@@ -4518,6 +4609,12 @@ function wirePrompterControls(): void {
       }
     } else if (e.key === 'Escape' || e.key === 'F3') {
       e.preventDefault();
+      // Close help overlay first; if it was open, don't also cancel the prompter
+      const helpOverlayEl = document.getElementById('clp-help-overlay');
+      if (helpOverlayEl?.classList.contains('visible')) {
+        closeHelpOverlay();
+        return;
+      }
       onCancel();
     }
     // Shift+Enter in textareas: allow newline (don't preventDefault above)
@@ -4551,6 +4648,19 @@ function wirePrompterControls(): void {
       state.showAllParms = !state.showAllParms;
       viewAllBtn.textContent = state.showAllParms ? 'View basic parameters' : 'View all parameters';
       applyPmtCtlVisibility();
+    });
+  }
+
+  // Wire help overlay close button and backdrop click
+  const helpOverlay = document.getElementById('clp-help-overlay');
+  const helpCloseBtn = document.getElementById('clp-help-close');
+  if (helpCloseBtn) {
+    helpCloseBtn.addEventListener('click', closeHelpOverlay);
+  }
+  if (helpOverlay) {
+    helpOverlay.addEventListener('click', (e) => {
+      // Close when clicking the backdrop (outside the panel)
+      if (e.target === helpOverlay) { closeHelpOverlay(); }
     });
   }
 }
@@ -4702,6 +4812,26 @@ window.addEventListener('message', event => {
     // Respond to ping to confirm webview is alive and responsive
     console.log('[clPrompter] Received ping, sending pong');
     vscode?.postMessage({ type: 'pong', hasProcessedFormData: state.hasProcessedFormData });
+  } else if (message.type === 'paramHelp') {
+    // Discard stale responses — only show if this is still the pending keyword
+    if (pendingHelpKwd !== null && String(message.kwd || '') !== pendingHelpKwd) { return; }
+    pendingHelpKwd = null;
+    dismissHelpToast();
+    showHelpOverlay(
+      String(message.kwd   || ''),
+      String(message.title || ''),
+      String(message.helpHtml || '<p>(No help text available for this parameter.)</p>')
+    );
+  } else if (message.type === 'paramHelpError') {
+    if (pendingHelpKwd !== null && String(message.kwd || '') !== pendingHelpKwd) { return; }
+    pendingHelpKwd = null;
+    dismissHelpToast();
+    const errMsg = String(message.error || 'Could not retrieve help. Make sure the IBM.vscode-clle extension is installed and connected to IBM i.');
+    showHelpOverlay(
+      String(message.kwd || ''),
+      'Help unavailable',
+      `<p>${errMsg.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}</p>`
+    );
   }
   console.log('[clPrompter] ', 'addEventListener(\'message\') end');
 });

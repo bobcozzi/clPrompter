@@ -370,6 +370,16 @@ textarea.long-text-input:focus {
   white-space: nowrap;
   overflow: visible;
   text-overflow: ellipsis;
+  /* Always bold — prevents layout shift when focus changes color */
+  font-weight: bold;
+  /* Block + position:relative lets the focus arrow be absolutely positioned.
+     line-height:1.5 gives a consistent row height and natural vertical rhythm.
+     vertical-align:middle on .param-help-btn centres it against the em-box,
+     the same way it works in the ELEM fieldset legend (no flex needed). */
+  display: block;
+  position: relative;
+  line-height: 1.5;
+  cursor: pointer;
 }
 
 .form-group input[type="text"],
@@ -387,7 +397,6 @@ textarea.long-text-input:focus {
 }
 
 .form-group:focus-within label {
-  font-weight: bold;
   color: var(--vscode-focusBorder, #0066cc);
 }
 
@@ -490,6 +499,7 @@ button {
   font-weight: bold;
   color: var(--vscode-editor-foreground, #333);
   padding: 0 0.2em;
+  cursor: pointer;
 }
 
 /* ELEM form-groups have adjusted label width to account for fieldset indent */
@@ -673,4 +683,193 @@ textarea.validation-error {
   color: #ff0000;
   font-weight: bold;
   margin-left: 2px;
+}
+
+/* ? help button on parameter labels */
+.param-help-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.1em;
+  height: 1.1em;
+  font-size: 0.75em;
+  line-height: 1;
+  padding: 0;
+  margin-left: 0.35em;
+  border-radius: 50%;
+  border: 1px solid currentColor;
+  background: transparent;
+  color: var(--vscode-descriptionForeground, #888);
+  cursor: pointer;
+  box-sizing: border-box;
+  opacity: 0.6;
+}
+.param-help-btn:hover {
+  opacity: 1;
+  color: var(--vscode-textLink-foreground, #3794ff);
+  border-color: var(--vscode-textLink-foreground, #3794ff);
+}
+/* Custom CSS tooltip — replaces the unreliable native title attribute.
+   Shows after a short hover delay; always re-appears correctly. */
+.param-help-btn[data-tooltip] {
+  position: relative;
+}
+.param-help-btn[data-tooltip]::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--vscode-editorHoverWidget-background, #252526);
+  color: var(--vscode-editorHoverWidget-foreground, #cccccc);
+  border: 1px solid var(--vscode-editorHoverWidget-border, #454545);
+  padding: 3px 8px;
+  border-radius: 3px;
+  font-size: 11px;
+  font-weight: normal;
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: 9999;
+  opacity: 0;
+  transition: opacity 0.1s ease;
+}
+.param-help-btn[data-tooltip]:hover::after {
+  opacity: 1;
+  transition-delay: 0.4s;
+}
+
+/* ── IBM i help loading toast ───────────────────────────────────────────── */
+#clp-help-toast {
+  position: fixed;
+  bottom: 28px;
+  left: 50%;
+  transform: translateX(-50%) translateY(10px);
+  z-index: 19999;  /* just below the help overlay */
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--vscode-notifications-background, #252526);
+  color: var(--vscode-notifications-foreground, #cccccc);
+  border: 1px solid var(--vscode-notifications-border, #454545);
+  padding: 8px 18px;
+  border-radius: 4px;
+  font-size: 0.85em;
+  box-shadow: 0 4px 14px rgba(0,0,0,0.45);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s ease, transform 0.15s ease;
+}
+#clp-help-toast.visible {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+.clp-toast-spinner {
+  width: 11px;
+  height: 11px;
+  border: 2px solid var(--vscode-notifications-foreground, #ccc);
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: clp-spin 0.7s linear infinite;
+  flex-shrink: 0;
+}
+@keyframes clp-spin {
+  to { transform: rotate(360deg); }
+}
+
+/* Full-screen backdrop for the parameter help panel */
+#clp-help-overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  z-index: 20000;
+  background: rgba(0, 0, 0, 0.45);
+  align-items: stretch;
+  justify-content: flex-end;
+}
+#clp-help-overlay.visible {
+  display: flex;
+}
+
+/* Slide-in panel */
+#clp-help-panel {
+  width: min(520px, 90vw);
+  background: var(--vscode-sideBar-background, #252526);
+  color: var(--vscode-foreground, #cccccc);
+  display: flex;
+  flex-direction: column;
+  box-shadow: -4px 0 16px rgba(0,0,0,0.4);
+  overflow: hidden;
+}
+#clp-help-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  background: var(--vscode-titleBar-activeBackground, #3c3c3c);
+  border-bottom: 1px solid var(--vscode-panel-border, #444);
+  flex-shrink: 0;
+}
+#clp-help-title {
+  font-weight: bold;
+  font-size: 0.95em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+#clp-help-close {
+  background: transparent;
+  border: none;
+  color: var(--vscode-foreground, #ccc);
+  cursor: pointer;
+  font-size: 1.1em;
+  padding: 2px 6px;
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+#clp-help-close:hover {
+  background: var(--vscode-toolbar-hoverBackground, rgba(255,255,255,0.1));
+}
+#clp-help-body {
+  padding: 14px;
+  overflow-y: auto;
+  flex: 1;
+  font-size: 0.9em;
+  line-height: 1.5;
+}
+#clp-help-body p   { margin: 0 0 0.7em; }
+#clp-help-body h3,
+#clp-help-body h4,
+#clp-help-body h5  { margin: 0.9em 0 0.3em; font-weight: 600; }
+#clp-help-body ul  { margin: 0 0 0.7em 1.2em; padding: 0; }
+#clp-help-body li  { margin-bottom: 0.25em; }
+#clp-help-body dl  { margin: 0 0 0.7em; }
+#clp-help-body dt  { font-weight: 600; margin-top: 0.6em; }
+#clp-help-body dd  { margin: 0.1em 0 0.4em 1.2em; }
+#clp-help-body code {
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 0.92em;
+  background: var(--vscode-textCodeBlock-background, rgba(128,128,128,0.15));
+  padding: 0.1em 0.3em;
+  border-radius: 3px;
+}
+#clp-help-body hr {
+  border: none;
+  border-top: 1px solid var(--vscode-editorWidget-border, #555);
+  margin: 0.8em 0;
+}
+#clp-help-body table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 0 0 0.8em;
+  font-size: 0.9em;
+}
+#clp-help-body th,
+#clp-help-body td {
+  border: 1px solid var(--vscode-editorWidget-border, #555);
+  padding: 4px 8px;
+  text-align: left;
+}
+#clp-help-body th {
+  background: var(--vscode-sideBarSectionHeader-background, rgba(128,128,128,0.2));
+  font-weight: 600;
 }

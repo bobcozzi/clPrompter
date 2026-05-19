@@ -2,6 +2,18 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.0.1] - 2026-05-19
+
+### What's New
+
+- **Parameter help panel**: Clicking the `?` button next to any parameter now opens an inline help overlay showing the full IBM-formatted parameter documentation, sourced directly from the IBM i via `GENCMDDOC`. The help panel should be similar to what you get on the green screen or the online IBM Documentations pages for the commands (it is the same source content). A close button can be used to close the help panel, but clicking anywhere on the screen also removes it.
+- **CSS tooltip on `?` buttons**: The help buttons now show a clean `"Help for <PARM>"` tooltip on hover using a CSS `::after` pseudo-element, replacing the unreliable native browser `title` attribute that VS Code webviews only show once per session.
+- **Loading indicator while retrieving help**: A non-blocking toast notification with a spinner appears at the bottom of the prompter immediately when `?` is clicked, giving feedback during the IBM i round-trip to `GENCMDDOC`. The toast dismisses automatically when the help panel opens, or after 15 seconds as a safety fallback.
+- **Background pre-fetch of parameter help**: When the prompter panel finishes rendering, `GENCMDDOC` is invoked in the background for the current command. By the time the user clicks `?`, the documentation is already cached by `vscode-clle`, making subsequent help requests for the same command instant.
+- Once a command's help has be retrieved, it is cached. Future help requests should appear nearly immediately in the current session. The initial performance lag is due to GENCMDDOC always starting a JVM every time it is run--it uses ACTGRP(*NEW) for some reason.
+
+---
+
 ## [1.0.0] - 2026-05-18
 
 ### Release Candidate 1 (RC1)

@@ -37,6 +37,23 @@
     <button id="viewAllParmsBtn" type="button">View all parameters</button>
   </div>
 
+  <!-- Loading toast shown while IBM i is retrieving parameter help -->
+  <div id="clp-help-toast" role="status" aria-live="polite" aria-atomic="true">
+    <span class="clp-toast-spinner"></span>
+    <span>Retrieving parameter help from IBM i…</span>
+  </div>
+
+  <!-- Parameter help overlay (shown when F1 is pressed or ? button clicked) -->
+  <div id="clp-help-overlay" role="dialog" aria-modal="true" aria-labelledby="clp-help-title">
+    <div id="clp-help-panel">
+      <div id="clp-help-header">
+        <span id="clp-help-title"></span>
+        <button id="clp-help-close" type="button" aria-label="Close help" title="Close (Escape)">&#x2715;</button>
+      </div>
+      <div id="clp-help-body"></div>
+    </div>
+  </div>
+
   <script nonce="{{nonce}}">
     const vscode = acquireVsCodeApi();
     window.vscodeApi = vscode;

@@ -60,6 +60,40 @@ import {
 
 let baseExtension: Extension<CodeForIBMi> | undefined;
 
+/**
+ * Extracts the raw HTML for a single parameter section from a GENCMDDOC HTML document.
+ * GENCMDDOC wraps each parameter in: <div><a name="CMDNAME.PARM">...</a>...</div>
+ * Returns null if the section cannot be found.
+ */
+function extractParamHtml(html: string, cmdName: string, kwd: string): string | null {
+    const htmlUpper = html.toUpperCase();
+    const target = `NAME="${cmdName.toUpperCase()}.${kwd.toUpperCase()}"`;
+    const anchorPos = htmlUpper.indexOf(target);
+    if (anchorPos === -1) { return null; }
+
+    // Walk back to find the opening <div that is the parent of the anchor
+    const divStart = htmlUpper.lastIndexOf('<DIV', anchorPos);
+    if (divStart === -1) { return null; }
+
+    // Count nested <div> tags to find the matching </div>
+    let depth = 1;
+    let pos = divStart + 4;
+    while (depth > 0 && pos < html.length) {
+        const nextOpen  = htmlUpper.indexOf('<DIV',  pos);
+        const nextClose = htmlUpper.indexOf('</DIV', pos);
+        if (nextClose === -1) { break; }
+        if (nextOpen !== -1 && nextOpen < nextClose) {
+            depth++;
+            pos = nextOpen + 4;
+        } else {
+            depth--;
+            pos = nextClose + 6; // skip past </div>
+        }
+    }
+
+    return html.substring(divStart, pos);
+}
+
 export async function activate(context: vscode.ExtensionContext) {
 
     baseExtension = extensions.getExtension<CodeForIBMi>("halcyontechltd.code-for-ibmi");
@@ -70,55 +104,8 @@ export async function activate(context: vscode.ExtensionContext) {
         code4i = baseExtension.exports;
 
         // Subscribe to IBM i connection events.
-        // On connect: run a configurable ILE command to pre-warm the Mapepire/JVM
-        // service job before the user prompts their first command.
         // On disconnect: clear the XML cache so stale definitions from the previous
         // IBM i system are never reused after reconnecting to a different system.
-        const runWarmup = async () => {
-            const warmupCmd = vscode.workspace.getConfiguration('clPrompter').get<string>('sessionWarmupCommand', 'DSPLIBL').trim();
-            if (!warmupCmd) { return; }
-            const connection = code4i?.instance?.getConnection();
-            if (!connection) { return; }
-            try {
-                const t0 = Date.now();
-                // NEW: warm the Mapepire SQL job (reuses c4i's existing JVM) when available.
-                // CL display commands like DSPLIBL cannot run unattended in a batch/Mapepire job,
-                // so we use a trivial SQL statement as the warm-up instead.
-                // REVERT: remove the if/else below and restore:
-                //   await connection.runCommand({ command: warmupCmd, environment: 'ile' });
-                if (connection.sqlRunnerAvailable()) {
-                    console.log(`[clPrompter] Warming up Mapepire SQL job (SQL + @ paths)`);
-                    // Phase 1: warm the SQL engine itself.
-                    await connection.runSQL('VALUES CURRENT_SERVER');
-                    // Phase 2: warm the @ CL-command execution path.
-                    // runSQL('@cmd') is dispatched differently inside Mapepire than plain SQL.
-                    // A comment-only CL string warms the @ dispatch path without issuing any
-                    // real command — no *ESCAPE messages, no side effects, returns quickly so
-                    // the connection slot is free before the user presses F4.
-                    try {
-                        await connection.runSQL(`@/* clPrompter warm-up */`);
-                    } catch (e2) {
-                        // Non-critical — log and continue
-                        console.log(`[clPrompter] @ path warm-up failed (non-critical): ${e2}`);
-                    }
-                } else {
-                    console.log(`[clPrompter] Warming up IBM i session with: ${warmupCmd}`);
-                    await connection.runCommand({ command: warmupCmd, environment: 'ile' });
-                }
-                console.log(`[clPrompter] IBM i session warm-up took ${Date.now() - t0}ms`);
-            } catch (e) {
-                // Best-effort — never block the user over a warm-up failure
-                console.log(`[clPrompter] Session warm-up skipped: ${e}`);
-            }
-        };
-        code4i.instance.subscribe(context, 'connected', 'clPrompter-warmup', runWarmup);
-        // Also warm up immediately if already connected when the extension (re-)activates.
-        // The 'connected' event only fires on new connections, so without this an extension
-        // reload while connected (e.g. after install) would skip the warmup entirely and
-        // leave the first F4 press cold-starting the Mapepire/JVM job (~20 s lag).
-        if (code4i.instance.getConnection()) {
-            runWarmup();
-        }
 
         // Keep-alive: send a trivial no-op to the Mapepire SQL job every 20 seconds so
         // the JVM service job never goes idle between F4 presses.  Without this, opening
@@ -1164,6 +1151,57 @@ export class ClPromptPanel {
                         }
                         break;
                     }
+                    case 'getParamHelp': {
+                        const kwd: string = message.kwd || '';
+                        const cmdName: string = message.cmdName || this._cmdName || '';
+                        console.log(`[clPrompter] getParamHelp: kwd=${kwd}, cmdName=${cmdName}`);
+                        try {
+                            const clleExt = vscode.extensions.getExtension<any>('IBM.vscode-clle');
+                            if (!clleExt) {
+                                this._panel.webview.postMessage({
+                                    type: 'paramHelpError', kwd,
+                                    error: 'IBM.vscode-clle extension is not installed.'
+                                });
+                                break;
+                            }
+                            const api = clleExt.isActive ? clleExt.exports : await clleExt.activate();
+                            const result = await api.genCmdDoc.getCLDoc(cmdName);
+                            if (!result?.doc) {
+                                this._panel.webview.postMessage({
+                                    type: 'paramHelpError', kwd,
+                                    error: `No documentation found for command ${cmdName}. Check your IBM i connection.`
+                                });
+                                break;
+                            }
+                            const detail = result.doc.parameters.details.find(
+                                (p: { name: string }) => p.name.toUpperCase() === kwd.toUpperCase()
+                            );
+                            if (!detail) {
+                                this._panel.webview.postMessage({
+                                    type: 'paramHelpError', kwd,
+                                    error: `No help found for parameter ${kwd} in ${cmdName}.`
+                                });
+                                break;
+                            }
+                            // Extract the raw parameter HTML from the GENCMDDOC document
+                            // (same source vscode-clle uses for its panel display).
+                            // Fall back to the Markdown description if extraction fails.
+                            const rawHtml = extractParamHtml(result.html, cmdName, kwd);
+                            this._panel.webview.postMessage({
+                                type: 'paramHelp',
+                                kwd,
+                                title: detail.name,
+                                helpHtml: rawHtml ?? `<p>${detail.description.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}</p>`
+                            });
+                        } catch (err) {
+                            console.error('[clPrompter] getParamHelp error:', err);
+                            this._panel.webview.postMessage({
+                                type: 'paramHelpError', kwd,
+                                error: `Error retrieving help: ${err instanceof Error ? err.message : String(err)}`
+                            });
+                        }
+                        break;
+                    }
                 }
             },
             undefined,
@@ -1239,6 +1277,9 @@ export class ClPromptPanel {
 
         const html = await this.getHtmlForPrompter(this._panel.webview, this._cmdName, this._xml);
         this._panel.webview.html = html;
+        // Fire-and-forget after the panel is rendered so it appears instantly.
+        // GENCMDDOC runs concurrently; by the time the user clicks ?, it's cached.
+        this._prefetchCLDoc(cmdName);
     }
 
 
@@ -1259,6 +1300,30 @@ export class ClPromptPanel {
                 disposable.dispose();
             }
         }
+    }
+
+    /**
+     * Fire-and-forget pre-fetch of vscode-clle's GENCMDDOC cache for `cmdName`.
+     * Only runs if IBM.vscode-clle is already active (avoids blocking panel open).
+     * On the second call for the same command the result returns instantly from
+     * vscode-clle's own static cache.
+     */
+    private _prefetchCLDoc(cmdName: string): void {
+        if (!cmdName) { return; }
+        const clleExt = vscode.extensions.getExtension<any>('IBM.vscode-clle');
+        if (!clleExt) { return; }
+        const t0 = Date.now();
+        console.log(`[clPrompter] Pre-fetching GENCMDDOC for ${cmdName}…`);
+        // Activate vscode-clle if needed — this is fire-and-forget so it never
+        // blocks the prompter panel, but means the cache is warm by first ? click
+        // even on the very first prompt of a session when vscode-clle isn't active yet.
+        (clleExt.isActive ? Promise.resolve(clleExt.exports) : Promise.resolve(clleExt.activate()))
+            .then((api: any) => {
+                if (!api?.genCmdDoc?.getCLDoc) { return; }
+                return api.genCmdDoc.getCLDoc(cmdName);
+            })
+            .then(() => console.log(`[clPrompter] GENCMDDOC pre-fetch for ${cmdName} done in ${Date.now() - t0}ms`))
+            .catch((e: any) => console.log(`[clPrompter] GENCMDDOC pre-fetch for ${cmdName} failed (non-critical): ${e?.message ?? e}`));
     }
 
     private async getHtmlForPrompter(webview: vscode.Webview, cmdString: string, xml: string): Promise<string> {
