@@ -50,7 +50,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { buildAPI2PartName, buildQualName } from './QlgPathName';
 import { collectCLCmd, buildAllowedValsMap, buildDepConstraints, buildValToMapToMap, buildDefaultValMap, buildPmtCtlMap, buildAllMaps } from './extractor';
-import { getCMDXML, clearCMDXMLCache } from './getcmdxml';
+import { getCMDXML, clearCMDXMLCache, warmXmlCache } from './getcmdxml';
 
 import {
     tokenizeCL,
@@ -59,6 +59,15 @@ import {
 } from './tokenizeCL';
 
 let baseExtension: Extension<CodeForIBMi> | undefined;
+
+/**
+ * Helptext cache populated by the PASE-based prefetch.
+ * Key: uppercase command name (e.g. "CPYF"). Value: raw GENCMDDOC HTML.
+ * Checked before falling back to vscode-clle's getCLDoc so that pre-fetched
+ * commands never touch the Mapepire connection when the ? button is clicked.
+ * Cleared on IBM i disconnect so stale docs from one system never appear on another.
+ */
+const clpDocCache = new Map<string, string>();
 
 /**
  * Extracts the raw HTML for a single parameter section from a GENCMDDOC HTML document.
@@ -133,12 +142,78 @@ export async function activate(context: vscode.ExtensionContext) {
             }
         };
 
+        /**
+         * Pre-loads both the command XML definition (QCDRCMDD → XML cache) and
+         * GENCMDDOC helptext (PASE SSH channel → clpDocCache) for every command in
+         * the prefetchCommands setting.
+         *
+         * XML warm uses Mapepire (fast, ~500 ms each) with no progress toast.
+         * Helptext fetch uses a PASE SSH exec channel so it never touches the ileQueue.
+         * Both run in parallel across all commands — total wall-clock time ≈ one command.
+         */
+        const prefetch = (): void => {
+            const config = vscode.workspace.getConfiguration('clPrompter');
+            const raw: string = config.get('prefetchCommands', '');
+            if (!raw.trim()) { return; }
+
+            const cmds = raw.split(/[\s,]+/).map(s => s.trim().toUpperCase()).filter(Boolean);
+            if (cmds.length === 0) { return; }
+
+            const delayMs: number = (config.get<number>('prefetchDelay', 0)) * 1_000;
+
+            setTimeout(async () => {
+                const conn = code4i?.instance?.getConnection();
+                if (!conn) { return; }
+
+                const fetchOne = async (cmd: string): Promise<void> => {
+                    const tmpFile = `clprompter_${cmd}.html`;
+                    const tmpPath = `/tmp/${tmpFile}`;
+
+                    // XML warm (Mapepire, ~500 ms, no progress toast) and
+                    // GENCMDDOC helptext (PASE SSH exec channel) run concurrently.
+                    await Promise.allSettled([
+                        // --- XML definition warm ---
+                        warmXmlCache(cmd),
+
+                        // --- Helptext (GENCMDDOC via PASE) ---
+                        (async () => {
+                            if (clpDocCache.has(cmd)) { return; }
+                            const t0 = Date.now();
+                            try {
+                                const genResult = await conn.runCommand({
+                                    command: `system "GENCMDDOC CMD(QSYS/${cmd}) GENOPT(*HTML *SHOWCHOICEPGMVAL) REPLACE(*YES) TOSTMF('${tmpFile}') TODIR('/tmp')"`,
+                                    environment: 'pase'
+                                });
+                                if (genResult.code !== 0) {
+                                    console.log(`[clPrompter] PASE GENCMDDOC for ${cmd} failed (code=${genResult.code}): ${genResult.stderr}`);
+                                    return;
+                                }
+                                const buf = await conn.getContent().downloadStreamfileRaw(tmpPath);
+                                clpDocCache.set(cmd, buf.toString('utf8'));
+                                console.log(`[clPrompter] PASE helptext pre-fetch for ${cmd} done in ${Date.now() - t0}ms (${clpDocCache.get(cmd)!.length} bytes)`);
+                            } catch (e: any) {
+                                console.log(`[clPrompter] PASE helptext pre-fetch for ${cmd} failed (non-critical): ${e?.message ?? e}`);
+                            } finally {
+                                conn.runCommand({ command: `rm -f ${tmpPath}`, environment: 'pase' }).catch(() => {});
+                            }
+                        })()
+                    ]);
+                };
+
+                // Run all commands in parallel — each uses its own SSH exec channel so
+                // there is no serialization penalty. Total wall-clock time ≈ one command.
+                await Promise.allSettled(cmds.map(fetchOne));
+            }, delayMs);
+        };
+
         code4i.instance.subscribe(context, 'connected', 'clPrompter-keepalive-start', startKeepAlive);
+        code4i.instance.subscribe(context, 'connected', 'clPrompter-prefetch', prefetch);
         code4i.instance.subscribe(context, 'disconnected', 'clPrompter-keepalive-stop', stopKeepAlive);
 
         // Start immediately if already connected when the extension activates.
         if (code4i.instance.getConnection()) {
             startKeepAlive();
+            prefetch();
         }
 
         // Ensure the interval is cleared when the extension is deactivated.
@@ -146,7 +221,8 @@ export async function activate(context: vscode.ExtensionContext) {
 
         code4i.instance.subscribe(context, 'disconnected', 'clPrompter-cache-clear', () => {
             clearCMDXMLCache();
-            console.log('[clPrompter] Disconnected — XML cache cleared');
+            clpDocCache.clear();
+            console.log('[clPrompter] Disconnected — XML cache and helptext cache cleared');
         });
     } else {
         vscode.window.showErrorMessage("Code for IBM i extension is not installed or not found.");
@@ -1156,6 +1232,20 @@ export class ClPromptPanel {
                         const cmdName: string = message.cmdName || this._cmdName || '';
                         console.log(`[clPrompter] getParamHelp: kwd=${kwd}, cmdName=${cmdName}`);
                         try {
+                            // Check our own PASE-populated cache first.
+                            // If the command was pre-fetched via PASE, serve it directly
+                            // without touching vscode-clle or the Mapepire connection.
+                            const cachedHtml = clpDocCache.get(cmdName.toUpperCase());
+                            if (cachedHtml) {
+                                const rawHtml = extractParamHtml(cachedHtml, cmdName, kwd);
+                                if (rawHtml) {
+                                    this._panel.webview.postMessage({ type: 'paramHelp', kwd, title: kwd, helpHtml: rawHtml });
+                                    break;
+                                }
+                                // extractParamHtml returned null — param section not found in cached HTML;
+                                // fall through to vscode-clle which may have a different/newer version
+                            }
+
                             const clleExt = vscode.extensions.getExtension<any>('IBM.vscode-clle');
                             if (!clleExt) {
                                 this._panel.webview.postMessage({
@@ -1310,6 +1400,9 @@ export class ClPromptPanel {
      */
     private _prefetchCLDoc(cmdName: string): void {
         if (!cmdName) { return; }
+        // Already in our own PASE cache — getParamHelp will serve it from there,
+        // no need to also warm vscode-clle's ileQueue-backed cache.
+        if (clpDocCache.has(cmdName.toUpperCase())) { return; }
         const clleExt = vscode.extensions.getExtension<any>('IBM.vscode-clle');
         if (!clleExt) { return; }
         const t0 = Date.now();

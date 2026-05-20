@@ -2,7 +2,7 @@
   "name": "clprompter",
   "displayName": "Bob Cozzi's CL Prompter and Formatter for IBM i",
   "description": "IBM i CL Prompting and Formatting: Built for modern development",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "author": {
     "name": "Bob Cozzi",
     "url": "https://github.com/bobcozzi"
@@ -169,6 +169,17 @@
           "default": 16,
           "minimum": 1,
           "description": "Number of characters added to a prompted input field each time the user enters & and leaves the field. Default: 16."
+        },
+        "clPrompter.prefetchCommands": {
+          "type": "string",
+          "default": "PGM, DCL, MONMSG, CPYF, CHGVAR, SNDPGMMSG",
+          "description": "Comma- or space-delimited list of CL command names to pre-load when a connection to IBM i is established. For each command, both the Prompter and helptext are prefetched. Leave blank to disable."
+        },
+        "clPrompter.prefetchDelay": {
+          "type": "number",
+          "default": 0,
+          "minimum": 0,
+          "description": "Seconds to wait after connecting to IBM i before starting pre-loading. Pre-loading does not block other IBM i activity (XML uses Mapepire silently; helptext uses PASE), so the default is 0. Increase only if you want to defer pre-loading to a specific time after connecting."
         }
       }
     },

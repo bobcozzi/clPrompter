@@ -2,6 +2,12 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.0.2] - 2026-05-20
+
+### What's New
+
+- **Pre-fetch user-specified CL commands**: To help improve prompting and helptext performance.
+
 ## [1.0.1] - 2026-05-19
 
 ### What's New

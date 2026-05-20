@@ -45,6 +45,78 @@ export function clearCMDXMLCache(cmdKey?: string): void {
     }
 }
 
+/**
+ * Silently pre-warms the XML cache for a given command name (e.g. "CPYF").
+ *
+ * Identical outcome to getCMDXML() but with no progress notification — safe to
+ * call in parallel at connect time without flooding the VS Code toast area.
+ *
+ * Registers the in-flight promise in `_inflight` so that if the user triggers
+ * F4 while the warm is still running, getCMDXML() will attach to the same
+ * promise instead of spinning up a second QCDRCMDD call for the same command.
+ */
+export async function warmXmlCache(cmd: string): Promise<void> {
+    if (!code4i) { return; }
+    const connection = code4i.instance.getConnection();
+    if (!connection) { return; }
+
+    const c4iConfig = connection.getConfig();
+    const qualName = buildAPI2PartName(cmd);
+    const nameStr = new TextDecoder().decode(qualName);
+    const OBJNAME = new TextDecoder().decode(qualName.subarray(0, 10)).trim();
+    let LIBNAME = qualName.length >= 20 ? new TextDecoder().decode(qualName.subarray(10, 20)).trim() : '';
+    if (!LIBNAME) { LIBNAME = '*LIBL'; }
+
+    let cmdXMLName = '';
+    if (LIBNAME.length > 0 && LIBNAME !== '*LIBL') { cmdXMLName = `${LIBNAME}_`; }
+    cmdXMLName += OBJNAME;
+
+    // Already cached or a fetch is already in flight (could be a user-triggered getCMDXML)
+    if (_xmlCache.has(cmdXMLName) || _inflight.has(cmdXMLName)) { return; }
+
+    const outFile = `${c4iConfig.tempDir.replace(/\/?$/, '/')}${cmdXMLName}.cmd`;
+    const fileParm = buildQlgPathNameHex(outFile);
+    const QCDRCMDD = `CALL QCDRCMDD PARM('${nameStr}' X'${fileParm}' 'DEST0200' ' ' 'CMDD0200' X'000000000000')`;
+    const t0 = Date.now();
+
+    const fetchPromise: Promise<string> = (async () => {
+        try {
+            let cmdSucceeded = false;
+            if (connection.sqlRunnerAvailable()) {
+                try {
+                    await connection.runSQL('@' + QCDRCMDD);
+                    cmdSucceeded = true;
+                } catch (e: any) {
+                    console.log(`[clPrompter] warmXmlCache runSQL for ${OBJNAME} failed: ${e?.message ?? e}`);
+                }
+            } else {
+                const result = await connection.runCommand({ command: QCDRCMDD, environment: 'ile' });
+                cmdSucceeded = result.code === 0;
+            }
+
+            if (cmdSucceeded) {
+                const doc = await vscode.workspace.openTextDocument(vscode.Uri.from({
+                    scheme: 'streamfile',
+                    path: outFile,
+                    query: 'readonly=true'
+                }));
+                if (doc) {
+                    const xml = doc.getText();
+                    _xmlCache.set(cmdXMLName, xml);
+                    console.log(`[clPrompter] warmXmlCache: ${OBJNAME} cached in ${Date.now() - t0}ms (${xml.length} bytes)`);
+                }
+            }
+        } catch (e: any) {
+            console.log(`[clPrompter] warmXmlCache for ${OBJNAME} failed (non-critical): ${e?.message ?? e}`);
+        }
+        return _xmlCache.get(cmdXMLName) ?? '';
+    })();
+
+    _inflight.set(cmdXMLName, fetchPromise);
+    fetchPromise.finally(() => _inflight.delete(cmdXMLName));
+    await fetchPromise;
+}
+
 // Utility: Fetch or return XML for a command
 export async function getCMDXML(cmdString: string): Promise<string> {
     if (!code4i) {
