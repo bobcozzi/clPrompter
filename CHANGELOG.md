@@ -2,11 +2,16 @@
 
 All notable changes to this project are documented in this file.
 
-## [1.0.2] - 2026-05-20
+## [1.0.3] - 2026-05-20
 
 ### What's New
 
-- **Pre-fetch user-specified CL commands**: To help improve prompting and helptext performance.
+- **Improved performance of CL Parameter Help**: CL parameter help is now retrieved via a new SQL-based `CMD_HELP` UDTF that runs entirely on IBM i without starting a JVM. This replaces the previous `GENCMDDOC`-based path, which required spawning a Java Virtual Machine on every invocation and could take 5–20 seconds. The new UDTF reads help text directly from panel groups using APIs, returning results in milliseconds once installed.
+- **Automatic UDTF installation**: On first connection to IBM i, clPrompter automatically uploads, compiles, and installs the `CMD_HELP` UDTF into the configured support library. Subsequent connections verify the installed version and skip reinstallation when already current. No manual setup is required.
+- **New `clPrompter.udtfSupportLibrary` setting**: The default value `*TEMPLIB` causes clPrompter to install and locate its UDTFs in Code for IBM i's temporary library for your connection, which works for most users without any configuration change. You can also specify `SQLTOOLS`, `SYSTOOLS`, or any other library name.
+- **`clPrompter.parmHelpText` setting**: Choose between the new `CMD_HELP UDTF` (faster and recommended) and the legacy `GENCMDDOC` method (slow, JVM-based) for retrieving CL parameter help when the `?` button is clicked in the prompter. Users who are not permitted to upload and build an SQL UDTF may need to switch this setting to `GENCMDDOC`.
+
+- **Pre-fetch user-specified CL command prompter**: There is now a settings that contains a list of several common CL commands that are pre-fretched when a CL source member is open. This only occurs once per session. All other CL command prompts are fetched on demand, and are cached for the duration of the session.
 
 ## [1.0.1] - 2026-05-19
 

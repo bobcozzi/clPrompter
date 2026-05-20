@@ -2,7 +2,7 @@
   "name": "clprompter",
   "displayName": "Bob Cozzi's CL Prompter and Formatter for IBM i",
   "description": "IBM i CL Prompting and Formatting: Built for modern development",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "author": {
     "name": "Bob Cozzi",
     "url": "https://github.com/bobcozzi"
@@ -69,20 +69,20 @@
           "type": "string",
           "format": "color",
           "default": "#ffb300",
-          "description": "Parameter keyword color in prompter.  Use CSS color values like ##1a237e, blue, or rgb(34,170,34).",
+          "description": "PARM keyword color in prompter.  Use CSS color values like ##1a237e, blue, or rgb(34,170,34).",
           "pattern": "^(#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{3}|[a-zA-Z]+|rgb\\(\\d+,\\s*\\d+,\\s*\\d+\\)|rgba\\(\\d+,\\s*\\d+,\\s*\\d+,\\s*[0-9.]+\\))$"
         },
         "clPrompter.kwdValueColor": {
           "type": "string",
           "format": "color",
           "default": "#1a237e",
-          "description": "Parameter value color in prompter.  Use CSS color values like ##1a237e, blue, or rgb(34,170,34).",
+          "description": "PARM value color in prompter.  Use CSS color values like ##1a237e, blue, or rgb(34,170,34).",
           "pattern": "^(#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{3}|[a-zA-Z]+|rgb\\(\\d+,\\s*\\d+,\\s*\\d+\\)|rgba\\(\\d+,\\s*\\d+,\\s*\\d+,\\s*[0-9.]+\\))$"
         },
         "clPrompter.kwdColorAutoAdjust": {
           "type": "boolean",
           "default": true,
-          "description": "Parameter keyword color Auto-adjust for best contrast in dark/light/high-contrast themes. If false, uses your color exactly as specified."
+          "description": "PARM keyword color Auto-adjust for best contrast in dark/light/high-contrast themes. If false, uses your color exactly as specified."
         },
         "clPrompter.saveCmdXMLtoFile": {
           "type": "boolean",
@@ -107,7 +107,7 @@
         "clPrompter.convertParmValueToUpperCase": {
           "type": "boolean",
           "default": true,
-          "description": "Convert CL variables, operators (*BCAT, *TCAT, etc.), and built-in functions (%SUBST, %TRIM, etc.) within parameter values to uppercase. When true, text like '&pickles *bcat %trim(x)' becomes '&PICKLES *BCAT %TRIM(x)'. When false, preserves original case. Applies when returning from the prompter."
+          "description": "Convert CL variables, operators (*BCAT, *TCAT, etc.), and built-in functions (%SUBST, %TRIM, etc.) within PARM values to uppercase. When true, text like '&pickles *bcat %trim(x)' becomes '&PICKLES *BCAT %TRIM(x)'. When false, preserves original case. Applies when returning from the prompter."
         },
         "clPrompter.convertCmdAndParmNameCase": {
           "type": "string",
@@ -117,7 +117,7 @@
             "*LOWER",
             "*NONE"
           ],
-          "description": "Case conversion for CL command names and parameter keywords. *UPPER = uppercase (CHGVAR VAR(...)), *LOWER = lowercase (chgvar var(...)), *NONE = no change. Applies when returning from the prompter and when formatting CL source."
+          "description": "Case conversion for CL command names and PARM keywords. *UPPER = uppercase (CHGVAR VAR(...)), *LOWER = lowercase (chgvar var(...)), *NONE = no change. Applies when returning from the prompter and when formatting CL source."
         },
         "clPrompter.formatIndentComments": {
           "type": "string",
@@ -144,7 +144,7 @@
           "type": "number",
           "default": 25,
           "minimum": 0,
-          "description": "Position where the first parameter/keyword starts. Use 0 for one space after command name. Default: 25."
+          "description": "Position where the first PARM/keyword starts. Use 0 for one space after command name. Default: 25."
         },
         "clPrompter.formatContinuePosition": {
           "type": "number",
@@ -180,6 +180,24 @@
           "default": 0,
           "minimum": 0,
           "description": "Seconds to wait after connecting to IBM i before starting pre-loading. Pre-loading does not block other IBM i activity (XML uses Mapepire silently; helptext uses PASE), so the default is 0. Increase only if you want to defer pre-loading to a specific time after connecting."
+        },
+        "clPrompter.udtfSupportLibrary": {
+          "type": "string",
+          "default": "*TEMPLIB",
+          "description": "Library on IBM i where clPrompter UDTFs such as CHECK_SYNTAX and CMD_HELP are installed. *TEMPLIB = use Code for IBM i's configured temporary library. Recommended SQLTOOLS or SYSTOOLS. Or enter any user library name. Default: *TEMPLIB."
+        },
+        "clPrompter.parmHelpText": {
+          "type": "string",
+          "default": "CMD_HELP UDTF",
+          "enum": [
+            "CMD_HELP UDTF",
+            "GENCMDDOC"
+          ],
+          "enumDescriptions": [
+            "Fast SQL-based helptext via the CMD_HELP UDTF (once installed on IBM i). Requires the CMD_HELP UDTF in the library specified by clPrompter.helpLibrary.",
+            "Legacy Helptext generated via the GENCMDDOC CL command. (slow)."
+          ],
+          "description": "Interface to use to retrieve CL command parameter helptext when the ? button is clicked in the prompter."
         }
       }
     },

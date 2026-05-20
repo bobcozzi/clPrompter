@@ -29,6 +29,7 @@ import { DOMParser } from '@xmldom/xmldom';
 import { CodeForIBMi } from "@halcyontech/vscode-ibmi-types";
 export let code4i: CodeForIBMi;
 import { Extension, extensions } from "vscode";
+import { CmdHelpChecker } from './components/cmdHelp/cmdHelpChecker';
 
 import { initializePrompter, CLPrompter, CLPrompterCallback } from './clPrompter';
 
@@ -50,7 +51,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { buildAPI2PartName, buildQualName } from './QlgPathName';
 import { collectCLCmd, buildAllowedValsMap, buildDepConstraints, buildValToMapToMap, buildDefaultValMap, buildPmtCtlMap, buildAllMaps } from './extractor';
-import { getCMDXML, clearCMDXMLCache, warmXmlCache } from './getcmdxml';
+import { getCMDXML, clearCMDXMLCache, warmXmlCache, getCmdHelpViaUDTF } from './getcmdxml';
 
 import {
     tokenizeCL,
@@ -68,6 +69,11 @@ let baseExtension: Extension<CodeForIBMi> | undefined;
  * Cleared on IBM i disconnect so stale docs from one system never appear on another.
  */
 const clpDocCache = new Map<string, string>();
+
+/** Per-keyword UDTF help cache. Key: "CMDNAME.KWD" (uppercase). Value: raw HTML from CMD_HELP UDTF.
+ * Cleared on IBM i disconnect so stale results from one system never appear on another.
+ */
+const clpHelpCache = new Map<string, string>();
 
 /**
  * Extracts the raw HTML for a single parameter section from a GENCMDDOC HTML document.
@@ -111,6 +117,33 @@ export async function activate(context: vscode.ExtensionContext) {
             await baseExtension.activate();
         }
         code4i = baseExtension.exports;
+
+        // Register the CMD_HELP UDTF component so Code for IBM i automatically
+        // checks and installs/updates it on every NEW connection.
+        const cmdHelpChecker = new CmdHelpChecker();
+        code4i.componentRegistry.registerComponent(context, cmdHelpChecker);
+
+        // If the extension activates while a connection is already live (e.g. lazy
+        // activation), the ComponentManager won't have called our component for the
+        // current session. Run the check manually here so it still installs.
+        // Guard prevents a concurrent run when the ComponentManager is already running it.
+        let cmdHelpCheckRunning = false;
+        const runCmdHelpCheck = async () => {
+            if (cmdHelpCheckRunning) { return; }
+            cmdHelpCheckRunning = true;
+            try {
+                const conn = code4i?.instance?.getConnection();
+                if (!conn) { return; }
+                const state = await cmdHelpChecker.getRemoteState(conn, '');
+                if (state !== 'Installed') {
+                    await cmdHelpChecker.update(conn, '');
+                }
+            } catch (e) {
+                console.error(`[clPrompter] CmdHelpChecker manual check failed: ${e}`);
+            } finally {
+                cmdHelpCheckRunning = false;
+            }
+        };
 
         // Subscribe to IBM i connection events.
         // On disconnect: clear the XML cache so stale definitions from the previous
@@ -169,14 +202,17 @@ export async function activate(context: vscode.ExtensionContext) {
                     const tmpFile = `clprompter_${cmd}.html`;
                     const tmpPath = `/tmp/${tmpFile}`;
 
+                    const useGencmddoc = vscode.workspace.getConfiguration('clPrompter').get<string>('parmHelpText', 'CMD_HELP UDTF') === 'GENCMDDOC';
+
                     // XML warm (Mapepire, ~500 ms, no progress toast) and
                     // GENCMDDOC helptext (PASE SSH exec channel) run concurrently.
                     await Promise.allSettled([
                         // --- XML definition warm ---
                         warmXmlCache(cmd),
 
-                        // --- Helptext (GENCMDDOC via PASE) ---
+                        // --- Helptext (GENCMDDOC via PASE) — only when parmHelpText=GENCMDDOC ---
                         (async () => {
+                            if (!useGencmddoc) { return; }
                             if (clpDocCache.has(cmd)) { return; }
                             const t0 = Date.now();
                             try {
@@ -208,12 +244,18 @@ export async function activate(context: vscode.ExtensionContext) {
 
         code4i.instance.subscribe(context, 'connected', 'clPrompter-keepalive-start', startKeepAlive);
         code4i.instance.subscribe(context, 'connected', 'clPrompter-prefetch', prefetch);
+        // NOTE: no 'connected' subscriber for runCmdHelpCheck — the ComponentManager
+        // handles new connections automatically (it calls getRemoteState/update on all
+        // registered components at connect time). The manual call below handles only
+        // the case where the extension activates into an already-live session.
         code4i.instance.subscribe(context, 'disconnected', 'clPrompter-keepalive-stop', stopKeepAlive);
 
         // Start immediately if already connected when the extension activates.
         if (code4i.instance.getConnection()) {
             startKeepAlive();
-            prefetch();
+            // Run the CMD_HELP check first, then prefetch — serialized so the
+            // upload/compile step doesn't race prefetch for SSH channels.
+            runCmdHelpCheck().finally(() => prefetch());
         }
 
         // Ensure the interval is cleared when the extension is deactivated.
@@ -222,6 +264,7 @@ export async function activate(context: vscode.ExtensionContext) {
         code4i.instance.subscribe(context, 'disconnected', 'clPrompter-cache-clear', () => {
             clearCMDXMLCache();
             clpDocCache.clear();
+            clpHelpCache.clear();
             console.log('[clPrompter] Disconnected — XML cache and helptext cache cleared');
         });
     } else {
@@ -1232,6 +1275,36 @@ export class ClPromptPanel {
                         const cmdName: string = message.cmdName || this._cmdName || '';
                         console.log(`[clPrompter] getParamHelp: kwd=${kwd}, cmdName=${cmdName}`);
                         try {
+                            // Tier 0: per-keyword UDTF cache (populated by Tier 1 on first call)
+                            const helpCacheKey = `${cmdName.toUpperCase()}.${kwd.toUpperCase()}`;
+                            const cachedUdtfHtml = clpHelpCache.get(helpCacheKey);
+                            if (cachedUdtfHtml) {
+                                this._panel.webview.postMessage({ type: 'paramHelp', kwd, title: kwd, helpHtml: cachedUdtfHtml });
+                                break;
+                            }
+                            // Tier 1: CMD_HELP UDTF (fast path — Mapepire, no PASE, no JVM)
+                            {
+                                const slashIdx = cmdName.indexOf('/');
+                                const cmdLib = slashIdx >= 0 ? cmdName.substring(0, slashIdx).toUpperCase() : '*LIBL';
+                                const cmdObj = slashIdx >= 0 ? cmdName.substring(slashIdx + 1).toUpperCase() : cmdName.toUpperCase();
+                                const udtfHtml = await getCmdHelpViaUDTF(cmdLib, cmdObj, kwd);
+                                if (udtfHtml) {
+                                    clpHelpCache.set(helpCacheKey, udtfHtml);
+                                    this._panel.webview.postMessage({ type: 'paramHelp', kwd, title: kwd, helpHtml: udtfHtml });
+                                    break;
+                                }
+                            }
+
+                            // Tier 2 + Tier 3: GENCMDDOC path — only when parmHelpText=GENCMDDOC
+                            const useGencmddoc = vscode.workspace.getConfiguration('clPrompter').get<string>('parmHelpText', 'CMD_HELP UDTF') === 'GENCMDDOC';
+                            if (!useGencmddoc) {
+                                this._panel.webview.postMessage({
+                                    type: 'paramHelpError', kwd,
+                                    error: `No CMD_HELP data found for PARM ${kwd} in ${cmdName}.`
+                                });
+                                break;
+                            }
+
                             // Check our own PASE-populated cache first.
                             // If the command was pre-fetched via PASE, serve it directly
                             // without touching vscode-clle or the Mapepire connection.
@@ -1269,7 +1342,7 @@ export class ClPromptPanel {
                             if (!detail) {
                                 this._panel.webview.postMessage({
                                     type: 'paramHelpError', kwd,
-                                    error: `No help found for parameter ${kwd} in ${cmdName}.`
+                                    error: `No help found for PARM ${kwd} in ${cmdName}.`
                                 });
                                 break;
                             }

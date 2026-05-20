@@ -238,3 +238,47 @@ export async function getCMDXML(cmdString: string): Promise<string> {
     fetchPromise.finally(() => _inflight.delete(cmdXMLName));
     return fetchPromise;
 }
+
+// ---------------------------------------------------------------------------
+// CMD_HELP UDTF — fast parameter helptext via SQL table function
+// ---------------------------------------------------------------------------
+
+function getUDTFLibrary(connection: any): string {
+    // *TEMPLIB (default) → use Code for IBM i's configured temp library.
+    // Any other value is used as-is (e.g. SQLTOOLS, SYSTOOLS, or a custom library name).
+    const configured = vscode.workspace.getConfiguration('clPrompter').get<string>('udtfSupportLibrary', '*TEMPLIB').trim().toUpperCase();
+    if (!configured || configured === '*TEMPLIB') {
+        const tempLib = (connection.getConfig().tempLibrary as string | undefined)?.trim().toUpperCase();
+        return tempLib || 'ILEDITOR';
+    }
+    return configured;
+}
+
+/**
+ * Retrieve XML helptext for a single CL parameter keyword via the CMD_HELP UDTF.
+ * Returns the raw HELP_XML string, or null if the UDTF is unavailable or the
+ * parameter was not found.
+ *
+ * @param cmdLib  Library of the command, e.g. "QSYS" or "*LIBL"
+ * @param cmdName Command name, e.g. "CPYF"
+ * @param kwd     Parameter keyword, e.g. "FROMFILE"
+ */
+export async function getCmdHelpViaUDTF(cmdLib: string, cmdName: string, kwd: string): Promise<string | null> {
+    if (!code4i) { return null; }
+    const connection = code4i.instance.getConnection();
+    if (!connection) { return null; }
+    if (!connection.sqlRunnerAvailable()) { return null; }
+    const esc = (s: string) => s.replace(/'/g, "''");
+    const library = getUDTFLibrary(connection);
+    const sql = `SELECT HELP_XML FROM TABLE(${library}.CMD_HELP('${esc(cmdLib)}', '${esc(cmdName)}', '${esc(kwd)}'))`;
+    try {
+        const results = await connection.runSQL(sql);
+        if (results.length > 0 && results[0].HELP_XML) {
+            return String(results[0].HELP_XML);
+        }
+        return null;
+    } catch (e: any) {
+        console.log('[clPrompter] getCmdHelpViaUDTF error:', e?.message ?? e);
+        return null;
+    }
+}
