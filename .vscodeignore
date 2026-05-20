@@ -1,7 +1,5 @@
 node_modules/**
 !node_modules/@xmldom/xmldom/**
-!node_modules/xml2js/**
-!node_modules/xmldom/**
 !node_modules/@halcyontech/vscode-ibmi-types/**
 
 .vscode/
@@ -21,3 +19,4 @@ xpackage.json
 publish.sh
 *.log
 .vs
+node_original/
