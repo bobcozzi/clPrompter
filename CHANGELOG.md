@@ -2,6 +2,12 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.0.6] - 2026-05-21
+
+### Fixed
+
+- **VS Code Marketplace AV false positive**: The embedded C++ source strings for the `CMD_HELP` and `CMD_XML` UDTFs are now base64-encoded in the extension bundle. The raw C++ source (containing `#include`, `#pragma`, and IBM i system API references) was triggering the Marketplace virus scanner. The source is decoded at runtime before being uploaded to IBM i — no functional change.
+
 ## [1.0.5] - 2026-05-21
 
 ### What's New

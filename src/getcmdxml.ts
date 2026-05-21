@@ -242,6 +242,9 @@ export async function getCMDXML(cmdString: string): Promise<string> {
                 ? ` — competing SQL running ${Date.now() - _pendingGet.t0}ms: ${_pendingGet.sql.substring(0, 200)}`
                 : '';
             console.log(`[clPrompter] getCMDXML: SQLJob status before UDTF for ${cmdXMLName}: ${jobStatusBefore ?? 'unknown'}${_busyExtraGet}`);
+            if (_pendingGet) {
+                progress.report({ message: `Waiting for IBM i SQL job... ${_pendingGet.sql.substring(0, 120)}` });
+            }
             try {
                 const results = await connection.runSQL(sql);
                 console.log(`[clPrompter] CMD_XML UDTF took ${Date.now() - t0}ms`);
@@ -308,14 +311,28 @@ export async function getCmdHelpViaUDTF(cmdLib: string, cmdName: string, kwd: st
     const esc = (s: string) => s.replace(/'/g, "''");
     const library = getUDTFLibrary(connection);
     const sql = `SELECT HELP_XML FROM TABLE(${library}.CMD_HELP('${esc(cmdLib)}', '${esc(cmdName)}', '${esc(kwd)}'))`;
-    try {
-        const results = await connection.runSQL(sql);
-        if (results.length > 0 && results[0].HELP_XML) {
-            return String(results[0].HELP_XML);
+    const doFetch = async (): Promise<string | null> => {
+        try {
+            const results = await connection.runSQL(sql);
+            if (results.length > 0 && results[0].HELP_XML) {
+                return String(results[0].HELP_XML);
+            }
+            return null;
+        } catch (e: any) {
+            console.log('[clPrompter] getCmdHelpViaUDTF error:', e?.message ?? e);
+            return null;
         }
-        return null;
-    } catch (e: any) {
-        console.log('[clPrompter] getCmdHelpViaUDTF error:', e?.message ?? e);
-        return null;
+    };
+    const pendingExt = getPendingExternalSQL();
+    if (pendingExt) {
+        return vscode.window.withProgress({
+            location: vscode.ProgressLocation.Notification,
+            title: 'CL Prompter',
+            cancellable: false
+        }, async (progress) => {
+            progress.report({ message: `Waiting for IBM i SQL job... ${pendingExt.sql.substring(0, 120)}` });
+            return doFetch();
+        });
     }
+    return doFetch();
 }

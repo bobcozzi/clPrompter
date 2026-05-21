@@ -3,695 +3,287 @@
  * CMD_XML UDTF.  Stored here so the extension can upload and compile it on
  * first connection without requiring a separate file distribution.
  *
- * Source origin: open-UDTF/src/CMD_XML/CMDXML.CPP
- * (c) 2017-2026 R. Cozzi, Jr.
+ * Source origin: /Users/cozzi/Downloads/projects/open-UDTF/src/CMD_XML/CMDXML.CPP
+ * To update: edit that file, then ask Copilot to re-encode it into this file.
+ * (c) 2020-2026 R. Cozzi, Jr.
  */
 export function getCmdXmlCPPSrc(): string {
-    // String.raw preserves backslash line-continuations that are required by the
-    // #pragma exception_handler and other IBM i compiler directives.
-    return String.raw`
-///////// ///////// ///////// //////
-
-  // (c) Copyright 2017-2026 by R. Cozzi, Jr.
-
-///////// ///////// ///////// //////
-
-
-#include <sys/time.h>
-#include <sys/types.h>
-
-#pragma datamodel(P128)
-
-
-#include <stdlib.h>
-#include <stdarg.h>
-#include <stdio.h>
-#include <unistd.h>
-#include <string.h>
-#include <p_time.h>
-#include <time.h>
-
-#include <langinfo.h>
-#include <QP0LSTDI.h>
-#include <QP0ZTRC.h>
-
-#include <sys/stat.h>
-#include <sys/types.h>
-
-#include <time.h>
-#include <errno.h>
-#include <ctype.h>
-#include <inttypes.h>
-#include <decimal.h>
-
-#include <qusgen.h>
-#include <qusec.h>
-#include <QUSCRTUS.h>
-#include <QUSCUSAT.h>
-#include <QUSPTRUS.h>
-#include <QLIDLTO.h>
-#include <qmhsndpm.H>
-#include <QMHRCVPM.h>
-#include <QMHRMVPM.h>
-#include <qlgcase.h>
-#include <lecond.h>
-#include <except.h>
-
-#include <QCDRCMDD.h>
-
-
-  // include syntax when compiling from an IFS stream file
-#include <mih/cpybytes.h>
-#include <mih/triml.h>
-
-#include <cstring>
-#include <cctype>
-#include <iostream>
-#include <fstream>
-#include <sstream>
-#include <string>
-#include <memory>
-#include <ctime>
-
-#include <algorithm>
-#include <vector>
-
-#include <SQL.h>
-#include <SQLUDF.h>
-
-using namespace std;
-
-const int coz_MAXUSRSPACESIZE = 16711568;
-const int coz_MAXMEM15M = 15662992;
-/* Case-conversion direction constants */
-#ifndef _TOUPPER
-#define _TOUPPER 0
-#endif
-#ifndef _TOLOWER
-#define _TOLOWER 1
-#endif
-
-/* ============================================= */
-/* coz_qusec - IBM i standard error code wrapper */
-/* ============================================= */
-
-typedef struct tag_QUS_EC
- {
-    union { int  Bytes_Provided; int  length; };
-    union { int  Bytes_Available; int  Bytes_Returned; };
-    union { char Exception_Id[7]; char msgid[7]; };
-    char Reserved;
-    union { char Exception_Data[255]; char msgdta[255]; };
- } qusec_t;
-
-
-class coz_qusec {
-public:
-    coz_qusec() { init(); }
-    void init() {
-        memset((char*)&ec, 0x00,
-               sizeof(ec) + sizeof(xtra));
-        ec.Bytes_Provided =
-            (int)(sizeof(ec) + sizeof(xtra));
-    }
-    void reset() { init(); }
-    int isEmpty() {
-        return ec.Bytes_Available == 0;
-    }
-    int isNotEmpty() {
-        return ec.Bytes_Available != 0;
-    }
-    int hasError() {
-        return ec.Bytes_Available > 0;
-    }
-    int isError() {
-        return ec.Bytes_Available > 0;
-    }
-    int hasNoError() {
-        return ec.Bytes_Available == 0;
-    }
-    /* Compare Exception_Id up to 7 chars */
-    bool compare(const char* pMsgID) {
-        if (ec.Bytes_Available == 0)
-            return false;
-        int n = (int)strlen(pMsgID);
-        if (n > 7) n = 7;
-        return (memcmp(ec.Exception_Id,
-                       pMsgID, n) == 0);
-    }
-    char* msgid() {
-        return ec.Exception_Id;
-    }
-    char* msgdata() {
-        int avail = ec.Bytes_Available;
-        if (avail > 16) {
-            char* p = (char*)&ec + 16;
-            int dlen = avail - 16;
-            if (dlen < (int)sizeof(xtra))
-                p[dlen] = 0x00;
-            return p;
-        }
-        return NULL;
-    }
-    int getMsgDataLen() {
-        int a = ec.Bytes_Available;
-        return (a > 16) ? a - 16 : 0;
-    }
-    operator void*()     { return &ec; }
-    operator Qus_EC_t*() {
-        return (Qus_EC_t*)&ec;
-    }
-private:
-    qusec_t ec;
-    char    xtra[256];
-};
-
-
-/* ============================================= */
-/* Helper function prototypes                    */
-/* ============================================= */
-inline void  coz_copyPad(char* t, const char* s, int padLen = 10, char padChar = ' ');
-inline void  coz_DLTOBJ(const char* qualObjName, const char* objType, const char* ASPName = "*");
-inline int   coz_toUpper(char* szData, int inLen = -1, int ccsid = 0);
-inline int   coz_nameUpper(char* szData, int inLen = -1);
-
-inline char* coz_TEMP_USRSPACE(char* rtnUSName, const char* objAttr = "SQLTOOLS", int initSize = 4096);
-inline char* coz_getPtrUsrSpace(const char* p2PartUsrSpaceName);
-
-inline void  coz_makeAPIObjName(char* objName, const char* qualObj, const char* dftLib = "*LIBL");
-inline int   coz_copyUntil(char* t, const char* s, int maxLen = 10, const char* stopAt = NULL, bool bTrim = false);
-inline void  coz_resignalMsg(coz_qusec& ec);
-inline char* coz_getNextParmIf(int& pC, int& argc, char** argv, int ioFlag = 0);
-
-#define inChar(_v) \
-    char *in##_v = \
-        (char*) coz_getNextParmIf(p,argc,argv)
-#define outCLOB(_v)  \
-     SQLUDF_CLOB*   out##_v = \
-        (SQLUDF_CLOB*)  coz_getNextParmIf(p, argc, argv, 4)
-
-
-#define inIndy(_v) \
-    short *indyIn##_v = \
-        (short*) coz_getNextParmIf(p,argc,argv)
-#define outIndy(_v) \
-    short *indy##_v = \
-        (short*) coz_getNextParmIf(p,argc,argv,2)
-
-
-
-typedef _Packed struct tagScratch
-{
-    int  length;         // Scratch Pad length
-    char cmdName[11];    // CL Command Name
-    char cmdLib[11];     // CL Command Library
-    char QUSRSPACE[21];  // Returned Parameter Definition XML
-    int eof;
-} scratch_t;
-
-scratch_t scratch;
-
-int main(int argc, char *argv[])
-{
-
-    int p = 0;
-
-    _MI_Time       mt;
-    time_t         epochTime;
-    struct timeval tv;
-    int            rc = 0;
-
-    //////////////////////////////////////////////
-    //  INPUT Parameters
-    //////////////////////////////////////////////
-    inChar(LIB);      // Library name for CMDNAME
-    inChar(CMDNAME);  // *CMD name VARCHAR(10)
-
-    //////////////////////////////////////////////
-    //  OUTPUT Fields
-    //////////////////////////////////////////////
-    outCLOB(CMDXML);
-
-    ////////////////////////////////////////////////////////////
-    //  Input Parameters' INDICATORS
-    ////////////////////////////////////////////////////////////
-    inIndy(LIB);      // Library name
-    inIndy(CMDNAME);  // Command name
-
-    ////////////////////////////////////////////////////////////
-    //  Output Columns' INDICATORS
-    ////////////////////////////////////////////////////////////
-    outIndy(CMDXML);
-
-    ////////////////////////////////////////////////////////////
-    //  SQL specific parameters
-    ////////////////////////////////////////////////////////////
-    char *sqlstate = (char *)coz_getNextParmIf(p, argc, argv);
-    char *funcName = (char *)coz_getNextParmIf(p, argc, argv);
-    char *specificName = (char *)coz_getNextParmIf(p, argc, argv);
-    char *sqlmsgtext = (char *)coz_getNextParmIf(p, argc, argv);
-    char *scratchPad = (char *)coz_getNextParmIf(p, argc, argv);
-    int  *sqlOpCode = (int *)coz_getNextParmIf(p, argc, argv);
-
-    ////////////////////////////////////////////////////////////
-    //  BEGIN main() body (after parms starts here)
-    ////////////////////////////////////////////////////////////
-
-     scratch_t* pScratch = (scratch_t *)scratchPad;
-     coz_qusec  ec;
-     char       qualCMD[21];
-
-     char      APIFMT[9]  = "CMDD0200";  // Full command definition source
-     char      DESTFMT[9] = "DEST0100";  // Output to return variable
-
-     Qcd_DEST0100_t   bufLen;   // bufLen.Receiver_Variable_Length = maxUserSpaceSize
-     Qcd_CMDD0200_t*  pCmdDefn; // pCmdDefn->Bytes_Returned pCmdDefn->Bytes_Available
-
-     if (*sqlOpCode == SQLUDF_TF_OPEN)
-     {
-       // One-Off stuff goes here
-
-       // Initialize Scratch pad
-        memset(pScratch, 0x00, sizeof(scratch));
-
-        coz_nameUpper(inCMDNAME);
-        coz_nameUpper(inLIB);
-        coz_makeAPIObjName(qualCMD, inCMDNAME, inLIB);
-
-         // Save the command name in the scratchpad
-        strcpy(pScratch->cmdName, inCMDNAME);
-        strcpy(pScratch->cmdLib, inLIB);
-
-        bufLen.Receiver_Variable_Length = coz_MAXMEM15M;
-        pCmdDefn = (Qcd_CMDD0200_t*)
-            coz_TEMP_USRSPACE(pScratch->QUSRSPACE, "CMD_XML");
-
-        QCDRCMDD(qualCMD,&bufLen,DESTFMT, (char*)pCmdDefn, APIFMT, &ec);
-
-        if (ec.hasError() || pCmdDefn->Bytes_Returned == 0)
-        {
-           coz_resignalMsg(ec);
-           strcpy(sqlstate, "02000");
-           pScratch->eof = 1;
-           return -1;
-        }
-
-     }
-
-    if (*sqlOpCode == SQLUDF_TF_FETCH && pScratch->eof == 1)
-    {
-        strcpy(sqlstate, "02000");
-        pScratch->eof = 1;
-    }
-
-    // ------------------------------------------------------
-    // F E T C H   Operation
-    // ------------------------------------------------------
-    if (*sqlOpCode == SQLUDF_TF_FETCH && pScratch->eof == 0)
-    {
-
-      pCmdDefn =
-           (Qcd_CMDD0200_t*) coz_getPtrUsrSpace(pScratch->QUSRSPACE);
-      if (pCmdDefn->Bytes_Returned > 0)
-      {
-        _CPYBYTES(outCMDXML->data, ((char*)pCmdDefn) + (sizeof(int)*2),
-                                   pCmdDefn->Bytes_Returned);
-        outCMDXML->length = pCmdDefn->Bytes_Returned;
-      }
-
-      pScratch->eof = 1; // Only one row returned so seton our "EOF" flag
-    }
-
-    if (*sqlOpCode == SQLUDF_TF_CLOSE)
-    {
-        coz_DLTOBJ(pScratch->QUSRSPACE, "*USRSPC");
-    }
-    if (*sqlOpCode == SQLUDF_TF_FINAL ||
-        *sqlOpCode == SQLUDF_TF_FINAL_CRA)
-    {
-        // no final call code for now
-    }
-}
-
-/* ============================================= */
-/* coz_copyPad                                   */
-/* Copy s to t, blank-padding to padLen bytes.   */
-/* ============================================= */
-inline void coz_copyPad(
-    char*       t,
-    const char* s,
-    int         padLen,
-    char        padChar)
-{
-    int slen = (s != NULL) ? (int)strlen(s) : 0;
-    memset(t, padChar, padLen);
-    if (slen > 0)
-        _CPYBYTES(t, s,
-                  (slen < padLen) ? slen : padLen);
-}
-
-
-/* ============================================= */
-/* coz_DLTOBJ                                    */
-/* Delete an IBM i object via QLIDLTO API.       */
-/* ============================================= */
-inline void coz_DLTOBJ(
-    const char* qualObjName,
-    const char* objType,
-    const char* ASPName)
-{
-    char szObjType[11];
-    char szASP[11];
-    char rmvMsg[1] = {'1'};
-    coz_qusec ec;
-    if (qualObjName == NULL  ||
-        qualObjName[0] == ' ' ||
-        qualObjName[0] == 0x00)
-        return;
-    coz_copyPad(szObjType, objType,  10);
-    coz_copyPad(szASP,     ASPName,  10);
-    ec.init();
-    QLIDLTO((char*)qualObjName,
-            szObjType, szASP,
-            rmvMsg, &ec);
-}
-/* ============================================= */
-/* coz_toUpper / coz_toLower                     */
-/* In-place EBCDIC case conversion.              */
-/* ============================================= */
-inline int coz_toUpper(
-    char* szData,
-    int   inLen,
-    int   ccsid)
-{
-    Qlg_CCSID_ReqCtlBlk_T frcb;
-    coz_qusec ec;
-    long len = (inLen <= 0)
-               ? (long)strlen(szData) : inLen;
-    memset((char*)&frcb, 0x00, sizeof(frcb));
-    frcb.Type_of_Request     = 1;
-    frcb.Case_Request        = _TOUPPER;
-    frcb.CCSID_of_Input_Data = ccsid;
-    if (len > 0)
-        QlgConvertCase((char*)&frcb,
-                       szData, szData,
-                       &len, (char*)&ec);
-    return (int)len;
-}
-
-/* ============================================= */
-/* coz_nameUpper                                 */
-/* Converts non-quoted IBM i object name to      */
-/* upper case in-place.                          */
-/* ============================================= */
-inline int coz_nameUpper(
-    char* szData,
-    int   inLen)
-{
-    const char q = '"';
-    int len = (inLen <= 0)
-                  ? (int)strlen(szData) : inLen;
-    if (szData[0] == q) return inLen;
-    return coz_toUpper(szData, len);
-}
-
-inline char* coz_getPtrUsrSpace(
-    const char* p2PartUsrSpaceName)
-{
-    void*     pUS = NULL;
-    coz_qusec ec;
-    ec.init();
-    QUSPTRUS((char*)p2PartUsrSpaceName,
-             &pUS, &ec);
-    if (ec.isEmpty()) return (char*)pUS;
-    return NULL;
-}
-
-/* ============================================= */
-/* coz_TEMP_USRSPACE                             */
-/* Create a temporary *USRSPC in QTEMP.          */
-/* Returns pointer to user-space data area;      */
-/* stores 20-char API name in rtnUSName[20].     */
-/* ============================================= */
-inline char* coz_TEMP_USRSPACE(
-                char*       rtnUSName,
-                const char* objAttr,
-                int         initSize)
-{
-    char qualName[21];
-    char extAttr[11];
-    char pubAut[11];
-    char text[51];
-    char repl[11];
-    char domain[11];
-    char initVal = 0x00;
-    char* pUS   = NULL;
-    coz_qusec ec;
-    std::string nm;
-    size_t pos = 0;
-    memset(qualName, ' ', 20);
-    qualName[20] = 0x00;
-    nm  = tmpnam(NULL);
-    pos = nm.find_last_of("/\\");
-    if (pos != std::string::npos)
-        nm.erase(0, pos + 1);
-    if (nm.length() > 10)
-        nm.resize(10);
-
-    coz_makeAPIObjName(
-        qualName, nm.c_str(), "QTEMP");
-
-    coz_nameUpper(qualName, 20);
-
-    coz_copyPad(extAttr, objAttr,       10);
-    coz_copyPad(pubAut,  "*LIBCRTAUT",  10);
-    coz_copyPad(text,
-                "SPOOLDATA UDTF Temp Space", 50);
-    coz_copyPad(repl,   "*NO",          10);
-    coz_copyPad(domain, "*DEFAULT",     10);
-    ec.init();
-    QUSCRTUS(qualName, extAttr, initSize,
-             &initVal, pubAut, text,
-             repl, &ec, domain);
-    if (ec.isEmpty()) {
-        /* Enable auto-extend so the space grows   */
-        /* automatically when APIs write past the  */
-        /* initial size (e.g. QDBRTVFD).           */
-        /* key=3 is AutoExtend; key=1=size,        */
-        /* key=2=InitChar, key=4=TransferSize.     */
-        typedef _Packed struct {
-            int  key;
-            int  dataLen;
-            union {
-                int  size;
-                int  transferSize;
-                char autoExtend;
-                char initValue;
-            };
-        } coz_spaceKey_t;
-        typedef _Packed struct {
-            int           count;
-            coz_spaceKey_t attr[1];
-        } coz_spaceAttr_t;
-        coz_spaceAttr_t spaceAttr;
-        spaceAttr.count          = 1;
-        spaceAttr.attr[0].key     = 3;
-        spaceAttr.attr[0].dataLen = 1;
-        spaceAttr.attr[0].autoExtend = '1';
-        char rtnLib[10];
-        memset(rtnLib, ' ', sizeof(rtnLib));
-        ec.init();
-        QUSCUSAT(rtnLib, qualName, &spaceAttr, &ec);
-        /* Non-fatal if QUSCUSAT fails — space     */
-        /* will still work, just won't auto-grow.  */
-        ec.init();
-        QUSPTRUS(qualName, (void**)&pUS, &ec);
-    }
-    if (pUS != NULL && rtnUSName != NULL)
-        _CPYBYTES(rtnUSName, qualName, 20);
-    return pUS;
-}
-
-
-/* ============================================= */
-/* coz_makeAPIObjName                            */
-/* Build 20-char IBM i API object name from      */
-/* qualified name (LIB/OBJ or OBJ).              */
-/* ============================================= */
-inline void coz_makeAPIObjName(
-    char*       objName,
-    const char* qualObj,
-    const char* dftLib)
-{
-    char OBJNAME[11];
-    char LIBNAME[11];
-    memset(objName,  ' ', 20);
-    memset(OBJNAME,  ' ', sizeof(OBJNAME));
-    memset(LIBNAME,  ' ', sizeof(LIBNAME));
-    OBJNAME[10] = 0x00;
-    LIBNAME[10] = 0x00;
-    const char* slashPos = strchr(qualObj, '/');
-    if (slashPos != NULL) {
-        int len = (int)(slashPos - qualObj);
-        int olen = (int)strlen(slashPos + 1);
-        if (olen > 10) olen = 10;
-        if (len  > 10) len  = 10;
-        _CPYBYTES(OBJNAME, slashPos + 1, olen);
-        _CPYBYTES(LIBNAME, qualObj,      len);
-    } else {
-        int olen = (int)strlen(qualObj);
-        if (olen > 10) olen = 10;
-        _CPYBYTES(OBJNAME, qualObj, olen);
-        if (dftLib != NULL) {
-            int llen = (int)strlen(dftLib);
-            if (llen > 10) llen = 10;
-            _CPYBYTES(LIBNAME, dftLib, llen);
-        } else {
-            _CPYBYTES(LIBNAME, "*LIBL", 5);
-        }
-    }
-    _CPYBYTES(objName,      OBJNAME, 10);
-    _CPYBYTES(objName + 10, LIBNAME, 10);
-}
-
-
-/* ============================================= */
-/* coz_copyUntil                                 */
-/* Copy s to t (null-terminated), stopping at   */
-/* maxLen, NUL, or any char in stopAt.           */
-/* ============================================= */
-inline int coz_copyUntil(
-    char*       t,
-    const char* s,
-    int         maxLen,
-    const char* stopAt,
-    bool        bTrim)
-{
-    int bStop  = 0;
-    int rtnLen = 0;
-    int i      = 0;
-    if (t == NULL || s == NULL) return 0;
-#pragma exception_handler(coz_cu_exc,\
-    0, 0,\
-    _C2_MH_ESCAPE | _C2_MH_FUNCTION_CHECK,\
-    _CTLA_HANDLE)
-    memset(t, ' ', maxLen);
-    while (s[i] != 0x00 && i < maxLen) {
-        if (stopAt != NULL) {
-            size_t j;
-            for (j = 0; j < strlen(stopAt); j++) {
-                if (s[i] == stopAt[j]) {
-                    bStop = 1;
-                }
-            }
-        }
-        if (bStop) break;
-        t[i] = s[i];
-        i++;
-    }
-    if (bTrim) {
-        t[i] = 0x00;
-        if (i > 0)
-            t[::triml(t, ' ')] = 0x00;
-        rtnLen = (int)strlen(t);
-    } else {
-        rtnLen = i;
-    }
-#pragma disable_handler
-    return rtnLen;
-coz_cu_exc:;
-    return rtnLen;
-}
-
-/* ============================================= */
-/* coz_resignalMsg                               */
-/* Re-send an IBM i API error as a program msg.  */
-/* ============================================= */
-inline void coz_resignalMsg(coz_qusec& ec)
-{
-    char msgfile[21];
-    char msgtype[11];
-    char msgkey[4];
-    char topgmq[11];
-    char msgPrefix[3];
-    char msgType[3];
-    qusec_t  fc;
-    memset((char*)&fc, 0x00, sizeof(fc));
-    fc.Bytes_Provided = sizeof(fc);
-    memset(msgkey,  ' ', sizeof(msgkey));
-    memset(msgfile, ' ', sizeof(msgfile));
-    memset(topgmq,  ' ', sizeof(topgmq));
-    coz_copyPad(topgmq, "*", 10);
-    if (ec.isEmpty()) return;
-    _CPYBYTES(msgPrefix, ec.msgid(), 2);
-    _CPYBYTES(msgType,   ec.msgid() + 2, 1);
-    msgType[1]   = 0x00;
-    msgPrefix[2] = 0x00;
-    if (strcmp(msgPrefix, "CP") == 0)
-        coz_makeAPIObjName(msgfile,
-                           "QCPFMSG", "*LIBL");
-    else if (strcmp(msgPrefix, "RN") == 0)
-        coz_makeAPIObjName(msgfile,
-                           "QRPGLEMSG","QDEVTOOLS");
-    else if (strcmp(msgPrefix, "HT") == 0)
-        coz_makeAPIObjName(msgfile,
-                           "QHTTPMSG", "QHTTPSVR");
-    else if (strcmp(msgPrefix, "CE") == 0)
-        coz_makeAPIObjName(msgfile,
-                           "QCEEMSG", "QSYS");
-    else if (strcmp(msgPrefix, "GU") == 0)
-        coz_makeAPIObjName(msgfile,
-                           "QGUIMSG",  "QSYS");
-    else if (strcmp(msgPrefix, "IW") == 0)
-        coz_makeAPIObjName(msgfile,
-                           "QIWSMSG",  "QSYS");
-    else
-        coz_makeAPIObjName(msgfile,
-                           "QCPFMSG",  "*LIBL");
-    switch (msgType[0]) {
-        case 'F': case 'I':
-            coz_copyPad(msgtype, "*INFO", 10);
-            break;
-        case 'E':
-            coz_copyPad(msgtype, "*ESCAPE", 10);
-            break;
-        case 'D':
-            coz_copyPad(msgtype, "*DIAG", 10);
-            break;
-        case 'C':
-            coz_copyPad(msgtype, "*COMP", 10);
-            break;
-        default:
-            coz_copyPad(msgtype, "*INFO", 10);
-            break;
-    }
-    QMHSNDPM(ec.msgid(), msgfile,
-             ec.msgdata(),
-             ec.getMsgDataLen(),
-             msgtype, topgmq, 1,
-             msgkey, &fc);
-}
-
-
-/* ============================================= */
-/* coz_getNextParmIf                             */
-/* Advance parameter counter and return argv[n]. */
-/* If ioFlag>0, memset output parm to 0x00.      */
-/* ============================================= */
-inline char* coz_getNextParmIf(
-    int&  pC,
-    int&  argc,
-    char** argv,
-    int   ioFlag)
-{
-    char* pRtn = NULL;
-    if (argc > pC + 1) {
-        pRtn = argv[++pC];
-        if (ioFlag > 0)
-            memset(pRtn, 0x00, ioFlag);
-    }
-    return pRtn;
-}
-#pragma datamodel(pop)
-`;
+    // C++ source is base64-encoded to prevent false-positive antivirus hits
+    // in the VS Code Marketplace. Decoded at runtime before upload to IBM i.
+    return Buffer.from(
+        'DQovLy8vLy8vLy8gLy8vLy8vLy8vIC8vLy8vLy8vLyAvLy8vLy8NCg0KICAvLyAoYykgQ29weXJpZ2h0IDIwMTctMjAyNiBieSBS'
+        + 'LiBDb3p6aSwgSnIuDQoNCi8vLy8vLy8vLyAvLy8vLy8vLy8gLy8vLy8vLy8vIC8vLy8vLw0KDQoNCiNpbmNsdWRlIDxzeXMvdGlt'
+        + 'ZS5oPg0KI2luY2x1ZGUgPHN5cy90eXBlcy5oPg0KDQojcHJhZ21hIGRhdGFtb2RlbChQMTI4KQ0KDQoNCiNpbmNsdWRlIDxzdGRs'
+        + 'aWIuaD4NCiNpbmNsdWRlIDxzdGRhcmcuaD4NCiNpbmNsdWRlIDxzdGRpby5oPg0KI2luY2x1ZGUgPHVuaXN0ZC5oPg0KI2luY2x1'
+        + 'ZGUgPHN0cmluZy5oPg0KI2luY2x1ZGUgPHBfdGltZS5oPg0KI2luY2x1ZGUgPHRpbWUuaD4NCg0KI2luY2x1ZGUgPGxhbmdpbmZv'
+        + 'Lmg+DQojaW5jbHVkZSA8UVAwTFNUREkuaD4NCiNpbmNsdWRlIDxRUDBaVFJDLmg+DQoNCiNpbmNsdWRlIDxzeXMvc3RhdC5oPg0K'
+        + 'I2luY2x1ZGUgPHN5cy90eXBlcy5oPg0KDQojaW5jbHVkZSA8dGltZS5oPg0KI2luY2x1ZGUgPGVycm5vLmg+DQojaW5jbHVkZSA8'
+        + 'Y3R5cGUuaD4NCiNpbmNsdWRlIDxpbnR0eXBlcy5oPg0KI2luY2x1ZGUgPGRlY2ltYWwuaD4NCg0KI2luY2x1ZGUgPHF1c2dlbi5o'
+        + 'Pg0KI2luY2x1ZGUgPHF1c2VjLmg+DQojaW5jbHVkZSA8UVVTQ1JUVVMuaD4NCiNpbmNsdWRlIDxRVVNDVVNBVC5oPg0KI2luY2x1'
+        + 'ZGUgPFFVU1BUUlVTLmg+DQojaW5jbHVkZSA8UUxJRExUTy5oPg0KI2luY2x1ZGUgPHFtaHNuZHBtLkg+DQojaW5jbHVkZSA8UU1I'
+        + 'UkNWUE0uaD4NCiNpbmNsdWRlIDxRTUhSTVZQTS5oPg0KI2luY2x1ZGUgPHFsZ2Nhc2UuaD4NCiNpbmNsdWRlIDxsZWNvbmQuaD4N'
+        + 'CiNpbmNsdWRlIDxleGNlcHQuaD4NCg0KI2luY2x1ZGUgPFFDRFJDTURELmg+DQoNCg0KICAvLyBpbmNsdWRlIHN5bnRheCB3aGVu'
+        + 'IGNvbXBpbGluZyBmcm9tIGFuIElGUyBzdHJlYW0gZmlsZQ0KI2luY2x1ZGUgPG1paC9jcHlieXRlcy5oPg0KI2luY2x1ZGUgPG1p'
+        + 'aC90cmltbC5oPg0KDQojaW5jbHVkZSA8Y3N0cmluZz4NCiNpbmNsdWRlIDxjY3R5cGU+DQojaW5jbHVkZSA8aW9zdHJlYW0+DQoj'
+        + 'aW5jbHVkZSA8ZnN0cmVhbT4NCiNpbmNsdWRlIDxzc3RyZWFtPg0KI2luY2x1ZGUgPHN0cmluZz4NCiNpbmNsdWRlIDxtZW1vcnk+'
+        + 'DQojaW5jbHVkZSA8Y3RpbWU+DQoNCiNpbmNsdWRlIDxhbGdvcml0aG0+DQojaW5jbHVkZSA8dmVjdG9yPg0KDQojaW5jbHVkZSA8'
+        + 'U1FMLmg+DQojaW5jbHVkZSA8U1FMVURGLmg+DQoNCnVzaW5nIG5hbWVzcGFjZSBzdGQ7DQoNCmNvbnN0IGludCBjb3pfTUFYVVNS'
+        + 'U1BBQ0VTSVpFID0gMTY3MTE1Njg7DQpjb25zdCBpbnQgY296X01BWE1FTTE1TSA9IDE1NjYyOTkyOw0KLyogQ2FzZS1jb252ZXJz'
+        + 'aW9uIGRpcmVjdGlvbiBjb25zdGFudHMgKi8NCiNpZm5kZWYgX1RPVVBQRVINCiNkZWZpbmUgX1RPVVBQRVIgMA0KI2VuZGlmDQoj'
+        + 'aWZuZGVmIF9UT0xPV0VSDQojZGVmaW5lIF9UT0xPV0VSIDENCiNlbmRpZg0KDQovKiA9PT09PT09PT09PT09PT09PT09PT09PT09'
+        + 'PT09PT09PT09PT09PT09PT09PT0gKi8NCi8qIGNvel9xdXNlYyAtIElCTSBpIHN0YW5kYXJkIGVycm9yIGNvZGUgd3JhcHBlciAq'
+        + 'Lw0KLyogPT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09ICovDQoNCnR5cGVkZWYgc3RydWN0IHRh'
+        + 'Z19RVVNfRUMNCiB7DQogICAgdW5pb24geyBpbnQgIEJ5dGVzX1Byb3ZpZGVkOyBpbnQgIGxlbmd0aDsgfTsNCiAgICB1bmlvbiB7'
+        + 'IGludCAgQnl0ZXNfQXZhaWxhYmxlOyBpbnQgIEJ5dGVzX1JldHVybmVkOyB9Ow0KICAgIHVuaW9uIHsgY2hhciBFeGNlcHRpb25f'
+        + 'SWRbN107IGNoYXIgbXNnaWRbN107IH07DQogICAgY2hhciBSZXNlcnZlZDsNCiAgICB1bmlvbiB7IGNoYXIgRXhjZXB0aW9uX0Rh'
+        + 'dGFbMjU1XTsgY2hhciBtc2dkdGFbMjU1XTsgfTsNCiB9IHF1c2VjX3Q7DQoNCg0KY2xhc3MgY296X3F1c2VjIHsNCnB1YmxpYzoN'
+        + 'CiAgICBjb3pfcXVzZWMoKSB7IGluaXQoKTsgfQ0KICAgIHZvaWQgaW5pdCgpIHsNCiAgICAgICAgbWVtc2V0KChjaGFyKikmZWMs'
+        + 'IDB4MDAsDQogICAgICAgICAgICAgICBzaXplb2YoZWMpICsgc2l6ZW9mKHh0cmEpKTsNCiAgICAgICAgZWMuQnl0ZXNfUHJvdmlk'
+        + 'ZWQgPQ0KICAgICAgICAgICAgKGludCkoc2l6ZW9mKGVjKSArIHNpemVvZih4dHJhKSk7DQogICAgfQ0KICAgIHZvaWQgcmVzZXQo'
+        + 'KSB7IGluaXQoKTsgfQ0KICAgIGludCBpc0VtcHR5KCkgew0KICAgICAgICByZXR1cm4gZWMuQnl0ZXNfQXZhaWxhYmxlID09IDA7'
+        + 'DQogICAgfQ0KICAgIGludCBpc05vdEVtcHR5KCkgew0KICAgICAgICByZXR1cm4gZWMuQnl0ZXNfQXZhaWxhYmxlICE9IDA7DQog'
+        + 'ICAgfQ0KICAgIGludCBoYXNFcnJvcigpIHsNCiAgICAgICAgcmV0dXJuIGVjLkJ5dGVzX0F2YWlsYWJsZSA+IDA7DQogICAgfQ0K'
+        + 'ICAgIGludCBpc0Vycm9yKCkgew0KICAgICAgICByZXR1cm4gZWMuQnl0ZXNfQXZhaWxhYmxlID4gMDsNCiAgICB9DQogICAgaW50'
+        + 'IGhhc05vRXJyb3IoKSB7DQogICAgICAgIHJldHVybiBlYy5CeXRlc19BdmFpbGFibGUgPT0gMDsNCiAgICB9DQogICAgLyogQ29t'
+        + 'cGFyZSBFeGNlcHRpb25fSWQgdXAgdG8gNyBjaGFycyAqLw0KICAgIGJvb2wgY29tcGFyZShjb25zdCBjaGFyKiBwTXNnSUQpIHsN'
+        + 'CiAgICAgICAgaWYgKGVjLkJ5dGVzX0F2YWlsYWJsZSA9PSAwKQ0KICAgICAgICAgICAgcmV0dXJuIGZhbHNlOw0KICAgICAgICBp'
+        + 'bnQgbiA9IChpbnQpc3RybGVuKHBNc2dJRCk7DQogICAgICAgIGlmIChuID4gNykgbiA9IDc7DQogICAgICAgIHJldHVybiAobWVt'
+        + 'Y21wKGVjLkV4Y2VwdGlvbl9JZCwNCiAgICAgICAgICAgICAgICAgICAgICAgcE1zZ0lELCBuKSA9PSAwKTsNCiAgICB9DQogICAg'
+        + 'Y2hhciogbXNnaWQoKSB7DQogICAgICAgIHJldHVybiBlYy5FeGNlcHRpb25fSWQ7DQogICAgfQ0KICAgIGNoYXIqIG1zZ2RhdGEo'
+        + 'KSB7DQogICAgICAgIGludCBhdmFpbCA9IGVjLkJ5dGVzX0F2YWlsYWJsZTsNCiAgICAgICAgaWYgKGF2YWlsID4gMTYpIHsNCiAg'
+        + 'ICAgICAgICAgIGNoYXIqIHAgPSAoY2hhciopJmVjICsgMTY7DQogICAgICAgICAgICBpbnQgZGxlbiA9IGF2YWlsIC0gMTY7DQog'
+        + 'ICAgICAgICAgICBpZiAoZGxlbiA8IChpbnQpc2l6ZW9mKHh0cmEpKQ0KICAgICAgICAgICAgICAgIHBbZGxlbl0gPSAweDAwOw0K'
+        + 'ICAgICAgICAgICAgcmV0dXJuIHA7DQogICAgICAgIH0NCiAgICAgICAgcmV0dXJuIE5VTEw7DQogICAgfQ0KICAgIGludCBnZXRN'
+        + 'c2dEYXRhTGVuKCkgew0KICAgICAgICBpbnQgYSA9IGVjLkJ5dGVzX0F2YWlsYWJsZTsNCiAgICAgICAgcmV0dXJuIChhID4gMTYp'
+        + 'ID8gYSAtIDE2IDogMDsNCiAgICB9DQogICAgb3BlcmF0b3Igdm9pZCooKSAgICAgeyByZXR1cm4gJmVjOyB9DQogICAgb3BlcmF0'
+        + 'b3IgUXVzX0VDX3QqKCkgew0KICAgICAgICByZXR1cm4gKFF1c19FQ190KikmZWM7DQogICAgfQ0KcHJpdmF0ZToNCiAgICBxdXNl'
+        + 'Y190IGVjOw0KICAgIGNoYXIgICAgeHRyYVsyNTZdOw0KfTsNCg0KDQovKiA9PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09'
+        + 'PT09PT09PT09PT09PT0gKi8NCi8qIEhlbHBlciBmdW5jdGlvbiBwcm90b3R5cGVzICAgICAgICAgICAgICAgICAgICAqLw0KLyog'
+        + 'PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09ICovDQppbmxpbmUgdm9pZCAgY296X2NvcHlQYWQo'
+        + 'Y2hhciogdCwgY29uc3QgY2hhciogcywgaW50IHBhZExlbiA9IDEwLCBjaGFyIHBhZENoYXIgPSAnICcpOw0KaW5saW5lIHZvaWQg'
+        + 'IGNvel9ETFRPQkooY29uc3QgY2hhciogcXVhbE9iak5hbWUsIGNvbnN0IGNoYXIqIG9ialR5cGUsIGNvbnN0IGNoYXIqIEFTUE5h'
+        + 'bWUgPSAiKiIpOw0KaW5saW5lIGludCAgIGNvel90b1VwcGVyKGNoYXIqIHN6RGF0YSwgaW50IGluTGVuID0gLTEsIGludCBjY3Np'
+        + 'ZCA9IDApOw0KaW5saW5lIGludCAgIGNvel9uYW1lVXBwZXIoY2hhciogc3pEYXRhLCBpbnQgaW5MZW4gPSAtMSk7DQoNCmlubGlu'
+        + 'ZSBjaGFyKiBjb3pfVEVNUF9VU1JTUEFDRShjaGFyKiBydG5VU05hbWUsIGNvbnN0IGNoYXIqIG9iakF0dHIgPSAiU1FMVE9PTFMi'
+        + 'LCBpbnQgaW5pdFNpemUgPSA0MDk2KTsNCmlubGluZSBjaGFyKiBjb3pfZ2V0UHRyVXNyU3BhY2UoY29uc3QgY2hhciogcDJQYXJ0'
+        + 'VXNyU3BhY2VOYW1lKTsNCg0KaW5saW5lIHZvaWQgIGNvel9tYWtlQVBJT2JqTmFtZShjaGFyKiBvYmpOYW1lLCBjb25zdCBjaGFy'
+        + 'KiBxdWFsT2JqLCBjb25zdCBjaGFyKiBkZnRMaWIgPSAiKkxJQkwiKTsNCmlubGluZSBpbnQgICBjb3pfY29weVVudGlsKGNoYXIq'
+        + 'IHQsIGNvbnN0IGNoYXIqIHMsIGludCBtYXhMZW4gPSAxMCwgY29uc3QgY2hhciogc3RvcEF0ID0gTlVMTCwgYm9vbCBiVHJpbSA9'
+        + 'IGZhbHNlKTsNCmlubGluZSB2b2lkICBjb3pfcmVzaWduYWxNc2coY296X3F1c2VjJiBlYyk7DQppbmxpbmUgY2hhciogY296X2dl'
+        + 'dE5leHRQYXJtSWYoaW50JiBwQywgaW50JiBhcmdjLCBjaGFyKiogYXJndiwgaW50IGlvRmxhZyA9IDApOw0KDQojZGVmaW5lIGlu'
+        + 'Q2hhcihfdikgXA0KICAgIGNoYXIgKmluIyNfdiA9IFwNCiAgICAgICAgKGNoYXIqKSBjb3pfZ2V0TmV4dFBhcm1JZihwLGFyZ2Ms'
+        + 'YXJndikNCiNkZWZpbmUgb3V0Q0xPQihfdikgIFwNCiAgICAgU1FMVURGX0NMT0IqICAgb3V0IyNfdiA9IFwNCiAgICAgICAgKFNR'
+        + 'TFVERl9DTE9CKikgIGNvel9nZXROZXh0UGFybUlmKHAsIGFyZ2MsIGFyZ3YsIDQpDQoNCg0KI2RlZmluZSBpbkluZHkoX3YpIFwN'
+        + 'CiAgICBzaG9ydCAqaW5keUluIyNfdiA9IFwNCiAgICAgICAgKHNob3J0KikgY296X2dldE5leHRQYXJtSWYocCxhcmdjLGFyZ3Yp'
+        + 'DQojZGVmaW5lIG91dEluZHkoX3YpIFwNCiAgICBzaG9ydCAqaW5keSMjX3YgPSBcDQogICAgICAgIChzaG9ydCopIGNvel9nZXRO'
+        + 'ZXh0UGFybUlmKHAsYXJnYyxhcmd2LDIpDQoNCg0KDQp0eXBlZGVmIF9QYWNrZWQgc3RydWN0IHRhZ1NjcmF0Y2gNCnsNCiAgICBp'
+        + 'bnQgIGxlbmd0aDsgICAgICAgICAvLyBTY3JhdGNoIFBhZCBsZW5ndGgNCiAgICBjaGFyIGNtZE5hbWVbMTFdOyAgICAvLyBDTCBD'
+        + 'b21tYW5kIE5hbWUNCiAgICBjaGFyIGNtZExpYlsxMV07ICAgICAvLyBDTCBDb21tYW5kIExpYnJhcnkNCiAgICBjaGFyIFFVU1JT'
+        + 'UEFDRVsyMV07ICAvLyBSZXR1cm5lZCBQYXJhbWV0ZXIgRGVmaW5pdGlvbiBYTUwNCiAgICBpbnQgZW9mOw0KfSBzY3JhdGNoX3Q7'
+        + 'DQoNCnNjcmF0Y2hfdCBzY3JhdGNoOw0KDQppbnQgbWFpbihpbnQgYXJnYywgY2hhciAqYXJndltdKQ0Kew0KDQogICAgaW50IHAg'
+        + 'PSAwOw0KDQogICAgX01JX1RpbWUgICAgICAgbXQ7DQogICAgdGltZV90ICAgICAgICAgZXBvY2hUaW1lOw0KICAgIHN0cnVjdCB0'
+        + 'aW1ldmFsIHR2Ow0KICAgIGludCAgICAgICAgICAgIHJjID0gMDsNCg0KICAgIC8vLy8vLy8vLy8vLy8vLy8vLy8vLy8vLy8vLy8v'
+        + 'Ly8vLy8vLy8vLy8vLy8vLy8NCiAgICAvLyAgSU5QVVQgUGFyYW1ldGVycw0KICAgIC8vLy8vLy8vLy8vLy8vLy8vLy8vLy8vLy8v'
+        + 'Ly8vLy8vLy8vLy8vLy8vLy8vLy8NCiAgICBpbkNoYXIoTElCKTsgICAgICAvLyBMaWJyYXJ5IG5hbWUgZm9yIENNRE5BTUUNCiAg'
+        + 'ICBpbkNoYXIoQ01ETkFNRSk7ICAvLyAqQ01EIG5hbWUgVkFSQ0hBUigxMCkNCg0KICAgIC8vLy8vLy8vLy8vLy8vLy8vLy8vLy8v'
+        + 'Ly8vLy8vLy8vLy8vLy8vLy8vLy8vLy8NCiAgICAvLyAgT1VUUFVUIEZpZWxkcw0KICAgIC8vLy8vLy8vLy8vLy8vLy8vLy8vLy8v'
+        + 'Ly8vLy8vLy8vLy8vLy8vLy8vLy8vLy8NCiAgICBvdXRDTE9CKENNRFhNTCk7DQoNCiAgICAvLy8vLy8vLy8vLy8vLy8vLy8vLy8v'
+        + 'Ly8vLy8vLy8vLy8vLy8vLy8vLy8vLy8vLy8vLy8vLy8vLy8vLy8NCiAgICAvLyAgSW5wdXQgUGFyYW1ldGVycycgSU5ESUNBVE9S'
+        + 'Uw0KICAgIC8vLy8vLy8vLy8vLy8vLy8vLy8vLy8vLy8vLy8vLy8vLy8vLy8vLy8vLy8vLy8vLy8vLy8vLy8vLy8vLw0KICAgIGlu'
+        + 'SW5keShMSUIpOyAgICAgIC8vIExpYnJhcnkgbmFtZQ0KICAgIGluSW5keShDTUROQU1FKTsgIC8vIENvbW1hbmQgbmFtZQ0KDQog'
+        + 'ICAgLy8vLy8vLy8vLy8vLy8vLy8vLy8vLy8vLy8vLy8vLy8vLy8vLy8vLy8vLy8vLy8vLy8vLy8vLy8vLy8vDQogICAgLy8gIE91'
+        + 'dHB1dCBDb2x1bW5zJyBJTkRJQ0FUT1JTDQogICAgLy8vLy8vLy8vLy8vLy8vLy8vLy8vLy8vLy8vLy8vLy8vLy8vLy8vLy8vLy8v'
+        + 'Ly8vLy8vLy8vLy8vLy8vDQogICAgb3V0SW5keShDTURYTUwpOw0KDQogICAgLy8vLy8vLy8vLy8vLy8vLy8vLy8vLy8vLy8vLy8v'
+        + 'Ly8vLy8vLy8vLy8vLy8vLy8vLy8vLy8vLy8vLy8vDQogICAgLy8gIFNRTCBzcGVjaWZpYyBwYXJhbWV0ZXJzDQogICAgLy8vLy8v'
+        + 'Ly8vLy8vLy8vLy8vLy8vLy8vLy8vLy8vLy8vLy8vLy8vLy8vLy8vLy8vLy8vLy8vLy8vLy8vDQogICAgY2hhciAqc3Fsc3RhdGUg'
+        + 'PSAoY2hhciAqKWNvel9nZXROZXh0UGFybUlmKHAsIGFyZ2MsIGFyZ3YpOw0KICAgIGNoYXIgKmZ1bmNOYW1lID0gKGNoYXIgKilj'
+        + 'b3pfZ2V0TmV4dFBhcm1JZihwLCBhcmdjLCBhcmd2KTsNCiAgICBjaGFyICpzcGVjaWZpY05hbWUgPSAoY2hhciAqKWNvel9nZXRO'
+        + 'ZXh0UGFybUlmKHAsIGFyZ2MsIGFyZ3YpOw0KICAgIGNoYXIgKnNxbG1zZ3RleHQgPSAoY2hhciAqKWNvel9nZXROZXh0UGFybUlm'
+        + 'KHAsIGFyZ2MsIGFyZ3YpOw0KICAgIGNoYXIgKnNjcmF0Y2hQYWQgPSAoY2hhciAqKWNvel9nZXROZXh0UGFybUlmKHAsIGFyZ2Ms'
+        + 'IGFyZ3YpOw0KICAgIGludCAgKnNxbE9wQ29kZSA9IChpbnQgKiljb3pfZ2V0TmV4dFBhcm1JZihwLCBhcmdjLCBhcmd2KTsNCg0K'
+        + 'ICAgIC8vLy8vLy8vLy8vLy8vLy8vLy8vLy8vLy8vLy8vLy8vLy8vLy8vLy8vLy8vLy8vLy8vLy8vLy8vLy8vLw0KICAgIC8vICBC'
+        + 'RUdJTiBtYWluKCkgYm9keSAoYWZ0ZXIgcGFybXMgc3RhcnRzIGhlcmUpDQogICAgLy8vLy8vLy8vLy8vLy8vLy8vLy8vLy8vLy8v'
+        + 'Ly8vLy8vLy8vLy8vLy8vLy8vLy8vLy8vLy8vLy8vLy8vDQoNCiAgICAgc2NyYXRjaF90KiBwU2NyYXRjaCA9IChzY3JhdGNoX3Qg'
+        + 'KilzY3JhdGNoUGFkOw0KICAgICBjb3pfcXVzZWMgIGVjOw0KICAgICBjaGFyICAgICAgIHF1YWxDTURbMjFdOw0KDQogICAgIGNo'
+        + 'YXIgICAgICBBUElGTVRbOV0gID0gIkNNREQwMjAwIjsgIC8vIEZ1bGwgY29tbWFuZCBkZWZpbml0aW9uIHNvdXJjZQ0KICAgICBj'
+        + 'aGFyICAgICAgREVTVEZNVFs5XSA9ICJERVNUMDEwMCI7ICAvLyBPdXRwdXQgdG8gcmV0dXJuIHZhcmlhYmxlDQoNCiAgICAgUWNk'
+        + 'X0RFU1QwMTAwX3QgICBidWZMZW47ICAgLy8gYnVmTGVuLlJlY2VpdmVyX1ZhcmlhYmxlX0xlbmd0aCA9IG1heFVzZXJTcGFjZVNp'
+        + 'emUNCiAgICAgUWNkX0NNREQwMjAwX3QqICBwQ21kRGVmbjsgLy8gcENtZERlZm4tPkJ5dGVzX1JldHVybmVkIHBDbWREZWZuLT5C'
+        + 'eXRlc19BdmFpbGFibGUNCg0KICAgICBpZiAoKnNxbE9wQ29kZSA9PSBTUUxVREZfVEZfT1BFTikNCiAgICAgew0KICAgICAgIC8v'
+        + 'IE9uZS1PZmYgc3R1ZmYgZ29lcyBoZXJlDQoNCiAgICAgICAvLyBJbml0aWFsaXplIFNjcmF0Y2ggcGFkDQogICAgICAgIG1lbXNl'
+        + 'dChwU2NyYXRjaCwgMHgwMCwgc2l6ZW9mKHNjcmF0Y2gpKTsNCg0KICAgICAgICBjb3pfbmFtZVVwcGVyKGluQ01ETkFNRSk7DQog'
+        + 'ICAgICAgIGNvel9uYW1lVXBwZXIoaW5MSUIpOw0KICAgICAgICBjb3pfbWFrZUFQSU9iak5hbWUocXVhbENNRCwgaW5DTUROQU1F'
+        + 'LCBpbkxJQik7DQoNCiAgICAgICAgIC8vIFNhdmUgdGhlIGNvbW1hbmQgbmFtZSBpbiB0aGUgc2NyYXRjaHBhZA0KICAgICAgICBz'
+        + 'dHJjcHkocFNjcmF0Y2gtPmNtZE5hbWUsIGluQ01ETkFNRSk7DQogICAgICAgIHN0cmNweShwU2NyYXRjaC0+Y21kTGliLCBpbkxJ'
+        + 'Qik7DQoNCiAgICAgICAgYnVmTGVuLlJlY2VpdmVyX1ZhcmlhYmxlX0xlbmd0aCA9IGNvel9NQVhNRU0xNU07DQogICAgICAgIHBD'
+        + 'bWREZWZuID0gKFFjZF9DTUREMDIwMF90KikNCiAgICAgICAgICAgIGNvel9URU1QX1VTUlNQQUNFKHBTY3JhdGNoLT5RVVNSU1BB'
+        + 'Q0UsICJDTURfWE1MIik7DQoNCiAgICAgICAgUUNEUkNNREQocXVhbENNRCwmYnVmTGVuLERFU1RGTVQsIChjaGFyKilwQ21kRGVm'
+        + 'biwgQVBJRk1ULCAmZWMpOw0KDQogICAgICAgIGlmIChlYy5oYXNFcnJvcigpIHx8IHBDbWREZWZuLT5CeXRlc19SZXR1cm5lZCA9'
+        + 'PSAwKQ0KICAgICAgICB7DQogICAgICAgICAgIGNvel9yZXNpZ25hbE1zZyhlYyk7DQogICAgICAgICAgIHN0cmNweShzcWxzdGF0'
+        + 'ZSwgIjAyMDAwIik7DQogICAgICAgICAgIHBTY3JhdGNoLT5lb2YgPSAxOw0KICAgICAgICAgICByZXR1cm4gLTE7DQogICAgICAg'
+        + 'IH0NCg0KICAgICB9DQoNCiAgICBpZiAoKnNxbE9wQ29kZSA9PSBTUUxVREZfVEZfRkVUQ0ggJiYgcFNjcmF0Y2gtPmVvZiA9PSAx'
+        + 'KQ0KICAgIHsNCiAgICAgICAgc3RyY3B5KHNxbHN0YXRlLCAiMDIwMDAiKTsNCiAgICAgICAgcFNjcmF0Y2gtPmVvZiA9IDE7DQog'
+        + 'ICAgfQ0KDQogICAgLy8gLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tDQogICAg'
+        + 'Ly8gRiBFIFQgQyBIICAgT3BlcmF0aW9uDQogICAgLy8gLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0t'
+        + 'LS0tLS0tLS0tLS0tDQogICAgaWYgKCpzcWxPcENvZGUgPT0gU1FMVURGX1RGX0ZFVENIICYmIHBTY3JhdGNoLT5lb2YgPT0gMCkN'
+        + 'CiAgICB7DQoNCiAgICAgIHBDbWREZWZuID0NCiAgICAgICAgICAgKFFjZF9DTUREMDIwMF90KikgY296X2dldFB0clVzclNwYWNl'
+        + 'KHBTY3JhdGNoLT5RVVNSU1BBQ0UpOw0KICAgICAgaWYgKHBDbWREZWZuLT5CeXRlc19SZXR1cm5lZCA+IDApDQogICAgICB7DQog'
+        + 'ICAgICAgIF9DUFlCWVRFUyhvdXRDTURYTUwtPmRhdGEsICgoY2hhciopcENtZERlZm4pICsgKHNpemVvZihpbnQpKjIpLA0KICAg'
+        + 'ICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICBwQ21kRGVmbi0+Qnl0ZXNfUmV0dXJuZWQpOw0KICAgICAgICBvdXRDTURY'
+        + 'TUwtPmxlbmd0aCA9IHBDbWREZWZuLT5CeXRlc19SZXR1cm5lZDsNCiAgICAgIH0NCg0KICAgICAgcFNjcmF0Y2gtPmVvZiA9IDE7'
+        + 'IC8vIE9ubHkgb25lIHJvdyByZXR1cm5lZCBzbyBzZXRvbiBvdXIgIkVPRiIgZmxhZw0KICAgIH0NCg0KICAgIGlmICgqc3FsT3BD'
+        + 'b2RlID09IFNRTFVERl9URl9DTE9TRSkNCiAgICB7DQogICAgICAgIGNvel9ETFRPQkoocFNjcmF0Y2gtPlFVU1JTUEFDRSwgIipV'
+        + 'U1JTUEMiKTsNCiAgICB9DQogICAgaWYgKCpzcWxPcENvZGUgPT0gU1FMVURGX1RGX0ZJTkFMIHx8DQogICAgICAgICpzcWxPcENv'
+        + 'ZGUgPT0gU1FMVURGX1RGX0ZJTkFMX0NSQSkNCiAgICB7DQogICAgICAgIC8vIG5vIGZpbmFsIGNhbGwgY29kZSBmb3Igbm93DQog'
+        + 'ICAgfQ0KfQ0KDQovKiA9PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT0gKi8NCi8qIGNvel9jb3B5'
+        + 'UGFkICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAqLw0KLyogQ29weSBzIHRvIHQsIGJsYW5rLXBhZGRpbmcgdG8g'
+        + 'cGFkTGVuIGJ5dGVzLiAgICovDQovKiA9PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT0gKi8NCmlu'
+        + 'bGluZSB2b2lkIGNvel9jb3B5UGFkKA0KICAgIGNoYXIqICAgICAgIHQsDQogICAgY29uc3QgY2hhciogcywNCiAgICBpbnQgICAg'
+        + 'ICAgICBwYWRMZW4sDQogICAgY2hhciAgICAgICAgcGFkQ2hhcikNCnsNCiAgICBpbnQgc2xlbiA9IChzICE9IE5VTEwpID8gKGlu'
+        + 'dClzdHJsZW4ocykgOiAwOw0KICAgIG1lbXNldCh0LCBwYWRDaGFyLCBwYWRMZW4pOw0KICAgIGlmIChzbGVuID4gMCkNCiAgICAg'
+        + 'ICAgX0NQWUJZVEVTKHQsIHMsDQogICAgICAgICAgICAgICAgICAoc2xlbiA8IHBhZExlbikgPyBzbGVuIDogcGFkTGVuKTsNCn0N'
+        + 'Cg0KDQovKiA9PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT0gKi8NCi8qIGNvel9ETFRPQkogICAg'
+        + 'ICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAqLw0KLyogRGVsZXRlIGFuIElCTSBpIG9iamVjdCB2aWEgUUxJRExUTyBB'
+        + 'UEkuICAgICAgICovDQovKiA9PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT0gKi8NCmlubGluZSB2'
+        + 'b2lkIGNvel9ETFRPQkooDQogICAgY29uc3QgY2hhciogcXVhbE9iak5hbWUsDQogICAgY29uc3QgY2hhciogb2JqVHlwZSwNCiAg'
+        + 'ICBjb25zdCBjaGFyKiBBU1BOYW1lKQ0Kew0KICAgIGNoYXIgc3pPYmpUeXBlWzExXTsNCiAgICBjaGFyIHN6QVNQWzExXTsNCiAg'
+        + 'ICBjaGFyIHJtdk1zZ1sxXSA9IHsnMSd9Ow0KICAgIGNvel9xdXNlYyBlYzsNCiAgICBpZiAocXVhbE9iak5hbWUgPT0gTlVMTCAg'
+        + 'fHwNCiAgICAgICAgcXVhbE9iak5hbWVbMF0gPT0gJyAnIHx8DQogICAgICAgIHF1YWxPYmpOYW1lWzBdID09IDB4MDApDQogICAg'
+        + 'ICAgIHJldHVybjsNCiAgICBjb3pfY29weVBhZChzek9ialR5cGUsIG9ialR5cGUsICAxMCk7DQogICAgY296X2NvcHlQYWQoc3pB'
+        + 'U1AsICAgICBBU1BOYW1lLCAgMTApOw0KICAgIGVjLmluaXQoKTsNCiAgICBRTElETFRPKChjaGFyKilxdWFsT2JqTmFtZSwNCiAg'
+        + 'ICAgICAgICAgIHN6T2JqVHlwZSwgc3pBU1AsDQogICAgICAgICAgICBybXZNc2csICZlYyk7DQp9DQovKiA9PT09PT09PT09PT09'
+        + 'PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT0gKi8NCi8qIGNvel90b1VwcGVyIC8gY296X3RvTG93ZXIgICAgICAgICAg'
+        + 'ICAgICAgICAgICAqLw0KLyogSW4tcGxhY2UgRUJDRElDIGNhc2UgY29udmVyc2lvbi4gICAgICAgICAgICAgICovDQovKiA9PT09'
+        + 'PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT0gKi8NCmlubGluZSBpbnQgY296X3RvVXBwZXIoDQogICAg'
+        + 'Y2hhciogc3pEYXRhLA0KICAgIGludCAgIGluTGVuLA0KICAgIGludCAgIGNjc2lkKQ0Kew0KICAgIFFsZ19DQ1NJRF9SZXFDdGxC'
+        + 'bGtfVCBmcmNiOw0KICAgIGNvel9xdXNlYyBlYzsNCiAgICBsb25nIGxlbiA9IChpbkxlbiA8PSAwKQ0KICAgICAgICAgICAgICAg'
+        + 'PyAobG9uZylzdHJsZW4oc3pEYXRhKSA6IGluTGVuOw0KICAgIG1lbXNldCgoY2hhciopJmZyY2IsIDB4MDAsIHNpemVvZihmcmNi'
+        + 'KSk7DQogICAgZnJjYi5UeXBlX29mX1JlcXVlc3QgICAgID0gMTsNCiAgICBmcmNiLkNhc2VfUmVxdWVzdCAgICAgICAgPSBfVE9V'
+        + 'UFBFUjsNCiAgICBmcmNiLkNDU0lEX29mX0lucHV0X0RhdGEgPSBjY3NpZDsNCiAgICBpZiAobGVuID4gMCkNCiAgICAgICAgUWxn'
+        + 'Q29udmVydENhc2UoKGNoYXIqKSZmcmNiLA0KICAgICAgICAgICAgICAgICAgICAgICBzekRhdGEsIHN6RGF0YSwNCiAgICAgICAg'
+        + 'ICAgICAgICAgICAgICAgJmxlbiwgKGNoYXIqKSZlYyk7DQogICAgcmV0dXJuIChpbnQpbGVuOw0KfQ0KDQovKiA9PT09PT09PT09'
+        + 'PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT0gKi8NCi8qIGNvel9uYW1lVXBwZXIgICAgICAgICAgICAgICAgICAg'
+        + 'ICAgICAgICAgICAgICAqLw0KLyogQ29udmVydHMgbm9uLXF1b3RlZCBJQk0gaSBvYmplY3QgbmFtZSB0byAgICAgICovDQovKiB1'
+        + 'cHBlciBjYXNlIGluLXBsYWNlLiAgICAgICAgICAgICAgICAgICAgICAgICAgKi8NCi8qID09PT09PT09PT09PT09PT09PT09PT09'
+        + 'PT09PT09PT09PT09PT09PT09PT09PSAqLw0KaW5saW5lIGludCBjb3pfbmFtZVVwcGVyKA0KICAgIGNoYXIqIHN6RGF0YSwNCiAg'
+        + 'ICBpbnQgICBpbkxlbikNCnsNCiAgICBjb25zdCBjaGFyIHEgPSAnIic7DQogICAgaW50IGxlbiA9IChpbkxlbiA8PSAwKQ0KICAg'
+        + 'ICAgICAgICAgICAgICAgPyAoaW50KXN0cmxlbihzekRhdGEpIDogaW5MZW47DQogICAgaWYgKHN6RGF0YVswXSA9PSBxKSByZXR1'
+        + 'cm4gaW5MZW47DQogICAgcmV0dXJuIGNvel90b1VwcGVyKHN6RGF0YSwgbGVuKTsNCn0NCg0KaW5saW5lIGNoYXIqIGNvel9nZXRQ'
+        + 'dHJVc3JTcGFjZSgNCiAgICBjb25zdCBjaGFyKiBwMlBhcnRVc3JTcGFjZU5hbWUpDQp7DQogICAgdm9pZCogICAgIHBVUyA9IE5V'
+        + 'TEw7DQogICAgY296X3F1c2VjIGVjOw0KICAgIGVjLmluaXQoKTsNCiAgICBRVVNQVFJVUygoY2hhciopcDJQYXJ0VXNyU3BhY2VO'
+        + 'YW1lLA0KICAgICAgICAgICAgICZwVVMsICZlYyk7DQogICAgaWYgKGVjLmlzRW1wdHkoKSkgcmV0dXJuIChjaGFyKilwVVM7DQog'
+        + 'ICAgcmV0dXJuIE5VTEw7DQp9DQoNCi8qID09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PSAqLw0K'
+        + 'LyogY296X1RFTVBfVVNSU1BBQ0UgICAgICAgICAgICAgICAgICAgICAgICAgICAgICovDQovKiBDcmVhdGUgYSB0ZW1wb3Jhcnkg'
+        + 'KlVTUlNQQyBpbiBRVEVNUC4gICAgICAgICAgKi8NCi8qIFJldHVybnMgcG9pbnRlciB0byB1c2VyLXNwYWNlIGRhdGEgYXJlYTsg'
+        + 'ICAgICAqLw0KLyogc3RvcmVzIDIwLWNoYXIgQVBJIG5hbWUgaW4gcnRuVVNOYW1lWzIwXS4gICAgICovDQovKiA9PT09PT09PT09'
+        + 'PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT0gKi8NCmlubGluZSBjaGFyKiBjb3pfVEVNUF9VU1JTUEFDRSgNCiAg'
+        + 'ICAgICAgICAgICAgICBjaGFyKiAgICAgICBydG5VU05hbWUsDQogICAgICAgICAgICAgICAgY29uc3QgY2hhciogb2JqQXR0ciwN'
+        + 'CiAgICAgICAgICAgICAgICBpbnQgICAgICAgICBpbml0U2l6ZSkNCnsNCiAgICBjaGFyIHF1YWxOYW1lWzIxXTsNCiAgICBjaGFy'
+        + 'IGV4dEF0dHJbMTFdOw0KICAgIGNoYXIgcHViQXV0WzExXTsNCiAgICBjaGFyIHRleHRbNTFdOw0KICAgIGNoYXIgcmVwbFsxMV07'
+        + 'DQogICAgY2hhciBkb21haW5bMTFdOw0KICAgIGNoYXIgaW5pdFZhbCA9IDB4MDA7DQogICAgY2hhciogcFVTICAgPSBOVUxMOw0K'
+        + 'ICAgIGNvel9xdXNlYyBlYzsNCiAgICBzdGQ6OnN0cmluZyBubTsNCiAgICBzaXplX3QgcG9zID0gMDsNCiAgICBtZW1zZXQocXVh'
+        + 'bE5hbWUsICcgJywgMjApOw0KICAgIHF1YWxOYW1lWzIwXSA9IDB4MDA7DQogICAgbm0gID0gdG1wbmFtKE5VTEwpOw0KICAgIHBv'
+        + 'cyA9IG5tLmZpbmRfbGFzdF9vZigiL1xcIik7DQogICAgaWYgKHBvcyAhPSBzdGQ6OnN0cmluZzo6bnBvcykNCiAgICAgICAgbm0u'
+        + 'ZXJhc2UoMCwgcG9zICsgMSk7DQogICAgaWYgKG5tLmxlbmd0aCgpID4gMTApDQogICAgICAgIG5tLnJlc2l6ZSgxMCk7DQoNCiAg'
+        + 'ICBjb3pfbWFrZUFQSU9iak5hbWUoDQogICAgICAgIHF1YWxOYW1lLCBubS5jX3N0cigpLCAiUVRFTVAiKTsNCg0KICAgIGNvel9u'
+        + 'YW1lVXBwZXIocXVhbE5hbWUsIDIwKTsNCg0KICAgIGNvel9jb3B5UGFkKGV4dEF0dHIsIG9iakF0dHIsICAgICAgIDEwKTsNCiAg'
+        + 'ICBjb3pfY29weVBhZChwdWJBdXQsICAiKkxJQkNSVEFVVCIsICAxMCk7DQogICAgY296X2NvcHlQYWQodGV4dCwNCiAgICAgICAg'
+        + 'ICAgICAgICAiU1BPT0xEQVRBIFVEVEYgVGVtcCBTcGFjZSIsIDUwKTsNCiAgICBjb3pfY29weVBhZChyZXBsLCAgICIqTk8iLCAg'
+        + 'ICAgICAgICAxMCk7DQogICAgY296X2NvcHlQYWQoZG9tYWluLCAiKkRFRkFVTFQiLCAgICAgMTApOw0KICAgIGVjLmluaXQoKTsN'
+        + 'CiAgICBRVVNDUlRVUyhxdWFsTmFtZSwgZXh0QXR0ciwgaW5pdFNpemUsDQogICAgICAgICAgICAgJmluaXRWYWwsIHB1YkF1dCwg'
+        + 'dGV4dCwNCiAgICAgICAgICAgICByZXBsLCAmZWMsIGRvbWFpbik7DQogICAgaWYgKGVjLmlzRW1wdHkoKSkgew0KICAgICAgICAv'
+        + 'KiBFbmFibGUgYXV0by1leHRlbmQgc28gdGhlIHNwYWNlIGdyb3dzICAgKi8NCiAgICAgICAgLyogYXV0b21hdGljYWxseSB3aGVu'
+        + 'IEFQSXMgd3JpdGUgcGFzdCB0aGUgICovDQogICAgICAgIC8qIGluaXRpYWwgc2l6ZSAoZS5nLiBRREJSVFZGRCkuICAgICAgICAg'
+        + 'ICAqLw0KICAgICAgICAvKiBrZXk9MyBpcyBBdXRvRXh0ZW5kOyBrZXk9MT1zaXplLCAgICAgICAgKi8NCiAgICAgICAgLyoga2V5'
+        + 'PTI9SW5pdENoYXIsIGtleT00PVRyYW5zZmVyU2l6ZS4gICAgICovDQogICAgICAgIHR5cGVkZWYgX1BhY2tlZCBzdHJ1Y3Qgew0K'
+        + 'ICAgICAgICAgICAgaW50ICBrZXk7DQogICAgICAgICAgICBpbnQgIGRhdGFMZW47DQogICAgICAgICAgICB1bmlvbiB7DQogICAg'
+        + 'ICAgICAgICAgICAgaW50ICBzaXplOw0KICAgICAgICAgICAgICAgIGludCAgdHJhbnNmZXJTaXplOw0KICAgICAgICAgICAgICAg'
+        + 'IGNoYXIgYXV0b0V4dGVuZDsNCiAgICAgICAgICAgICAgICBjaGFyIGluaXRWYWx1ZTsNCiAgICAgICAgICAgIH07DQogICAgICAg'
+        + 'IH0gY296X3NwYWNlS2V5X3Q7DQogICAgICAgIHR5cGVkZWYgX1BhY2tlZCBzdHJ1Y3Qgew0KICAgICAgICAgICAgaW50ICAgICAg'
+        + 'ICAgICBjb3VudDsNCiAgICAgICAgICAgIGNvel9zcGFjZUtleV90IGF0dHJbMV07DQogICAgICAgIH0gY296X3NwYWNlQXR0cl90'
+        + 'Ow0KICAgICAgICBjb3pfc3BhY2VBdHRyX3Qgc3BhY2VBdHRyOw0KICAgICAgICBzcGFjZUF0dHIuY291bnQgICAgICAgICAgPSAx'
+        + 'Ow0KICAgICAgICBzcGFjZUF0dHIuYXR0clswXS5rZXkgICAgID0gMzsNCiAgICAgICAgc3BhY2VBdHRyLmF0dHJbMF0uZGF0YUxl'
+        + 'biA9IDE7DQogICAgICAgIHNwYWNlQXR0ci5hdHRyWzBdLmF1dG9FeHRlbmQgPSAnMSc7DQogICAgICAgIGNoYXIgcnRuTGliWzEw'
+        + 'XTsNCiAgICAgICAgbWVtc2V0KHJ0bkxpYiwgJyAnLCBzaXplb2YocnRuTGliKSk7DQogICAgICAgIGVjLmluaXQoKTsNCiAgICAg'
+        + 'ICAgUVVTQ1VTQVQocnRuTGliLCBxdWFsTmFtZSwgJnNwYWNlQXR0ciwgJmVjKTsNCiAgICAgICAgLyogTm9uLWZhdGFsIGlmIFFV'
+        + 'U0NVU0FUIGZhaWxzIOKAlCBzcGFjZSAgICAgKi8NCiAgICAgICAgLyogd2lsbCBzdGlsbCB3b3JrLCBqdXN0IHdvbid0IGF1dG8t'
+        + 'Z3Jvdy4gICovDQogICAgICAgIGVjLmluaXQoKTsNCiAgICAgICAgUVVTUFRSVVMocXVhbE5hbWUsICh2b2lkKiopJnBVUywgJmVj'
+        + 'KTsNCiAgICB9DQogICAgaWYgKHBVUyAhPSBOVUxMICYmIHJ0blVTTmFtZSAhPSBOVUxMKQ0KICAgICAgICBfQ1BZQllURVMocnRu'
+        + 'VVNOYW1lLCBxdWFsTmFtZSwgMjApOw0KICAgIHJldHVybiBwVVM7DQp9DQoNCg0KLyogPT09PT09PT09PT09PT09PT09PT09PT09'
+        + 'PT09PT09PT09PT09PT09PT09PT09ICovDQovKiBjb3pfbWFrZUFQSU9iak5hbWUgICAgICAgICAgICAgICAgICAgICAgICAgICAg'
+        + 'Ki8NCi8qIEJ1aWxkIDIwLWNoYXIgSUJNIGkgQVBJIG9iamVjdCBuYW1lIGZyb20gICAgICAqLw0KLyogcXVhbGlmaWVkIG5hbWUg'
+        + 'KExJQi9PQkogb3IgT0JKKS4gICAgICAgICAgICAgICovDQovKiA9PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09'
+        + 'PT09PT09PT0gKi8NCmlubGluZSB2b2lkIGNvel9tYWtlQVBJT2JqTmFtZSgNCiAgICBjaGFyKiAgICAgICBvYmpOYW1lLA0KICAg'
+        + 'IGNvbnN0IGNoYXIqIHF1YWxPYmosDQogICAgY29uc3QgY2hhciogZGZ0TGliKQ0Kew0KICAgIGNoYXIgT0JKTkFNRVsxMV07DQog'
+        + 'ICAgY2hhciBMSUJOQU1FWzExXTsNCiAgICBtZW1zZXQob2JqTmFtZSwgICcgJywgMjApOw0KICAgIG1lbXNldChPQkpOQU1FLCAg'
+        + 'JyAnLCBzaXplb2YoT0JKTkFNRSkpOw0KICAgIG1lbXNldChMSUJOQU1FLCAgJyAnLCBzaXplb2YoTElCTkFNRSkpOw0KICAgIE9C'
+        + 'Sk5BTUVbMTBdID0gMHgwMDsNCiAgICBMSUJOQU1FWzEwXSA9IDB4MDA7DQogICAgY29uc3QgY2hhciogc2xhc2hQb3MgPSBzdHJj'
+        + 'aHIocXVhbE9iaiwgJy8nKTsNCiAgICBpZiAoc2xhc2hQb3MgIT0gTlVMTCkgew0KICAgICAgICBpbnQgbGVuID0gKGludCkoc2xh'
+        + 'c2hQb3MgLSBxdWFsT2JqKTsNCiAgICAgICAgaW50IG9sZW4gPSAoaW50KXN0cmxlbihzbGFzaFBvcyArIDEpOw0KICAgICAgICBp'
+        + 'ZiAob2xlbiA+IDEwKSBvbGVuID0gMTA7DQogICAgICAgIGlmIChsZW4gID4gMTApIGxlbiAgPSAxMDsNCiAgICAgICAgX0NQWUJZ'
+        + 'VEVTKE9CSk5BTUUsIHNsYXNoUG9zICsgMSwgb2xlbik7DQogICAgICAgIF9DUFlCWVRFUyhMSUJOQU1FLCBxdWFsT2JqLCAgICAg'
+        + 'IGxlbik7DQogICAgfSBlbHNlIHsNCiAgICAgICAgaW50IG9sZW4gPSAoaW50KXN0cmxlbihxdWFsT2JqKTsNCiAgICAgICAgaWYg'
+        + 'KG9sZW4gPiAxMCkgb2xlbiA9IDEwOw0KICAgICAgICBfQ1BZQllURVMoT0JKTkFNRSwgcXVhbE9iaiwgb2xlbik7DQogICAgICAg'
+        + 'IGlmIChkZnRMaWIgIT0gTlVMTCkgew0KICAgICAgICAgICAgaW50IGxsZW4gPSAoaW50KXN0cmxlbihkZnRMaWIpOw0KICAgICAg'
+        + 'ICAgICAgaWYgKGxsZW4gPiAxMCkgbGxlbiA9IDEwOw0KICAgICAgICAgICAgX0NQWUJZVEVTKExJQk5BTUUsIGRmdExpYiwgbGxl'
+        + 'bik7DQogICAgICAgIH0gZWxzZSB7DQogICAgICAgICAgICBfQ1BZQllURVMoTElCTkFNRSwgIipMSUJMIiwgNSk7DQogICAgICAg'
+        + 'IH0NCiAgICB9DQogICAgX0NQWUJZVEVTKG9iak5hbWUsICAgICAgT0JKTkFNRSwgMTApOw0KICAgIF9DUFlCWVRFUyhvYmpOYW1l'
+        + 'ICsgMTAsIExJQk5BTUUsIDEwKTsNCn0NCg0KDQovKiA9PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09'
+        + 'PT0gKi8NCi8qIGNvel9jb3B5VW50aWwgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAqLw0KLyogQ29weSBzIHRvIHQg'
+        + 'KG51bGwtdGVybWluYXRlZCksIHN0b3BwaW5nIGF0ICAgKi8NCi8qIG1heExlbiwgTlVMLCBvciBhbnkgY2hhciBpbiBzdG9wQXQu'
+        + 'ICAgICAgICAgICAqLw0KLyogPT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09ICovDQppbmxpbmUg'
+        + 'aW50IGNvel9jb3B5VW50aWwoDQogICAgY2hhciogICAgICAgdCwNCiAgICBjb25zdCBjaGFyKiBzLA0KICAgIGludCAgICAgICAg'
+        + 'IG1heExlbiwNCiAgICBjb25zdCBjaGFyKiBzdG9wQXQsDQogICAgYm9vbCAgICAgICAgYlRyaW0pDQp7DQogICAgaW50IGJTdG9w'
+        + 'ICA9IDA7DQogICAgaW50IHJ0bkxlbiA9IDA7DQogICAgaW50IGkgICAgICA9IDA7DQogICAgaWYgKHQgPT0gTlVMTCB8fCBzID09'
+        + 'IE5VTEwpIHJldHVybiAwOw0KI3ByYWdtYSBleGNlcHRpb25faGFuZGxlcihjb3pfY3VfZXhjLFwNCiAgICAwLCAwLFwNCiAgICBf'
+        + 'QzJfTUhfRVNDQVBFIHwgX0MyX01IX0ZVTkNUSU9OX0NIRUNLLFwNCiAgICBfQ1RMQV9IQU5ETEUpDQogICAgbWVtc2V0KHQsICcg'
+        + 'JywgbWF4TGVuKTsNCiAgICB3aGlsZSAoc1tpXSAhPSAweDAwICYmIGkgPCBtYXhMZW4pIHsNCiAgICAgICAgaWYgKHN0b3BBdCAh'
+        + 'PSBOVUxMKSB7DQogICAgICAgICAgICBzaXplX3QgajsNCiAgICAgICAgICAgIGZvciAoaiA9IDA7IGogPCBzdHJsZW4oc3RvcEF0'
+        + 'KTsgaisrKSB7DQogICAgICAgICAgICAgICAgaWYgKHNbaV0gPT0gc3RvcEF0W2pdKSB7DQogICAgICAgICAgICAgICAgICAgIGJT'
+        + 'dG9wID0gMTsNCiAgICAgICAgICAgICAgICB9DQogICAgICAgICAgICB9DQogICAgICAgIH0NCiAgICAgICAgaWYgKGJTdG9wKSBi'
+        + 'cmVhazsNCiAgICAgICAgdFtpXSA9IHNbaV07DQogICAgICAgIGkrKzsNCiAgICB9DQogICAgaWYgKGJUcmltKSB7DQogICAgICAg'
+        + 'IHRbaV0gPSAweDAwOw0KICAgICAgICBpZiAoaSA+IDApDQogICAgICAgICAgICB0Wzo6dHJpbWwodCwgJyAnKV0gPSAweDAwOw0K'
+        + 'ICAgICAgICBydG5MZW4gPSAoaW50KXN0cmxlbih0KTsNCiAgICB9IGVsc2Ugew0KICAgICAgICBydG5MZW4gPSBpOw0KICAgIH0N'
+        + 'CiNwcmFnbWEgZGlzYWJsZV9oYW5kbGVyDQogICAgcmV0dXJuIHJ0bkxlbjsNCmNvel9jdV9leGM6Ow0KICAgIHJldHVybiBydG5M'
+        + 'ZW47DQp9DQoNCi8qID09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PSAqLw0KLyogY296X3Jlc2ln'
+        + 'bmFsTXNnICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICovDQovKiBSZS1zZW5kIGFuIElCTSBpIEFQSSBlcnJvciBhcyBh'
+        + 'IHByb2dyYW0gbXNnLiAgKi8NCi8qID09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PSAqLw0KaW5s'
+        + 'aW5lIHZvaWQgY296X3Jlc2lnbmFsTXNnKGNvel9xdXNlYyYgZWMpDQp7DQogICAgY2hhciBtc2dmaWxlWzIxXTsNCiAgICBjaGFy'
+        + 'IG1zZ3R5cGVbMTFdOw0KICAgIGNoYXIgbXNna2V5WzRdOw0KICAgIGNoYXIgdG9wZ21xWzExXTsNCiAgICBjaGFyIG1zZ1ByZWZp'
+        + 'eFszXTsNCiAgICBjaGFyIG1zZ1R5cGVbM107DQogICAgcXVzZWNfdCAgZmM7DQogICAgbWVtc2V0KChjaGFyKikmZmMsIDB4MDAs'
+        + 'IHNpemVvZihmYykpOw0KICAgIGZjLkJ5dGVzX1Byb3ZpZGVkID0gc2l6ZW9mKGZjKTsNCiAgICBtZW1zZXQobXNna2V5LCAgJyAn'
+        + 'LCBzaXplb2YobXNna2V5KSk7DQogICAgbWVtc2V0KG1zZ2ZpbGUsICcgJywgc2l6ZW9mKG1zZ2ZpbGUpKTsNCiAgICBtZW1zZXQo'
+        + 'dG9wZ21xLCAgJyAnLCBzaXplb2YodG9wZ21xKSk7DQogICAgY296X2NvcHlQYWQodG9wZ21xLCAiKiIsIDEwKTsNCiAgICBpZiAo'
+        + 'ZWMuaXNFbXB0eSgpKSByZXR1cm47DQogICAgX0NQWUJZVEVTKG1zZ1ByZWZpeCwgZWMubXNnaWQoKSwgMik7DQogICAgX0NQWUJZ'
+        + 'VEVTKG1zZ1R5cGUsICAgZWMubXNnaWQoKSArIDIsIDEpOw0KICAgIG1zZ1R5cGVbMV0gICA9IDB4MDA7DQogICAgbXNnUHJlZml4'
+        + 'WzJdID0gMHgwMDsNCiAgICBpZiAoc3RyY21wKG1zZ1ByZWZpeCwgIkNQIikgPT0gMCkNCiAgICAgICAgY296X21ha2VBUElPYmpO'
+        + 'YW1lKG1zZ2ZpbGUsDQogICAgICAgICAgICAgICAgICAgICAgICAgICAiUUNQRk1TRyIsICIqTElCTCIpOw0KICAgIGVsc2UgaWYg'
+        + 'KHN0cmNtcChtc2dQcmVmaXgsICJSTiIpID09IDApDQogICAgICAgIGNvel9tYWtlQVBJT2JqTmFtZShtc2dmaWxlLA0KICAgICAg'
+        + 'ICAgICAgICAgICAgICAgICAgICAgIlFSUEdMRU1TRyIsIlFERVZUT09MUyIpOw0KICAgIGVsc2UgaWYgKHN0cmNtcChtc2dQcmVm'
+        + 'aXgsICJIVCIpID09IDApDQogICAgICAgIGNvel9tYWtlQVBJT2JqTmFtZShtc2dmaWxlLA0KICAgICAgICAgICAgICAgICAgICAg'
+        + 'ICAgICAgIlFIVFRQTVNHIiwgIlFIVFRQU1ZSIik7DQogICAgZWxzZSBpZiAoc3RyY21wKG1zZ1ByZWZpeCwgIkNFIikgPT0gMCkN'
+        + 'CiAgICAgICAgY296X21ha2VBUElPYmpOYW1lKG1zZ2ZpbGUsDQogICAgICAgICAgICAgICAgICAgICAgICAgICAiUUNFRU1TRyIs'
+        + 'ICJRU1lTIik7DQogICAgZWxzZSBpZiAoc3RyY21wKG1zZ1ByZWZpeCwgIkdVIikgPT0gMCkNCiAgICAgICAgY296X21ha2VBUElP'
+        + 'YmpOYW1lKG1zZ2ZpbGUsDQogICAgICAgICAgICAgICAgICAgICAgICAgICAiUUdVSU1TRyIsICAiUVNZUyIpOw0KICAgIGVsc2Ug'
+        + 'aWYgKHN0cmNtcChtc2dQcmVmaXgsICJJVyIpID09IDApDQogICAgICAgIGNvel9tYWtlQVBJT2JqTmFtZShtc2dmaWxlLA0KICAg'
+        + 'ICAgICAgICAgICAgICAgICAgICAgICAgIlFJV1NNU0ciLCAgIlFTWVMiKTsNCiAgICBlbHNlDQogICAgICAgIGNvel9tYWtlQVBJ'
+        + 'T2JqTmFtZShtc2dmaWxlLA0KICAgICAgICAgICAgICAgICAgICAgICAgICAgIlFDUEZNU0ciLCAgIipMSUJMIik7DQogICAgc3dp'
+        + 'dGNoIChtc2dUeXBlWzBdKSB7DQogICAgICAgIGNhc2UgJ0YnOiBjYXNlICdJJzoNCiAgICAgICAgICAgIGNvel9jb3B5UGFkKG1z'
+        + 'Z3R5cGUsICIqSU5GTyIsIDEwKTsNCiAgICAgICAgICAgIGJyZWFrOw0KICAgICAgICBjYXNlICdFJzoNCiAgICAgICAgICAgIGNv'
+        + 'el9jb3B5UGFkKG1zZ3R5cGUsICIqRVNDQVBFIiwgMTApOw0KICAgICAgICAgICAgYnJlYWs7DQogICAgICAgIGNhc2UgJ0QnOg0K'
+        + 'ICAgICAgICAgICAgY296X2NvcHlQYWQobXNndHlwZSwgIipESUFHIiwgMTApOw0KICAgICAgICAgICAgYnJlYWs7DQogICAgICAg'
+        + 'IGNhc2UgJ0MnOg0KICAgICAgICAgICAgY296X2NvcHlQYWQobXNndHlwZSwgIipDT01QIiwgMTApOw0KICAgICAgICAgICAgYnJl'
+        + 'YWs7DQogICAgICAgIGRlZmF1bHQ6DQogICAgICAgICAgICBjb3pfY29weVBhZChtc2d0eXBlLCAiKklORk8iLCAxMCk7DQogICAg'
+        + 'ICAgICAgICBicmVhazsNCiAgICB9DQogICAgUU1IU05EUE0oZWMubXNnaWQoKSwgbXNnZmlsZSwNCiAgICAgICAgICAgICBlYy5t'
+        + 'c2dkYXRhKCksDQogICAgICAgICAgICAgZWMuZ2V0TXNnRGF0YUxlbigpLA0KICAgICAgICAgICAgIG1zZ3R5cGUsIHRvcGdtcSwg'
+        + 'MSwNCiAgICAgICAgICAgICBtc2drZXksICZmYyk7DQp9DQoNCg0KLyogPT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09'
+        + 'PT09PT09PT09PT09ICovDQovKiBjb3pfZ2V0TmV4dFBhcm1JZiAgICAgICAgICAgICAgICAgICAgICAgICAgICAgKi8NCi8qIEFk'
+        + 'dmFuY2UgcGFyYW1ldGVyIGNvdW50ZXIgYW5kIHJldHVybiBhcmd2W25dLiAqLw0KLyogSWYgaW9GbGFnPjAsIG1lbXNldCBvdXRw'
+        + 'dXQgcGFybSB0byAweDAwLiAgICAgICovDQovKiA9PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT0g'
+        + 'Ki8NCmlubGluZSBjaGFyKiBjb3pfZ2V0TmV4dFBhcm1JZigNCiAgICBpbnQmICBwQywNCiAgICBpbnQmICBhcmdjLA0KICAgIGNo'
+        + 'YXIqKiBhcmd2LA0KICAgIGludCAgIGlvRmxhZykNCnsNCiAgICBjaGFyKiBwUnRuID0gTlVMTDsNCiAgICBpZiAoYXJnYyA+IHBD'
+        + 'ICsgMSkgew0KICAgICAgICBwUnRuID0gYXJndlsrK3BDXTsNCiAgICAgICAgaWYgKGlvRmxhZyA+IDApDQogICAgICAgICAgICBt'
+        + 'ZW1zZXQocFJ0biwgMHgwMCwgaW9GbGFnKTsNCiAgICB9DQogICAgcmV0dXJuIHBSdG47DQp9DQojcHJhZ21hIGRhdGFtb2RlbChw'
+        + 'b3ApDQo=',
+        'base64').toString('utf8');
 }

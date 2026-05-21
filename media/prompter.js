@@ -97,8 +97,11 @@ function showHelpOverlay(kwd, title, helpHtml) {
     if (!overlay || !titleEl || !bodyEl) {
         return;
     }
-    titleEl.textContent = title ? `${kwd} — ${title}` : kwd;
-    bodyEl.innerHTML = helpHtml;
+    // Don't repeat the keyword when title === kwd (UDTF paths pass title: kwd)
+    titleEl.textContent = (title && title.toUpperCase() !== kwd.toUpperCase()) ? `${kwd} — ${title}` : kwd;
+    // Strip any TOC anchor the UDTF or GENCMDDOC may inject
+    const cleaned = helpHtml.replace(/<a\s[^>]*name\s*=\s*["']TOC["'][^>]*>[\s\S]*?<\/a>/gi, '');
+    bodyEl.innerHTML = cleaned;
     overlay.classList.add('visible');
 }
 function closeHelpOverlay() {

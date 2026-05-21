@@ -10,7 +10,7 @@ export function getCmdHelpSQLSrc(library: string, version: number): string {
 CREATE or REPLACE FUNCTION ${library}.CMD_HELP(
                               library_name varchar(10) DEFAULT '*LIBL',
                               cmd_name     varchar(10),
-                              helpid       varchar(6000)
+                              helpid       varchar(6000) DEFAULT '*CMD'
                                              )
     RETURNS table (
             HELP_XML CLOB(16M) CCSID 1208
@@ -18,10 +18,11 @@ CREATE or REPLACE FUNCTION ${library}.CMD_HELP(
 
      LANGUAGE C++
      NO SQL
-     NO EXTERNAL ACTION
+     EXTERNAL ACTION
      NO FINAL CALL
-     NOT DETERMINISTIC
+     STATEMENT DETERMINISTIC
      NOT FENCED
+     CARDINALITY 1
      SCRATCHPAD 256
      SPECIFIC ${library}.cmd_help
      EXTERNAL NAME '${library}/CMDHELP'
