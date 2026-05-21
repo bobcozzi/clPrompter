@@ -2,11 +2,12 @@
 
 A professional CL (Control Language) prompter and formatter for VS Code that brings both the familiar IBM i F4 CL prompter experience and intelligent code formatting to your modern IBM i CL development environment. Works seamlessly with the vscode-for-ibmi extension (Code4IBMi).
 
-[Available on the VS CODE Marketplace](https://marketplace.visualstudio.com/items?itemName=CozziResearch.clprompter)
+## Available on:
+- [VS CODE Marketplace](https://marketplace.visualstudio.com/items?itemName=CozziResearch.clprompter)
 
-[Available the the Open VSX marketplace](https://open-vsx.org/extension/CozziResearch/clprompter)
+- [Open VSX marketplace](https://open-vsx.org/extension/CozziResearch/clprompter)
 
-
+## Overview:
 This extension brings two powerful capabilities to modern IBM i development:
 
 **CL Prompting** — A fully functional professional IBM i CL command interface that interprets IBM i *CMD objects directly, supporting both IBM-supplied and user-defined commands with complete prompting accuracy. Nested prompting, parameter validation, and command definition handling are preserved, allowing developers to interact with the IBM i command model as it was designed—now integrated into a modern IDE workflow.
