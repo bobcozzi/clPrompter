@@ -23,13 +23,36 @@
  */
 
 import * as vscode from 'vscode';
-import { code4i } from './extension';
+import { code4i, getPendingExternalSQL } from './extension';
 
 import { buildQlgPathNameHex, buildAPI2PartName, buildQualName } from './QlgPathName';
+import { getUDTFLibrary } from './components/hostFunctions';
 
 // In-memory cache: qualified command key -> XML string
 // Survives for the lifetime of the extension host process.
 const _xmlCache = new Map<string, string>();
+
+// Set to true after the first sqlJob property inspection so we only dump once.
+let _sqlJobInspected = false;
+
+/** Log all own + prototype property names of the sqlJob object once, to help
+ *  identify any "current SQL" or "last SQL" property exposed by mapepire-js. */
+function _inspectSqlJobOnce(sqlJob: any): void {
+    if (_sqlJobInspected || !sqlJob) { return; }
+    _sqlJobInspected = true;
+    const ownKeys = Object.getOwnPropertyNames(sqlJob);
+    const protoKeys = Object.getOwnPropertyNames(Object.getPrototypeOf(sqlJob) ?? {});
+    console.log(`[clPrompter] sqlJob own properties: ${ownKeys.join(', ')}`);
+    console.log(`[clPrompter] sqlJob prototype properties: ${protoKeys.join(', ')}`);
+    // Probe candidate "current/last SQL" property names
+    const candidates = ['sql', 'currentSql', 'lastSql', 'currentQuery', 'lastQuery',
+        'currentStatement', 'pendingSql', 'activeSql', 'statement', 'query'];
+    for (const key of candidates) {
+        if (key in sqlJob) {
+            console.log(`[clPrompter] sqlJob.${key} = ${JSON.stringify(sqlJob[key])}`);
+        }
+    }
+}
 
 // In-flight dedup: tracks promises for commands currently being fetched.
 // Concurrent getCMDXML calls for the same key share one promise instead of
@@ -78,32 +101,47 @@ export async function warmXmlCache(cmd: string): Promise<void> {
     const fileParm = buildQlgPathNameHex(outFile);
     const QCDRCMDD = `CALL QCDRCMDD PARM('${nameStr}' X'${fileParm}' 'DEST0200' ' ' 'CMDD0200' X'000000000000')`;
     const t0 = Date.now();
+    const warmPath = connection.sqlRunnerAvailable() ? 'CMD_XML UDTF' : 'QCDRCMDD fallback';
+    console.log(`[clPrompter] warmXmlCache Not-Cached for ${OBJNAME} — sqlRunnerAvailable=${connection.sqlRunnerAvailable()}, path=${warmPath}`);
 
     const fetchPromise: Promise<string> = (async () => {
         try {
-            let cmdSucceeded = false;
+            let udtfSucceeded = false;
             if (connection.sqlRunnerAvailable()) {
                 try {
-                    await connection.runSQL('@' + QCDRCMDD);
-                    cmdSucceeded = true;
+                    const esc = (s: string) => s.replace(/'/g, "''");
+                    const library = getUDTFLibrary(connection);
+                    const sql = `SELECT CMD_XML FROM TABLE(${library}.CMD_XML('${esc(LIBNAME)}', '${esc(OBJNAME)}'))`;
+                    const jobStatusBefore: string | undefined = (connection as any).sqlJob?.getStatus?.();
+                    const _pendingWarm = getPendingExternalSQL();
+                    const _busyExtraWarm = _pendingWarm
+                        ? ` — competing SQL running ${Date.now() - _pendingWarm.t0}ms: ${_pendingWarm.sql.substring(0, 200)}`
+                        : '';
+                    console.log(`[clPrompter] warmXmlCache: SQLJob status before UDTF for ${OBJNAME}: ${jobStatusBefore ?? 'unknown'}${_busyExtraWarm}`);
+                    const results = await connection.runSQL(sql);
+                    if (results.length > 0 && results[0].CMD_XML) {
+                        const xml = String(results[0].CMD_XML);
+                        _xmlCache.set(cmdXMLName, xml);
+                        console.log(`[clPrompter] warmXmlCache: ${OBJNAME} cached in ${Date.now() - t0}ms (${xml.length} bytes)`);
+                        udtfSucceeded = true;
+                    }
                 } catch (e: any) {
-                    console.log(`[clPrompter] warmXmlCache runSQL for ${OBJNAME} failed: ${e?.message ?? e}`);
+                    console.log(`[clPrompter] warmXmlCache CMD_XML UDTF failed for ${OBJNAME}, falling back to QCDRCMDD: ${e?.message ?? e}`);
                 }
-            } else {
-                const result = await connection.runCommand({ command: QCDRCMDD, environment: 'ile' });
-                cmdSucceeded = result.code === 0;
             }
-
-            if (cmdSucceeded) {
-                const doc = await vscode.workspace.openTextDocument(vscode.Uri.from({
-                    scheme: 'streamfile',
-                    path: outFile,
-                    query: 'readonly=true'
-                }));
-                if (doc) {
-                    const xml = doc.getText();
-                    _xmlCache.set(cmdXMLName, xml);
-                    console.log(`[clPrompter] warmXmlCache: ${OBJNAME} cached in ${Date.now() - t0}ms (${xml.length} bytes)`);
+            if (!udtfSucceeded) {
+                const result = await connection.runCommand({ command: QCDRCMDD, environment: 'ile' });
+                if (result.code === 0) {
+                    const doc = await vscode.workspace.openTextDocument(vscode.Uri.from({
+                        scheme: 'streamfile',
+                        path: outFile,
+                        query: 'readonly=true'
+                    }));
+                    if (doc) {
+                        const xml = doc.getText();
+                        _xmlCache.set(cmdXMLName, xml);
+                        console.log(`[clPrompter] warmXmlCache: ${OBJNAME} cached via QCDRCMDD in ${Date.now() - t0}ms (${xml.length} bytes)`);
+                    }
                 }
             }
         } catch (e: any) {
@@ -163,7 +201,7 @@ export async function getCMDXML(cmdString: string): Promise<string> {
 
     // --- Cache check: skip the 20+ second IBM i round-trip on repeat prompts ---
     if (_xmlCache.has(cmdXMLName)) {
-        console.log(`[clPrompter] getCMDXML cache HIT for ${cmdXMLName}`);
+        console.log(`[clPrompter] getCMDXML Cached: ${cmdXMLName}`);
         return _xmlCache.get(cmdXMLName)!;
     }
 
@@ -172,63 +210,73 @@ export async function getCMDXML(cmdString: string): Promise<string> {
     // from each acquiring their own cold Mapepire/JVM service job for the same command.
     const existing = _inflight.get(cmdXMLName);
     if (existing) {
-        console.log(`[clPrompter] getCMDXML in-flight HIT for ${cmdXMLName}`);
+        console.log(`[clPrompter] getCMDXML in-flight for ${cmdXMLName}`);
         return existing;
     }
 
     // Build and register the fetch promise SYNCHRONOUSLY (before the first await)
     // so any concurrent call arriving after this point will find it in _inflight.
+    const sqlAvail = connection.sqlRunnerAvailable();
+    console.log(`[clPrompter] getCMDXML Not-Cached for ${cmdXMLName} — sqlRunnerAvailable=${sqlAvail}, primary=${sqlAvail ? 'CMD_XML UDTF' : 'QCDRCMDD fallback'}`);
+
     const fetchPromise: Promise<string> = Promise.resolve(vscode.window.withProgress({
         location: vscode.ProgressLocation.Notification,
         title: 'CL Prompter',
         cancellable: false
     }, async (progress) => {
         progress.report({ message: `Fetching ${OBJNAME} definition from IBM i...` });
-        const QCDRCMDD = `CALL QCDRCMDD PARM('${cmdNameStr}' X'${fileParm}' 'DEST0200' ' ' 'CMDD0200' X'000000000000')`;
-        console.log(`[clPrompter] Calling API: ${QCDRCMDD}`);
-
-        // Use VSCODEforIBMi to get the Command Definition XML file from the IFS
         const t0 = Date.now();
 
-        // NEW: run QCDRCMDD through the Mapepire SQL job (reuses c4i's existing JVM).
-        // REVERT: delete the let/if/else block below and restore:
-        //   const result = await connection.runCommand({ command: QCDRCMDD, environment: `ile` });
-        //   console.log(`[clPrompter] runCommand (QCDRCMDD) took ${Date.now() - t0}ms, code=${result.code}`);
-        //   if (result.code === 0) { ...IFS read block... } else { vscode.window.showWarningMessage(...) }
-        let cmdSucceeded = false;
-        if (connection.sqlRunnerAvailable()) {
+        let xml: string | undefined;
+
+        // --- Primary path: CMD_XML UDTF (fast, ~10ms when JVM is warm) ---
+        if (sqlAvail) {
+            const esc = (s: string) => s.replace(/'/g, "''");
+            const library = getUDTFLibrary(connection);
+            const sql = `SELECT CMD_XML FROM TABLE(${library}.CMD_XML('${esc(LIBNAME)}', '${esc(OBJNAME)}'))`;
+            const sqlJob = (connection as any).sqlJob;
+            const jobStatusBefore: string | undefined = sqlJob?.getStatus?.();
+            _inspectSqlJobOnce(sqlJob);
+            const _pendingGet = getPendingExternalSQL();
+            const _busyExtraGet = _pendingGet
+                ? ` — competing SQL running ${Date.now() - _pendingGet.t0}ms: ${_pendingGet.sql.substring(0, 200)}`
+                : '';
+            console.log(`[clPrompter] getCMDXML: SQLJob status before UDTF for ${cmdXMLName}: ${jobStatusBefore ?? 'unknown'}${_busyExtraGet}`);
             try {
-                await connection.runSQL('@' + QCDRCMDD);
-                console.log(`[clPrompter] runSQL (QCDRCMDD) took ${Date.now() - t0}ms`);
-                cmdSucceeded = true;
+                const results = await connection.runSQL(sql);
+                console.log(`[clPrompter] CMD_XML UDTF took ${Date.now() - t0}ms`);
+                if (results.length > 0 && results[0].CMD_XML) {
+                    xml = String(results[0].CMD_XML);
+                }
             } catch (e: any) {
-                console.log(`[clPrompter] runSQL (QCDRCMDD) failed after ${Date.now() - t0}ms: ${e.message || e}`);
-                vscode.window.showWarningMessage(`Cannot prompt '${cmdString.trim().toUpperCase()}': ${e.message || e}`);
-            }
-        } else {
-            // Fallback: original runCommand path (also the revert target)
-            const result = await connection.runCommand({ command: QCDRCMDD, environment: `ile` });
-            console.log(`[clPrompter] runCommand (QCDRCMDD) took ${Date.now() - t0}ms, code=${result.code}`);
-            if (result.code !== 0) {
-                vscode.window.showWarningMessage(`Cannot prompt '${cmdString.trim().toUpperCase()}': ${result.stderr || result.stdout}`);
-            } else {
-                cmdSucceeded = true;
+                console.log(`[clPrompter] CMD_XML UDTF failed after ${Date.now() - t0}ms, falling back to QCDRCMDD: ${e.message || e}`);
             }
         }
 
-        if (cmdSucceeded) {
-            const t1 = Date.now();
-            const cmdxml = await vscode.workspace.openTextDocument(vscode.Uri.from({
-                scheme: 'streamfile',
-                path: outFile,
-                query: 'readonly=true'
-            }));
-            console.log(`[clPrompter] openTextDocument (IFS read) took ${Date.now() - t1}ms, total getCMDXML=${Date.now() - t0}ms`);
-            if (cmdxml) {
-                const xml = cmdxml.getText();
-                _xmlCache.set(cmdXMLName, xml);
-                return xml;
+        // --- Fallback: QCDRCMDD via runCommand (UDTF unavailable or failed) ---
+        if (!xml) {
+            const QCDRCMDD = `CALL QCDRCMDD PARM('${cmdNameStr}' X'${fileParm}' 'DEST0200' ' ' 'CMDD0200' X'000000000000')`;
+            const result = await connection.runCommand({ command: QCDRCMDD, environment: `ile` });
+            console.log(`[clPrompter] runCommand (QCDRCMDD) took ${Date.now() - t0}ms, code=${result.code}`);
+            if (result.code === 0) {
+                const t1 = Date.now();
+                const cmdxml = await vscode.workspace.openTextDocument(vscode.Uri.from({
+                    scheme: 'streamfile',
+                    path: outFile,
+                    query: 'readonly=true'
+                }));
+                console.log(`[clPrompter] openTextDocument (IFS read) took ${Date.now() - t1}ms, total getCMDXML=${Date.now() - t0}ms`);
+                if (cmdxml) {
+                    xml = cmdxml.getText();
+                }
+            } else {
+                vscode.window.showWarningMessage(`Cannot prompt '${cmdString.trim().toUpperCase()}': ${result.stderr || result.stdout}`);
             }
+        }
+
+        if (xml) {
+            _xmlCache.set(cmdXMLName, xml);
+            return xml;
         }
         // Placeholder for unknown commands
         return `<QcdCLCmd><Cmd CmdName="${cmdNameStr}"></Cmd></QcdCLCmd>`;
@@ -242,17 +290,6 @@ export async function getCMDXML(cmdString: string): Promise<string> {
 // ---------------------------------------------------------------------------
 // CMD_HELP UDTF — fast parameter helptext via SQL table function
 // ---------------------------------------------------------------------------
-
-function getUDTFLibrary(connection: any): string {
-    // *TEMPLIB (default) → use Code for IBM i's configured temp library.
-    // Any other value is used as-is (e.g. SQLTOOLS, SYSTOOLS, or a custom library name).
-    const configured = vscode.workspace.getConfiguration('clPrompter').get<string>('udtfSupportLibrary', '*TEMPLIB').trim().toUpperCase();
-    if (!configured || configured === '*TEMPLIB') {
-        const tempLib = (connection.getConfig().tempLibrary as string | undefined)?.trim().toUpperCase();
-        return tempLib || 'ILEDITOR';
-    }
-    return configured;
-}
 
 /**
  * Retrieve XML helptext for a single CL parameter keyword via the CMD_HELP UDTF.

@@ -29,7 +29,7 @@ import { DOMParser } from '@xmldom/xmldom';
 import { CodeForIBMi } from "@halcyontech/vscode-ibmi-types";
 export let code4i: CodeForIBMi;
 import { Extension, extensions } from "vscode";
-import { CmdHelpChecker } from './components/cmdHelp/cmdHelpChecker';
+import { CmdHelpChecker, CmdXmlChecker } from './components/hostFunctions';
 
 import { initializePrompter, CLPrompter, CLPrompterCallback } from './clPrompter';
 
@@ -75,6 +75,46 @@ const clpDocCache = new Map<string, string>();
  */
 const clpHelpCache = new Map<string, string>();
 
+// ---------------------------------------------------------------------------
+// runSQL diagnostic: track external SQL competing for the shared Mapepire job
+// ---------------------------------------------------------------------------
+
+/** Holds the SQL text and wall-clock start time of any non-clPrompter runSQL
+ *  currently in flight on the shared Mapepire SQLJob.  Exported so getCMDXML
+ *  and warmXmlCache can enrich their "busy" log lines with what is competing. */
+let _pendingExternalSQL: { sql: string; t0: number } | undefined;
+
+/** Returns the currently in-flight external SQL on the shared Mapepire SQLJob,
+ *  or undefined if nothing external is running right now. */
+export function getPendingExternalSQL(): { sql: string; t0: number } | undefined {
+    return _pendingExternalSQL;
+}
+
+/** Monkey-patch connection.runSQL() so every call from any extension is logged
+ *  and the most-recent external call is tracked in _pendingExternalSQL.
+ *  Guards against double-patching with a flag on the connection object. */
+function patchRunSQL(connection: any): void {
+    if (connection._clPrompterPatched) { return; }
+    connection._clPrompterPatched = true;
+    const original = connection.runSQL.bind(connection);
+    connection.runSQL = async function (sqlOrArr: string | string[], ...rest: any[]): Promise<any> {
+        const sql = Array.isArray(sqlOrArr) ? sqlOrArr.join('; ') : String(sqlOrArr);
+        // Skip our own SQL to avoid recursive noise in the log
+        const isOurs = /CMD_XML|CMD_HELP|sysroutines|LONG_COMMENT|VALUES\s+1\b|VALUES\s+CURRENT_SERVER/i.test(sql);
+        if (isOurs) {
+            return original(sqlOrArr, ...rest);
+        }
+        const entry = { sql, t0: Date.now() };
+        _pendingExternalSQL = entry;
+        try {
+            return await original(sqlOrArr, ...rest);
+        } finally {
+            if (_pendingExternalSQL === entry) { _pendingExternalSQL = undefined; }
+            console.log(`[clPrompter] external runSQL: ${Date.now() - entry.t0}ms — ${sql.substring(0, 200)}`);
+        }
+    };
+}
+
 /**
  * Extracts the raw HTML for a single parameter section from a GENCMDDOC HTML document.
  * GENCMDDOC wraps each parameter in: <div><a name="CMDNAME.PARM">...</a>...</div>
@@ -118,10 +158,12 @@ export async function activate(context: vscode.ExtensionContext) {
         }
         code4i = baseExtension.exports;
 
-        // Register the CMD_HELP UDTF component so Code for IBM i automatically
-        // checks and installs/updates it on every NEW connection.
+        // Register the CMD_HELP and CMD_XML UDTF components so Code for IBM i
+        // automatically checks and installs/updates them on every NEW connection.
         const cmdHelpChecker = new CmdHelpChecker();
         code4i.componentRegistry.registerComponent(context, cmdHelpChecker);
+        const cmdXmlChecker = new CmdXmlChecker();
+        code4i.componentRegistry.registerComponent(context, cmdXmlChecker);
 
         // If the extension activates while a connection is already live (e.g. lazy
         // activation), the ComponentManager won't have called our component for the
@@ -145,14 +187,32 @@ export async function activate(context: vscode.ExtensionContext) {
             }
         };
 
+        let cmdXmlCheckRunning = false;
+        const runCmdXmlCheck = async () => {
+            if (cmdXmlCheckRunning) { return; }
+            cmdXmlCheckRunning = true;
+            try {
+                const conn = code4i?.instance?.getConnection();
+                if (!conn) { return; }
+                const state = await cmdXmlChecker.getRemoteState(conn, '');
+                if (state !== 'Installed') {
+                    await cmdXmlChecker.update(conn, '');
+                }
+            } catch (e) {
+                console.error(`[clPrompter] CmdXmlChecker manual check failed: ${e}`);
+            } finally {
+                cmdXmlCheckRunning = false;
+            }
+        };
+
         // Subscribe to IBM i connection events.
         // On disconnect: clear the XML cache so stale definitions from the previous
         // IBM i system are never reused after reconnecting to a different system.
 
-        // Keep-alive: send a trivial no-op to the Mapepire SQL job every 20 seconds so
-        // the JVM service job never goes idle between F4 presses.  Without this, opening
-        // a second source member after a short pause causes a ~22 s cold-start because
-        // the Mapepire job is recycled/reset while the IDE sits idle.
+        // Keep-alive: send a lightweight SQL ping to the Mapepire SQL job on a regular
+        // interval so IBM i doesn't recycle the service job during idle periods.
+        // Without this, opening a second source member after a short pause causes a
+        // ~17-20s cold-start while the JVM/JDBC connection is re-established.
         let keepAliveInterval: ReturnType<typeof setInterval> | undefined;
 
         const startKeepAlive = () => {
@@ -160,12 +220,57 @@ export async function activate(context: vscode.ExtensionContext) {
             keepAliveInterval = setInterval(async () => {
                 const conn = code4i?.instance?.getConnection();
                 if (!conn || !conn.sqlRunnerAvailable()) { return; }
+
+                // Skip the ping if the SQLJob is already busy — another query is in-flight,
+                // which itself proves the connection is alive.  No need to queue behind it.
+                const jobStatus: string | undefined = (conn as any).sqlJob?.getStatus?.();
+                if (jobStatus === 'busy') { return; }
                 try {
-                    await conn.runSQL('@/* clPrompter keep-alive */');
-                } catch (_) {
-                    // Non-critical — silently ignore
+                    // A lightweight SQL ping is sufficient — CMD_XML uses ACTGRP(*CALLER)
+                    // so it lives in the Mapepire job's activation group and needs no
+                    // separate warming.  We only need to keep the SQLJob itself alive so
+                    // IBM i doesn't recycle the service job during idle periods.
+                    await conn.runSQL(`VALUES 1`);
+                    // console.log(`[clPrompter] keep-alive: ping OK`);
+                } catch (err: any) {
+                    // The keep-alive failed.  The most common cause is that the Mapepire
+                    // SQLJob died (IBM i recycled the service job after an idle period).
+                    // When that happens, sshSqlJob.end() sets channel=undefined and
+                    // status=ENDED, but IBMi.sqlJob still points at the dead object and
+                    // sqlRunnerAvailable() still returns true — so we land here.
+                    //
+                    // PoC WORKAROUND (pending upstream fix in Code for IBM i):
+                    //   IBMi.getComponent() is public; Mapepire.newJob() is public.
+                    //   The only missing piece is a public IBMi.restartSqlJob() method.
+                    //   Until that exists we use a type-cast to reach the private field.
+                    //
+                    // RECOMMENDED Code for IBM i API addition:
+                    //   public async restartSqlJob(): Promise<void> {
+                    //     const mapepire = await this.getComponent<Mapepire>(Mapepire.ID);
+                    //     if (mapepire) { this.sqlJob = await mapepire.newJob(this); }
+                    //   }
+                    //
+                    // ALSO RECOMMENDED: sqlRunnerAvailable() should check job status:
+                    //   return this.sqlJob !== undefined
+                    //       && this.sqlJob.getStatus() !== JobStatus.ENDED;
+                    const deadJobMsg = ['not yet setup', 'ended', 'not started'];
+                    const isDeadJob = deadJobMsg.some(s => err?.message?.toLowerCase().includes(s));
+                    if (!isDeadJob) { return; } // unrelated error — leave it
+
+                    console.warn('[clPrompter] keep-alive: SQLJob appears dead, attempting restart…');
+                    try {
+                        // PoC hack: access private IBMi.sqlJob via type cast.
+                        // Replace with conn.restartSqlJob() once Code for IBM i adds it.
+                        const mapepire = await (conn as any).getComponent('mapepire');
+                        if (mapepire) {
+                            (conn as any).sqlJob = await mapepire.newJob(conn);
+                            console.log('[clPrompter] keep-alive: SQLJob restarted successfully');
+                        }
+                    } catch (restartErr: any) {
+                        console.error('[clPrompter] keep-alive: SQLJob restart failed:', restartErr?.message ?? restartErr);
+                    }
                 }
-            }, 20_000);
+            }, 60_000);
         };
 
         const stopKeepAlive = () => {
@@ -194,9 +299,11 @@ export async function activate(context: vscode.ExtensionContext) {
 
             const delayMs: number = (config.get<number>('prefetchDelay', 0)) * 1_000;
 
+            console.log(`[clPrompter] prefetch: scheduling warm for [${cmds.join(', ')}] in ${delayMs}ms`);
             setTimeout(async () => {
                 const conn = code4i?.instance?.getConnection();
                 if (!conn) { return; }
+                console.log(`[clPrompter] prefetch: starting warm for [${cmds.join(', ')}]`);
 
                 const fetchOne = async (cmd: string): Promise<void> => {
                     const tmpFile = `clprompter_${cmd}.html`;
@@ -244,6 +351,12 @@ export async function activate(context: vscode.ExtensionContext) {
 
         code4i.instance.subscribe(context, 'connected', 'clPrompter-keepalive-start', startKeepAlive);
         code4i.instance.subscribe(context, 'connected', 'clPrompter-prefetch', prefetch);
+        // Patch runSQL on every new connection so we can log what external SQL is
+        // competing for the shared Mapepire job when we detect a "busy" SQLJob.
+        code4i.instance.subscribe(context, 'connected', 'clPrompter-patch-runsql', () => {
+            const conn = code4i?.instance?.getConnection();
+            if (conn) { patchRunSQL(conn as any); }
+        });
         // NOTE: no 'connected' subscriber for runCmdHelpCheck — the ComponentManager
         // handles new connections automatically (it calls getRemoteState/update on all
         // registered components at connect time). The manual call below handles only
@@ -252,10 +365,11 @@ export async function activate(context: vscode.ExtensionContext) {
 
         // Start immediately if already connected when the extension activates.
         if (code4i.instance.getConnection()) {
+            patchRunSQL(code4i.instance.getConnection() as any);
             startKeepAlive();
-            // Run the CMD_HELP check first, then prefetch — serialized so the
-            // upload/compile step doesn't race prefetch for SSH channels.
-            runCmdHelpCheck().finally(() => prefetch());
+            // Run both UDTF checks in parallel, then prefetch — serialized relative
+            // to prefetch so upload/compile steps don't race for SSH channels.
+            Promise.allSettled([runCmdHelpCheck(), runCmdXmlCheck()]).finally(() => prefetch());
         }
 
         // Ensure the interval is cleared when the extension is deactivated.

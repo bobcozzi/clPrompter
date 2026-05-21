@@ -2,6 +2,23 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.0.5] - 2026-05-21
+
+### What's New
+
+- **Eliminated initial CL prompt lag via new `CMD_XML` UDTF**: Command definition XML is now retrieved using a new `CMD_XML` SQL table function that runs entirely on IBM i via the existing Mapepire SQL job. The previous approach called the `QCDRCMDD` API, wrote the result to a temp IFS file, then read that file back over a second round-trip — adding 5–20 seconds on the very first prompt. The UDTF returns the full XML in a single SQL result row, making initial prompts feel instantaneous.
+- **Automatic `CMD_XML` UDTF installation**: On first connection, clPrompter automatically uploads, compiles, and installs the `CMD_XML` UDTF alongside the existing `CMD_HELP` UDTF. Version checking and reinstallation on update follow the same pattern as `CMD_HELP` — no manual setup required.
+- **Consolidated UDTF lifecycle management**: The internal IBM i component classes for `CMD_HELP` and `CMD_XML` are now managed by a single shared base class (`UDTFChecker`) in `hostFunctions.ts`. The shared 6-step compile/install pipeline (upload C++ source, `CRTLIB`, `CRTCPPMOD`, `CRTPGM`, upload SQL DDL, `RUNSQLSTM`) is defined once; adding a new UDTF in the future requires only a small concrete subclass. The old per-UDTF checker file has been removed.
+- **QCDRCMDD path retained as fallback**: The original `QCDRCMDD` + IFS file read path is preserved for environments where the Mapepire SQL runner is unavailable (`sqlRunnerAvailable()` returns false). In practice, all normal connected sessions use the fast UDTF path.
+
+### Known Issue / Workaround
+
+- **`vscode-clle` hover documentation blocks blocks other host request/SQL jobs**: The [vscode-clle](https://marketplace.visualstudio.com/items?itemName=IBM.vscode-clle) extension's *Display Command Documentation* feature runs IBM i's `GENCMDDOC` command whenever you hover over a CL command name in a source member. `GENCMDDOC` is routed through the shared Mapepire SQL job and takes 7 to 40+ seconds to complete. Because clPrompter's `CMD_XML` UDTF uses the same shared SQL job, any `GENCMDDOC` run that overlaps with a prompt request will block clPrompter for the full duration of that run — reproducing the appearance of a "slow first prompt" problem even though the UDTF itself is fast.
+
+  **Temporary workaround**: Open VS Code Settings (`Cmd+,`), search for **`vscode-clle.general.displayCommandDocumentation`**, and set it to **`false`**. This prevents `GENCMDDOC` from ever running and eliminates the conflict entirely. Hover-based command help in `.clle`/`.cl` source files will no longer appear, but clPrompter's `?` parameter help (which uses the fast `CMD_HELP` UDTF) is unaffected.
+
+  A proper fix — replacing vscode-clle's `GENCMDDOC` path with the clPrompter `CMD_HELP` UDTF — is planned as a separate pull request to the vscode-clle repository.
+
 ## [1.0.4] - 2026-05-20
 
 ### What's New
