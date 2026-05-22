@@ -2,6 +2,9 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.0.9] - 2026-05-22
+- Version bump to work around Microsoft Marketplace "Extension Validation Failed" / false-positive virus scan rejection
+
 ## [1.0.8] - 2026-05-22
 - Minor bug fixes and prompter performance improvements
 
