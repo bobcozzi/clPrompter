@@ -191,6 +191,7 @@ export interface PrompterState {
   cmdLabel: string;
   cmdComment: string;
   hasProcessedFormData: boolean;
+  hasBeenRevealed: boolean;      // true only after the final reveal RAF fires (body opacity → 1)
   controlsWired: boolean;
   parmMetas: ParmMetaMap;  // Include this if not already present
   touchedFields: Set<string>; // Track which fields the user has interacted with

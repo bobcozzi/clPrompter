@@ -555,6 +555,16 @@ export class ClPromptPanel {
     }
 
     /**
+     * Called when the user finishes with the prompter (submit or cancel).
+     * For nested prompters, disposes the panel (they are ephemeral).
+     * For main prompters, keeps the panel alive but resets its webview state so
+     * it can be reused instantly on the next prompt without creating a new webview panel.
+     */
+    private onUserClose(): void {
+        this._panel.dispose();
+    }
+
+    /**
      * Creates a nested prompter for CMD/CMDSTR parameters
      * Returns a promise that resolves with the completed command string (unformatted)
      */
@@ -674,8 +684,8 @@ export class ClPromptPanel {
             console.log(`[clPrompter] Label-only line detected: ${cmdLabel}`);
             const existingPanel = ClPromptPanel.panels.get(panelKey);
             if (existingPanel) {
-                existingPanel._panel.reveal(column);
                 await existingPanel.setXML('', '', editor, selection, '', fullCmd, cmdLabel, cmdComment);
+                existingPanel._panel.reveal(column);
                 return;
             }
             const panel = vscode.window.createWebviewPanel(
@@ -703,6 +713,14 @@ export class ClPromptPanel {
         }
 
         console.log(`[clPrompter] About to call getCMDXML for: ${cmdName}`);
+        // Bring the existing panel to front FIRST (while still showing old content),
+        // then reset to hide the old content. Calling reveal() AFTER postMessage(reset)
+        // causes a race: the compositor paints the old form (opacity:1) before the IPC
+        // reset message is processed by the webview renderer, producing a visible flash
+        // of the old command's parameters (e.g. APPTITLE/USRTITLE/RPTTITLE on RUNIQRY).
+        // Revealing first means the user sees old form → blank → new form in order.
+        ClPromptPanel.panels.get(panelKey)?._panel.reveal(column);
+        ClPromptPanel.panels.get(panelKey)?.resetWebviewState();
         const xml = await getCMDXML(cmdName);
         console.log(`[clPrompter] XML length: ${xml.length} characters`);
         console.log(`[clPrompter] XML starts with: ${xml.substring(0, 100)}`);
@@ -772,8 +790,8 @@ export class ClPromptPanel {
 
         if (ClPromptPanel.panels.has(panelKey)) {
             const existingPanel = ClPromptPanel.panels.get(panelKey)!;
-            existingPanel._panel.reveal(column);
             await existingPanel.setXML(cmdName, xml, editor, selection, cmdPrompt, fullCmd, cmdLabel, cmdComment);
+            // reveal() already called above before resetWebviewState() to prevent flash
         } else {
             const panel = vscode.window.createWebviewPanel(
                 'clPrompter',
@@ -915,10 +933,13 @@ export class ClPromptPanel {
         this._disposables.push(
             panel.webview.onDidReceiveMessage(message => {
                 if (message.type === 'webviewReady') {
-                // Prevent duplicate formData sends
                 if (this._sentFormData) {
-                    console.log('[clPrompter] webviewReady ignored; formData already sent');
-                    return;
+                    // webviewReady while _sentFormData=true means the webview JS context
+                    // was reloaded (VS Code reclaimed memory or internal renderer restart).
+                    // Reset _sentFormData and fall through to resend formData so the panel
+                    // is populated instead of left blank.
+                    console.log('[clPrompter] webviewReady after sentFormData=true — webview reloaded, resending');
+                    this._sentFormData = false;
                 }
                 console.log('[clPrompter] Sending processed data to webview');
 
@@ -984,13 +1005,7 @@ export class ClPromptPanel {
         })
         );
 
-        this.getHtmlForPrompter(this._panel.webview, this._cmdName, this._xml)
-            .then(html => {
-                this._panel.webview.html = html;
-            })
-            .catch(err => {
-                console.error('[clPrompter] Error generating HTML:', err);
-            });
+        this._panel.webview.html = this.getHtmlForPrompter(this._panel.webview, this._cmdName, this._xml);
 
         // Listen for when the panel becomes visible again (e.g., after nested prompt closes)
         this._panel.onDidChangeViewState(
@@ -1057,7 +1072,7 @@ export class ClPromptPanel {
                             if (this._isNested && this._nestedResolver) {
                                 console.log('[submit] Nested prompter resolving with label:', formatted);
                                 this._nestedResolver(formatted);
-                                this._panel.dispose();
+                                this.onUserClose();
                                 break;
                             }
 
@@ -1073,9 +1088,9 @@ export class ClPromptPanel {
                                             if (!success) {
                                                 vscode.window.showWarningMessage('Failed to insert label. Try again.');
                                             }
-                                            // Transfer focus back to editor before disposing
+                                            // Transfer focus back to editor before closing
                                             vscode.window.showTextDocument(doc, { preview: false, preserveFocus: false }).then(() => {
-                                                this._panel.dispose();
+                                                this.onUserClose();
                                             });
                                         });
                                     });
@@ -1086,7 +1101,7 @@ export class ClPromptPanel {
                                 );
                                 vscode.env.clipboard.writeText(formatted);
                                 vscode.window.showInformationMessage('Label copied to clipboard.');
-                                this._panel.dispose();
+                                this.onUserClose();
                             }
                             break;
                         }
@@ -1185,7 +1200,7 @@ export class ClPromptPanel {
                         if (this._isNested && this._nestedResolver) {
                             console.log('[submit] Nested prompter resolving with:', cmd);
                             this._nestedResolver(cmd);
-                            this._panel.dispose();
+                            this.onUserClose();
                             break;
                         }
 
@@ -1208,7 +1223,7 @@ export class ClPromptPanel {
                                         }
                                         // Transfer focus back to editor before disposing
                                         vscode.window.showTextDocument(doc, { preview: false, preserveFocus: false }).then(() => {
-                                            this._panel.dispose();
+                                            this.onUserClose();
                                         });
                                     });
                                 });
@@ -1219,7 +1234,7 @@ export class ClPromptPanel {
                             );
                             vscode.env.clipboard.writeText(formatted);
                             vscode.window.showInformationMessage('CL command copied to clipboard.');
-                            this._panel.dispose();
+                            this.onUserClose();
                         }
                         break;
                     }
@@ -1228,15 +1243,15 @@ export class ClPromptPanel {
                         if (this._isNested && this._nestedResolver) {
                             this._nestedResolver(null);
                         }
-                        // Return focus to editor before disposing
+                        // Return focus to editor before closing
                         if (this._documentUri) {
                             vscode.workspace.openTextDocument(this._documentUri).then(doc => {
                                 vscode.window.showTextDocument(doc, { preview: false, preserveFocus: false }).then(() => {
-                                    this._panel.dispose();
+                                    this.onUserClose();
                                 });
                             });
                         } else {
-                            this._panel.dispose();
+                            this.onUserClose();
                         }
                         break;
                     }
@@ -1333,7 +1348,11 @@ export class ClPromptPanel {
                     case 'pong': {
                         // Webview responded to ping - check if it needs reinitialization
                         console.log('[clPrompter] Received pong, hasProcessedFormData:', message.hasProcessedFormData);
-                        if (!message.hasProcessedFormData && !this._sentFormData) {
+                        if (!message.hasProcessedFormData) {
+                            // Webview has not yet processed formData — either it hasn't
+                            // arrived yet (normal startup) or the webview JS context was
+                            // reloaded (e.g. VS Code reclaimed memory on the 5th+ re-prompt).
+                            // Always resend regardless of _sentFormData to handle both cases.
                             console.log('[clPrompter] Webview needs reinitialization, resending formData');
 
                             // For label-only lines (no command), skip XML processing and just send label/comment
@@ -1490,7 +1509,7 @@ export class ClPromptPanel {
     public async setXML(cmdName: string, xml: string, editor?: vscode.TextEditor, selection?: vscode.Selection, cmdPrompt?: string, fullCmd?: string, cmdLabel?: string, cmdComment?: string) {
         console.log('[clPrompter] setXML called - resetting state');
         this.resetWebviewState();
-        this._sentFormData = false; // allow new formData send
+        // _sentFormData is set to true below after we post directly; no need to reset to false
         console.log('[clPrompter] setXML finished resetting state');
 
         this._cmdName = cmdName;
@@ -1552,10 +1571,39 @@ export class ClPromptPanel {
             this._presentParms = new Set(Object.keys(this._parmMap));
         }
 
-        const html = await this.getHtmlForPrompter(this._panel.webview, this._cmdName, this._xml);
-        this._panel.webview.html = html;
-        // Fire-and-forget after the panel is rendered so it appears instantly.
-        // GENCMDDOC runs concurrently; by the time the user clicks ?, it's cached.
+        // Post formData directly to the already-running webview instead of replacing webview.html.
+        // The 'reset' message (sent above) hides the body; this renders the new command and reveals it.
+        // Replacing webview.html on a hidden panel is deferred by VS Code until reveal, which causes
+        // the old retained DOM to flash. Message-passing avoids that entirely.
+        if (!cmdName || cmdName.trim() === '') {
+            this._panel.webview.postMessage({ type: 'setLabel', label: this._cmdLabel, comment: this._cmdComment });
+        } else {
+            const { allowedValsMap, depConstraints, valToMapToMap, defaultValMap, pmtCtlMap } = buildAllMaps(this._xml);
+            const config = vscode.workspace.getConfiguration('clPrompter');
+            const keywordColor = config.get('kwdColor');
+            const valueColor = config.get('kwdValueColor');
+            const autoAdjust = config.get('kwdColorAutoAdjust');
+            const convertParmValueToUpperCase = config.get('convertParmValueToUpperCase', true);
+            const parmExpansionMax = config.get('parmExpansionMax', 5000);
+            const parmExpansionSize = config.get('parmExpansionSize', 16);
+            this._panel.webview.postMessage({
+                type: 'formData',
+                xml: this._xml,
+                allowedValsMap,
+                depConstraints,
+                valToMapToMap,
+                defaultValMap,
+                pmtCtlMap,
+                cmdName: this._cmdName,
+                cmdPrompt: cmdPrompt || '',
+                paramMap: this._parmMap,
+                parmMap: this._parmMap,
+                parmMetas: this._parmMetas,
+                config: { keywordColor, valueColor, autoAdjust, convertParmValueToUpperCase, parmExpansionMax, parmExpansionSize }
+            });
+            this._panel.webview.postMessage({ type: 'setLabel', label: this._cmdLabel, comment: this._cmdComment });
+        }
+        this._sentFormData = true;
         this._prefetchCLDoc(cmdName);
     }
 
@@ -1606,11 +1654,11 @@ export class ClPromptPanel {
             .catch((e: any) => console.log(`[clPrompter] GENCMDDOC pre-fetch for ${cmdName} failed (non-critical): ${e?.message ?? e}`));
     }
 
-    private async getHtmlForPrompter(webview: vscode.Webview, cmdString: string, xml: string): Promise<string> {
+    private getHtmlForPrompter(webview: vscode.Webview, cmdString: string, xml: string): string {
         const nonce = getNonce();
         const cmdName = buildAPI2PartName(cmdString);
 
-        const prompter = await getHtmlForPrompter(webview, this._extensionUri, cmdString, xml, nonce);
+        const prompter = getHtmlForPrompter(webview, this._extensionUri, cmdString, xml, nonce);
         // console.log("[clPrompter] HTML generated for Prompter: ", prompter);
         return prompter;
     }
@@ -1936,7 +1984,7 @@ export function getHtmlForPrompter(
     TwoPartCmdName: string,
     xml: string,
     nonce: string
-): Promise<string> {
+): string {
 
     const htmlPath = path.join(__dirname, '..', 'media', 'prompter.html');
 
@@ -1969,55 +2017,53 @@ export function getHtmlForPrompter(
     console.log('[clPrompter] mediaUri:', vscode.Uri.joinPath(extensionUri, 'media').toString());
 
 
-    return new Promise((resolve, reject) => {
-        fs.readFile(htmlPath, { encoding: 'utf8' }, (err, html) => {
-            if (err) {
-                reject(new Error(`[clPrompter] Failed to read HTML file: ${err.message}`));
-                return;
-            }
-            const qualCmdName = buildQualName(TwoPartCmdName);
+    let html: string;
+    try {
+        html = fs.readFileSync(htmlPath, { encoding: 'utf8' });
+    } catch (err: any) {
+        throw new Error(`[clPrompter] Failed to read HTML file: ${err.message}`);
+    }
+    const qualCmdName = buildQualName(TwoPartCmdName);
 
-            // Replace placeholders with escaped or safe values (VS Code webview version)
-            const replacedHtml = html
-                .replace(/{{nonce}}/g, nonce)
-                .replace(/{{cspSource}}/g, webview.cspSource)
-                .replace(/{{mainJs}}/g, mainJs)
-                .replace(/{{styleUri}}/g, styleUri)
-                .replace(/{{vscodeElementsBundle}}/g, vscodeElementsBundle)
-                .replace(/{{cmdName}}/g, qualCmdName)
-                .replace(/{{xml}}/g, xml.replace(/"/g, '&quot;')); // Escape double quotes for safety
+    // Replace placeholders with escaped or safe values (VS Code webview version)
+    const replacedHtml = html
+        .replace(/{{nonce}}/g, nonce)
+        .replace(/{{cspSource}}/g, webview.cspSource)
+        .replace(/{{mainJs}}/g, mainJs)
+        .replace(/{{styleUri}}/g, styleUri)
+        .replace(/{{vscodeElementsBundle}}/g, vscodeElementsBundle)
+        .replace(/{{cmdName}}/g, qualCmdName)
+        .replace(/{{xml}}/g, xml.replace(/"/g, '&quot;')); // Escape double quotes for safety
 
-            // Save HTML for diagnostic purposes if enabled
-            const config = vscode.workspace.getConfiguration('clPrompter');
-            const savePrompterHTMLtoFile = config.get<boolean>('savePrompterHTMLtoFile', false);
+    // Save HTML for diagnostic purposes if enabled
+    const config = vscode.workspace.getConfiguration('clPrompter');
+    const savePrompterHTMLtoFile = config.get<boolean>('savePrompterHTMLtoFile', false);
 
-            if (savePrompterHTMLtoFile) {
-                try {
-                    const os = require('os');
-                    let htmlDir = config.get<string>('savedPrompterHTMLFileLocation') || '${tmpdir}';
+    if (savePrompterHTMLtoFile) {
+        try {
+            const os = require('os');
+            let htmlDir = config.get<string>('savedPrompterHTMLFileLocation') || '${tmpdir}';
 
-                    // Expand variables
-                    htmlDir = htmlDir
-                        .replace('${tmpdir}', os.tmpdir())
-                        .replace('${userHome}', os.homedir())
-                        .replace('${workspaceFolder}', vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || os.tmpdir());
+            // Expand variables
+            htmlDir = htmlDir
+                .replace('${tmpdir}', os.tmpdir())
+                .replace('${userHome}', os.homedir())
+                .replace('${workspaceFolder}', vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || os.tmpdir());
 
-                    // Clean command name for filename (remove special chars)
-                    const cleanCmdName = qualCmdName.replace(/[^a-zA-Z0-9_-]/g, '_');
-                    const htmlFilePath = path.join(htmlDir, `clPrompter-${cleanCmdName}.html`);
+            // Clean command name for filename (remove special chars)
+            const cleanCmdName = qualCmdName.replace(/[^a-zA-Z0-9_-]/g, '_');
+            const htmlFilePath = path.join(htmlDir, `clPrompter-${cleanCmdName}.html`);
 
-                    fs.writeFileSync(htmlFilePath, replacedHtml, { encoding: 'utf8' });
-                    console.log(`[clPrompter] ✓ Diagnostic HTML written to: ${htmlFilePath}`);
-                } catch (err) {
-                    console.error('[clPrompter] ✗ Failed to write diagnostic HTML file:', err);
-                }
-            } else {
-                console.log('[clPrompter] Diagnostic HTML writing is disabled (savePrompterHTMLtoFile=false)');
-            }
+            fs.writeFileSync(htmlFilePath, replacedHtml, { encoding: 'utf8' });
+            console.log(`[clPrompter] ✓ Diagnostic HTML written to: ${htmlFilePath}`);
+        } catch (err) {
+            console.error('[clPrompter] ✗ Failed to write diagnostic HTML file:', err);
+        }
+    } else {
+        console.log('[clPrompter] Diagnostic HTML writing is disabled (savePrompterHTMLtoFile=false)');
+    }
 
-            resolve(replacedHtml);
-        });
-    });
+    return replacedHtml;
 }
 
 

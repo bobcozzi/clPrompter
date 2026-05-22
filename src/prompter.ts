@@ -66,6 +66,7 @@ let state: PrompterState = {
   cmdLabel: '',
   cmdComment: '',
   hasProcessedFormData: false,
+  hasBeenRevealed: false,
   controlsWired: false,
   parmMetas: {},
   touchedFields: new Set<string>(),
@@ -2670,8 +2671,13 @@ function addMultiInstanceControls(container: HTMLElement, parm: ParmElement, kwd
         // Reconfigure focus indicators for newly added elements
         configureFocusIndicators();
 
-        // Focus the newly added input
-        if (newInput) {
+        // Focus the newly added input — but not during initial form population
+        // (populateFormFromValues sets isInitializing=true). Programmatic + clicks
+        // during population schedule this 50ms timer, which fires after the form
+        // is already visible and scrolls the viewport to mid-form before
+        // configureTabOrder can settle on the correct first input. The scroll jump
+        // is what users see as a "double render" on lengthy commands like RUNIQRY.
+        if (newInput && !state.isInitializing) {
           setTimeout(() => newInput.focus(), 50);
         }
       }
@@ -2747,12 +2753,12 @@ function loadForm(): void {
       form.appendChild(renderParmInstance(parm, kwd, 0, 1, null));
     }
   });
-  console.log(`[PERF]   renderParmInstances (${state.parms.length} parms): ${(performance.now() - _tRender).toFixed(1)}ms`);
+  console.log(`[clPrompter:PERF]   renderParmInstances (${state.parms.length} parms): ${(performance.now() - _tRender).toFixed(1)}ms`);
 
   // Calculate and apply optimal label width after all parameters are rendered
   const _tOpt = performance.now();
   optimizeLabelWidth();
-  console.log(`[PERF]   optimizeLabelWidth: ${(performance.now() - _tOpt).toFixed(1)}ms`);
+  console.log(`[clPrompter:PERF]   optimizeLabelWidth: ${(performance.now() - _tOpt).toFixed(1)}ms`);
 
   // Form initialization complete - now track user touches
   const ts2 = new Date().toISOString().substring(11, 23);
@@ -2761,19 +2767,24 @@ function loadForm(): void {
   console.log(`[${ts2}] [loadForm] About to call attachStoredListeners()`);
   const _tAsl = performance.now();
   attachStoredListeners();
-  console.log(`[PERF]   attachStoredListeners: ${(performance.now() - _tAsl).toFixed(1)}ms`);
+  console.log(`[clPrompter:PERF]   attachStoredListeners: ${(performance.now() - _tAsl).toFixed(1)}ms`);
   const _tAifc = performance.now();
   applyInitialFieldColors();
-  console.log(`[PERF]   applyInitialFieldColors: ${(performance.now() - _tAifc).toFixed(1)}ms`);
+  console.log(`[clPrompter:PERF]   applyInitialFieldColors: ${(performance.now() - _tAifc).toFixed(1)}ms`);
   const _tTab = performance.now();
-  configureTabOrder(); // Configure tab navigation to move between input fields
-  console.log(`[PERF]   configureTabOrder: ${(performance.now() - _tTab).toFixed(1)}ms`);
+  // Only schedule the focus timer here if no values will be populated afterward.
+  // When state.originalParmMap has entries, populateFormFromValues() runs in a
+  // subsequent RAF and calls configureTabOrder(true) itself — scheduling focus
+  // there (after PmtCtl visibility is applied) avoids a double-focus race.
+  const _willPopulate = Object.keys(state.originalParmMap).length > 0;
+  configureTabOrder(!_willPopulate); // Configure tab navigation to move between input fields
+  console.log(`[clPrompter:PERF]   configureTabOrder: ${(performance.now() - _tTab).toFixed(1)}ms`);
   const _tFocus = performance.now();
   configureFocusIndicators(); // Add visual focus indicators (arrows) to all inputs
-  console.log(`[PERF]   configureFocusIndicators: ${(performance.now() - _tFocus).toFixed(1)}ms`);
+  console.log(`[clPrompter:PERF]   configureFocusIndicators: ${(performance.now() - _tFocus).toFixed(1)}ms`);
   const _tPmtctl = performance.now();
   applyPmtCtlVisibility(); // Apply initial prompt-control show/hide based on current field values
-  console.log(`[PERF]   applyPmtCtlVisibility: ${(performance.now() - _tPmtctl).toFixed(1)}ms`);
+  console.log(`[clPrompter:PERF]   applyPmtCtlVisibility: ${(performance.now() - _tPmtctl).toFixed(1)}ms`);
   console.log(`[${ts2}] [loadForm] END - Form ready for user interaction`);
 }
 
@@ -3067,8 +3078,12 @@ function populateFormFromValues(values: ParmMap): void {
   configureTabOrder(); // Configure tab navigation to move between input fields
   configureFocusIndicators(); // Add visual focus indicators (arrows) to all inputs
 
-  // Validate all range inputs after population
-  requestAnimationFrame(() => validateAllRangeInputs());
+  // NOTE: Do NOT call validateAllRangeInputs() here. The range/full/rstd/rel
+  // validators wrap their inputs in <div class="range-validation-wrapper">
+  // via setTimeout(0) (see setupValidations and createInputForType), so the
+  // wrappers do not yet exist at this point. The formData handler waits for
+  // those setTimeout(0)s to flush before revealing the body, and runs
+  // validateAllRangeInputs() at that point.
 
   // After programmatic population, sync preExpandValue for all inputs that use & expansion.
   // Setting input.value programmatically does NOT fire the 'input' event, so the listener
@@ -3218,9 +3233,20 @@ function populateQualInputs(parm: ParmElement, parmMeta: ParmMetaMap[string], kw
   console.log('[clPrompter] populateQualInputs end');
 }
 
-async function ensureInstanceCount(group: HTMLElement, parm: ParmElement, kwd: string, targetCount: number, max: number): Promise<void> {
+function ensureInstanceCount(group: HTMLElement, parm: ParmElement, kwd: string, targetCount: number, max: number): void {
   console.log('[clPrompter] ', 'ensureInstanceCount start');
-  while (group.querySelectorAll('.parm-instance').length < targetCount && group.querySelectorAll('.parm-instance').length < max) {
+  // NOTE: This must be synchronous. populateFormFromValues calls it without
+  // awaiting, and the body-reveal sequence (setTimeout(0) x2 + rAF) flushes
+  // within a few ms. Any async yield here (e.g. setTimeout(r, 10)) causes the
+  // new instance rows to be appended AFTER the form is revealed, producing a
+  // visible flash / layout shift on multi-instance parms (EXTRA, EMAIL, etc.)
+  // on commands like RUNIQRY.
+  let guard = 0;
+  while (
+    group.querySelectorAll('.parm-instance').length < targetCount &&
+    group.querySelectorAll('.parm-instance').length < max &&
+    guard++ < 1000
+  ) {
     const addBtn = group.querySelector('.add-parm-btn') as HTMLButtonElement;
     if (addBtn) addBtn.click();
     else {
@@ -3228,7 +3254,6 @@ async function ensureInstanceCount(group: HTMLElement, parm: ParmElement, kwd: s
       const newInst = renderParmInstance(parm, kwd, currentCount, max, group);
       group.appendChild(newInst);
     }
-    await new Promise(r => setTimeout(r, 10));
   }
   console.log('[clPrompter] ', 'ensureInstanceCount end');
 }
@@ -4681,6 +4706,7 @@ function resetPrompterState(): void {
   state.originalParmMap = {};
   state.cmdName = '';
   state.hasProcessedFormData = false;
+  state.hasBeenRevealed = false;
   state.controlsWired = false;
   const form = document.getElementById('clForm');
   if (form) form.innerHTML = '';
@@ -4694,13 +4720,17 @@ window.addEventListener('message', event => {
   const message = event.data as WebviewMessage;
   if (message.type === 'formData') {
     const _t0 = performance.now();
-    console.log(`[PERF] formData message received`);
+    console.log(`[clPrompter:PERF] formData message received`);
     if (state.hasProcessedFormData) return;
     state.hasProcessedFormData = true;
+    // Hide body immediately — for fresh panels the body starts at opacity:1 by default.
+    // Without this, loadForm() runs with the body fully visible, so the user watches
+    // the form being assembled live (the "drawing wherever" flash for large commands).
+    document.body.style.opacity = '0';
     const parser = new DOMParser();
     state.xmlDoc = parser.parseFromString(message.xml, 'text/xml');
     const _tParsed = performance.now();
-    console.log(`[PERF] XML parse: ${(_tParsed - _t0).toFixed(1)}ms  (xml length=${message.xml.length})`);
+    console.log(`[clPrompter:PERF] XML parse: ${(_tParsed - _t0).toFixed(1)}ms  (xml length=${message.xml.length})`);
     state.parms = Array.from(state.xmlDoc.querySelectorAll('Parm')) as ParmElement[];
     // Sort parameters by PosNbr to ensure correct display order
     state.parms.sort((a, b) => {
@@ -4756,16 +4786,112 @@ window.addEventListener('message', event => {
     const _tPreLoad = performance.now();
     loadForm();
     const _tPostLoad = performance.now();
-    console.log(`[PERF] loadForm(): ${(_tPostLoad - _tPreLoad).toFixed(1)}ms`);
+    console.log(`[clPrompter:PERF] loadForm(): ${(_tPostLoad - _tPreLoad).toFixed(1)}ms`);
     wirePrompterControls();
+
+    // Collect every custom-element tag currently present in the form so we can
+    // wait for each to be registered/upgraded before revealing. If we reveal
+    // before vscode-elements (vscode-textfield, vscode-single-select, etc.)
+    // finish defining/upgrading, each component swaps its light DOM for shadow
+    // DOM after reveal, resizing every row — visible as a layout-shift flash
+    // (the residual flash on RUNIQRY after the multi-instance sync fix).
+    const collectCustomTags = (): string[] => {
+      const tags = new Set<string>();
+      document.querySelectorAll('*').forEach(el => {
+        const tag = el.tagName.toLowerCase();
+        if (tag.includes('-')) tags.add(tag);
+      });
+      return Array.from(tags);
+    };
+    const waitForCustomElements = (): Promise<void> => {
+      const tags = collectCustomTags();
+      if (tags.length === 0) return Promise.resolve();
+      console.log('[clPrompter] Waiting for custom elements:', tags.join(', '));
+      const _tWait = performance.now();
+      const whenDefinedAll: Promise<void> = Promise.all(
+        tags.map(t => customElements.whenDefined(t).catch(() => undefined))
+      ).then(() => undefined);
+      // Safety timeout: if custom elements never resolve (e.g. script paused by
+      // DevTools or bundle load failure), proceed with reveal after 2 seconds.
+      const timeout = new Promise<void>(resolve => setTimeout(resolve, 2000));
+      return Promise.race([whenDefinedAll, timeout]).then(() => {
+        console.log(`[clPrompter:PERF] customElements.whenDefined wait: ${(performance.now() - _tWait).toFixed(1)}ms`);
+      });
+    };
+
     if (Object.keys(state.originalParmMap).length > 0) {
+      // Reveal the body INSIDE the RAF, after values are populated.
+      // Revealing before the RAF causes the browser to paint one frame of the
+      // empty form skeleton before values appear — visible as a zig-zag flash
+      // on commands with many parameters (e.g. RUNIQRY).
       requestAnimationFrame(() => {
         populateFormFromValues(state.originalParmMap);
         // Re-evaluate PmtCtl visibility now that pre-filled values are in the DOM
         applyPmtCtlVisibility();
+        // The Range/Full/Rstd/Rel validators are queued via setTimeout(0)
+        // from setupValidations() / createInputForType() and each WRAPS its
+        // input in a <div class="range-validation-wrapper">. If we reveal
+        // the body now, those wraps happen in subsequent macrotasks/frames
+        // and produce one or two visible layout shifts (the "double flash"
+        // on commands like RUNIQRY). Wait for those setTimeout(0)s to flush
+        // (two ticks, since some validators re-queue work), then run range
+        // validation, AND wait for all custom elements to be defined, then
+        // reveal the body in the next animation frame.
+        setTimeout(() => {
+          console.log('[clPrompter:PERF] reveal tick 1');
+          setTimeout(() => {
+            console.log('[clPrompter:PERF] reveal tick 2 (pre-validateAllRangeInputs)');
+            try {
+              validateAllRangeInputs();
+            } catch (e) {
+              console.error('[clPrompter] validateAllRangeInputs threw:', e);
+            }
+            console.log('[clPrompter:PERF] reveal tick 2 (post-validateAllRangeInputs, calling waitForCustomElements)');
+            waitForCustomElements().then(() => {
+              console.log('[clPrompter:PERF] waitForCustomElements resolved, scheduling reveal rAF');
+              requestAnimationFrame(() => {
+                document.documentElement.style.visibility = 'visible';
+                document.body.style.opacity = '1';
+                state.hasBeenRevealed = true;
+                console.log('[clPrompter:PERF] body opacity set to 1 (with-values path)');
+              });
+            }).catch(err => {
+              console.error('[clPrompter] waitForCustomElements rejected:', err);
+              document.documentElement.style.visibility = 'visible';
+              document.body.style.opacity = '1';
+              state.hasBeenRevealed = true;
+            });
+          }, 0);
+        }, 0);
+      });
+    } else {
+      // No values to populate — form is already in its final state.
+      // Still wait for deferred validator wraps AND custom element upgrades
+      // before revealing to avoid a post-reveal layout shift.
+      requestAnimationFrame(() => {
+        setTimeout(() => {
+          console.log('[clPrompter:PERF] reveal tick 1 (no-values path)');
+          setTimeout(() => {
+            console.log('[clPrompter:PERF] reveal tick 2 (no-values path, calling waitForCustomElements)');
+            waitForCustomElements().then(() => {
+              console.log('[clPrompter:PERF] waitForCustomElements resolved (no-values path)');
+              requestAnimationFrame(() => {
+                document.documentElement.style.visibility = 'visible';
+                document.body.style.opacity = '1';
+                state.hasBeenRevealed = true;
+                console.log('[clPrompter:PERF] body opacity set to 1 (no-values path)');
+              });
+            }).catch(err => {
+              console.error('[clPrompter] waitForCustomElements rejected:', err);
+              document.documentElement.style.visibility = 'visible';
+              document.body.style.opacity = '1';
+              state.hasBeenRevealed = true;
+            });
+          }, 0);
+        }, 0);
       });
     }
-    console.log(`[PERF] formData total (sync): ${(performance.now() - _t0).toFixed(1)}ms`);
+    console.log(`[clPrompter:PERF] formData total (sync): ${(performance.now() - _t0).toFixed(1)}ms`);
   } else if (message.type === 'setLabel') {
     // Handle label and comment message
     state.cmdLabel = (message as any).label || '';
@@ -4790,6 +4916,8 @@ window.addEventListener('message', event => {
       console.log('[clPrompter] Label-only prompter detected, wiring controls');
       state.hasProcessedFormData = true;
       wirePrompterControls();
+      document.documentElement.style.visibility = 'visible';
+      document.body.style.opacity = '1';
     }
   } else if (message.type === 'nestedResult') {
     // Handle nested prompter result - update the field with the returned command string
@@ -4815,6 +4943,17 @@ window.addEventListener('message', event => {
     // Respond to ping to confirm webview is alive and responsive
     console.log('[clPrompter] Received ping, sending pong');
     vscode?.postMessage({ type: 'pong', hasProcessedFormData: state.hasProcessedFormData });
+  } else if (message.type === 'reset') {
+    // Immediately hide body so the old command form never flashes when the panel is revealed
+    document.body.style.opacity = '0';
+    state.hasProcessedFormData = false;
+    state.hasBeenRevealed = false;
+    state.controlsWired = false;
+    state.touchedFields.clear();
+    const form = document.getElementById('clForm');
+    if (form) { form.innerHTML = ''; }
+    const mainTitle = document.getElementById('mainTitle');
+    if (mainTitle) { mainTitle.textContent = ''; }
   } else if (message.type === 'paramHelp') {
     // Discard stale responses — only show if this is still the pending keyword
     if (pendingHelpKwd !== null && String(message.kwd || '') !== pendingHelpKwd) { return; }
@@ -4837,6 +4976,51 @@ window.addEventListener('message', event => {
     );
   }
   console.log('[clPrompter] ', 'addEventListener(\'message\') end');
+});
+
+// VS Code webview content updates use document.open()/write() on a recycled
+// WebContents renderer — NOT a standard browser navigation. pagehide never
+// fires in this path. visibilitychange IS fired reliably by VS Code when the
+// panel tab is hidden or closed.
+//
+// When the panel is disposed/closed, document.hidden becomes true. Hiding the
+// old content here ensures that when VS Code reuses this renderer for the next
+// panel, the very first compositor frame is blank rather than the previous
+// command's form — eliminating the APPTITLE/USRTITLE/RPTTITLE flash on
+// repeated RUNIQRY (or any other) prompts.
+//
+// When the tab is later made visible again (retainContextWhenHidden path),
+// restore the revealed state if the form was already loaded, so a tab-switch
+// and back doesn't leave the panel blank.
+//
+// Self-healing: VS Code's DevTools attachment sets document.hidden=true and
+// sometimes never fires visibilitychange:visible, leaving the panel blank and
+// the focus caret invisible. If hasBeenRevealed is true and visible hasn't
+// fired within 400ms, restore automatically.
+let _revealRestoreTimer: ReturnType<typeof setTimeout> | null = null;
+
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) {
+    console.log('[clPrompter] visibilitychange: hidden — blanking content');
+    document.documentElement.style.visibility = 'hidden';
+    document.body.style.opacity = '0';
+    if (state.hasBeenRevealed) {
+      if (_revealRestoreTimer !== null) clearTimeout(_revealRestoreTimer);
+      _revealRestoreTimer = setTimeout(() => {
+        _revealRestoreTimer = null;
+        if (state.hasBeenRevealed) {
+          console.log('[clPrompter] visibilitychange: self-healing restore (visible event never fired)');
+          document.documentElement.style.visibility = 'visible';
+          document.body.style.opacity = '1';
+        }
+      }, 400);
+    }
+  } else if (state.hasBeenRevealed) {
+    console.log('[clPrompter] visibilitychange: visible, form revealed — restoring');
+    if (_revealRestoreTimer !== null) { clearTimeout(_revealRestoreTimer); _revealRestoreTimer = null; }
+    document.documentElement.style.visibility = 'visible';
+    document.body.style.opacity = '1';
+  }
 });
 
 // Handshake

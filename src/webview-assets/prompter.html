@@ -1,5 +1,12 @@
 <!DOCTYPE html>
-<html lang="en">
+<!--
+  Inline visibility:hidden on <html> + a nonce'd inline <style> below ensure
+  the body is never paintable until our JS explicitly reveals it. This must
+  be inline (no external CSS dependency) so it wins even if Chromium forces
+  an early paint while {{styleUri}} is still being fetched on first launch
+  of a parameter-heavy command (e.g. RUNIQRY, 77 parms). See Phase 8 notes.
+-->
+<html lang="en" style="visibility: hidden;">
 
 <head>
   <!--
@@ -12,6 +19,13 @@
     content="default-src 'none'; style-src {{cspSource}} 'nonce-{{nonce}}'; script-src 'nonce-{{nonce}}';" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>CL Command Prompter</title>
+  <style nonce="{{nonce}}">
+    /* Pre-CSS hide. Belt-and-braces with the inline style on <html>.
+       No !important so JS inline style.visibility='visible' (and
+       body.style.opacity='1') still wins via specificity. */
+    html { visibility: hidden; }
+    body { opacity: 0; }
+  </style>
   <link rel="stylesheet" href="{{styleUri}}" >
 
 </head>
