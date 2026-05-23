@@ -14,9 +14,19 @@ This extension brings two powerful capabilities to modern IBM i development:
 
 **CL Formatting** — Professional code formatting for CL source that intelligently handles single statements or entire files. The formatter understands CL syntax, preserves comments, properly handles qualified names, and respects your formatting preferences—bringing modern code formatting standards to IBM i CL development.
 
+**CL Syntax Checking** — Full CL syntax checking was originally created for this extension; it has now been merged with the **IBM** `vscode-clle` extension, where it is shipped and installed. It is no longer provided by this extension.
+
 Together, these tools enable developers to work with CL commands and source code outside of the traditional green-screen experience—without sacrificing fidelity, behavior, or control. The extension also exposes a callable API, making it suitable for automation, extension integration, and AI-assisted workflows.
 
 ## Getting Started
+
+When the extension is first activated, it checks your IBM i host for the SQL UDTFs it requires. For each function, the extension only uploads and installs when needed:
+- The function is not currently installed on the host.
+- The function is installed, but the version shipped with this extension is newer than the version on the host.
+
+The extension currently manages these SQL UDTFs (this list may grow over time):
+- **CMD_HELP**: Used by CL Prompter (and eventually the main CL extension) to display command and parameter help text.
+- **CMD_XML**: Used by CL Prompter to retrieve `*CMD` object parameter definitions in XML format, which are used to construct the CL Prompter panel.
 
 ### CL Prompting
 To prompt a CL command:

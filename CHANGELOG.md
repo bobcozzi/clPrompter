@@ -2,20 +2,31 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.0.10] - 2026-05-23
+
+### Changed
+
+- **Marketplace packaging hardening**: The VSIX packaging rules were tightened to exclude embedded archives (`.tgz`, `.zip`, `.gz`), PDF files, and non-runtime artifacts that can trigger Marketplace virus-scan false positives. A publish preflight check was also added to fail packaging if risky archive/binary artifacts are detected in the VSIX payload.
+- **Documentation updates**: README was clarified for UDTF lifecycle behavior (install only when missing or when shipped version is newer) and to note that CL syntax checking is now delivered by IBM `vscode-clle`.
+
 ## [1.0.9] - 2026-05-22
-- Version bump to work around Microsoft Marketplace "Extension Validation Failed" / false-positive virus scan rejection
+
+### Changed
+
+- No functional runtime changes. Version increment and repackaging to retry Microsoft Marketplace publish after a false-positive virus-scan rejection.
 
 ## [1.0.8] - 2026-05-22
-- Minor bug fixes and prompter performance improvements
-
-## [1.0.7] - 2026-05-21
-- Bump
-
-## [1.0.6] - 2026-05-21
 
 ### Fixed
 
-- **VS Code Marketplace AV false positive**: The embedded C++ source strings for the `CMD_HELP` and `CMD_XML` UDTFs are now base64-encoded in the extension bundle. The raw C++ source (containing `#include`, `#pragma`, and IBM i system API references) was triggering the Marketplace virus scanner. The source is decoded at runtime before being uploaded to IBM i — no functional change.
+- Minor bug fixes and prompter performance improvements.
+
+## [1.0.7] - 2026-05-21
+
+### Fixed
+
+- **GUI Performance Improvements**: The prompter UI now renders more efficiently and avoids the occasional redrawing of artifacts on commands with many parameters, such as `SBMJOB` and `RUNiQRY`.
+- **VS Code Marketplace AV false positive**: The embedded C++ source strings for the `CMD_HELP` and `CMD_XML` UDTFs are base64-encoded in the extension bundle. The raw C++ source (containing `#include`, `#pragma`, and IBM i system API references) could trigger Marketplace virus scanning. The source is decoded at runtime before upload to IBM i, with no functional behavior change.
 
 ## [1.0.5] - 2026-05-21
 

@@ -44,6 +44,15 @@ npm run compile || exit 1
 echo "📦 Packaging..."
 vsce package || exit 1
 
+# Validate VSIX payload to avoid Marketplace virus-scan false positives
+VSIX_FILE="clprompter-${VERSION}.vsix"
+echo "🔎 Validating VSIX payload (${VSIX_FILE})..."
+if unzip -l "$VSIX_FILE" | grep -Eq "extension/.*\.(tgz|zip|gz|jar|exe|dll|dylib|so)$|extension/node_original/|extension/.*\.vsix$"; then
+  echo "❌ Packaging validation failed: VSIX contains archive/binary artifacts that can trigger Marketplace virus checks."
+  echo "Update .vscodeignore and repackage before publishing."
+  exit 1
+fi
+
 # Git commit/push
 echo "💾 Committing and pushing..."
 git add .
