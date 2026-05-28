@@ -79,6 +79,9 @@ The formatter intelligently handles CL syntax, preserves trailing comments, and 
 ### Diagnostic Tools (for troubleshooting)
 - **Save Command XML** — Optionally save the IBM i command definition XML to a file for analysis
 - **Save Prompter HTML** — Optionally save the generated prompter HTML for diagnostic purposes when reporting issues
+- **Save Command Helptext** — Optionally save the command parameter helptext HTML generated from the `?` button for diagnostic analysis
+
+For all three save-location settings, enter `${tmpdir}`, `${userHome}`, `${workspaceFolder}`, or any absolute path.
 
 ## Links
 

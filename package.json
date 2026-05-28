@@ -2,7 +2,7 @@
   "name": "clprompter",
   "displayName": "Bob Cozzi's CL Prompter and Formatter for IBM i",
   "description": "IBM i CL Prompting and Formatting: Built for modern development",
-  "version": "1.0.10",
+  "version": "1.0.12",
   "author": {
     "name": "Bob Cozzi",
     "url": "https://github.com/bobcozzi"
@@ -84,30 +84,46 @@
           "default": true,
           "description": "PARM keyword color Auto-adjust for best contrast in dark/light/high-contrast themes. If false, uses your color exactly as specified."
         },
-        "clPrompter.saveCmdXMLtoFile": {
+        "clPrompter.saveCmdXMLToFile": {
           "type": "boolean",
           "default": false,
-          "description": "Write prompted command XML to the cmdDefn.xml file. Useful for troubleshooting but not recommended for normal use."
+          "order": 10,
+          "description": "Write prompted command XML to clp_cmdDefn_<cmdName>.xml. Useful for troubleshooting but not recommended for normal use."
         },
-        "clPrompter.savedCmdXMLFileLocation": {
+        "clPrompter.saveCmdXMLFileLocation": {
           "type": "string",
-          "default": "${tmpdir}",
-          "description": "Directory where cmdDefn.xml file is written. Use ${tmpdir} for system temp, ${userHome} for home directory, or an absolute path."
+          "default": "*USERHOME",
+          "order": 11,
+          "description": "Directory where clp_cmdDefn_<cmdName>.xml is written when clPrompter.saveCmdXMLToFile is enabled. Enter *TMPDIR, *USERHOME, *WORKSPACE, or an absolute path."
         },
-        "clPrompter.savePrompterHTMLtoFile": {
+        "clPrompter.saveCmdPrompterHTMLToFile": {
           "type": "boolean",
           "default": false,
-          "description": "Save prompter HTML to clPrompt-<cmdName>.html file for diagnostic purposes. This file can be sent to support for troubleshooting issues with the prompter."
+          "order": 12,
+          "description": "Save prompter HTML to clp_cmdPrompt_<cmdName>.html for diagnostic purposes. This file can be sent to support for troubleshooting issues with the prompter."
         },
-        "clPrompter.savedPrompterHTMLFileLocation": {
+        "clPrompter.saveCmdPrompterHTMLFileLocation": {
           "type": "string",
-          "default": "${tmpdir}",
-          "description": "Directory where clPrompt-<cmdName>.html file is written. Use ${tmpdir} for system temp, ${userHome} for home directory, or an absolute path."
+          "default": "*USERHOME",
+          "order": 13,
+          "description": "Directory where clp_cmdPrompt_<cmdName>.html is written when clPrompter.saveCmdPrompterHTMLToFile is enabled. Enter *TMPDIR, *USERHOME, *WORKSPACE, or an absolute path."
+        },
+        "clPrompter.saveCmdHelpTextToFile": {
+          "type": "boolean",
+          "default": false,
+          "order": 14,
+          "description": "Save command parameter helptext to clp_cmdHelpText_<cmdName>_<parmName>.html for diagnostic purposes when reporting issues."
+        },
+        "clPrompter.saveCmdHelpTextFileLocation": {
+          "type": "string",
+          "default": "*USERHOME",
+          "order": 15,
+          "description": "Directory where clp_cmdHelpText_<cmdName>_<parmName>.html is written when clPrompter.saveCmdHelpTextToFile is enabled. Enter *TMPDIR, *USERHOME, *WORKSPACE, or an absolute path."
         },
         "clPrompter.convertParmValueToUpperCase": {
           "type": "boolean",
           "default": true,
-          "description": "Convert CL variables, operators (*BCAT, *TCAT, etc.), and built-in functions (%SUBST, %TRIM, etc.) within PARM values to uppercase. When true, text like '&pickles *bcat %trim(x)' becomes '&PICKLES *BCAT %TRIM(x)'. When false, preserves original case. Applies when returning from the prompter."
+          "description": "Convert CL variables, operators (*BCAT, *TCAT, etc.), and built-in functions (%SUBST, %TRIM, etc.) within PARM values to uppercase. When true, text like '&pickles *bcat %trim(&x)' becomes '&PICKLES *BCAT %TRIM(&X)'. When false, preserves original case. Applies when returning from the prompter."
         },
         "clPrompter.convertCmdAndParmNameCase": {
           "type": "string",
@@ -174,12 +190,6 @@
           "type": "string",
           "default": "PGM, DCL, MONMSG, CPYF, CHGVAR, SNDPGMMSG",
           "description": "Comma- or space-delimited list of CL command names to pre-load when a connection to IBM i is established. For each command, both the Prompter and helptext are prefetched. Leave blank to disable."
-        },
-        "clPrompter.prefetchDelay": {
-          "type": "number",
-          "default": 0,
-          "minimum": 0,
-          "description": "Seconds to wait after connecting to IBM i before starting pre-loading. Pre-loading does not block other IBM i activity (XML uses Mapepire silently; helptext uses PASE), so the default is 0. Increase only if you want to defer pre-loading to a specific time after connecting."
         },
         "clPrompter.udtfSupportLibrary": {
           "type": "string",

@@ -102,7 +102,7 @@ export async function warmXmlCache(cmd: string): Promise<void> {
     const QCDRCMDD = `CALL QCDRCMDD PARM('${nameStr}' X'${fileParm}' 'DEST0200' ' ' 'CMDD0200' X'000000000000')`;
     const t0 = Date.now();
     const warmPath = connection.sqlRunnerAvailable() ? 'CMD_XML UDTF' : 'QCDRCMDD fallback';
-    console.log(`[clPrompter] warmXmlCache Not-Cached for ${OBJNAME} — sqlRunnerAvailable=${connection.sqlRunnerAvailable()}, path=${warmPath}`);
+    console.log(`[clPrompter] warmXmlCache: fetching ${OBJNAME} from IBM i (sqlRunnerAvailable=${connection.sqlRunnerAvailable()}, path=${warmPath})`);
 
     const fetchPromise: Promise<string> = (async () => {
         try {
@@ -217,7 +217,7 @@ export async function getCMDXML(cmdString: string): Promise<string> {
     // Build and register the fetch promise SYNCHRONOUSLY (before the first await)
     // so any concurrent call arriving after this point will find it in _inflight.
     const sqlAvail = connection.sqlRunnerAvailable();
-    console.log(`[clPrompter] getCMDXML Not-Cached for ${cmdXMLName} — sqlRunnerAvailable=${sqlAvail}, primary=${sqlAvail ? 'CMD_XML UDTF' : 'QCDRCMDD fallback'}`);
+    console.log(`[clPrompter] getCMDXML: fetching ${cmdXMLName} from IBM i (sqlRunnerAvailable=${sqlAvail}, primary=${sqlAvail ? 'CMD_XML UDTF' : 'QCDRCMDD fallback'})`);
 
     const fetchPromise: Promise<string> = Promise.resolve(vscode.window.withProgress({
         location: vscode.ProgressLocation.Notification,

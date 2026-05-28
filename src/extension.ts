@@ -24,6 +24,7 @@
 
 import * as vscode from 'vscode';
 import { DOMParser } from '@xmldom/xmldom';
+import * as os from 'os';
 
 
 import { CodeForIBMi } from "@halcyontech/vscode-ibmi-types";
@@ -147,6 +148,66 @@ function extractParamHtml(html: string, cmdName: string, kwd: string): string | 
     }
 
     return html.substring(divStart, pos);
+}
+
+function getPreferredWorkspaceFolderPath(): string {
+    const activeUri = vscode.window.activeTextEditor?.document.uri;
+    if (activeUri) {
+        const activeFolder = vscode.workspace.getWorkspaceFolder(activeUri);
+        if (activeFolder) {
+            return activeFolder.uri.fsPath;
+        }
+    }
+
+    return vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || os.tmpdir();
+}
+
+function expandSaveLocation(rawLocation: string): string {
+    const workspacePath = getPreferredWorkspaceFolderPath();
+    return rawLocation
+        .replace(/\*TMPDIR\b/gi, os.tmpdir())
+        .replace(/\*USERHOME\b/gi, os.homedir())
+        .replace(/\*WORKSPACE\b/gi, workspacePath);
+}
+
+function resolveSaveLocation(
+    config: vscode.WorkspaceConfiguration,
+    locationKey: string,
+    defaultSymbolicLocation: '*TMPDIR' | '*USERHOME' | '*WORKSPACE'
+): string {
+    const rawLocation = config.get<string>(locationKey, defaultSymbolicLocation) || defaultSymbolicLocation;
+
+    return expandSaveLocation(rawLocation);
+}
+
+// This function saves the retrieved HTML to a local file for debug purposes.
+// It is normally not called or the calls to it are commented out.
+// Calling save all help text files, when retrieved, to the local PC as `clp_cmdHelpText_<cmdName>_<parmName>.html`
+async function saveHelpTextDebugFile(cmdName: string, parmName: string, helpHtml: string): Promise<string | null> {
+    try {
+        const config = vscode.workspace.getConfiguration('clPrompter');
+        if (!config.get<boolean>('saveCmdHelpTextToFile', false)) {
+            return null;
+        }
+
+        const helpTextLocation = resolveSaveLocation(
+            config,
+            'saveCmdHelpTextFileLocation',
+            '*USERHOME'
+        );
+
+        const safeCmdName = cmdName.toUpperCase().replace(/[^A-Z0-9._-]+/g, '_').replace(/^_+|_+$/g, '') || 'CMD';
+        const safeParmName = parmName.toUpperCase().replace(/[^A-Z0-9._-]+/g, '_').replace(/^_+|_+$/g, '') || 'PARM';
+        const fileName = `clp_cmdHelpText_${safeCmdName}_${safeParmName}.html`;
+        await fs.promises.mkdir(helpTextLocation, { recursive: true });
+        const filePath = path.join(helpTextLocation, fileName);
+        await fs.promises.writeFile(filePath, helpHtml, 'utf8');
+        console.log(`[clPrompter] Saved helptext debug file: ${filePath}`);
+        return filePath;
+    } catch (err) {
+        console.warn('[clPrompter] Could not save helptext file:', err instanceof Error ? err.message : String(err));
+        return null;
+    }
 }
 
 export async function activate(context: vscode.ExtensionContext) {
@@ -281,13 +342,11 @@ export async function activate(context: vscode.ExtensionContext) {
         };
 
         /**
-         * Pre-loads both the command XML definition (QCDRCMDD → XML cache) and
-         * GENCMDDOC helptext (PASE SSH channel → clpDocCache) for every command in
-         * the prefetchCommands setting.
+         * Pre-loads the command XML definition (CMD_XML UDTF → _xmlCache) for every
+         * command in the prefetchCommands setting.
          *
          * XML warm uses Mapepire (fast, ~500 ms each) with no progress toast.
-         * Helptext fetch uses a PASE SSH exec channel so it never touches the ileQueue.
-         * Both run in parallel across all commands — total wall-clock time ≈ one command.
+         * All commands run in parallel — total wall-clock time ≈ one command.
          */
         const prefetch = (): void => {
             const config = vscode.workspace.getConfiguration('clPrompter');
@@ -297,56 +356,15 @@ export async function activate(context: vscode.ExtensionContext) {
             const cmds = raw.split(/[\s,]+/).map(s => s.trim().toUpperCase()).filter(Boolean);
             if (cmds.length === 0) { return; }
 
-            const delayMs: number = (config.get<number>('prefetchDelay', 0)) * 1_000;
-
-            console.log(`[clPrompter] prefetch: scheduling warm for [${cmds.join(', ')}] in ${delayMs}ms`);
-            setTimeout(async () => {
+            console.log(`[clPrompter] prefetch: starting warm for [${cmds.join(', ')}]`);
+            (async () => {
                 const conn = code4i?.instance?.getConnection();
                 if (!conn) { return; }
-                console.log(`[clPrompter] prefetch: starting warm for [${cmds.join(', ')}]`);
 
-                const fetchOne = async (cmd: string): Promise<void> => {
-                    const tmpFile = `clprompter_${cmd}.html`;
-                    const tmpPath = `/tmp/${tmpFile}`;
-
-                    const useGencmddoc = vscode.workspace.getConfiguration('clPrompter').get<string>('parmHelpText', 'CMD_HELP UDTF') === 'GENCMDDOC';
-
-                    // XML warm (Mapepire, ~500 ms, no progress toast) and
-                    // GENCMDDOC helptext (PASE SSH exec channel) run concurrently.
-                    await Promise.allSettled([
-                        // --- XML definition warm ---
-                        warmXmlCache(cmd),
-
-                        // --- Helptext (GENCMDDOC via PASE) — only when parmHelpText=GENCMDDOC ---
-                        (async () => {
-                            if (!useGencmddoc) { return; }
-                            if (clpDocCache.has(cmd)) { return; }
-                            const t0 = Date.now();
-                            try {
-                                const genResult = await conn.runCommand({
-                                    command: `system "GENCMDDOC CMD(QSYS/${cmd}) GENOPT(*HTML *SHOWCHOICEPGMVAL) REPLACE(*YES) TOSTMF('${tmpFile}') TODIR('/tmp')"`,
-                                    environment: 'pase'
-                                });
-                                if (genResult.code !== 0) {
-                                    console.log(`[clPrompter] PASE GENCMDDOC for ${cmd} failed (code=${genResult.code}): ${genResult.stderr}`);
-                                    return;
-                                }
-                                const buf = await conn.getContent().downloadStreamfileRaw(tmpPath);
-                                clpDocCache.set(cmd, buf.toString('utf8'));
-                                console.log(`[clPrompter] PASE helptext pre-fetch for ${cmd} done in ${Date.now() - t0}ms (${clpDocCache.get(cmd)!.length} bytes)`);
-                            } catch (e: any) {
-                                console.log(`[clPrompter] PASE helptext pre-fetch for ${cmd} failed (non-critical): ${e?.message ?? e}`);
-                            } finally {
-                                conn.runCommand({ command: `rm -f ${tmpPath}`, environment: 'pase' }).catch(() => {});
-                            }
-                        })()
-                    ]);
-                };
-
-                // Run all commands in parallel — each uses its own SSH exec channel so
+                // Run all XML warms in parallel — each uses its own SSH exec channel so
                 // there is no serialization penalty. Total wall-clock time ≈ one command.
-                await Promise.allSettled(cmds.map(fetchOne));
-            }, delayMs);
+                await Promise.allSettled(cmds.map(cmd => warmXmlCache(cmd)));
+            })();
         };
 
         code4i.instance.subscribe(context, 'connected', 'clPrompter-keepalive-start', startKeepAlive);
@@ -729,21 +747,19 @@ export class ClPromptPanel {
         console.log("[clPrompter] <XML> ", xml);
         console.log("[clPrompter] </XML>");
 
-// Write XML to cmdDefn.xml file for debugging (if enabled)
+// Write XML to clp_cmdDefn_<cmdName>.xml file for debugging (if enabled)
         const config = vscode.workspace.getConfiguration('clPrompter');
-        const saveCmdXMLtoFile = config.get<boolean>('saveCmdXMLtoFile', false);
+        const saveCmdXMLToFile = config.get<boolean>('saveCmdXMLToFile', false);
 
-        if (saveCmdXMLtoFile && editor && editor.document.uri.fsPath) {
-            const os = require('os');
-            let xmlDir = config.get<string>('savedCmdXMLFileLocation') || '${tmpdir}';
+        if (saveCmdXMLToFile && editor && editor.document.uri.fsPath) {
+            const xmlDir = resolveSaveLocation(
+                config,
+                'saveCmdXMLFileLocation',
+                '*TMPDIR'
+            );
 
-            // Expand variables
-            xmlDir = xmlDir
-                .replace('${tmpdir}', os.tmpdir())
-                .replace('${userHome}', os.homedir())
-                .replace('${workspaceFolder}', vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || os.tmpdir());
-
-            const xmlFilePath = path.join(xmlDir, 'cmdDefn.xml');
+            const cleanCmdName = String(cmdName || 'CMD').toUpperCase().replace(/[^A-Z0-9._-]+/g, '_').replace(/^_+|_+$/g, '') || 'CMD';
+            const xmlFilePath = path.join(xmlDir, `clp_cmdDefn_${cleanCmdName}.xml`);
             console.log(`[clPrompter] Writing XML to: ${xmlFilePath}`);
 
             try {
@@ -752,8 +768,8 @@ export class ClPromptPanel {
             } catch (err) {
                 console.error(`[clPrompter] ✗ Failed to write XML file: ${err}`);
             }
-        } else if (!saveCmdXMLtoFile) {
-            console.log(`[clPrompter] Debug XML writing is disabled (saveCmdXMLtoFile=false)`);
+        } else if (!saveCmdXMLToFile) {
+            console.log(`[clPrompter] Debug XML writing is disabled (saveCmdXMLToFile=false)`);
         } else {
             const scheme = editor?.document.uri.scheme || 'unknown';
             console.log(`[clPrompter] No file path available (scheme: ${scheme}), skipping XML file write`);
@@ -1423,6 +1439,7 @@ export class ClPromptPanel {
                                 const udtfHtml = await getCmdHelpViaUDTF(cmdLib, cmdObj, kwd);
                                 if (udtfHtml) {
                                     clpHelpCache.set(helpCacheKey, udtfHtml);
+                                    await saveHelpTextDebugFile(cmdName, kwd, udtfHtml);
                                     this._panel.webview.postMessage({ type: 'paramHelp', kwd, title: kwd, helpHtml: udtfHtml });
                                     break;
                                 }
@@ -1445,6 +1462,7 @@ export class ClPromptPanel {
                             if (cachedHtml) {
                                 const rawHtml = extractParamHtml(cachedHtml, cmdName, kwd);
                                 if (rawHtml) {
+                                    await saveHelpTextDebugFile(cmdName, kwd, rawHtml);
                                     this._panel.webview.postMessage({ type: 'paramHelp', kwd, title: kwd, helpHtml: rawHtml });
                                     break;
                                 }
@@ -1483,6 +1501,9 @@ export class ClPromptPanel {
                             // (same source vscode-clle uses for its panel display).
                             // Fall back to the Markdown description if extraction fails.
                             const rawHtml = extractParamHtml(result.html, cmdName, kwd);
+                            if (rawHtml) {
+                                await saveHelpTextDebugFile(cmdName, kwd, rawHtml);
+                            }
                             this._panel.webview.postMessage({
                                 type: 'paramHelp',
                                 kwd,
@@ -2037,22 +2058,19 @@ export function getHtmlForPrompter(
 
     // Save HTML for diagnostic purposes if enabled
     const config = vscode.workspace.getConfiguration('clPrompter');
-    const savePrompterHTMLtoFile = config.get<boolean>('savePrompterHTMLtoFile', false);
+    const saveCmdPrompterHTMLToFile = config.get<boolean>('saveCmdPrompterHTMLToFile', false);
 
-    if (savePrompterHTMLtoFile) {
+    if (saveCmdPrompterHTMLToFile) {
         try {
-            const os = require('os');
-            let htmlDir = config.get<string>('savedPrompterHTMLFileLocation') || '${tmpdir}';
-
-            // Expand variables
-            htmlDir = htmlDir
-                .replace('${tmpdir}', os.tmpdir())
-                .replace('${userHome}', os.homedir())
-                .replace('${workspaceFolder}', vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || os.tmpdir());
+            const htmlDir = resolveSaveLocation(
+                config,
+                'saveCmdPrompterHTMLFileLocation',
+                '*TMPDIR'
+            );
 
             // Clean command name for filename (remove special chars)
             const cleanCmdName = qualCmdName.replace(/[^a-zA-Z0-9_-]/g, '_');
-            const htmlFilePath = path.join(htmlDir, `clPrompter-${cleanCmdName}.html`);
+            const htmlFilePath = path.join(htmlDir, `clp_cmdPrompt_${cleanCmdName}.html`);
 
             fs.writeFileSync(htmlFilePath, replacedHtml, { encoding: 'utf8' });
             console.log(`[clPrompter] ✓ Diagnostic HTML written to: ${htmlFilePath}`);
@@ -2060,7 +2078,7 @@ export function getHtmlForPrompter(
             console.error('[clPrompter] ✗ Failed to write diagnostic HTML file:', err);
         }
     } else {
-        console.log('[clPrompter] Diagnostic HTML writing is disabled (savePrompterHTMLtoFile=false)');
+        console.log('[clPrompter] Diagnostic HTML writing is disabled (saveCmdPrompterHTMLToFile=false)');
     }
 
     return replacedHtml;

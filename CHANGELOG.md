@@ -2,6 +2,18 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.0.12] - 2026-05-28
+
+### Changed
+
+- **Diagnostic save-location settings simplified**: The separate `...LocationPreset` settings have been removed for command XML, prompter HTML, and helptext diagnostics. Each diagnostic type now uses a single location setting (`clPrompter.savedCmdXMLFileLocation`, `clPrompter.savedPrompterHTMLFileLocation`, `clPrompter.savedCmdHelpTextFileLocation`) that accepts `${tmpdir}`, `${userHome}`, `${workspaceFolder}`, or an absolute path.
+
+## [1.0.11] - 2026-05-24
+
+### Changed
+
+- **Debug helptext HTML save**: An optional "Save Parameter Helptext" setting has been added to save the generated helptext to a local PC file as `<cmdName>_<parmName>_Helptext.html`. This save happens only when `clPrompter.saveCmdHelpTexttoFile` is enabled (`true`). The output location defaults to the user's home directory, with the optional `${tmpdir}` also available or any user-specified location is also supported by setting it in the `clPrompter.savedCmdHelpTextFileLocation` setting.
+
 ## [1.0.10] - 2026-05-23
 
 ### Changed

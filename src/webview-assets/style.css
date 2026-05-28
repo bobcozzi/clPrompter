@@ -2,6 +2,8 @@ html {
   /* Match the editor background so the panel never shows a white flash before
      the stylesheet/components finish loading. */
   background-color: var(--vscode-editor-background);
+  /* Keep the webview hidden until the TS bootstrap explicitly reveals it. */
+  visibility: hidden;
 }
 
 body {
