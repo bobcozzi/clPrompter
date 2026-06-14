@@ -1533,6 +1533,9 @@ function createInputForType(type, name, dft, len, suggestions, isRestricted = fa
                 const normalizedValue = normalizeValue(selectedValue, displaySuggestions, null);
                 textarea.value = normalizedValue;
                 cbInputElement.value = '';
+                // Trigger change event on textarea to mark it as touched
+                textarea.dispatchEvent(new Event('change', { bubbles: true }));
+                textarea.dispatchEvent(new Event('input', { bubbles: true }));
             }
         });
         // When user manually types a value and leaves the cbInput, transfer to textarea
@@ -1542,6 +1545,9 @@ function createInputForType(type, name, dft, len, suggestions, isRestricted = fa
                 const normalizedValue = normalizeValue(typedValue, displaySuggestions, null);
                 textarea.value = normalizedValue;
                 cbInputElement.value = '';
+                // Trigger change event on textarea to mark it as touched
+                textarea.dispatchEvent(new Event('change', { bubbles: true }));
+                textarea.dispatchEvent(new Event('input', { bubbles: true }));
             }
         });
         container.appendChild(cbinput.getElement());

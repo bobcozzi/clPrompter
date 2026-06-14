@@ -1675,6 +1675,9 @@ function createInputForType(type: string, name: string, dft: string, len: string
         const normalizedValue = normalizeValue(selectedValue, displaySuggestions, null);
         textarea.value = normalizedValue;
         cbInputElement.value = '';
+        // Trigger change event on textarea to mark it as touched
+        textarea.dispatchEvent(new Event('change', { bubbles: true }));
+        textarea.dispatchEvent(new Event('input', { bubbles: true }));
       }
     });
 
@@ -1685,6 +1688,9 @@ function createInputForType(type: string, name: string, dft: string, len: string
         const normalizedValue = normalizeValue(typedValue, displaySuggestions, null);
         textarea.value = normalizedValue;
         cbInputElement.value = '';
+        // Trigger change event on textarea to mark it as touched
+        textarea.dispatchEvent(new Event('change', { bubbles: true }));
+        textarea.dispatchEvent(new Event('input', { bubbles: true }));
       }
     });
 

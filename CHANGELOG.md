@@ -2,6 +2,12 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.0.14] - 2026-06-14
+
+### What's Fixed
+
+- **Special value persistence in long parameters**: Fixed issue where special values (e.g., `*NONE`) selected from the dropdown for long parameters (>80 chars) that were not also required parameters (i.e, MIN(0)) were not being persisted back to the source code. The dropdown-to-textarea transfer now properly triggers change events to mark the field as touched, ensuring the value is included when rebuilding the command. Fixes [#13](https://github.com/bobcozzi/clprompter/issues/13).
+
 ## [1.0.12] - 2026-05-28
 
 ### Changed
