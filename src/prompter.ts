@@ -697,10 +697,34 @@ function configureFullValidation(input: HTMLInputElement, requiredLength: number
 }
 
 // Validate Rstd=Y fields — value must match one of the allowed values exactly (case-insensitive)
-function configureRstdValidation(input: HTMLInputElement, suggestions: string[], container?: HTMLElement, alwVar?: boolean): void {
+function configureRstdValidation(input: HTMLInputElement, suggestions: string[], container?: HTMLElement, alwVar?: boolean, idx?: number, parm?: Element): void {
+  console.log(`[configureRstdValidation] ENTRY: input.name=${input.name}, idx=${idx}, parm=${parm?.getAttribute('Kwd')}, suggestions.length=${suggestions.length}`);
+
   // Filter metadata entries; only keep actual display values
   const displayValues = suggestions.filter(s => !s.startsWith('_RANGE_') && !s.startsWith('_REL_'));
-  if (displayValues.length === 0) return;
+  console.log(`[configureRstdValidation] displayValues for ${input.name}:`, displayValues);
+
+  if (displayValues.length === 0) {
+    console.log(`[configureRstdValidation] No display values, returning early`);
+    return;
+  }
+
+  // Get SNGVAL values if this is a secondary instance (idx > 0)
+  let sngvalSet: Set<string> = new Set();
+  if (idx !== undefined && idx > 0 && parm) {
+    console.log(`[configureRstdValidation] Setting up SNGVAL validation for idx=${idx}, input.name=${input.name}`);
+    sngvalSet = getParentSngVals(parm);
+    console.log(`[configureRstdValidation] Parent SNGVAL values:`, Array.from(sngvalSet));
+    // Also check for ELEM-level SNGVAL values
+    const elemParts = parm.querySelectorAll(':scope > Elem');
+    if (elemParts.length > 0) {
+      const elem0SngVals = getElemSngVals(elemParts[0] as Element);
+      sngvalSet = new Set([...sngvalSet, ...elem0SngVals]);
+      console.log(`[configureRstdValidation] Combined SNGVAL values (with ELEM):`, Array.from(sngvalSet));
+    }
+  } else {
+    console.log(`[configureRstdValidation] NOT setting up SNGVAL - idx=${idx}, idx>0? ${idx !== undefined && idx > 0}, parm? ${!!parm}`);
+  }
 
   // Create error message span
   const errorSpan = document.createElement('span');
@@ -719,6 +743,8 @@ function configureRstdValidation(input: HTMLInputElement, suggestions: string[],
   }
 
   const validateRstd = () => {
+    console.log(`[validateRstd] Called for ${input.name}, value="${input.value}", sngvalSet.size=${sngvalSet.size}`);
+
     if (!input.value) {
       input.setCustomValidity('');
       input.style.color = '';
@@ -748,7 +774,21 @@ function configureRstdValidation(input: HTMLInputElement, suggestions: string[],
 
     // Case-insensitive match against allowed values
     const valueUpper = input.value.toUpperCase();
+    console.log(`[validateRstd] ${input.name}: valueUpper="${valueUpper}", sngvalSet contains:`, Array.from(sngvalSet), `has value? ${sngvalSet.has(valueUpper)}`);
+
+    // Check if this is a SNGVAL value in a secondary instance
+    if (sngvalSet.size > 0 && sngvalSet.has(valueUpper)) {
+      console.log(`[configureRstdValidation] ✅ SNGVAL violation detected: "${input.value}" in input ${input.name}`);
+      const msg = `${input.value} must be only value for parameter`;
+      input.setCustomValidity(msg);
+      input.classList.add('validation-error');
+      errorSpan.textContent = msg;
+      errorSpan.classList.add('visible');
+      return;
+    }
+
     const match = displayValues.find(v => v.toUpperCase() === valueUpper);
+    console.log(`[validateRstd] ${input.name}: match in displayValues? ${!!match}, displayValues:`, displayValues);
     if (match) {
       // Normalize to canonical casing
       input.value = match;
@@ -767,6 +807,7 @@ function configureRstdValidation(input: HTMLInputElement, suggestions: string[],
   };
 
   input.addEventListener('blur', validateRstd);
+  input.addEventListener('change', validateRstd);
   input.addEventListener('keydown', (e: KeyboardEvent) => {
     if (e.key === 'Enter') validateRstd();
   });
@@ -1162,6 +1203,256 @@ function configureRtnValValidation(input: HTMLInputElement, container?: HTMLElem
   });
 }
 
+// Configure SNGVAL exclusivity validation for multi-instance parameters
+// SNGVAL values are exclusive — if specified, they must be the ONLY value for the parameter.
+// This prevents users from entering SNGVAL values in secondary instances (idx > 0).
+// Example: CHGLIBL LIBL(*SAME ...) is invalid — *SAME must be the only value.
+function configureSngValValidation(input: HTMLInputElement, parm: Element, idx: number, container?: HTMLElement): void {
+  console.log(`[configureSngValValidation] ENTRY: input.name=${input.name}, idx=${idx}, parm=${parm.getAttribute('Kwd')}`);
+
+  if (idx === 0) {
+    console.log(`[configureSngValValidation] Skipping idx=0`);
+    return; // First instance can have SNGVAL values
+  }
+
+  // Check if already wrapped by another validation (e.g., Rstd validation)
+  // If so, skip wrapping but still add validation listener
+  const targetElement = container || input;
+  const parent = targetElement.parentElement || targetElement.parentNode;
+  const isAlreadyWrapped = parent && (parent as Element).classList?.contains('parm-validation-wrapper');
+
+  console.log(`[configureSngValValidation] isAlreadyWrapped=${isAlreadyWrapped}, parent exists=${!!parent}`);
+
+  if (isAlreadyWrapped) {
+    // Validation already set up (likely by enhanced Rstd validation which now handles SNGVAL)
+    // Skip to avoid duplicate wrapping and duplicate error messages
+    console.log(`[configureSngValValidation] Already wrapped, returning early`);
+    return;
+  }
+
+  // Create error message span
+  const errorSpan = document.createElement('span');
+  errorSpan.className = 'prompter-error-msg';
+
+  // Wrap the input (or container) and error span together
+  if (parent) {
+    const wrapper = document.createElement('div');
+    wrapper.className = 'parm-validation-wrapper';
+
+    // Insert wrapper before the target element, then move target into wrapper
+    parent.replaceChild(wrapper, targetElement);
+    wrapper.appendChild(targetElement);
+    wrapper.appendChild(errorSpan);
+    console.log(`[configureSngValValidation] Created wrapper and errorSpan for ${input.name}`);
+  } else {
+    console.log(`[configureSngValValidation] WARNING: No parent found for ${input.name}, cannot create error span`);
+  }
+
+  const parentSngVals = getParentSngVals(parm);
+
+  // Also check if the first ELEM has its own SNGVAL values (for ELEM parameters)
+  const elemParts = parm.querySelectorAll(':scope > Elem');
+  let elem0SngVals: Set<string> = new Set();
+  if (elemParts.length > 0) {
+    elem0SngVals = getElemSngVals(elemParts[0] as Element);
+  }
+
+  const validateSngVal = () => {
+    const val = input.value.trim().toUpperCase();
+    console.log(`[validateSngVal] Called for ${input.name}, value="${val}", idx=${idx}`);
+
+    errorSpan.classList.remove('visible');
+    input.classList.remove('validation-error');
+    input.setCustomValidity('');
+
+    if (!val) {
+      console.log(`[validateSngVal] Empty value, clearing errors`);
+      return;
+    }
+
+    // Check both parent-level and ELEM0-level SNGVAL values
+    const allSngVals = new Set([...parentSngVals, ...elem0SngVals]);
+    console.log(`[validateSngVal] ${input.name}: allSngVals=`, Array.from(allSngVals), `has "${val}"? ${allSngVals.has(val)}`);
+
+    if (allSngVals.has(val)) {
+      console.log(`[configureSngValValidation] ✅ SNGVAL violation detected: \"${val}\" in input ${input.name}, idx=${idx}`);
+      const kwd = parm.getAttribute('Kwd') || 'parameter';
+      const msg = `${val} must be only value for parameter`;
+      input.setCustomValidity(msg);
+      input.classList.add('validation-error');
+      errorSpan.textContent = msg;
+      errorSpan.classList.add('visible');
+      console.log(`[validateSngVal] ✅ Error message shown: "${msg}"`);
+    } else {
+      console.log(`[validateSngVal] No SNGVAL violation`);
+    }
+  };
+
+  input.addEventListener('blur', validateSngVal);
+  input.addEventListener('change', validateSngVal);
+  input.addEventListener('keydown', (e: KeyboardEvent) => {
+    if (e.key === 'Enter') validateSngVal();
+  });
+  console.log(`[configureSngValValidation] Event listeners attached for ${input.name}`);
+}
+
+// Configure SNGVAL exclusivity validation for the FIRST instance (idx=0)
+// When idx=0 contains a SNGVAL, no secondary instances should have values.
+// Matches IBM i 5250 prompter behavior: First Enter shows error, second Enter removes extra entries.
+// Example: CHGLIBL LIBL(*SAME pickles) is invalid — pressing Enter twice removes "pickles"
+function configureSngValExclusivityForFirstInstance(input: HTMLInputElement, parm: Element, container?: HTMLElement): void {
+  const kwd = parm.getAttribute('Kwd');
+
+  // Determine the "widget" — the outermost element representing the whole input control.
+  // For a CBInput (input + dropdown button), the outer container is .cbinput-container.
+  // For textarea combos, the caller passes the container explicitly.
+  // We must wrap the whole widget so error appears after both input AND button.
+  const cbContainer = input.parentElement?.classList.contains('cbinput-container')
+    ? input.parentElement as HTMLElement
+    : null;
+  const widget: HTMLElement = container || cbContainer || input;
+
+  const parent = widget.parentElement;
+  if (!parent) {
+    return;
+  }
+
+  // Check if already wrapped by another validation
+  const isAlreadyWrapped = parent.classList.contains('parm-validation-wrapper') ||
+                          parent.classList.contains('range-validation-wrapper');
+
+  // Create error message span
+  const errorSpan = document.createElement('span');
+  errorSpan.className = 'prompter-error-msg';
+
+  if (isAlreadyWrapped) {
+    // Wrapper already exists — just add our error span to it
+    parent.appendChild(errorSpan);
+  } else {
+    // Create new wrapper
+    const wrapper = document.createElement('div');
+    wrapper.className = 'parm-validation-wrapper';
+    parent.replaceChild(wrapper, widget);
+    wrapper.appendChild(widget);
+    wrapper.appendChild(errorSpan);
+  }
+
+  const parentSngVals = getParentSngVals(parm);
+
+  // Also check if the first ELEM has its own SNGVAL values (for ELEM parameters)
+  const elemParts = parm.querySelectorAll(':scope > Elem');
+  let elem0SngVals: Set<string> = new Set();
+  if (elemParts.length > 0) {
+    elem0SngVals = getElemSngVals(elemParts[0] as Element);
+  }
+
+  const validateExclusivity = () => {
+    const val = input.value.trim().toUpperCase();
+
+    errorSpan.classList.remove('visible');
+    input.classList.remove('validation-error');
+    input.setCustomValidity('');
+
+    if (!val) {
+      return;
+    }
+
+    // Check if current value is a SNGVAL
+    const allSngVals = new Set([...parentSngVals, ...elem0SngVals]);
+    if (!allSngVals.has(val)) {
+      return;
+    }
+
+    // Find all secondary instances for this parameter
+    const allInstances = document.querySelectorAll<HTMLInputElement>(`input[name="${input.name}"], textarea[name="${input.name}"]`);
+    const secondaryWithValues = Array.from(allInstances).filter((inp, idx) => idx > 0 && inp.value.trim() !== '');
+
+    if (secondaryWithValues.length > 0) {
+      const msg = `${val} must be the only value. Press Enter to remove extra entries and return.`;
+      // DO NOT call setCustomValidity() here - it triggers browser validation popup on Enter
+      // input.setCustomValidity(msg);  // REMOVED - causes triple-Enter bug
+      input.classList.add('validation-error');
+      errorSpan.textContent = msg;
+      errorSpan.classList.add('visible');
+    }
+  };
+
+  // Handle Enter key: On second press, remove secondary instances (5250 behavior)
+  const handleEnter = (e: KeyboardEvent) => {
+    if (e.key !== 'Enter') return;
+
+    const val = input.value.trim().toUpperCase();
+    const allSngVals = new Set([...parentSngVals, ...elem0SngVals]);
+
+    // Only handle Enter if current value is a SNGVAL
+    if (!allSngVals.has(val)) return;
+
+    // Check if there are secondary instances with values
+    const allInstances = document.querySelectorAll<HTMLInputElement>(`input[name="${input.name}"], textarea[name="${input.name}"]`);
+    const secondaryWithValues = Array.from(allInstances).filter((inp, idx) => idx > 0 && inp.value.trim() !== '');
+
+    if (secondaryWithValues.length === 0) {
+      return;
+    }
+
+    // Check if this is the second Enter press
+    const enterPressedOnce = input.dataset.enterPressedOnce === 'true';
+
+    if (!enterPressedOnce) {
+      // First Enter: Show inline error (without setCustomValidity to avoid browser popup)
+      input.dataset.enterPressedOnce = 'true';
+
+      // Show inline error directly without calling validateExclusivity
+      // (validateExclusivity sets setCustomValidity which triggers browser validation popup)
+      const msg = `When ${val} is specified, it must be the only value. Press Enter again to remove extra entries.`;
+      input.classList.add('validation-error');
+      errorSpan.textContent = msg;
+      errorSpan.classList.add('visible');
+
+      e.preventDefault(); // Prevent default form submission behavior
+      e.stopImmediatePropagation(); // Stop global Enter handler from firing
+    } else {
+      // Second Enter: Remove secondary instances (5250 behavior)
+      secondaryWithValues.forEach((inp) => {
+        // Clear the value
+        inp.value = '';
+
+        // Find and click the remove button for this instance
+        const instanceContainer = inp.closest('.parm-instance-container, .parm');
+        if (instanceContainer) {
+          const removeBtn = instanceContainer.querySelector<HTMLButtonElement>('.remove-parm-btn');
+          if (removeBtn) {
+            removeBtn.click();
+          }
+        }
+      });
+
+      // Clear the error and flag
+      input.dataset.enterPressedOnce = '';
+      errorSpan.classList.remove('visible');
+      input.classList.remove('validation-error');
+      input.setCustomValidity('');
+
+      // DO NOT preventDefault or stopImmediatePropagation here - let event bubble to global Enter handler for submission
+    }
+  };
+
+  // Clear "Enter pressed once" flag when user changes the value
+  const handleChange = () => {
+    if (input.dataset.enterPressedOnce === 'true') {
+      input.dataset.enterPressedOnce = '';
+      // Clear the inline error from first Enter press
+      errorSpan.classList.remove('visible');
+      input.classList.remove('validation-error');
+    }
+    validateExclusivity();
+  };
+
+  input.addEventListener('blur', validateExclusivity);
+  input.addEventListener('change', handleChange);
+  input.addEventListener('keydown', handleEnter);
+}
+
 // ========================================
 // CENTRALIZED VALIDATION SETUP
 // ========================================
@@ -1178,6 +1469,8 @@ interface ValidationAttributes {
   isRestricted?: boolean;       // For Rstd=Y validation
   alwVar?: boolean;             // AlwVar=NO: CL variables not permitted
   rtnVal?: boolean;             // RtnVal=YES: only a CL variable may be specified
+  idx?: number;                 // Instance index for SNGVAL validation
+  parm?: Element;               // Parameter element for SNGVAL validation
 }
 
 function setupValidations(input: HTMLInputElement, attrs: ValidationAttributes, container?: HTMLElement): void {
@@ -1207,7 +1500,7 @@ function setupValidations(input: HTMLInputElement, attrs: ValidationAttributes, 
     if (attrs.isRestricted && attrs.suggestions) {
       const displayVals = attrs.suggestions.filter(s => !s.startsWith('_RANGE_') && !s.startsWith('_REL_') && !s.startsWith('_DEPREL_'));
       if (displayVals.length > 0) {
-        configureRstdValidation(input, attrs.suggestions, container, attrs.alwVar);
+        configureRstdValidation(input, attrs.suggestions, container, attrs.alwVar, attrs.idx, attrs.parm);
       }
     }
 
@@ -1592,7 +1885,7 @@ function configureFocusIndicators(): void {
 }
 
 
-function createInputForType(type: string, name: string, dft: string, len: string, suggestions: string[], isRestricted: boolean = false, full?: string, alwVar?: boolean, dspInput?: string, rtnVal?: boolean): HTMLElement {
+function createInputForType(type: string, name: string, dft: string, len: string, suggestions: string[], isRestricted: boolean = false, full?: string, alwVar?: boolean, dspInput?: string, rtnVal?: boolean, idx?: number, parm?: Element): HTMLElement {
   const effectiveLen = len ? parseInt(len, 10) : getDefaultLengthForType(type);
   const dftLen = (dft || '').length;
   const typeUpper = type.toUpperCase();
@@ -1937,14 +2230,25 @@ function createInputForType(type: string, name: string, dft: string, len: string
     });
 
     // Configure all validations (range, full, alwVar, rtnVal, etc.)
-    setupValidations(input, { suggestions, full, len, alwVar, rtnVal });
+    setupValidations(input, { suggestions, full, len, alwVar, rtnVal, idx, parm });
 
     return input;
   }
 }
 
 // Create parm input (cbInput or textfield for all parameters to support CL variables)
-function createParmInput(name: string, suggestions: string[], isRestricted: boolean, dft: string, len?: string, type?: string, full?: string, alwVar?: boolean, dspInput?: string, rtnVal?: boolean): HTMLElement {
+function createParmInput(name: string, suggestions: string[], isRestricted: boolean, dft: string, len?: string, type?: string, full?: string, alwVar?: boolean, dspInput?: string, rtnVal?: boolean, idx?: number, parm?: Element): HTMLElement {
+  console.log(`[createParmInput] ${name}: idx=${idx}, isRestricted=${isRestricted}, suggestions.length=${suggestions.length}`);
+  // Filter out SNGVAL values from dropdown for secondary instances (idx > 0)
+  // SNGVAL values are exclusive and must be the only value for a parameter
+  if (idx !== undefined && idx > 0 && parm) {
+    const parentSngVals = getParentSngVals(parm);
+    if (parentSngVals.size > 0) {
+      console.log(`[createParmInput] Filtering SNGVAL values for idx=${idx}:`, Array.from(parentSngVals));
+      suggestions = suggestions.filter(s => !parentSngVals.has(s.toUpperCase()));
+    }
+  }
+
   console.log(`[createParmInput] ${name}: suggestions=`, suggestions, 'isRestricted=', isRestricted, 'type=', type, 'full=', full);
   // RtnVal=YES: skip CBInput path — only a CL variable name may be specified
   if (rtnVal) {
@@ -2001,8 +2305,10 @@ function createParmInput(name: string, suggestions: string[], isRestricted: bool
     });
 
     // Attach Rstd validation (shows "Value entered is not valid" for values outside the allowed list)
+    // For secondary instances, this also shows SNGVAL-specific errors
     setTimeout(() => {
-      configureRstdValidation(inputElement, suggestions, cbinput.getElement(), alwVar);
+      console.log(`[createParmInput setTimeout] About to call configureRstdValidation with idx=${idx}, parm=${parm?.getAttribute('Kwd')}`);
+      configureRstdValidation(inputElement, suggestions, cbinput.getElement(), alwVar, idx, parm);
       // Also attach Rel/RelVal constraint validation if any _REL_ entries exist
       if (parseRelConstraints(suggestions).length > 0) {
         configureRelValidation(inputElement, suggestions, undefined, alwVar);
@@ -2013,7 +2319,7 @@ function createParmInput(name: string, suggestions: string[], isRestricted: bool
     return cbinput.getElement();
   } else {
     console.log('[clPrompter] ', 'createParmInput end2');
-    return createInputForType(type || 'CHAR', name, dft, len || '', suggestions, isRestricted, full, alwVar, dspInput, rtnVal);
+    return createInputForType(type || 'CHAR', name, dft, len || '', suggestions, isRestricted, full, alwVar, dspInput, rtnVal, idx, parm);
   }
 }
 
@@ -2024,7 +2330,8 @@ function createQualInput(
   qualType: string,
   qualLen: string,
   qualDft: string,
-  isFirstPart: boolean
+  isFirstPart: boolean,
+  idx?: number
 ): HTMLElement {
   // Build allowed values: this Qual's SpcVal/SngVal/Values, plus parent for first part
   const xmlVals: string[] = [];
@@ -2075,7 +2382,7 @@ function createQualInput(
   const full = String(qual?.getAttribute('Full') || '');
   const alwVar = qual?.getAttribute('AlwVar') !== 'NO';
   const dspInput = String(qual?.getAttribute('DspInput') || '');
-  const input = createParmInput(qualName, allowedVals, restricted, dft, qualLen, qualType, full, alwVar, dspInput);
+  const input = createParmInput(qualName, allowedVals, restricted, dft, qualLen, qualType, full, alwVar, dspInput, undefined, idx, parentParm);
   ensureMinInputWidth(input as HTMLElement, { len, inlPmtLen: inl });
 
   return input;
@@ -2089,7 +2396,8 @@ function createElemInput(
   elemType: string,
   elemLen: string,
   elemDft: string,
-  isFirstTopLevelElem: boolean
+  isFirstTopLevelElem: boolean,
+  idx?: number
 ): HTMLElement {
   // Build allowed values: this Elem’s SpcVal/SngVal/Values (+ parent SngVal/SpcVal for first top-level)
   const xmlVals: string[] = [];
@@ -2112,7 +2420,24 @@ function createElemInput(
   }
 
   const fromMap = (state.allowedValsMap || {})[elemName] || [];
-  const allowedVals = Array.from(new Set(fromMap.concat(xmlVals)));
+  let allowedVals = Array.from(new Set(fromMap.concat(xmlVals)));
+
+  // Filter out SNGVAL values from dropdown for secondary instances (idx > 0)
+  // For ELEM parameters, filter both parent-level and ELEM0-level SNGVAL values
+  if (idx !== undefined && idx > 0) {
+    const parentSngVals = getParentSngVals(parentParm);
+    if (parentSngVals.size > 0) {
+      allowedVals = allowedVals.filter(v => !parentSngVals.has(v.toUpperCase()));
+    }
+    // Also filter ELEM0-level SNGVAL values if this is the first ELEM
+    if (elem && isFirstTopLevelElem) {
+      const elem0SngVals = getElemSngVals(elem);
+      if (elem0SngVals.size > 0) {
+        allowedVals = allowedVals.filter(v => !elem0SngVals.has(v.toUpperCase()));
+      }
+    }
+  }
+
   const restricted = isRestricted(elem);
 
   // Default: for first top-level elem, prefer parent Dft when it’s among parent SngVal
@@ -2134,7 +2459,7 @@ function createElemInput(
   const full = String(elem?.getAttribute('Full') || '');
   const alwVar = elem?.getAttribute('AlwVar') !== 'NO';
   const dspInput = String(elem?.getAttribute('DspInput') || '');
-  const input = createParmInput(elemName, allowedVals, restricted, dft, elemLen, elemType, full, alwVar, dspInput);
+  const input = createParmInput(elemName, allowedVals, restricted, dft, elemLen, elemType, full, alwVar, dspInput, undefined, idx, parentParm);
   ensureMinInputWidth(input as HTMLElement, { len, inlPmtLen: inl });
 
   return input;
@@ -2164,7 +2489,17 @@ function renderSimpleParm(parm: ParmElement, kwd: string, container: HTMLElement
   const alwVar = parm.getAttribute('AlwVar') !== 'NO';
   const dspInput = String(parm.getAttribute('DspInput') || '');
   const rtnVal = parm.getAttribute('RtnVal') === 'YES';
-  const input = createParmInput(inputName, allowedVals, restricted, dft, effectiveLenAttr, type, fullAttr, alwVar, dspInput, rtnVal);
+
+  // Extract idx for SNGVAL filtering and validation
+  let idx: number | undefined = undefined;
+  if (instanceId && /_INST\d+$/.test(instanceId)) {
+    idx = Number(instanceId.replace(/.*_INST/, ''));
+    console.log(`[renderSimpleParm] Extracted idx=${idx} from instanceId=${instanceId} for kwd=${kwd}`);
+  } else {
+    console.log(`[renderSimpleParm] No idx extracted (instanceId=${instanceId}) for kwd=${kwd}`);
+  }
+
+  const input = createParmInput(inputName, allowedVals, restricted, dft, effectiveLenAttr, type, fullAttr, alwVar, dspInput, rtnVal, idx, parm as unknown as Element);
   ensureMinInputWidth(input as HTMLElement, { len, inlPmtLen: inl });
 
   // Wrap in form-group for 5250-style grid layout with prompt and keyword in label
@@ -2190,6 +2525,31 @@ function renderSimpleParm(parm: ParmElement, kwd: string, container: HTMLElement
   }
 
   formGroup.appendChild(input);
+
+  // Add SNGVAL validation for secondary instances AFTER input is in the DOM
+  // configureSngValValidation will skip if Rstd validation already handles it
+  if (idx !== undefined && idx > 0) {
+    const actualInput = (input instanceof HTMLInputElement)
+      ? input
+      : input.querySelector('input, textarea') as HTMLInputElement;
+    if (actualInput) {
+      // Pass the container if input is textarea-cbinput-container, otherwise pass undefined
+      const validationContainer = (input instanceof HTMLElement && input.classList.contains('textarea-cbinput-container')) ? input : undefined;
+      configureSngValValidation(actualInput, parm as unknown as Element, idx, validationContainer);
+    }
+  }
+
+  // Add SNGVAL exclusivity validation for FIRST instance (idx=0)
+  // When idx=0 has a SNGVAL value, secondary instances with values are invalid
+  if (idx !== undefined && idx === 0) {
+    const actualInput = (input instanceof HTMLInputElement)
+      ? input
+      : input.querySelector('input, textarea') as HTMLInputElement;
+    if (actualInput) {
+      const validationContainer = (input instanceof HTMLElement && input.classList.contains('textarea-cbinput-container')) ? input : undefined;
+      configureSngValExclusivityForFirstInstance(actualInput, parm as unknown as Element, validationContainer);
+    }
+  }
 
   // EIGHTH FIX: If input is a textarea-cbinput-container, create a separate form-group for the textarea
   // This gives the textarea its own label for the focus indicator
@@ -2417,7 +2777,8 @@ function renderElemParm(parm: ParmElement, kwd: string, idx: number, container: 
           qualType,
           qualLen,
           qualDft,
-          i === 0 && j === 0 // only first qual of first top-level elem inherits parent lists/dft
+          i === 0 && j === 0, // only first qual of first top-level elem inherits parent lists/dft
+          idx
         );
 
         qualDiv.appendChild(input);
@@ -2482,10 +2843,23 @@ function renderElemParm(parm: ParmElement, kwd: string, idx: number, container: 
             subType,
             subLen,
             subDft,
-            false
+            false,
+            idx
           );
 
           subDiv.appendChild(input);
+
+          // Add SNGVAL validation for secondary instances to prevent invalid combinations
+          if (idx > 0) {
+            const actualInput = (input instanceof HTMLInputElement)
+              ? input
+              : input.querySelector('input, textarea') as HTMLInputElement;
+            if (actualInput) {
+              // Pass the container if input is textarea-cbinput-container, otherwise pass undefined
+              const validationContainer = (input instanceof HTMLElement && input.classList.contains('textarea-cbinput-container')) ? input : undefined;
+              configureSngValValidation(actualInput, parm, idx, validationContainer);
+            }
+          }
 
           // Split textarea-cbinput-container into two form-groups
           if (input instanceof HTMLElement && input.classList.contains('textarea-cbinput-container')) {
@@ -2533,12 +2907,26 @@ function renderElemParm(parm: ParmElement, kwd: string, idx: number, container: 
           elemType,
           elemLen,
           elemDft,
-          i === 0
+          i === 0,
+          idx
         );
 
         elemDiv.appendChild(input);
 
-        // Split textarea-cbinput-container into two form-groups (same fix as renderSimpleParm)
+        // Add SNGVAL validation for secondary instances to prevent invalid combinations
+        if (idx > 0 && i === 0) {
+          // Only validate first ELEM (ELEM0) in secondary instances
+          const actualInput = (input instanceof HTMLInputElement)
+            ? input
+            : input.querySelector('input, textarea') as HTMLInputElement;
+          if (actualInput) {
+            // Pass the container if input is textarea-cbinput-container, otherwise pass undefined
+            const validationContainer = (input instanceof HTMLElement && input.classList.contains('textarea-cbinput-container')) ? input : undefined;
+            configureSngValValidation(actualInput, parm, idx, validationContainer);
+          }
+        }
+
+        // Split textarea-cbinput-container into two form-groups
         if (input instanceof HTMLElement && input.classList.contains('textarea-cbinput-container')) {
           const textarea = input.querySelector('textarea');
           if (textarea) {
@@ -2586,7 +2974,19 @@ function renderParmInstance(parm: ParmElement, kwd: string, idx: number, max: nu
   // with the first allowed value. For parameters like OBJTYPE (Max>1, no Dft, Rstd=YES),
   // pre-filling with SngVal/*ALL would both display the wrong initial value and confuse
   // the isFieldSpecified check (which uses defaultValMap, which comes from the XML Dft attr).
-  const dft = parm.getAttribute('Dft') || '';
+  let dft = parm.getAttribute('Dft') || '';
+
+  // For instances beyond the first (idx > 0), do NOT use a SngVal as the default.
+  // SngVal values are exclusive — if specified, they must be the ONLY value for the parameter.
+  // Example: CHGLIBL command's LIBL parameter has default *SAME, which is a SngVal.
+  // First instance can have *SAME, but additional instances should start empty.
+  if (idx > 0 && dft) {
+    const parentSngVals = getParentSngVals(parm);
+    if (parentSngVals.has(dft.toUpperCase())) {
+      console.log(`[renderParmInstance] ${kwd} idx=${idx}: default "${dft}" is a SngVal, using empty string instead`);
+      dft = '';
+    }
+  }
 
   const required = parseInt(parm.getAttribute('Min') || '0', 10) >= 1;
   const instanceId = `${kwd}_INST${idx}`;
@@ -2831,6 +3231,17 @@ function getParentSngVals(parm: Element): Set<string> {
 function getElemSpcVals(elem: Element): Set<string> {
   const set = new Set<string>();
   const nodes = elem.querySelectorAll(':scope > SpcVal > Value');
+  nodes.forEach(n => {
+    const v = (n as Element).getAttribute('Val');
+    if (v) set.add(v.toUpperCase());
+  });
+  return set;
+}
+
+// Helper: Get SngVals from an ELEM (these are exclusive single values for that ELEM)
+function getElemSngVals(elem: Element): Set<string> {
+  const set = new Set<string>();
+  const nodes = elem.querySelectorAll(':scope > SngVal > Value');
   nodes.forEach(n => {
     const v = (n as Element).getAttribute('Val');
     if (v) set.add(v.toUpperCase());
@@ -3307,6 +3718,17 @@ function assembleCurrentParmMap(): ParmMap {
             return;
           }
 
+          // Check if value matches ELEM0-level SngVal (exclusive single value for this ELEM)
+          // If ELEM0 has its own SngVal entries and the value matches one, only ELEM0 should be output
+          if (firstElem) {
+            const elem0SngVals = getElemSngVals(firstElem);
+            if (elem0SngVals.size > 0 && firstElemVal && elem0SngVals.has(firstElemVal.toUpperCase())) {
+              console.log(`[DEBUG] ${kwd} ELEM0 matches ELEM-level SngVal: ${firstElemVal}, returning single value`);
+              arr.push(firstElemVal);
+              return;
+            }
+          }
+
           // For parent SngVal exclusivity check, use parent PARM's default
           const parentParmDefault = String(parm.getAttribute('Dft') || '');
           let isFirstElemSpecialAndDefault = false;
@@ -3604,6 +4026,24 @@ function assembleCurrentParmMap(): ParmMap {
         // Check parent SngVal or first ELEM SpcVal
         const firstElemInput = document.querySelector(`[name="${kwd}_INST0_ELEM0"]`) as HTMLInputElement | null;
         const firstElemVal = (firstElemInput?.value || '').trim();
+
+        // Check if value matches ELEM0-level SngVal (exclusive single value for this ELEM)
+        if (elemParts.length > 0) {
+          const firstElem = elemParts[0] as Element;
+          const elem0SngVals = getElemSngVals(firstElem);
+          if (elem0SngVals.size > 0 && firstElemVal && elem0SngVals.has(firstElemVal.toUpperCase())) {
+            console.log(`[assembleCommand] ${kwd}: ELEM0="${firstElemVal}" matches ELEM-level SngVal`);
+            const touched = isFieldTouched(`${kwd}_INST0_ELEM0`);
+            const inOriginal = wasInOriginalCommand(kwd);
+            if (touched || inOriginal) {
+              console.log(`[assembleCommand] ${kwd}="${firstElemVal}" ✅ INCLUDED (ELEM SngVal, touched or in original)`);
+              map[kwd] = firstElemVal;
+            } else {
+              console.log(`[assembleCommand] ${kwd}="${firstElemVal}" ❌ SKIPPED (ELEM SngVal, not touched and not in original)`);
+            }
+            return;
+          }
+        }
 
         // For parent SngVal exclusivity check, use parent PARM's default
         const parentParmDefault = String(parm.getAttribute('Dft') || '');

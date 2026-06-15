@@ -2,46 +2,57 @@
 
 All notable changes to this project are documented in this file.
 
-## [1.0.14] - 2026-06-14
+## [1.0.15] - 2026-06-15
 
 ### What's Fixed
 
 - **Special value persistence in long parameters**: Fixed issue where special values (e.g., `*NONE`) selected from the dropdown for long parameters (>80 chars) that were not also required parameters (i.e, MIN(0)) were not being persisted back to the source code. The dropdown-to-textarea transfer now properly triggers change events to mark the field as touched, ensuring the value is included when rebuilding the command. Fixes [#13](https://github.com/bobcozzi/clprompter/issues/13).
 
+- **SNGVAL handling in multi-instance parameters**: Fixed issue where SNGVAL (single value) defaults were incorrectly replicated when adding new instances via the + button for parameters with Max > 1. SNGVAL values are exclusive — if specified, they must be the only value. Now:
+  - When adding new instances (idx > 0) for multi-instance parameters, SNGVAL defaults are no longer copied
+  - ELEM-level SNGVAL values are properly recognized and enforced (if ELEM0 has a SNGVAL selected, other ELEMs are ignored)
+  - Parent-level and ELEM-level SNGVAL semantics are both correctly implemented
+  - **Input validation prevents manual entry** of SNGVAL values in secondary instances — if a user types a SNGVAL value (e.g., `*SAME`) into a secondary entry (idx > 0), whether in the text field or selected from the dropdown, the prompter displays an error message
+  - **Exclusivity validation for first instance**: If a SNGVAL value (e.g., `*SAME`) is entered in the first instance while secondary instances contain values, an inline error message appears. Pressing Enter once displays the error; pressing Enter again removes the secondary instances and submits the command with only the SNGVAL value (emulating 5250 terminal behavior)
+  - SNGVAL values are filtered from dropdown lists for secondary instances
+  - Validation integrates with existing restricted value validation (Rstd) to provide consistent error handling
+
+  Example: CHGLIBL's LIBL parameter has default `*SAME` as a SNGVAL. First instance can default to `*SAME`, but clicking + to add more library names starts with empty fields. The dropdown for secondary instances will not show `*SAME` as an option. If the user manually types `*SAME` into a secondary field and tabs away, they'll see an error: `*SAME must be only value for parameter`. If the user enters `*SAME` in the first field while other library names exist in secondary fields, they'll see an error on the first Enter; pressing Enter again removes the extra entries and submits with only `*SAME`.
+
 ## [1.0.12] - 2026-05-28
 
-### Changed
+### What's Changed
 
 - **Diagnostic save-location settings simplified**: The separate `...LocationPreset` settings have been removed for command XML, prompter HTML, and helptext diagnostics. Each diagnostic type now uses a single location setting (`clPrompter.savedCmdXMLFileLocation`, `clPrompter.savedPrompterHTMLFileLocation`, `clPrompter.savedCmdHelpTextFileLocation`) that accepts `${tmpdir}`, `${userHome}`, `${workspaceFolder}`, or an absolute path.
 
 ## [1.0.11] - 2026-05-24
 
-### Changed
+### What's Changed
 
 - **Debug helptext HTML save**: An optional "Save Parameter Helptext" setting has been added to save the generated helptext to a local PC file as `<cmdName>_<parmName>_Helptext.html`. This save happens only when `clPrompter.saveCmdHelpTexttoFile` is enabled (`true`). The output location defaults to the user's home directory, with the optional `${tmpdir}` also available or any user-specified location is also supported by setting it in the `clPrompter.savedCmdHelpTextFileLocation` setting.
 
 ## [1.0.10] - 2026-05-23
 
-### Changed
+### What's Changed
 
 - **Marketplace packaging hardening**: The VSIX packaging rules were tightened to exclude embedded archives (`.tgz`, `.zip`, `.gz`), PDF files, and non-runtime artifacts that can trigger Marketplace virus-scan false positives. A publish preflight check was also added to fail packaging if risky archive/binary artifacts are detected in the VSIX payload.
 - **Documentation updates**: README was clarified for UDTF lifecycle behavior (install only when missing or when shipped version is newer) and to note that CL syntax checking is now delivered by IBM `vscode-clle`.
 
 ## [1.0.9] - 2026-05-22
 
-### Changed
+### What's Changed
 
 - No functional runtime changes. Version increment and repackaging to retry Microsoft Marketplace publish after a false-positive virus-scan rejection.
 
 ## [1.0.8] - 2026-05-22
 
-### Fixed
+### What's Fixed
 
 - Minor bug fixes and prompter performance improvements.
 
 ## [1.0.7] - 2026-05-21
 
-### Fixed
+### What's Fixed
 
 - **GUI Performance Improvements**: The prompter UI now renders more efficiently and avoids the occasional redrawing of artifacts on commands with many parameters, such as `SBMJOB` and `RUNiQRY`.
 - **VS Code Marketplace AV false positive**: The embedded C++ source strings for the `CMD_HELP` and `CMD_XML` UDTFs are base64-encoded in the extension bundle. The raw C++ source (containing `#include`, `#pragma`, and IBM i system API references) could trigger Marketplace virus scanning. The source is decoded at runtime before upload to IBM i, with no functional behavior change.
@@ -320,7 +331,7 @@ All notable changes to this project are documented in this file.
   - Proper separation: `buildCLCommand` builds raw command, `formatCLCmd` applies formatting
 
 ## [0.0.49] - 2026-02-21
-### Fixed
+### What's Fixed
 - **Public API: Export correction**: Fixed `activate()` function to properly return API exports for external extensions
   - Added `return { CLPrompter, CLPrompterCallback }` statement that was missing
   - External extensions can now correctly access the API via `vscode.extensions.getExtension().exports`
@@ -334,7 +345,7 @@ All notable changes to this project are documented in this file.
   - Checks source code for proper imports and return statement
   - Run with `npm run test:api` to validate API structure
   - Documentation in API_TESTS.md
-### Changed
+### What's Changed
 - **Build Configuration**: Updated tsconfig.json to exclude test, run, and debug files from builds
   - Added exclusions for `src/test*.ts`, `src/run*.ts`, and `src/debug*.ts` patterns
   - Development/testing files no longer compiled into extension package
@@ -350,7 +361,7 @@ All notable changes to this project are documented in this file.
   - Example use case: RDi-style compile prompting without opening text editors
 
 ## [0.0.47] - 2026-02-07
-### Fixed
+### What's Fixed
 - **Prompter: Focus indicator for combined parameters**: Fixed focus indicator not following focus from dropdown to textarea in parameters with both controls
   - Applied textarea-cbinput-container split pattern to all parameter rendering functions
   - Fixed renderQualParm, renderElemParm (multiple locations) to create separate form-groups for dropdown and textarea
@@ -361,7 +372,7 @@ All notable changes to this project are documented in this file.
 - **Prompter: Textarea alignment**: Fixed cmdComment and all textareas to use top alignment instead of center alignment for consistent appearance
 
 ## [0.0.46] - 2026-02-06
-### Fixed
+### What's Fixed
 - **Formatter: Nested command paren preservation**: Fixed nested commands losing closing parentheses during formatting
   - Example: `SBMJOB CMD(DSPJOB JOB(x) DUPJOBOPT(y))` now correctly preserves both closing parens
   - Enhanced token layout formatter to check wrapped flag on individual array items
@@ -388,7 +399,7 @@ All notable changes to this project are documented in this file.
   - Static fields now properly sized even when parameter form is empty
 
 ## [0.0.45] - 2026-02-04
-### Fixed
+### What's Fixed
 - **ELEM group parentheses preservation**: Fixed formatting to preserve parentheses around multi-instance ELEM parameters
   - Fixed EXTRA, LOG, SETVAR and other ELEM parameters losing parentheses during formatting
   - Example: `EXTRA((*BEFORE 'text') (*AFTER 'text'))` now formats correctly
@@ -403,7 +414,7 @@ All notable changes to this project are documented in this file.
   - Special handling for wrapped ELEM expressions with quoted strings
 
 ## [0.0.43] - 2026-02-04
-### Fixed
+### What's Fixed
 - **Enter key in textareas**: Restored proper textarea behavior where Enter submits form
   - v0.0.42 broke this by removing ALL Enter key handling
   - Now specifically handles Enter in textareas to submit form (matching IBM i behavior)
@@ -411,7 +422,7 @@ All notable changes to this project are documented in this file.
   - Regular input fields use native form submit (no duplicate submissions)
 
 ## [0.0.42] - 2026-02-04 [YANKED - Broke textarea Enter behavior]
-### Fixed
+### What's Fixed
 - **CRITICAL HOTFIX: Duplicate form submission bug in v0.0.41**: Removed Enter key handler that was causing duplicate submissions
   - v0.0.41 introduced a new bug where `form.requestSubmit()` triggered duplicate `onSubmit()` calls
   - Now relies solely on form's native submit behavior when Enter is pressed
@@ -423,7 +434,7 @@ All notable changes to this project are documented in this file.
 - The fix: Removed manual Enter key handling completely - browsers handle Enter → form submit natively
 
 ## [0.0.41] - 2026-02-04 [YANKED - DO NOT USE]
-### Fixed
+### What's Fixed
 - **Critical: Form Submission Memory Leak**: Fixed duplicate event handler that caused extension to crash with "JavaScript heap out of memory" error
   - Removed duplicate `onSubmit()` call from Enter key handler that created recursive submissions
   - Enter key now properly triggers single form submission via `form.requestSubmit()`
@@ -452,7 +463,7 @@ All notable changes to this project are documented in this file.
   - All location settings support variables: `${tmpdir}`, `${userHome}`, `${workspaceFolder}`
   - Nested prompting is now supported. Commands like SBMJOB that have a CMD parameter can have the command in that parameter prompted as well. This is called `nested prompting`.
 
-### Changed
+### What's Changed
 - **Improved Comment Handling**: Trailing comments on CL commands are now properly preserved and formatted
   - Multi-line comments are correctly indented on continuation lines
   - Comment indentation fixed to use proper column positioning (contCol-1 for 0-based indexing)
@@ -464,7 +475,7 @@ All notable changes to this project are documented in this file.
   - `enableDebugXml` → `saveCmdXMLtoFile`
   - `debugXmlPath` → `savedCmdXMLFileLocation`
 
-### Fixed
+### What's Fixed
 - **Initial Focus State**: Focus indicator now appears correctly on the first field (cmdLabel) when prompter opens
 - **Tab Order**: cbInput dropdown buttons no longer interfere with tab navigation (tabIndex=-1)
 - **Comment Indentation**: Fixed extra space issue in continuation lines of multi-line comments
@@ -481,12 +492,12 @@ All notable changes to this project are documented in this file.
 - Added comprehensive token filtering and joining for expression object parameters
 
 ## [0.0.13] - 2025-07-06
-### Changed
+### What's Changed
 - All hardcoded color styles was removed from JavaScript; all visual styling is now handled in CSS using VS Code theme variables.
 - Added `.nested-elem-group` CSS class to `style.css` for theme-aware background, border, and foreground, matching `.elem-group` and `.qual-group`.
 - Updated `main.js` to only set the class for nested ELEM fieldsets, with no inline style properties.
 
-### Fixed
+### What's Fixed
 - Ensured nested ELEM group appearance is consistent and accessible in all VS Code theme modes (light, dark, high-contrast).
 
 ### Notes
@@ -500,7 +511,7 @@ All notable changes to this project are documented in this file.
 ### Added
 - Initial CHANGELOG.md file.
 
-### Changed
+### What's Changed
 - Major refactor of the webview JavaScript:
   - Migrated all inline scripts from `prompter.html` into a single ES module entry point (`main.js`).
   - All helper logic is now modularized and imported via ES modules (`tooltips.js`, `promptHelpers.js`).
@@ -511,7 +522,7 @@ All notable changes to this project are documented in this file.
   - Fixed typo: replaced all `toolTips` with `tooltips` for correct module usage.
 - Updated `prompter.html` to only load `main.js` as a module, removing all inline scripts.
 
-### Fixed
+### What's Fixed
 - Resolved runtime errors due to missing or unqualified helper/module references.
 - Fixed ReferenceError for `toolTips` (now `tooltips`).
 - Fixed ReferenceError for `isContainerType` and `setElementValue`.
