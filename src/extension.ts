@@ -85,6 +85,13 @@ const clpHelpCache = new Map<string, string>();
  *  and warmXmlCache can enrich their "busy" log lines with what is competing. */
 let _pendingExternalSQL: { sql: string; t0: number } | undefined;
 
+const EXTERNAL_RUNSQL_DEBUG_LOGS = false;
+function debugLog(message: string): void {
+    if (EXTERNAL_RUNSQL_DEBUG_LOGS) {
+        console.log(message);
+    }
+}
+
 /** Returns the currently in-flight external SQL on the shared Mapepire SQLJob,
  *  or undefined if nothing external is running right now. */
 export function getPendingExternalSQL(): { sql: string; t0: number } | undefined {
@@ -111,7 +118,7 @@ function patchRunSQL(connection: any): void {
             return await original(sqlOrArr, ...rest);
         } finally {
             if (_pendingExternalSQL === entry) { _pendingExternalSQL = undefined; }
-            console.log(`[clPrompter] external runSQL: ${Date.now() - entry.t0}ms — ${sql.substring(0, 200)}`);
+            debugLog(`[clPrompter] external runSQL: ${Date.now() - entry.t0}ms — ${sql.substring(0, 200)}`);
         }
     };
 }
@@ -166,8 +173,11 @@ function expandSaveLocation(rawLocation: string): string {
     const workspacePath = getPreferredWorkspaceFolderPath();
     return rawLocation
         .replace(/\*TMPDIR\b/gi, os.tmpdir())
+        .replace(/\$\{tmpdir\}/gi, os.tmpdir())
         .replace(/\*USERHOME\b/gi, os.homedir())
-        .replace(/\*WORKSPACE\b/gi, workspacePath);
+        .replace(/\$\{userhome\}/gi, os.homedir())
+        .replace(/\*WORKSPACE\b/gi, workspacePath)
+        .replace(/\$\{workspacefolder\}/gi, workspacePath);
 }
 
 function resolveSaveLocation(
@@ -356,7 +366,6 @@ export async function activate(context: vscode.ExtensionContext) {
             const cmds = raw.split(/[\s,]+/).map(s => s.trim().toUpperCase()).filter(Boolean);
             if (cmds.length === 0) { return; }
 
-            console.log(`[clPrompter] prefetch: starting warm for [${cmds.join(', ')}]`);
             (async () => {
                 const conn = code4i?.instance?.getConnection();
                 if (!conn) { return; }
@@ -397,16 +406,14 @@ export async function activate(context: vscode.ExtensionContext) {
             clearCMDXMLCache();
             clpDocCache.clear();
             clpHelpCache.clear();
-            console.log('[clPrompter] Disconnected — XML cache and helptext cache cleared');
         });
     } else {
         vscode.window.showErrorMessage("Code for IBM i extension is not installed or not found.");
     }
     try {
-        console.log('[clPrompter] activating...');
+        console.log('CL Prompter extension activated');
         context.subscriptions.push(
             vscode.commands.registerCommand('clPrompter.clPrompter', async () => {
-                console.log('CL Prompter activated!');
                 const config = vscode.workspace.getConfiguration('clPrompter');
                 if (!config.get('enableF4Key')) {
                     vscode.window.showInformationMessage('Fn key for CL Prompter is disabled in settings.');
@@ -534,9 +541,6 @@ export async function activate(context: vscode.ExtensionContext) {
     // Initialize the standalone CLPrompter API for external extensions
     // This must be done after ClPromptPanel is defined
     initializePrompter(ClPromptPanel, context.extensionUri);
-
-    console.log('CL Prompter activate [end]');
-
     // Return API for external extensions
     return {
         CLPrompter,
@@ -558,8 +562,6 @@ export class ClPromptPanel {
 
     // ✅ Added method to reset webview state
     public resetWebviewState() {
-        console.log('[clPrompter] Resetting webview state');
-
         // ✅ Check if panel exists and use try-catch for webview access
         if (this._panel) {
             try {
@@ -596,7 +598,6 @@ export class ClPromptPanel {
 
             // Handle label-only lines in nested context
             if (!cmdName && cmdLabel) {
-                console.log(`[clPrompter] Label-only nested line: ${cmdLabel}`);
                 resolve(cmdLabel + ':');
                 return;
             }
@@ -609,7 +610,6 @@ export class ClPromptPanel {
                 return;
             }
 
-            console.log(`[clPrompter] Nested prompt for: ${cmdName}`);
             const xml = await getCMDXML(cmdName);
 
             // Extract command prompt from XML for panel title
@@ -636,23 +636,19 @@ export class ClPromptPanel {
                 }
             );
 
-            console.log('[promptNestedCommand] Creating nested panel instance');
             const nestedPanel = new ClPromptPanel(
                 panel, extensionUri, cmdName, cmdLabel, xml, undefined, undefined, commandString, undefined, true, resolve);
 
             // Ensure promise resolves if panel is disposed without submitting
             panel.onDidDispose(() => {
-                console.log('[promptNestedCommand] Panel disposed, checking if already resolved');
                 // If not already resolved, resolve with null
                 try {
                     resolve(null);
                 } catch (e) {
                     // Promise already resolved, ignore
-                    console.log('[promptNestedCommand] Promise already resolved');
                 }
 
                 // Reveal and restore the parent panel when nested panel closes
-                console.log('[promptNestedCommand] Revealing parent panel');
                 parentPanel._panel.reveal(column, false);
             });
         });
@@ -674,12 +670,6 @@ export class ClPromptPanel {
             commandRange = { startLine: cmdResult.startLine, endLine: cmdResult.endLine };
             cmdComment = cmdResult.comment;
 
-            // ✅ Optional: Verify both methods agree on the range
-            console.log(`[clPrompter] Command range: ${commandRange.startLine}-${commandRange.endLine}`);
-            console.log(`[clPrompter] Extract result: ${cmdResult.startLine}-${cmdResult.endLine}`);
-            if (cmdComment) {
-                console.log(`[clPrompter] Extracted comment: ${cmdComment}`);
-            }
         }
 
         let cmdName = extractCmdName(fullCmd);
@@ -699,7 +689,6 @@ export class ClPromptPanel {
         // Handle label-only lines (e.g., "ENDPGM:")
         if (!cmdName && cmdLabel) {
             // Label-only line - create a minimal prompter with just Label and Comment fields
-            console.log(`[clPrompter] Label-only line detected: ${cmdLabel}`);
             const existingPanel = ClPromptPanel.panels.get(panelKey);
             if (existingPanel) {
                 await existingPanel.setXML('', '', editor, selection, '', fullCmd, cmdLabel, cmdComment);
@@ -730,7 +719,6 @@ export class ClPromptPanel {
             return;
         }
 
-        console.log(`[clPrompter] About to call getCMDXML for: ${cmdName}`);
         // Bring the existing panel to front FIRST (while still showing old content),
         // then reset to hide the old content. Calling reveal() AFTER postMessage(reset)
         // causes a race: the compositor paints the old form (opacity:1) before the IPC
@@ -740,12 +728,6 @@ export class ClPromptPanel {
         ClPromptPanel.panels.get(panelKey)?._panel.reveal(column);
         ClPromptPanel.panels.get(panelKey)?.resetWebviewState();
         const xml = await getCMDXML(cmdName);
-        console.log(`[clPrompter] XML length: ${xml.length} characters`);
-        console.log(`[clPrompter] XML starts with: ${xml.substring(0, 100)}`);
-        console.log(`[clPrompter] XML ends with: ${xml.substring(xml.length - 100)}`);
-
-        console.log("[clPrompter] <XML> ", xml);
-        console.log("[clPrompter] </XML>");
 
 // Write XML to clp_cmdDefn_<cmdName>.xml file for debugging (if enabled)
         const config = vscode.workspace.getConfiguration('clPrompter');
@@ -760,19 +742,15 @@ export class ClPromptPanel {
 
             const cleanCmdName = String(cmdName || 'CMD').toUpperCase().replace(/[^A-Z0-9._-]+/g, '_').replace(/^_+|_+$/g, '') || 'CMD';
             const xmlFilePath = path.join(xmlDir, `clp_cmdDefn_${cleanCmdName}.xml`);
-            console.log(`[clPrompter] Writing XML to: ${xmlFilePath}`);
 
             try {
                 fs.writeFileSync(xmlFilePath, xml, { encoding: 'utf8' });
-                console.log(`[clPrompter] ✓ XML successfully written to: ${xmlFilePath}`);
             } catch (err) {
                 console.error(`[clPrompter] ✗ Failed to write XML file: ${err}`);
             }
-        } else if (!saveCmdXMLToFile) {
-            console.log(`[clPrompter] Debug XML writing is disabled (saveCmdXMLToFile=false)`);
         } else {
             const scheme = editor?.document.uri.scheme || 'unknown';
-            console.log(`[clPrompter] No file path available (scheme: ${scheme}), skipping XML file write`);
+            console.warn(`[clPrompter] No file path available (scheme: ${scheme}), skipping XML file write`);
         }
 
         // Extract command prompt from XML for panel title
@@ -792,7 +770,6 @@ export class ClPromptPanel {
         // QCDRCMDD returned a placeholder because the command doesn't exist.
         // getCMDXML already showed the warning; just abort without opening a panel.
         if (!cmdPrompt) {
-            console.log(`[clPrompter] '${cmdName}' returned no command definition — aborting prompter.`);
             // Touch the source line so the IBM-CLLE syntax checker fires and surfaces
             // the IBM i diagnostic alongside our popup warning.
             if (editor && commandRange) {
@@ -900,25 +877,13 @@ export class ClPromptPanel {
             const maxPos = getMaxPos(xml);
 
             // 3) Rewrite leading positionals by XML arrival order, then parse
-            console.log('[clPrompter] Full command before rewrite:', fullCmd);
             const cmdWithKeywords =
                 (maxPos ?? 0) > 0 && posOrderByArrival.length > 0
                     ? rewriteLeadingPositionalsByList(fullCmd, posOrderByArrival, maxPos)
                     : fullCmd;
-            console.log('[clPrompter] Full command after rewrite:', cmdWithKeywords);
 
             try {
                 this._parmMap = parseCLParms(cmdWithKeywords, this._parmMetas);
-                console.log('[clPrompter] parseCLParms keys:', Object.keys(this._parmMap));
-                // Debug PARM specifically for CALL command
-                if (this._parmMap['PARM']) {
-                    console.log('[clPrompter] PARM immediately after parseCLParms:', JSON.stringify(this._parmMap['PARM']));
-                    console.log('[clPrompter] PARM length:', this._parmMap['PARM'].length);
-                }
-                // Debug RMTFILE specifically
-                if (this._parmMap['RMTFILE']) {
-                    console.log('[clPrompter] RMTFILE immediately after parseCLParms:', JSON.stringify(this._parmMap['RMTFILE']));
-                }
             } catch (e) {
                 console.warn('[clPrompter] parseCLParms failed on rewritten:', e);
                 this._parmMap = {};
@@ -931,19 +896,10 @@ export class ClPromptPanel {
                     if (!throwawayKwds.has(k.toUpperCase())) filtered[k] = v;
                 }
                 this._parmMap = orderParmMapByMetas(this._parmMetas, filtered);
-                // Debug RMTFILE after ordering
-                if (this._parmMap['RMTFILE']) {
-                    console.log('[clPrompter] RMTFILE after orderParmMapByMetas:', JSON.stringify(this._parmMap['RMTFILE']));
-                }
             }
 
             // 5) Present parms
             this._presentParms = new Set(Object.keys(this._parmMap));
-        }
-
-        console.log('[clPrompter] Parameter Map:', this._parmMap);
-        if (this._parmMap['EXTRA']) {
-            console.log('[clPrompter] EXTRA parameter parsed value:', JSON.stringify(this._parmMap['EXTRA'], null, 2));
         }
 
         this._disposables.push(
@@ -954,14 +910,11 @@ export class ClPromptPanel {
                     // was reloaded (VS Code reclaimed memory or internal renderer restart).
                     // Reset _sentFormData and fall through to resend formData so the panel
                     // is populated instead of left blank.
-                    console.log('[clPrompter] webviewReady after sentFormData=true — webview reloaded, resending');
                     this._sentFormData = false;
                 }
-                console.log('[clPrompter] Sending processed data to webview');
 
                 // For label-only lines (no command), skip XML processing and just send label/comment
                 if (!this._cmdName || this._cmdName.trim() === '') {
-                    console.log('[clPrompter] Label-only prompter (webviewReady), skipping XML processing');
                     panel.webview.postMessage({ type: "setLabel", label: this._cmdLabel, comment: this._cmdComment });
                     this._sentFormData = true;
                     return;
@@ -973,25 +926,15 @@ export class ClPromptPanel {
                     const parser = new DOMParser();
                     const xmlDoc = parser.parseFromString(this._xml, 'application/xml');
                     const cmdNodes = xmlDoc.getElementsByTagName('Cmd');
-                    console.log('[clPrompter] webviewReady: Found', cmdNodes.length, 'Cmd nodes');
                     if (cmdNodes.length > 0) {
                         const cmdNode = cmdNodes[0];
-                        console.log('[clPrompter] webviewReady: Cmd attributes:', {
-                            CmdName: cmdNode.getAttribute('CmdName'),
-                            Prompt: cmdNode.getAttribute('Prompt'),
-                            prompt: cmdNode.getAttribute('prompt')
-                        });
                         cmdPrompt = cmdNode.getAttribute('Prompt') || '';
                     }
                 } catch (err) {
                     console.error('[clPrompter] webviewReady: Failed to parse XML for command prompt:', err);
                 }
 
-                console.log('[clPrompter] webviewReady: Extracted cmdPrompt:', cmdPrompt);
-
-                const t0 = Date.now();
                 const { allowedValsMap, depConstraints, valToMapToMap, defaultValMap, pmtCtlMap } = buildAllMaps(this._xml);
-                console.log(`[clPrompter] buildAllMaps took ${Date.now() - t0}ms`);
                 const config = vscode.workspace.getConfiguration('clPrompter');
                 const keywordColor = config.get('kwdColor');
                 const valueColor = config.get('kwdValueColor');
@@ -1027,7 +970,6 @@ export class ClPromptPanel {
         this._panel.onDidChangeViewState(
             e => {
                 if (e.webviewPanel.visible && !this._isNested) {
-                    console.log('[clPrompter] Panel became visible, ensuring webview is ready');
                     // The webview might have lost its state, so we trigger a refresh
                     // by checking if it needs reinitialization
                     this._panel.webview.postMessage({ type: 'ping' });
@@ -1039,7 +981,6 @@ export class ClPromptPanel {
 
         // ✅ Fix around line 245 in constructor
         this._panel.onDidDispose(() => {
-            console.log('[clPrompter] Panel disposed');
 
             // ✅ DON'T call this.dispose() here - it creates recursion
             // ✅ Just clean up the static reference and disposables
@@ -1058,14 +999,8 @@ export class ClPromptPanel {
             async message => {
                 switch (message.type) {
                     case 'submit': {
-
-                        console.log('[submit] this._cmdName:', this._cmdName);
-                        console.log('[submit] Received cmdName:', message.cmdName);
-                        console.log('[submit] message.values:', message.values);
-
                         // Handle label-only lines (no command)
                         if (!this._cmdName || this._cmdName.trim() === '') {
-                            console.log('[submit] Label-only line, skipping XML processing');
 
                             // Extract comment from values if present (normalize newlines to spaces)
                             const submittedComment = message.values['comment'] as string | undefined;
@@ -1082,11 +1017,8 @@ export class ClPromptPanel {
                                 formatted += ' ' + finalComment.trim();
                             }
 
-                            console.log('[submit] Label-only formatted output:', formatted);
-
                             // If this is a nested prompter, resolve with formatted label
                             if (this._isNested && this._nestedResolver) {
-                                console.log('[submit] Nested prompter resolving with label:', formatted);
                                 this._nestedResolver(formatted);
                                 this.onUserClose();
                                 break;
@@ -1122,43 +1054,9 @@ export class ClPromptPanel {
                             break;
                         }
 
-                        console.log('[submit] Raw message.values:');
-                        Object.keys(message.values).forEach(key => {
-                            console.log(`  ${key}: "${message.values[key]}"`);
-                        });
-                        // Check specifically for TOPGMQ patterns
-                        const topgmqKeys = Object.keys(message.values).filter(k => k.startsWith('TOPGMQ'));
-                        console.log('[submit] TOPGMQ keys found:', topgmqKeys);
-
-                        // ✅ Add debugging for nested ELEM detection
                         const { allowedValsMap, parmTypeMap } = extractAllowedValsAndTypes(this._xml);
-                        console.log('[submit] allowedValsMap keys:', Object.keys(allowedValsMap));
-                        console.log('[submit] parmTypeMap:', parmTypeMap);
-
-                        // ✅ Check for ELEM parameters specifically
-                        Object.keys(message.values).forEach(key => {
-                            if (key.includes('_ELEM')) {
-                                console.log(`[submit] ELEM parameter ${key}:`, message.values[key]);
-                                console.log(`[submit] Type for ${key}:`, parmTypeMap[key]);
-                            }
-                        });
 
                         const defaults = extractDefaultsFromXML(this._xml);
-                        console.log('[submit] Extracted defaults:', JSON.stringify(defaults, null, 2));
-
-                        // Debug specific parameters
-                        if (defaults['SRCSEQ']) {
-                            console.log('[submit] SRCSEQ default:', defaults['SRCSEQ']);
-                        }
-                        if (defaults['INCREL']) {
-                            console.log('[submit] INCREL default:', defaults['INCREL']);
-                        }
-                        if (message.values['SRCSEQ']) {
-                            console.log('[submit] SRCSEQ value from form:', message.values['SRCSEQ']);
-                        }
-                        if (message.values['INCREL']) {
-                            console.log('[submit] INCREL value from form:', message.values['INCREL']);
-                        }
 
                         // Extract comment from values if present (normalize newlines to spaces)
                         const submittedComment = message.values['comment'] as string | undefined;
@@ -1185,11 +1083,6 @@ export class ClPromptPanel {
                         if (finalComment && finalComment.trim()) {
                             cmd += ' ' + finalComment.trim();
                         }
-                        console.log(`Post Prompter CL Cmd: ${cmd}`);
-                        const parts = extractParms(cmd);
-                        for (const p of parts) {
-                            console.log(`PARM: ${p.kwd} VALUE: ${p.value}`); // p.value preserves inner (1 64)
-                        }
 
                         // Extract trailing comment from cmd if present
                         let trailingComment: string | undefined;
@@ -1214,7 +1107,6 @@ export class ClPromptPanel {
 
                         // If this is a nested prompter, resolve with unformatted command and close
                         if (this._isNested && this._nestedResolver) {
-                            console.log('[submit] Nested prompter resolving with:', cmd);
                             this._nestedResolver(cmd);
                             this.onUserClose();
                             break;
@@ -1272,37 +1164,29 @@ export class ClPromptPanel {
                         break;
                     }
                     case 'promptNested': {
-                        console.log('[promptNested] Request to prompt nested command:', message.commandString);
-                        console.log('[promptNested] Field ID:', message.fieldId);
                         const result = await ClPromptPanel.promptNestedCommand(
                             this._extensionUri,
                             message.commandString,
                             this
                         );
-                        console.log('[promptNested] Result from nested prompt:', result);
                         if (result) {
-                            console.log('[promptNested] Sending result back to parent webview for field:', message.fieldId);
                             // Send result back to webview
                             this._panel.webview.postMessage({
                                 type: 'nestedResult',
                                 fieldId: message.fieldId,
                                 commandString: result
                             });
-                        } else {
-                            console.log('[promptNested] No result (cancelled or empty)');
                         }
                         break;
                     }
                     case 'loadForm': {
                         // Ignore if already sent
                         if (this._sentFormData) {
-                            console.log('[clPrompter] loadForm ignored; formData already sent');
                             break;
                         }
 
                         // For label-only lines (no command), skip XML processing and just send label/comment
                         if (!this._cmdName || this._cmdName.trim() === '') {
-                            console.log('[clPrompter] Label-only prompter, skipping XML processing');
                             this._panel.webview.postMessage({ type: 'setLabel', label: this._cmdLabel, comment: this._cmdComment });
                             this._sentFormData = true;
                             break;
@@ -1314,25 +1198,15 @@ export class ClPromptPanel {
                             const parser = new DOMParser();
                             const xmlDoc = parser.parseFromString(this._xml, 'application/xml');
                             const cmdNodes = xmlDoc.getElementsByTagName('Cmd');
-                            console.log('[clPrompter] Found', cmdNodes.length, 'Cmd nodes');
                             if (cmdNodes.length > 0) {
                                 const cmdNode = cmdNodes[0];
-                                console.log('[clPrompter] Cmd attributes:', {
-                                    CmdName: cmdNode.getAttribute('CmdName'),
-                                    Prompt: cmdNode.getAttribute('Prompt'),
-                                    prompt: cmdNode.getAttribute('prompt')
-                                });
                                 cmdPrompt = cmdNode.getAttribute('Prompt') || '';
                             }
                         } catch (err) {
                             console.error('[clPrompter] Failed to parse XML for command prompt:', err);
                         }
 
-                        console.log('[clPrompter] Extracted cmdPrompt:', cmdPrompt);
-                        console.log('[clPrompter] About to send formData with cmdName:', this._cmdName, 'cmdPrompt:', cmdPrompt);
-
                         this._panel.webview.postMessage({ type: 'formXml', xml: this._xml, cmdName: this._cmdName, cmdPrompt: cmdPrompt });
-                        this._panel.webview.postMessage({ type: 'setLabel', label: this._cmdLabel, comment: this._cmdComment });
 
                         const { allowedValsMap, depConstraints, valToMapToMap, defaultValMap } = buildAllMaps(this._xml);
                         const config = vscode.workspace.getConfiguration('clPrompter');
@@ -1341,8 +1215,6 @@ export class ClPromptPanel {
                         const autoAdjust = config.get('kwdColorAutoAdjust');
                         const parmExpansionMax = config.get('parmExpansionMax', 5000);
                         const parmExpansionSize = config.get('parmExpansionSize', 16);
-
-                        console.log('[clPrompter] loadForm → sending formData with keys:', Object.keys(this._parmMap || {}));
 
                         this._panel.webview.postMessage({
                             type: 'formData',
@@ -1358,22 +1230,19 @@ export class ClPromptPanel {
                             parmMetas: this._parmMetas,
                             config: { keywordColor, valueColor, autoAdjust, parmExpansionMax, parmExpansionSize }
                         });
+                        this._panel.webview.postMessage({ type: 'setLabel', label: this._cmdLabel, comment: this._cmdComment });
                         this._sentFormData = true;
                         break;
                     }
                     case 'pong': {
                         // Webview responded to ping - check if it needs reinitialization
-                        console.log('[clPrompter] Received pong, hasProcessedFormData:', message.hasProcessedFormData);
                         if (!message.hasProcessedFormData) {
                             // Webview has not yet processed formData — either it hasn't
                             // arrived yet (normal startup) or the webview JS context was
                             // reloaded (e.g. VS Code reclaimed memory on the 5th+ re-prompt).
                             // Always resend regardless of _sentFormData to handle both cases.
-                            console.log('[clPrompter] Webview needs reinitialization, resending formData');
-
                             // For label-only lines (no command), skip XML processing and just send label/comment
                             if (!this._cmdName || this._cmdName.trim() === '') {
-                                console.log('[clPrompter] Label-only prompter (pong), skipping XML processing');
                                 this._panel.webview.postMessage({ type: 'setLabel', label: this._cmdLabel, comment: this._cmdComment });
                                 this._sentFormData = true;
                                 break;
@@ -1422,7 +1291,6 @@ export class ClPromptPanel {
                     case 'getParamHelp': {
                         const kwd: string = message.kwd || '';
                         const cmdName: string = message.cmdName || this._cmdName || '';
-                        console.log(`[clPrompter] getParamHelp: kwd=${kwd}, cmdName=${cmdName}`);
                         try {
                             // Tier 0: per-keyword UDTF cache (populated by Tier 1 on first call)
                             const helpCacheKey = `${cmdName.toUpperCase()}.${kwd.toUpperCase()}`;
@@ -1528,10 +1396,8 @@ export class ClPromptPanel {
 
     // ✅ Update setXML to handle multi-line commands
     public async setXML(cmdName: string, xml: string, editor?: vscode.TextEditor, selection?: vscode.Selection, cmdPrompt?: string, fullCmd?: string, cmdLabel?: string, cmdComment?: string) {
-        console.log('[clPrompter] setXML called - resetting state');
         this.resetWebviewState();
         // _sentFormData is set to true below after we post directly; no need to reset to false
-        console.log('[clPrompter] setXML finished resetting state');
 
         this._cmdName = cmdName;
         this._xml = xml;
@@ -1631,8 +1497,6 @@ export class ClPromptPanel {
 
     // ✅ Fix the dispose method around line 290
     public dispose() {
-        console.log('[clPrompter] Disposing ClPromptPanel');
-
         // ✅ Clear the panel map entry BEFORE disposing
         if (this._panelKey) { ClPromptPanel.panels.delete(this._panelKey); }
 
@@ -1661,8 +1525,6 @@ export class ClPromptPanel {
         if (clpDocCache.has(cmdName.toUpperCase())) { return; }
         const clleExt = vscode.extensions.getExtension<any>('IBM.vscode-clle');
         if (!clleExt) { return; }
-        const t0 = Date.now();
-        console.log(`[clPrompter] Pre-fetching GENCMDDOC for ${cmdName}…`);
         // Activate vscode-clle if needed — this is fire-and-forget so it never
         // blocks the prompter panel, but means the cache is warm by first ? click
         // even on the very first prompt of a session when vscode-clle isn't active yet.
@@ -1671,8 +1533,7 @@ export class ClPromptPanel {
                 if (!api?.genCmdDoc?.getCLDoc) { return; }
                 return api.genCmdDoc.getCLDoc(cmdName);
             })
-            .then(() => console.log(`[clPrompter] GENCMDDOC pre-fetch for ${cmdName} done in ${Date.now() - t0}ms`))
-            .catch((e: any) => console.log(`[clPrompter] GENCMDDOC pre-fetch for ${cmdName} failed (non-critical): ${e?.message ?? e}`));
+            .catch((e: any) => console.warn(`[clPrompter] GENCMDDOC pre-fetch for ${cmdName} failed (non-critical): ${e?.message ?? e}`));
     }
 
     private getHtmlForPrompter(webview: vscode.Webview, cmdString: string, xml: string): string {
@@ -1984,21 +1845,6 @@ function parseElemDefault(dft: string): any {
     return trimmed;
 }
 
-// Formerly in prompter.ts now here since ths is where they are used.
-
-function logMessage(...args: any[]): void {
-    const message = args.map(arg => (typeof arg === 'object' ? JSON.stringify(arg, null, 2) : arg)).join(' ');
-
-    // Use a fallback for development mode detection
-    const isDevelopmentMode = vscode.env.appName.includes('Code - OSS') || vscode.env.appName.includes('Insiders');
-
-    if (isDevelopmentMode) {
-        console.log(message);
-    } else {
-        vscode.window.showWarningMessage(message);
-    }
-}
-
 export function getHtmlForPrompter(
     webview: vscode.Webview,
     extensionUri: vscode.Uri,
@@ -2022,21 +1868,12 @@ export function getHtmlForPrompter(
     let vscodeElementsBundle = '';
     try {
         vscodeElementsBundle = fs.readFileSync(vscodeElementsPath, 'utf8');
-        console.log('[clPrompter] Loaded vscode-elements bundle:', vscodeElementsBundle.length, 'bytes');
     } catch (err) {
         console.error('[clPrompter] Failed to read vscode-elements bundle:', err);
     }
 
     // styleUri = styleUri.replace('file%2B.', 'file+.');
     // mainJs = mainJs.replace('file%2B.', 'file+.');
-
-    console.log(`[clPrompter] extensionUri: ${htmlPath}`);
-    console.log(`[clPrompter] htmlPath: ${htmlPath}`);
-    console.log(`[clPrompter] main.js: ${mainJs}`);
-    console.log(`[clPrompter] styleUri: ${styleUri}`);
-    console.log('[clPrompter] extensionUri:', extensionUri.toString());
-    console.log('[clPrompter] mediaUri:', vscode.Uri.joinPath(extensionUri, 'media').toString());
-
 
     let html: string;
     try {
@@ -2073,12 +1910,9 @@ export function getHtmlForPrompter(
             const htmlFilePath = path.join(htmlDir, `clp_cmdPrompt_${cleanCmdName}.html`);
 
             fs.writeFileSync(htmlFilePath, replacedHtml, { encoding: 'utf8' });
-            console.log(`[clPrompter] ✓ Diagnostic HTML written to: ${htmlFilePath}`);
         } catch (err) {
             console.error('[clPrompter] ✗ Failed to write diagnostic HTML file:', err);
         }
-    } else {
-        console.log('[clPrompter] Diagnostic HTML writing is disabled (saveCmdPrompterHTMLToFile=false)');
     }
 
     return replacedHtml;

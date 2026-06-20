@@ -25,6 +25,13 @@
 
 import { DOMParser, Element as XMLElement, Node as XMLNode } from '@xmldom/xmldom';
 
+const POPULATOR_DEBUG_LOGS = false;
+function debugLog(...args: unknown[]): void {
+  if (POPULATOR_DEBUG_LOGS) {
+    console.log(...args);
+  }
+}
+
 export interface ParameterMap {
   [key: string]: string | string[] | ParameterMap;
 }
@@ -117,29 +124,29 @@ function generateElemInstructions(
 ): PopulationInstruction[] {
   const instructions: PopulationInstruction[] = [];
 
-  console.log(`[generateElemInstructions] ${kwd} - ENTRY`);
-  console.log(`[generateElemInstructions] ${kwd} - instanceIdx: ${instanceIdx}`);
-  console.log(`[generateElemInstructions] ${kwd} - isMultiInstance: ${isMultiInstance}`);
-  console.log(`[generateElemInstructions] ${kwd} - vals:`, vals);
+  debugLog(`[generateElemInstructions] ${kwd} - ENTRY`);
+  debugLog(`[generateElemInstructions] ${kwd} - instanceIdx: ${instanceIdx}`);
+  debugLog(`[generateElemInstructions] ${kwd} - isMultiInstance: ${isMultiInstance}`);
+  debugLog(`[generateElemInstructions] ${kwd} - vals:`, vals);
 
   // ✅ Handle mixed array structure (simple values + nested arrays)
   if (Array.isArray(vals)) {
-    console.log(`[generateElemInstructions] ${kwd} - Processing array with ${vals.length} elements`);
+    debugLog(`[generateElemInstructions] ${kwd} - Processing array with ${vals.length} elements`);
 
     for (let e = 0; e < vals.length; e++) {
       const elemValue = vals[e];
       // Always use INST naming to maintain 2D array structure consistency
       const elemName = `${kwd}_INST${instanceIdx}_ELEM${e}`;
 
-      console.log(`[generateElemInstructions] ${kwd} - Element ${e}:`);
-      console.log(`[generateElemInstructions] ${kwd} -   elemValue:`, elemValue);
-      console.log(`[generateElemInstructions] ${kwd} -   isMultiInstance: ${isMultiInstance}`);
-      console.log(`[generateElemInstructions] ${kwd} -   elemName: "${elemName}"`);
-      console.log(`[generateElemInstructions] ${kwd} -   elemValue is array: ${Array.isArray(elemValue)}`);
+      debugLog(`[generateElemInstructions] ${kwd} - Element ${e}:`);
+      debugLog(`[generateElemInstructions] ${kwd} -   elemValue:`, elemValue);
+      debugLog(`[generateElemInstructions] ${kwd} -   isMultiInstance: ${isMultiInstance}`);
+      debugLog(`[generateElemInstructions] ${kwd} -   elemName: "${elemName}"`);
+      debugLog(`[generateElemInstructions] ${kwd} -   elemValue is array: ${Array.isArray(elemValue)}`);
 
       // ✅ Handle nested ELEM (array within array)
       if (Array.isArray(elemValue)) {
-        console.log(`[generateElemInstructions] ${kwd} - Processing nested array for element ${e}:`, elemValue);
+        debugLog(`[generateElemInstructions] ${kwd} - Processing nested array for element ${e}:`, elemValue);
 
         // Check if this is a QUAL element (qualified name with 2 parts)
         // QUAL arrays have exactly 2 string elements (library/file or similar)
@@ -147,7 +154,7 @@ function generateElemInstructions(
                               elemValue.every(v => typeof v === 'string' || v === '');
 
         if (isQualElement) {
-          console.log(`[generateElemInstructions] ${kwd} - Detected QUAL element, creating QUAL instructions`);
+          debugLog(`[generateElemInstructions] ${kwd} - Detected QUAL element, creating QUAL instructions`);
           // Create QUAL instructions with proper naming: RMTFILE_INST0_ELEM0_QUAL0, etc.
           for (let q = 0; q < elemValue.length; q++) {
             const qualValue = elemValue[q];
@@ -165,7 +172,7 @@ function generateElemInstructions(
               }
             });
 
-            console.log(`[generateElemInstructions] ${kwd} - Added QUAL instruction: ${qualName} = "${qualValue}"`);
+            debugLog(`[generateElemInstructions] ${kwd} - Added QUAL instruction: ${qualName} = "${qualValue}"`);
           }
         } else {
           // Regular nested ELEM (not a QUAL)
@@ -182,23 +189,23 @@ function generateElemInstructions(
                 options: { forceValue: true, dispatchEvents: true }
               });
 
-              console.log(`[generateElemInstructions] ${kwd} - Added nested ELEM instruction: ${subElemName} = "${subValue}"`);
+              debugLog(`[generateElemInstructions] ${kwd} - Added nested ELEM instruction: ${subElemName} = "${subValue}"`);
             }
           }
         }
       }
       // ✅ NEW: Handle strings with parentheses (like "(KPOP COZTOOLS)")
       else if (typeof elemValue === 'string' && elemValue.includes('(') && elemValue.includes(')')) {
-        console.log(`[generateElemInstructions] ${kwd} - Element ${e} is string with parentheses: "${elemValue}"`);
+        debugLog(`[generateElemInstructions] ${kwd} - Element ${e} is string with parentheses: "${elemValue}"`);
 
         let cleanValue = elemValue.trim();
         if (cleanValue.startsWith('(') && cleanValue.endsWith(')')) {
           cleanValue = cleanValue.slice(1, -1);
-          console.log(`[generateElemInstructions] ${kwd} - Stripped parentheses: "${elemValue}" -> "${cleanValue}"`);
+          debugLog(`[generateElemInstructions] ${kwd} - Stripped parentheses: "${elemValue}" -> "${cleanValue}"`);
         }
 
         const subValues = cleanValue.split(' ').filter(v => v.trim() !== '');
-        console.log(`[generateElemInstructions] ${kwd} - Parsed sub-values:`, subValues);
+        debugLog(`[generateElemInstructions] ${kwd} - Parsed sub-values:`, subValues);
 
         for (let se = 0; se < subValues.length; se++) {
           const subValue = subValues[se];
@@ -213,7 +220,7 @@ function generateElemInstructions(
               options: { forceValue: true, dispatchEvents: true }
             });
 
-            console.log(`[generateElemInstructions] ${kwd} - Added parsed nested ELEM instruction: ${subElemName} = "${subValue}"`);
+            debugLog(`[generateElemInstructions] ${kwd} - Added parsed nested ELEM instruction: ${subElemName} = "${subValue}"`);
           }
         }
       }
@@ -227,7 +234,7 @@ function generateElemInstructions(
           options: { forceValue: true, dispatchEvents: true }
         });
 
-        console.log(`[generateElemInstructions] ${kwd} - Added simple ELEM instruction: ${elemName} = "${elemValue}"`);
+        debugLog(`[generateElemInstructions] ${kwd} - Added simple ELEM instruction: ${elemName} = "${elemValue}"`);
       }
     }
   }
@@ -241,7 +248,7 @@ function generateElemInstructions(
       splitVals = vals.split(' ');
     }
 
-    console.log(`[clPrompter] ${kwd} - Split string ELEM values:`, splitVals);
+    debugLog(`[clPrompter] ${kwd} - Split string ELEM values:`, splitVals);
 
     for (let e = 0; e < splitVals.length; e++) {
       const elemName = isMultiInstance ? `${kwd}_ELEM${e}_${instanceIdx}` : `${kwd}_ELEM${e}`;
@@ -254,7 +261,7 @@ function generateElemInstructions(
 
           if (cleanValue.startsWith('(') && cleanValue.endsWith(')')) {
             cleanValue = cleanValue.slice(1, -1);
-            console.log(`[clPrompter] ${kwd} - Stripped parentheses: "${value}" -> "${cleanValue}"`);
+            debugLog(`[clPrompter] ${kwd} - Stripped parentheses: "${value}" -> "${cleanValue}"`);
           }
 
           const subValues = cleanValue.split(' ').filter(v => v.trim() !== '');
@@ -273,7 +280,7 @@ function generateElemInstructions(
                 options: { forceValue: true, dispatchEvents: true }
               });
 
-              console.log(`[clPrompter] ${kwd} - Added string-parsed nested ELEM: ${subElemName} = "${subValue}"`);
+              debugLog(`[clPrompter] ${kwd} - Added string-parsed nested ELEM: ${subElemName} = "${subValue}"`);
             }
           }
         } else {
@@ -286,13 +293,13 @@ function generateElemInstructions(
             options: { forceValue: true, dispatchEvents: true }
           });
 
-          console.log(`[clPrompter] ${kwd} - Added string ELEM instruction: ${elemName} = "${value}"`);
+          debugLog(`[clPrompter] ${kwd} - Added string ELEM instruction: ${elemName} = "${value}"`);
         }
       }
     }
   }
 
-  console.log(`[clPrompter] ${kwd} - Generated ${instructions.length} ELEM instructions`);
+  debugLog(`[clPrompter] ${kwd} - Generated ${instructions.length} ELEM instructions`);
   return instructions;
 }
 
@@ -315,14 +322,14 @@ function generateQualInstructions(
     parts = [];
   }
 
-  console.log(`[clPrompter] ${kwd} - Processing QUAL parameter, parts:`, parts);
+  debugLog(`[clPrompter] ${kwd} - Processing QUAL parameter, parts:`, parts);
 
   for (let q = 0; q < parts.length; q++) {
     const qName = `${kwd}_QUAL${q}`;
     // Use natural order: QUAL0 gets parts[0], QUAL1 gets parts[1], etc.
     const value = parts[q] !== undefined ? parts[q] : "";
 
-    console.log(`[clPrompter] ${kwd} - QUAL${q}: qName=${qName}, value="${value}"`);
+    debugLog(`[clPrompter] ${kwd} - QUAL${q}: qName=${qName}, value="${value}"`);
 
     instructions.push({
       type: 'qual',
@@ -350,7 +357,7 @@ function generateSimpleInstructions(
 ): PopulationInstruction[] {
   const value = Array.isArray(vals) ? vals[0] : vals;
 
-  console.log(`[clPrompter] ${kwd} - Processing simple parameter, value:`, value);
+  debugLog(`[clPrompter] ${kwd} - Processing simple parameter, value:`, value);
 
   return [{
     type: 'simple',
@@ -374,8 +381,8 @@ function generateMultiInstanceInstructions(
 ): PopulationInstruction[] {
   const instructions: PopulationInstruction[] = [];
 
-  console.log(`[generateMultiInstanceInstructions] ${kwd} - ENTRY`);
-  console.log(`[generateMultiInstanceInstructions] ${kwd} - vals:`, vals);
+  debugLog(`[generateMultiInstanceInstructions] ${kwd} - ENTRY`);
+  debugLog(`[generateMultiInstanceInstructions] ${kwd} - vals:`, vals);
 
   // Parse XML to get parameter definition
   const parser = new DOMParser();
@@ -385,7 +392,7 @@ function generateMultiInstanceInstructions(
   );
 
   if (!parm) {
-    console.log(`[generateMultiInstanceInstructions] ${kwd} - Parameter not found in XML`);
+    debugLog(`[generateMultiInstanceInstructions] ${kwd} - Parameter not found in XML`);
     return instructions;
   }
 
@@ -393,13 +400,13 @@ function generateMultiInstanceInstructions(
   const hasElems = parm.getElementsByTagName("Elem").length > 0;
   const hasQuals = parm.getElementsByTagName("Qual").length > 0;
 
-  console.log(`[generateMultiInstanceInstructions] ${kwd} - maxInstances: ${maxInstances}`);
-  console.log(`[generateMultiInstanceInstructions] ${kwd} - hasElems: ${hasElems}`);
-  console.log(`[generateMultiInstanceInstructions] ${kwd} - hasQuals: ${hasQuals}`);
+  debugLog(`[generateMultiInstanceInstructions] ${kwd} - maxInstances: ${maxInstances}`);
+  debugLog(`[generateMultiInstanceInstructions] ${kwd} - hasElems: ${hasElems}`);
+  debugLog(`[generateMultiInstanceInstructions] ${kwd} - hasQuals: ${hasQuals}`);
 
   // Ensure vals is an array for multi-instance processing
   const valuesArray = Array.isArray(vals) ? vals : [vals];
-  console.log(`[generateMultiInstanceInstructions] ${kwd} - valuesArray:`, valuesArray);
+  debugLog(`[generateMultiInstanceInstructions] ${kwd} - valuesArray:`, valuesArray);
 
   // First, add instructions to create additional instances if needed
   for (let i = 1; i < valuesArray.length && i < maxInstances; i++) {
@@ -414,30 +421,30 @@ function generateMultiInstanceInstructions(
       }
     });
 
-    console.log(`[generateMultiInstanceInstructions] ${kwd} - Added click instruction for instance ${i}`);
+    debugLog(`[generateMultiInstanceInstructions] ${kwd} - Added click instruction for instance ${i}`);
   }
 
   // Then populate each instance
   valuesArray.forEach((instanceValue, instanceIndex) => {
     if (instanceIndex >= maxInstances) {
-      console.log(`[generateMultiInstanceInstructions] ${kwd} - Skipping instance ${instanceIndex} (exceeds max ${maxInstances})`);
+      debugLog(`[generateMultiInstanceInstructions] ${kwd} - Skipping instance ${instanceIndex} (exceeds max ${maxInstances})`);
       return;
     }
 
-    console.log(`[generateMultiInstanceInstructions] ${kwd} - Processing instance ${instanceIndex}:`, instanceValue);
+    debugLog(`[generateMultiInstanceInstructions] ${kwd} - Processing instance ${instanceIndex}:`, instanceValue);
 
     if (hasElems) {
       // Multi-instance ELEM parameter
-      console.log(`[generateMultiInstanceInstructions] ${kwd} - Processing as multi-instance ELEM`);
+      debugLog(`[generateMultiInstanceInstructions] ${kwd} - Processing as multi-instance ELEM`);
       instructions.push(...generateElemInstructions(kwd, instanceValue, instanceIndex, true, options));
     } else if (hasQuals) {
       // Multi-instance QUAL parameter
-      console.log(`[generateMultiInstanceInstructions] ${kwd} - Processing as multi-instance QUAL`);
+      debugLog(`[generateMultiInstanceInstructions] ${kwd} - Processing as multi-instance QUAL`);
       const qualInstructions = generateQualInstructions(`${kwd}_${instanceIndex}`, instanceValue, options);
       instructions.push(...qualInstructions);
     } else {
       // Multi-instance simple parameter
-      console.log(`[generateMultiInstanceInstructions] ${kwd} - Processing as multi-instance simple`);
+      debugLog(`[generateMultiInstanceInstructions] ${kwd} - Processing as multi-instance simple`);
       const targetName = instanceIndex === 0 ? kwd : `${kwd}_${instanceIndex}`;
 
       if (instanceValue && instanceValue.toString().trim() !== '') {
@@ -452,12 +459,12 @@ function generateMultiInstanceInstructions(
           }
         });
 
-        console.log(`[generateMultiInstanceInstructions] ${kwd} - Added simple instruction: ${targetName} = "${instanceValue}"`);
+        debugLog(`[generateMultiInstanceInstructions] ${kwd} - Added simple instruction: ${targetName} = "${instanceValue}"`);
       }
     }
   });
 
-  console.log(`[generateMultiInstanceInstructions] ${kwd} - Generated ${instructions.length} instructions`);
+  debugLog(`[generateMultiInstanceInstructions] ${kwd} - Generated ${instructions.length} instructions`);
   return instructions;
 }
 
@@ -469,16 +476,16 @@ export function generatePopulationInstructions(
   xmlContent: string,
   options: PopulationOptions = {}
 ): PopulationInstruction[] {
-  console.log("[clPrompter] ===== generatePopulationInstructions START =====");
-  console.log("[clPrompter] paramMap received:", paramMap);
-  console.log("[clPrompter] paramMap type:", typeof paramMap);
-  console.log("[clPrompter] paramMap keys:", paramMap ? Object.keys(paramMap) : "paramMap is null/undefined");
+  debugLog("[clPrompter] ===== generatePopulationInstructions START =====");
+  debugLog("[clPrompter] paramMap received:", paramMap);
+  debugLog("[clPrompter] paramMap type:", typeof paramMap);
+  debugLog("[clPrompter] paramMap keys:", paramMap ? Object.keys(paramMap) : "paramMap is null/undefined");
 
   const instructions: PopulationInstruction[] = [];
 
   // Check if paramMap is empty or null
   if (!paramMap || Object.keys(paramMap).length === 0) {
-    console.log("[clPrompter] paramMap is empty or null - returning empty instructions");
+    debugLog("[clPrompter] paramMap is empty or null - returning empty instructions");
     return instructions;
   }
 
@@ -487,19 +494,19 @@ export function generatePopulationInstructions(
   const xmlDoc = parser.parseFromString(xmlContent, "text/xml");
   const parms = Array.from(xmlDoc.getElementsByTagName("Parm"));
 
-  console.log("[clPrompter] Starting to iterate over parameters...");
+  debugLog("[clPrompter] Starting to iterate over parameters...");
 
   for (const [kwd, vals] of Object.entries(paramMap)) {
-    console.log("[clPrompter] ===== Processing parameter =====");
-    console.log("[clPrompter] kwd:", kwd);
-    console.log("[clPrompter] vals:", vals);
-    console.log("[clPrompter] vals type:", typeof vals);
-    console.log("[clPrompter] vals is array:", Array.isArray(vals));
+    debugLog("[clPrompter] ===== Processing parameter =====");
+    debugLog("[clPrompter] kwd:", kwd);
+    debugLog("[clPrompter] vals:", vals);
+    debugLog("[clPrompter] vals type:", typeof vals);
+    debugLog("[clPrompter] vals is array:", Array.isArray(vals));
 
     // Find parameter definition in XML
     const parm = parms.find(p => p.getAttribute("Kwd") === kwd);
     if (!parm) {
-      console.log(`[clPrompter] ${kwd} - Parameter not found in XML, skipping`);
+      debugLog(`[clPrompter] ${kwd} - Parameter not found in XML, skipping`);
       continue;
     }
 
@@ -526,11 +533,11 @@ export function generatePopulationInstructions(
     }
   }
 
-  console.log("[clPrompter] ===== generatePopulationInstructions END =====");
-  console.log(`[clPrompter] Generated ${instructions.length} population instructions`);
+  debugLog("[clPrompter] ===== generatePopulationInstructions END =====");
+  debugLog(`[clPrompter] Generated ${instructions.length} population instructions`);
 
   if (options.debugMode) {
-    console.log("[clPrompter] Population instructions:", instructions);
+    debugLog("[clPrompter] Population instructions:", instructions);
   }
 
   return instructions;

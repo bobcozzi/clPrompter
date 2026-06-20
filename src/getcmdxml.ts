@@ -28,6 +28,13 @@ import { code4i, getPendingExternalSQL } from './extension';
 import { buildQlgPathNameHex, buildAPI2PartName, buildQualName } from './QlgPathName';
 import { getUDTFLibrary } from './components/hostFunctions';
 
+const CMDXML_DEBUG_LOGS = false;
+function debugLog(message: string): void {
+    if (CMDXML_DEBUG_LOGS) {
+        console.log(message);
+    }
+}
+
 // In-memory cache: qualified command key -> XML string
 // Survives for the lifetime of the extension host process.
 const _xmlCache = new Map<string, string>();
@@ -102,7 +109,7 @@ export async function warmXmlCache(cmd: string): Promise<void> {
     const QCDRCMDD = `CALL QCDRCMDD PARM('${nameStr}' X'${fileParm}' 'DEST0200' ' ' 'CMDD0200' X'000000000000')`;
     const t0 = Date.now();
     const warmPath = connection.sqlRunnerAvailable() ? 'CMD_XML UDTF' : 'QCDRCMDD fallback';
-    console.log(`[clPrompter] warmXmlCache: fetching ${OBJNAME} from IBM i (sqlRunnerAvailable=${connection.sqlRunnerAvailable()}, path=${warmPath})`);
+    debugLog(`[clPrompter] warmXmlCache: fetching ${OBJNAME} from IBM i (sqlRunnerAvailable=${connection.sqlRunnerAvailable()}, path=${warmPath})`);
 
     const fetchPromise: Promise<string> = (async () => {
         try {
@@ -117,16 +124,16 @@ export async function warmXmlCache(cmd: string): Promise<void> {
                     const _busyExtraWarm = _pendingWarm
                         ? ` — competing SQL running ${Date.now() - _pendingWarm.t0}ms: ${_pendingWarm.sql.substring(0, 200)}`
                         : '';
-                    console.log(`[clPrompter] warmXmlCache: SQLJob status before UDTF for ${OBJNAME}: ${jobStatusBefore ?? 'unknown'}${_busyExtraWarm}`);
+                    debugLog(`[clPrompter] warmXmlCache: SQLJob status before UDTF for ${OBJNAME}: ${jobStatusBefore ?? 'unknown'}${_busyExtraWarm}`);
                     const results = await connection.runSQL(sql);
                     if (results.length > 0 && results[0].CMD_XML) {
                         const xml = String(results[0].CMD_XML);
                         _xmlCache.set(cmdXMLName, xml);
-                        console.log(`[clPrompter] warmXmlCache: ${OBJNAME} cached in ${Date.now() - t0}ms (${xml.length} bytes)`);
+                        debugLog(`[clPrompter] warmXmlCache: ${OBJNAME} cached in ${Date.now() - t0}ms (${xml.length} bytes)`);
                         udtfSucceeded = true;
                     }
                 } catch (e: any) {
-                    console.log(`[clPrompter] warmXmlCache CMD_XML UDTF failed for ${OBJNAME}, falling back to QCDRCMDD: ${e?.message ?? e}`);
+                    debugLog(`[clPrompter] warmXmlCache CMD_XML UDTF failed for ${OBJNAME}, falling back to QCDRCMDD: ${e?.message ?? e}`);
                 }
             }
             if (!udtfSucceeded) {
@@ -140,12 +147,12 @@ export async function warmXmlCache(cmd: string): Promise<void> {
                     if (doc) {
                         const xml = doc.getText();
                         _xmlCache.set(cmdXMLName, xml);
-                        console.log(`[clPrompter] warmXmlCache: ${OBJNAME} cached via QCDRCMDD in ${Date.now() - t0}ms (${xml.length} bytes)`);
+                        debugLog(`[clPrompter] warmXmlCache: ${OBJNAME} cached via QCDRCMDD in ${Date.now() - t0}ms (${xml.length} bytes)`);
                     }
                 }
             }
         } catch (e: any) {
-            console.log(`[clPrompter] warmXmlCache for ${OBJNAME} failed (non-critical): ${e?.message ?? e}`);
+            debugLog(`[clPrompter] warmXmlCache for ${OBJNAME} failed (non-critical): ${e?.message ?? e}`);
         }
         return _xmlCache.get(cmdXMLName) ?? '';
     })();

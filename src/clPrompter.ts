@@ -33,6 +33,13 @@ import * as vscode from 'vscode';
 import { DOMParser } from '@xmldom/xmldom';
 import { getCMDXML } from './getcmdxml';
 
+const API_DEBUG_LOGS = false;
+function debugLog(...args: unknown[]): void {
+    if (API_DEBUG_LOGS) {
+        console.log(...args);
+    }
+}
+
 // Import types and helper functions from extension
 // These will be needed when the ClPromptPanel is imported
 let ClPromptPanelClass: any;
@@ -185,8 +192,8 @@ export async function CLPrompter(
                 return;
             }
 
-            console.log(`[CLPrompter] Prompting command: ${cmdName}`);
-            console.log(`[CLPrompter] Full command string: ${command}`);
+            debugLog(`[CLPrompter] Prompting command: ${cmdName}`);
+            debugLog(`[CLPrompter] Full command string: ${command}`);
 
             // Get the command XML definition from IBM i
             let xml: string;
@@ -215,7 +222,7 @@ export async function CLPrompter(
             // If the XML has no Prompt attribute, QCDRCMDD returned a placeholder
             // (command not found / invalid). getCMDXML already showed the warning.
             if (!cmdPrompt) {
-                console.log(`[clPrompter] '${cmdName}' returned no command definition — aborting prompter.`);
+                debugLog(`[clPrompter] '${cmdName}' returned no command definition — aborting prompter.`);
                 resolve(command);
                 return;
             }
@@ -235,7 +242,7 @@ export async function CLPrompter(
                 }
             );
 
-            console.log('[CLPrompter] Creating prompter panel');
+            debugLog('[CLPrompter] Creating prompter panel');
 
             // Create the prompter panel with isNested=true so it returns the result via resolver
             // Pass undefined for editor and selection since this is standalone
@@ -254,11 +261,11 @@ export async function CLPrompter(
                     // This resolver is called when the user submits or cancels
                     if (result === null) {
                         // User cancelled - return original command
-                        console.log('[CLPrompter] User cancelled, returning original command');
+                        debugLog('[CLPrompter] User cancelled, returning original command');
                         resolve(command);
                     } else {
                         // User submitted - return the updated command
-                        console.log('[CLPrompter] User submitted, returning updated command:', result);
+                        debugLog('[CLPrompter] User submitted, returning updated command:', result);
                         resolve(result);
                     }
                 }
@@ -266,13 +273,13 @@ export async function CLPrompter(
 
             // Ensure promise resolves if panel is disposed without submitting/cancelling
             panel.onDidDispose(() => {
-                console.log('[CLPrompter] Panel disposed');
+                debugLog('[CLPrompter] Panel disposed');
                 // If the promise hasn't been resolved yet, resolve with original command
                 try {
                     resolve(command);
                 } catch (e) {
                     // Promise already resolved, ignore
-                    console.log('[CLPrompter] Promise already resolved');
+                    debugLog('[CLPrompter] Promise already resolved');
                 }
             });
 

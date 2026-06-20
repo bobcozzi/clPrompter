@@ -2,6 +2,22 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.0.16] - 2026-06-20
+
+### What's Changed
+
+- **Diagnostic logging cleanup across runtime TypeScript**: High-volume development tracing logs were muted in the prompter/runtime code paths and routed through disabled-by-default debug wrappers (`debugLog`) where retained for future troubleshooting. This significantly reduces Extension Host log noise during normal use.
+- **Targeted SQL/background trace gating**: Repetitive `external runSQL` and `warmXmlCache` informational logs are now gated behind disabled debug flags so they can be re-enabled only when needed for diagnostics.
+- **Activation message retained for IBM i extension-family consistency**: The startup message `CL Prompter extension activated` is preserved.
+
+### What's Fixed
+
+- **Intermittent empty-parameter prompter on open/reopen**: Fixed an initialization-order race by ensuring `formData` is posted before `setLabel` in the `loadForm` message path. This prevents occasional cases where the label/comment fields appeared but command parameters did not render.
+- **Save-location token backward compatibility**: Save-location expansion now supports both symbolic and legacy token formats, case-insensitively:
+  - `*TMPDIR`, `*USERHOME`, `*WORKSPACE`
+  - `${tmpdir}`, `${userHome}`, `${workspaceFolder}`
+  This preserves existing user settings while supporting current documented values.
+
 ## [1.0.15] - 2026-06-15
 
 ### What's Fixed

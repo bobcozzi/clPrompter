@@ -56,6 +56,13 @@ import {
   PmtCtlMap
 } from './types.js';
 
+const WEBVIEW_DEBUG_LOGS = false;
+function debugLog(...args: unknown[]): void {
+  if (WEBVIEW_DEBUG_LOGS) {
+    console.log(...args);
+  }
+}
+
 // Global state (typed)
 let state: PrompterState = {
   xmlDoc: null,
@@ -376,11 +383,11 @@ function parseColor(color: string): { r: number, g: number, b: number } | null {
 function markFieldTouched(fieldName: string): void {
   const ts = new Date().toISOString().substring(11, 23);
   if (state.isInitializing) {
-    console.log(`[${ts}] [markFieldTouched] ${fieldName} IGNORED - form is initializing`);
+    debugLog(`[${ts}] [markFieldTouched] ${fieldName} IGNORED - form is initializing`);
     return;
   }
   state.touchedFields.add(fieldName);
-  console.log(`[${ts}] [markFieldTouched] ${fieldName} MARKED as touched (total: ${state.touchedFields.size})`);
+  debugLog(`[${ts}] [markFieldTouched] ${fieldName} MARKED as touched (total: ${state.touchedFields.size})`);
 
   // Apply dark green color to touched field
   const field = document.querySelector(`[name="${fieldName}"]`) as HTMLElement;
@@ -496,10 +503,10 @@ function configureRangeValidation(input: HTMLInputElement, suggestions: string[]
     wrapper.appendChild(targetElement);
     wrapper.appendChild(errorSpan);
 
-    console.log('[configureRangeValidation] Wrapper created and inserted');
-    console.log('[configureRangeValidation] Wrapper parent:', wrapper.parentElement);
-    console.log('[configureRangeValidation] Error span parent after append:', errorSpan.parentElement);
-    console.log('[configureRangeValidation] Target element parent after append:', targetElement.parentElement);
+    debugLog('[configureRangeValidation] Wrapper created and inserted');
+    debugLog('[configureRangeValidation] Wrapper parent:', wrapper.parentElement);
+    debugLog('[configureRangeValidation] Error span parent after append:', errorSpan.parentElement);
+    debugLog('[configureRangeValidation] Target element parent after append:', targetElement.parentElement);
   } else {
     // Fallback: append to body if no parent (shouldn't happen but be defensive)
     console.warn('[configureRangeValidation] No parent element found, cannot wrap input');
@@ -563,15 +570,15 @@ function configureRangeValidation(input: HTMLInputElement, suggestions: string[]
       } else {
         // Out of range - show error
         const errorMsg = `Value must be between ${range.min} and ${range.max}`;
-        console.log(`[Range Validation] Out of range! value=${input.value}, numValue=${numValue}, min=${numMin}, max=${numMax}`);
-        console.log(`[Range Validation] Input element:`, input);
-        console.log(`[Range Validation] Input parent:`, input.parentElement);
-        console.log(`[Range Validation] Setting error span display to inline, textContent="${errorMsg}"`);
-        console.log(`[Range Validation] Error span element:`, errorSpan);
-        console.log(`[Range Validation] Error span parent:`, errorSpan.parentElement || errorSpan.parentNode);
-        console.log(`[Range Validation] Looking for wrapper with class parm-validation-wrapper...`);
+        debugLog(`[Range Validation] Out of range! value=${input.value}, numValue=${numValue}, min=${numMin}, max=${numMax}`);
+        debugLog(`[Range Validation] Input element:`, input);
+        debugLog(`[Range Validation] Input parent:`, input.parentElement);
+        debugLog(`[Range Validation] Setting error span display to inline, textContent="${errorMsg}"`);
+        debugLog(`[Range Validation] Error span element:`, errorSpan);
+        debugLog(`[Range Validation] Error span parent:`, errorSpan.parentElement || errorSpan.parentNode);
+        debugLog(`[Range Validation] Looking for wrapper with class parm-validation-wrapper...`);
         const wrapperCheck = input.closest('.parm-validation-wrapper');
-        console.log(`[Range Validation] Wrapper found:`, wrapperCheck);
+        debugLog(`[Range Validation] Wrapper found:`, wrapperCheck);
         input.setCustomValidity(errorMsg);
         input.classList.add('validation-error');
         errorSpan.textContent = errorMsg;
@@ -592,10 +599,10 @@ function configureRangeValidation(input: HTMLInputElement, suggestions: string[]
 
     // Invalid value - show error message
     const msg = `Value must be between ${range.min} and ${range.max}${specialValues.length > 0 ? ', or: ' + specialValues.join(', ') : ''}`;
-    console.log(`[Range Validation] Invalid value (alphanumeric)! value="${input.value}", min="${range.min}", max="${range.max}"`);
-    console.log(`[Range Validation] Setting error span display to inline, textContent="${msg}"`);
-    console.log(`[Range Validation] Error span element:`, errorSpan);
-    console.log(`[Range Validation] Error span parent:`, errorSpan.parentElement || errorSpan.parentNode);
+    debugLog(`[Range Validation] Invalid value (alphanumeric)! value="${input.value}", min="${range.min}", max="${range.max}"`);
+    debugLog(`[Range Validation] Setting error span display to inline, textContent="${msg}"`);
+    debugLog(`[Range Validation] Error span element:`, errorSpan);
+    debugLog(`[Range Validation] Error span parent:`, errorSpan.parentElement || errorSpan.parentNode);
     input.setCustomValidity(msg);
     input.classList.add('validation-error');
     errorSpan.textContent = msg;
@@ -698,32 +705,32 @@ function configureFullValidation(input: HTMLInputElement, requiredLength: number
 
 // Validate Rstd=Y fields — value must match one of the allowed values exactly (case-insensitive)
 function configureRstdValidation(input: HTMLInputElement, suggestions: string[], container?: HTMLElement, alwVar?: boolean, idx?: number, parm?: Element): void {
-  console.log(`[configureRstdValidation] ENTRY: input.name=${input.name}, idx=${idx}, parm=${parm?.getAttribute('Kwd')}, suggestions.length=${suggestions.length}`);
+  debugLog(`[configureRstdValidation] ENTRY: input.name=${input.name}, idx=${idx}, parm=${parm?.getAttribute('Kwd')}, suggestions.length=${suggestions.length}`);
 
   // Filter metadata entries; only keep actual display values
   const displayValues = suggestions.filter(s => !s.startsWith('_RANGE_') && !s.startsWith('_REL_'));
-  console.log(`[configureRstdValidation] displayValues for ${input.name}:`, displayValues);
+  debugLog(`[configureRstdValidation] displayValues for ${input.name}:`, displayValues);
 
   if (displayValues.length === 0) {
-    console.log(`[configureRstdValidation] No display values, returning early`);
+    debugLog(`[configureRstdValidation] No display values, returning early`);
     return;
   }
 
   // Get SNGVAL values if this is a secondary instance (idx > 0)
   let sngvalSet: Set<string> = new Set();
   if (idx !== undefined && idx > 0 && parm) {
-    console.log(`[configureRstdValidation] Setting up SNGVAL validation for idx=${idx}, input.name=${input.name}`);
+    debugLog(`[configureRstdValidation] Setting up SNGVAL validation for idx=${idx}, input.name=${input.name}`);
     sngvalSet = getParentSngVals(parm);
-    console.log(`[configureRstdValidation] Parent SNGVAL values:`, Array.from(sngvalSet));
+    debugLog(`[configureRstdValidation] Parent SNGVAL values:`, Array.from(sngvalSet));
     // Also check for ELEM-level SNGVAL values
     const elemParts = parm.querySelectorAll(':scope > Elem');
     if (elemParts.length > 0) {
       const elem0SngVals = getElemSngVals(elemParts[0] as Element);
       sngvalSet = new Set([...sngvalSet, ...elem0SngVals]);
-      console.log(`[configureRstdValidation] Combined SNGVAL values (with ELEM):`, Array.from(sngvalSet));
+      debugLog(`[configureRstdValidation] Combined SNGVAL values (with ELEM):`, Array.from(sngvalSet));
     }
   } else {
-    console.log(`[configureRstdValidation] NOT setting up SNGVAL - idx=${idx}, idx>0? ${idx !== undefined && idx > 0}, parm? ${!!parm}`);
+    debugLog(`[configureRstdValidation] NOT setting up SNGVAL - idx=${idx}, idx>0? ${idx !== undefined && idx > 0}, parm? ${!!parm}`);
   }
 
   // Create error message span
@@ -743,7 +750,7 @@ function configureRstdValidation(input: HTMLInputElement, suggestions: string[],
   }
 
   const validateRstd = () => {
-    console.log(`[validateRstd] Called for ${input.name}, value="${input.value}", sngvalSet.size=${sngvalSet.size}`);
+    debugLog(`[validateRstd] Called for ${input.name}, value="${input.value}", sngvalSet.size=${sngvalSet.size}`);
 
     if (!input.value) {
       input.setCustomValidity('');
@@ -774,11 +781,11 @@ function configureRstdValidation(input: HTMLInputElement, suggestions: string[],
 
     // Case-insensitive match against allowed values
     const valueUpper = input.value.toUpperCase();
-    console.log(`[validateRstd] ${input.name}: valueUpper="${valueUpper}", sngvalSet contains:`, Array.from(sngvalSet), `has value? ${sngvalSet.has(valueUpper)}`);
+    debugLog(`[validateRstd] ${input.name}: valueUpper="${valueUpper}", sngvalSet contains:`, Array.from(sngvalSet), `has value? ${sngvalSet.has(valueUpper)}`);
 
     // Check if this is a SNGVAL value in a secondary instance
     if (sngvalSet.size > 0 && sngvalSet.has(valueUpper)) {
-      console.log(`[configureRstdValidation] ✅ SNGVAL violation detected: "${input.value}" in input ${input.name}`);
+      debugLog(`[configureRstdValidation] ✅ SNGVAL violation detected: "${input.value}" in input ${input.name}`);
       const msg = `${input.value} must be only value for parameter`;
       input.setCustomValidity(msg);
       input.classList.add('validation-error');
@@ -788,7 +795,7 @@ function configureRstdValidation(input: HTMLInputElement, suggestions: string[],
     }
 
     const match = displayValues.find(v => v.toUpperCase() === valueUpper);
-    console.log(`[validateRstd] ${input.name}: match in displayValues? ${!!match}, displayValues:`, displayValues);
+    debugLog(`[validateRstd] ${input.name}: match in displayValues? ${!!match}, displayValues:`, displayValues);
     if (match) {
       // Normalize to canonical casing
       input.value = match;
@@ -1208,10 +1215,10 @@ function configureRtnValValidation(input: HTMLInputElement, container?: HTMLElem
 // This prevents users from entering SNGVAL values in secondary instances (idx > 0).
 // Example: CHGLIBL LIBL(*SAME ...) is invalid — *SAME must be the only value.
 function configureSngValValidation(input: HTMLInputElement, parm: Element, idx: number, container?: HTMLElement): void {
-  console.log(`[configureSngValValidation] ENTRY: input.name=${input.name}, idx=${idx}, parm=${parm.getAttribute('Kwd')}`);
+  debugLog(`[configureSngValValidation] ENTRY: input.name=${input.name}, idx=${idx}, parm=${parm.getAttribute('Kwd')}`);
 
   if (idx === 0) {
-    console.log(`[configureSngValValidation] Skipping idx=0`);
+    debugLog(`[configureSngValValidation] Skipping idx=0`);
     return; // First instance can have SNGVAL values
   }
 
@@ -1221,12 +1228,12 @@ function configureSngValValidation(input: HTMLInputElement, parm: Element, idx: 
   const parent = targetElement.parentElement || targetElement.parentNode;
   const isAlreadyWrapped = parent && (parent as Element).classList?.contains('parm-validation-wrapper');
 
-  console.log(`[configureSngValValidation] isAlreadyWrapped=${isAlreadyWrapped}, parent exists=${!!parent}`);
+  debugLog(`[configureSngValValidation] isAlreadyWrapped=${isAlreadyWrapped}, parent exists=${!!parent}`);
 
   if (isAlreadyWrapped) {
     // Validation already set up (likely by enhanced Rstd validation which now handles SNGVAL)
     // Skip to avoid duplicate wrapping and duplicate error messages
-    console.log(`[configureSngValValidation] Already wrapped, returning early`);
+    debugLog(`[configureSngValValidation] Already wrapped, returning early`);
     return;
   }
 
@@ -1243,9 +1250,9 @@ function configureSngValValidation(input: HTMLInputElement, parm: Element, idx: 
     parent.replaceChild(wrapper, targetElement);
     wrapper.appendChild(targetElement);
     wrapper.appendChild(errorSpan);
-    console.log(`[configureSngValValidation] Created wrapper and errorSpan for ${input.name}`);
+    debugLog(`[configureSngValValidation] Created wrapper and errorSpan for ${input.name}`);
   } else {
-    console.log(`[configureSngValValidation] WARNING: No parent found for ${input.name}, cannot create error span`);
+    debugLog(`[configureSngValValidation] WARNING: No parent found for ${input.name}, cannot create error span`);
   }
 
   const parentSngVals = getParentSngVals(parm);
@@ -1259,32 +1266,32 @@ function configureSngValValidation(input: HTMLInputElement, parm: Element, idx: 
 
   const validateSngVal = () => {
     const val = input.value.trim().toUpperCase();
-    console.log(`[validateSngVal] Called for ${input.name}, value="${val}", idx=${idx}`);
+    debugLog(`[validateSngVal] Called for ${input.name}, value="${val}", idx=${idx}`);
 
     errorSpan.classList.remove('visible');
     input.classList.remove('validation-error');
     input.setCustomValidity('');
 
     if (!val) {
-      console.log(`[validateSngVal] Empty value, clearing errors`);
+      debugLog(`[validateSngVal] Empty value, clearing errors`);
       return;
     }
 
     // Check both parent-level and ELEM0-level SNGVAL values
     const allSngVals = new Set([...parentSngVals, ...elem0SngVals]);
-    console.log(`[validateSngVal] ${input.name}: allSngVals=`, Array.from(allSngVals), `has "${val}"? ${allSngVals.has(val)}`);
+    debugLog(`[validateSngVal] ${input.name}: allSngVals=`, Array.from(allSngVals), `has "${val}"? ${allSngVals.has(val)}`);
 
     if (allSngVals.has(val)) {
-      console.log(`[configureSngValValidation] ✅ SNGVAL violation detected: \"${val}\" in input ${input.name}, idx=${idx}`);
+      debugLog(`[configureSngValValidation] ✅ SNGVAL violation detected: \"${val}\" in input ${input.name}, idx=${idx}`);
       const kwd = parm.getAttribute('Kwd') || 'parameter';
       const msg = `${val} must be only value for parameter`;
       input.setCustomValidity(msg);
       input.classList.add('validation-error');
       errorSpan.textContent = msg;
       errorSpan.classList.add('visible');
-      console.log(`[validateSngVal] ✅ Error message shown: "${msg}"`);
+      debugLog(`[validateSngVal] ✅ Error message shown: "${msg}"`);
     } else {
-      console.log(`[validateSngVal] No SNGVAL violation`);
+      debugLog(`[validateSngVal] No SNGVAL violation`);
     }
   };
 
@@ -1293,7 +1300,7 @@ function configureSngValValidation(input: HTMLInputElement, parm: Element, idx: 
   input.addEventListener('keydown', (e: KeyboardEvent) => {
     if (e.key === 'Enter') validateSngVal();
   });
-  console.log(`[configureSngValValidation] Event listeners attached for ${input.name}`);
+  debugLog(`[configureSngValValidation] Event listeners attached for ${input.name}`);
 }
 
 // Configure SNGVAL exclusivity validation for the FIRST instance (idx=0)
@@ -1555,13 +1562,13 @@ function attachTouchTracking(element: HTMLElement): void {
   const ts = new Date().toISOString().substring(11, 23);
   if (state.isInitializing) {
     // During initialization, just store the element for later
-    console.log(`[${ts}] [attachTouchTracking] ${fieldName} STORED (queue: ${state.elementsToTrack.length + 1})`);
+    debugLog(`[${ts}] [attachTouchTracking] ${fieldName} STORED (queue: ${state.elementsToTrack.length + 1})`);
     state.elementsToTrack.push(element);
     return;
   }
 
   // After initialization, attach listeners immediately
-  console.log(`[${ts}] [attachTouchTracking] ${fieldName} ATTACHED immediately`);
+  debugLog(`[${ts}] [attachTouchTracking] ${fieldName} ATTACHED immediately`);
   const markTouched = () => markFieldTouched(fieldName);
   element.addEventListener('change', markTouched);
   element.addEventListener('input', markTouched);
@@ -1570,21 +1577,21 @@ function attachTouchTracking(element: HTMLElement): void {
 // Attach listeners to all stored elements after initialization
 function attachStoredListeners(): void {
   const ts = new Date().toISOString().substring(11, 23);
-  console.log(`[${ts}] [attachStoredListeners] START - ${state.elementsToTrack.length} elements queued`);
-  console.log(`[${ts}] [attachStoredListeners] isInitializing = ${state.isInitializing}`);
-  console.log(`[${ts}] [attachStoredListeners] touchedFields.size = ${state.touchedFields.size}`);
+  debugLog(`[${ts}] [attachStoredListeners] START - ${state.elementsToTrack.length} elements queued`);
+  debugLog(`[${ts}] [attachStoredListeners] isInitializing = ${state.isInitializing}`);
+  debugLog(`[${ts}] [attachStoredListeners] touchedFields.size = ${state.touchedFields.size}`);
 
   state.elementsToTrack.forEach(element => {
     const fieldName = (element as any).name;
     if (fieldName) {
-      console.log(`[${ts}] [attachStoredListeners] Attaching '${fieldName}'`);
+      debugLog(`[${ts}] [attachStoredListeners] Attaching '${fieldName}'`);
       const markTouched = () => markFieldTouched(fieldName);
       element.addEventListener('change', markTouched);
       element.addEventListener('input', markTouched);
     }
   });
   state.elementsToTrack = [];
-  console.log(`[${ts}] [attachStoredListeners] COMPLETE - listeners attached, queue cleared`);
+  debugLog(`[${ts}] [attachStoredListeners] COMPLETE - listeners attached, queue cleared`);
 }
 
 // Apply dark green color to fields that have non-default values after initialization
@@ -1592,7 +1599,7 @@ function attachStoredListeners(): void {
 // This mimics the IBM i prompter's ">" indicator for user-specified values.
 function applyInitialFieldColors(): void {
   const ts = new Date().toISOString().substring(11, 23);
-  console.log(`[${ts}] [applyInitialFieldColors] START`);
+  debugLog(`[${ts}] [applyInitialFieldColors] START`);
 
   const inputs = document.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>('input[name], textarea[name]');
   let coloredCount = 0;
@@ -1605,20 +1612,20 @@ function applyInitialFieldColors(): void {
     if (wasInOriginalCommand(fieldName)) {
       input.style.color = '#006400';
       coloredCount++;
-      console.log(`[${ts}] [applyInitialFieldColors] ${fieldName}: was in original command → dark green`);
+      debugLog(`[${ts}] [applyInitialFieldColors] ${fieldName}: was in original command → dark green`);
     } else {
-      console.log(`[${ts}] [applyInitialFieldColors] ${fieldName}: not in original command → default color`);
+      debugLog(`[${ts}] [applyInitialFieldColors] ${fieldName}: not in original command → default color`);
     }
   });
 
-  console.log(`[${ts}] [applyInitialFieldColors] COMPLETE - ${coloredCount} fields colored dark green`);
+  debugLog(`[${ts}] [applyInitialFieldColors] COMPLETE - ${coloredCount} fields colored dark green`);
 }
 
 // Configure tab order to move logically between input fields
 // This ensures TAB moves from input to input, not to labels or other elements
 function configureTabOrder(focusFirst: boolean = true): void {
   const ts = new Date().toISOString().substring(11, 23);
-  console.log(`[${ts}] [configureTabOrder] START (focusFirst=${focusFirst})`);
+  debugLog(`[${ts}] [configureTabOrder] START (focusFirst=${focusFirst})`);
 
   // Find all input fields in the form (inputs, textareas, selects, cbinput elements)
   const form = document.getElementById('clForm');
@@ -1654,13 +1661,13 @@ function configureTabOrder(focusFirst: boolean = true): void {
     return isVisible && !isDisabled;
   });
 
-  console.log(`[${ts}] [configureTabOrder] Found ${visibleInputs.length} visible input fields`);
+  debugLog(`[${ts}] [configureTabOrder] Found ${visibleInputs.length} visible input fields`);
 
   // Set tabindex sequentially (starting from 1)
   visibleInputs.forEach((input, index) => {
     input.tabIndex = index + 1;
     const name = (input as HTMLInputElement).name || input.id || 'unnamed';
-    console.log(`[${ts}] [configureTabOrder] [${index + 1}] ${name}`);
+    debugLog(`[${ts}] [configureTabOrder] [${index + 1}] ${name}`);
   });
 
   // Remove tabindex from ALL labels to ensure they're not in tab order
@@ -1687,11 +1694,11 @@ function configureTabOrder(focusFirst: boolean = true): void {
   if (focusFirst && visibleInputs.length > 0) {
     setTimeout(() => {
       visibleInputs[0].focus();
-      console.log(`[${ts}] [configureTabOrder] Focused first input: ${(visibleInputs[0] as HTMLInputElement).name}`);
+      debugLog(`[${ts}] [configureTabOrder] Focused first input: ${(visibleInputs[0] as HTMLInputElement).name}`);
     }, 100);
   }
 
-  console.log(`[${ts}] [configureTabOrder] COMPLETE - Tab order configured for ${visibleInputs.length} inputs`);
+  debugLog(`[${ts}] [configureTabOrder] COMPLETE - Tab order configured for ${visibleInputs.length} inputs`);
 }
 
 /**
@@ -1727,7 +1734,7 @@ function configureFocusIndicators(): void {
     // Add focus event listener
     input.addEventListener('focus', () => {
       const inputName = (input as any).name || input.className;
-      console.log('[focus] Input:', inputName);
+      debugLog('[focus] Input:', inputName);
 
       // Find the associated label FIRST
       // For combined parameters (dropdown + textarea), the label is in the form-group that contains the textarea-cbinput-container
@@ -1741,26 +1748,26 @@ function configureFocusIndicators(): void {
         label = parent?.querySelector('label');
       }
 
-      console.log('[focus] Parent found?', !!parent, 'Label found?', !!label);
-      console.log('[focus] Parent classList:', parent?.classList.toString());
-      if (container) console.log('[focus] Inside textarea-cbinput-container');
+      debugLog('[focus] Parent found?', !!parent, 'Label found?', !!label);
+      debugLog('[focus] Parent classList:', parent?.classList.toString());
+      if (container) debugLog('[focus] Inside textarea-cbinput-container');
 
       // Check if THIS label already has an indicator (kept from blur event)
       let existingIndicator = label?.querySelector('.focus-indicator');
 
       // Remove any indicators from OTHER labels (not this one)
       const allIndicators = document.querySelectorAll('.focus-indicator');
-      console.log('[focus] Found', allIndicators.length, 'existing indicators');
+      debugLog('[focus] Found', allIndicators.length, 'existing indicators');
       allIndicators.forEach(ind => {
         if (ind.parentElement !== label) {
-          console.log('[focus] Removing indicator from other label');
+          debugLog('[focus] Removing indicator from other label');
           ind.remove();
         }
       });
 
       // If this label already has an indicator, make sure it's visible and return
       if (existingIndicator && existingIndicator.parentElement === label) {
-        console.log('[focus] ✓ Label already has indicator, enforcing visibility with !important');
+        debugLog('[focus] ✓ Label already has indicator, enforcing visibility with !important');
         const indicatorEl = existingIndicator as HTMLElement;
         // Use !important to override any CSS that might hide it
         indicatorEl.style.setProperty('display', 'inline', 'important');
@@ -1770,7 +1777,7 @@ function configureFocusIndicators(): void {
       }
 
       if (label) {
-        console.log('[focus] ✓ Adding indicator to label:', label.textContent?.substring(0, 30));
+        debugLog('[focus] ✓ Adding indicator to label:', label.textContent?.substring(0, 30));
 
         // Position the indicator at the right edge of the label.
         // The label has position:relative so the arrow is pinned to its right edge.
@@ -1788,7 +1795,7 @@ function configureFocusIndicators(): void {
 
         label.appendChild(indicator);
       } else {
-        console.log('[focus] ✗ No label found for input');
+        debugLog('[focus] ✗ No label found for input');
       }
     });
 
@@ -1799,7 +1806,7 @@ function configureFocusIndicators(): void {
 
       const inputName = (input as any).name || input.className;
       const targetName = (relatedTarget as any)?.name || relatedTarget?.className;
-      console.log('[blur] Input:', inputName, 'relatedTarget:', targetName);
+      debugLog('[blur] Input:', inputName, 'relatedTarget:', targetName);
 
       // If focus is moving to another input in the same group, don't remove the indicator
       // Check both the form-group and the textarea-cbinput-container
@@ -1809,13 +1816,13 @@ function configureFocusIndicators(): void {
         const parentContainer = input.closest('.textarea-cbinput-container');
         const relatedContainer = relatedTarget.closest('.textarea-cbinput-container');
 
-        console.log('[blur] Same form-group?', parentFormGroup === relatedFormGroup);
-        console.log('[blur] Same container?', parentContainer === relatedContainer, parentContainer && relatedContainer);
+        debugLog('[blur] Same form-group?', parentFormGroup === relatedFormGroup);
+        debugLog('[blur] Same container?', parentContainer === relatedContainer, parentContainer && relatedContainer);
 
         // Keep indicator if moving within same form-group OR same textarea-cbinput-container
         if ((parentFormGroup && parentFormGroup === relatedFormGroup) ||
             (parentContainer && parentContainer === relatedContainer)) {
-          console.log('[blur] ✓ Keeping indicator - focus staying in same group');
+          debugLog('[blur] ✓ Keeping indicator - focus staying in same group');
           return;
         }
       }
@@ -1823,15 +1830,15 @@ function configureFocusIndicators(): void {
       // If relatedTarget is undefined, wait briefly to see where focus actually went
       // This handles cases where the textarea briefly loses focus but regains it
       if (!relatedTarget) {
-        console.log('[blur] relatedTarget undefined, checking activeElement after delay');
+        debugLog('[blur] relatedTarget undefined, checking activeElement after delay');
         setTimeout(() => {
           const newFocus = document.activeElement as HTMLElement;
           const newFocusName = (newFocus as any)?.name || newFocus?.className;
-          console.log('[blur-delayed] activeElement is now:', newFocusName);
+          debugLog('[blur-delayed] activeElement is now:', newFocusName);
 
           // If focus is still on the same input, don't remove indicator
           if (newFocus === input) {
-            console.log('[blur-delayed] ✓ Focus still on same input, keeping indicator');
+            debugLog('[blur-delayed] ✓ Focus still on same input, keeping indicator');
             return;
           }
 
@@ -1840,12 +1847,12 @@ function configureFocusIndicators(): void {
           const newFocusContainer = newFocus?.closest('.textarea-cbinput-container');
 
           if (parentContainer && parentContainer === newFocusContainer) {
-            console.log('[blur-delayed] ✓ Focus returned to same container, keeping indicator');
+            debugLog('[blur-delayed] ✓ Focus returned to same container, keeping indicator');
             return;
           }
 
           // Remove indicator if focus has truly left
-          console.log('[blur-delayed] ✗ Removing indicator');
+          debugLog('[blur-delayed] ✗ Removing indicator');
           const parent = parentContainer ? parentContainer.closest('.form-group') : input.closest('.form-group');
           const label = parent?.querySelector('label');
           if (label) {
@@ -1858,7 +1865,7 @@ function configureFocusIndicators(): void {
         return;
       }
 
-      console.log('[blur] ✗ Removing indicator');
+      debugLog('[blur] ✗ Removing indicator');
       // Remove the indicator from the label
       // For combined parameters, look up to the form-group containing the textarea-cbinput-container
       let parent = input.closest('.form-group');
@@ -1897,7 +1904,7 @@ function createInputForType(type: string, name: string, dft: string, len: string
   // DspInput=NO means password field — always use a single-line input, never textarea
   const useLongInput = (dspInput === 'NO') ? false : (isLglType || isCmdType || effectiveLen > 80 || dftLen > 80);
 
-  console.log(`[createInputForType] name=${name}, type=${type}, effectiveLen=${effectiveLen}, dftLen=${dftLen}, isRestricted=${isRestricted}, isLglType=${isLglType}, isCmdType=${isCmdType}, useLongInput=${useLongInput}, suggestions:`, suggestions, 'dft:', dft);
+  debugLog(`[createInputForType] name=${name}, type=${type}, effectiveLen=${effectiveLen}, dftLen=${dftLen}, isRestricted=${isRestricted}, isLglType=${isLglType}, isCmdType=${isCmdType}, useLongInput=${useLongInput}, suggestions:`, suggestions, 'dft:', dft);
 
   // If there are suggestions AND it's a long input, use cbInput dropdown + textarea
   // The cbInput provides quick selection with CL variable support, textarea allows manual editing
@@ -1935,29 +1942,29 @@ function createInputForType(type: string, name: string, dft: string, len: string
     }
 
     // Add F4 handler for CMD/CMDSTR textareas
-    console.log(`[createInputForType] Checking F4 for ${name}, isCmdType=${isCmdType}, type=${type}`);
+    debugLog(`[createInputForType] Checking F4 for ${name}, isCmdType=${isCmdType}, type=${type}`);
     if (isCmdType) {
-      console.log(`[createInputForType] ✓ F4 handler ENABLED for ${name}`);
+      debugLog(`[createInputForType] ✓ F4 handler ENABLED for ${name}`);
       textarea.addEventListener('keydown', (e) => {
-        console.log(`[F4] Key: ${e.key} on ${name}`);
+        debugLog(`[F4] Key: ${e.key} on ${name}`);
         if (e.key === 'F4') {
-          console.log(`[F4] ✓ F4 detected on ${name}, value: "${textarea.value}"`);
+          debugLog(`[F4] ✓ F4 detected on ${name}, value: "${textarea.value}"`);
           e.preventDefault();
           const commandString = textarea.value.trim();
           if (commandString) {
-            console.log(`[F4] ✓ Sending promptNested for: ${commandString}`);
+            debugLog(`[F4] ✓ Sending promptNested for: ${commandString}`);
             vscode?.postMessage({
               type: 'promptNested',
               fieldId: name,
               commandString: commandString
             });
           } else {
-            console.log(`[F4] ✗ Empty command string, ignoring`);
+            debugLog(`[F4] ✗ Empty command string, ignoring`);
           }
         }
       });
     } else {
-      console.log(`[createInputForType] ✗ F4 handler NOT enabled for ${name}`);
+      debugLog(`[createInputForType] ✗ F4 handler NOT enabled for ${name}`);
     }
 
     // When user selects a predefined value from dropdown, immediately transfer to textarea
@@ -2138,29 +2145,29 @@ function createInputForType(type: string, name: string, dft: string, len: string
     }
 
     // Add F4 handler for CMD/CMDSTR textareas
-    console.log(`[createInputForType] Checking F4 for ${name}, isCmdType=${isCmdType}, type=${type}`);
+    debugLog(`[createInputForType] Checking F4 for ${name}, isCmdType=${isCmdType}, type=${type}`);
     if (isCmdType) {
-      console.log(`[createInputForType] ✓ F4 handler ENABLED for ${name}`);
+      debugLog(`[createInputForType] ✓ F4 handler ENABLED for ${name}`);
       textarea.addEventListener('keydown', (e) => {
-        console.log(`[F4] Key: ${e.key} on ${name}`);
+        debugLog(`[F4] Key: ${e.key} on ${name}`);
         if (e.key === 'F4') {
-          console.log(`[F4] ✓ F4 detected on ${name}, value: "${textarea.value}"`);
+          debugLog(`[F4] ✓ F4 detected on ${name}, value: "${textarea.value}"`);
           e.preventDefault();
           const commandString = textarea.value.trim();
           if (commandString) {
-            console.log(`[F4] ✓ Sending promptNested for: ${commandString}`);
+            debugLog(`[F4] ✓ Sending promptNested for: ${commandString}`);
             vscode?.postMessage({
               type: 'promptNested',
               fieldId: name,
               commandString: commandString
             });
           } else {
-            console.log(`[F4] ✗ Empty command string, ignoring`);
+            debugLog(`[F4] ✗ Empty command string, ignoring`);
           }
         }
       });
     } else {
-      console.log(`[createInputForType] ✗ F4 handler NOT enabled for ${name}`);
+      debugLog(`[createInputForType] ✗ F4 handler NOT enabled for ${name}`);
     }
 
     return textarea;
@@ -2175,7 +2182,7 @@ function createInputForType(type: string, name: string, dft: string, len: string
     attachTouchTracking(input);
 
     // Add blur handler for VARNAME validation only (no case conversion)
-    console.log('[createInputForType] Attaching blur handler to:', name, 'type:', type);
+    debugLog('[createInputForType] Attaching blur handler to:', name, 'type:', type);
 
     // Track the most-recent non-& value so it can be restored after a & expansion.
     input.dataset.preExpandValue = input.value;
@@ -2186,7 +2193,7 @@ function createInputForType(type: string, name: string, dft: string, len: string
     });
 
     input.addEventListener('blur', () => {
-      console.log('[blur handler] Fired for:', input.name, 'value:', input.value, 'type:', type);
+      debugLog('[blur handler] Fired for:', input.name, 'value:', input.value, 'type:', type);
 
       // IBM i CL prompter expand: a lone '&' tabbed away — expand the field and restore the prior value.
       // '&' alone (not '&NAME') signals the user wants more input space.
@@ -2209,7 +2216,7 @@ function createInputForType(type: string, name: string, dft: string, len: string
       // Type=VARNAME validation: must start with & and be max 11 chars total
       // Do NOT uppercase - let the command builder handle that
       if (typeUpper === 'VARNAME' && input.value) {
-        console.log('[blur handler] VARNAME validation - original value:', input.value);
+        debugLog('[blur handler] VARNAME validation - original value:', input.value);
         let normalized = input.value;
 
         if (!normalized.startsWith('&')) {
@@ -2223,7 +2230,7 @@ function createInputForType(type: string, name: string, dft: string, len: string
 
         if (normalized !== input.value) {
           input.value = normalized;
-          console.log('[blur handler] VARNAME adjusted to:', input.value);
+          debugLog('[blur handler] VARNAME adjusted to:', input.value);
         }
       }
       // Note: Case conversion is handled by buildCLCommand() based on convertParmValueToUpperCase setting
@@ -2238,18 +2245,18 @@ function createInputForType(type: string, name: string, dft: string, len: string
 
 // Create parm input (cbInput or textfield for all parameters to support CL variables)
 function createParmInput(name: string, suggestions: string[], isRestricted: boolean, dft: string, len?: string, type?: string, full?: string, alwVar?: boolean, dspInput?: string, rtnVal?: boolean, idx?: number, parm?: Element): HTMLElement {
-  console.log(`[createParmInput] ${name}: idx=${idx}, isRestricted=${isRestricted}, suggestions.length=${suggestions.length}`);
+  debugLog(`[createParmInput] ${name}: idx=${idx}, isRestricted=${isRestricted}, suggestions.length=${suggestions.length}`);
   // Filter out SNGVAL values from dropdown for secondary instances (idx > 0)
   // SNGVAL values are exclusive and must be the only value for a parameter
   if (idx !== undefined && idx > 0 && parm) {
     const parentSngVals = getParentSngVals(parm);
     if (parentSngVals.size > 0) {
-      console.log(`[createParmInput] Filtering SNGVAL values for idx=${idx}:`, Array.from(parentSngVals));
+      debugLog(`[createParmInput] Filtering SNGVAL values for idx=${idx}:`, Array.from(parentSngVals));
       suggestions = suggestions.filter(s => !parentSngVals.has(s.toUpperCase()));
     }
   }
 
-  console.log(`[createParmInput] ${name}: suggestions=`, suggestions, 'isRestricted=', isRestricted, 'type=', type, 'full=', full);
+  debugLog(`[createParmInput] ${name}: suggestions=`, suggestions, 'isRestricted=', isRestricted, 'type=', type, 'full=', full);
   // RtnVal=YES: skip CBInput path — only a CL variable name may be specified
   if (rtnVal) {
     return createInputForType(type || 'CHAR', name, dft, len || '', suggestions, false, full, alwVar, dspInput, rtnVal);
@@ -2307,7 +2314,7 @@ function createParmInput(name: string, suggestions: string[], isRestricted: bool
     // Attach Rstd validation (shows "Value entered is not valid" for values outside the allowed list)
     // For secondary instances, this also shows SNGVAL-specific errors
     setTimeout(() => {
-      console.log(`[createParmInput setTimeout] About to call configureRstdValidation with idx=${idx}, parm=${parm?.getAttribute('Kwd')}`);
+      debugLog(`[createParmInput setTimeout] About to call configureRstdValidation with idx=${idx}, parm=${parm?.getAttribute('Kwd')}`);
       configureRstdValidation(inputElement, suggestions, cbinput.getElement(), alwVar, idx, parm);
       // Also attach Rel/RelVal constraint validation if any _REL_ entries exist
       if (parseRelConstraints(suggestions).length > 0) {
@@ -2315,10 +2322,10 @@ function createParmInput(name: string, suggestions: string[], isRestricted: bool
       }
     }, 0);
 
-    console.log('[clPrompter] ', 'createParmInput end1');
+    debugLog('[clPrompter] ', 'createParmInput end1');
     return cbinput.getElement();
   } else {
-    console.log('[clPrompter] ', 'createParmInput end2');
+    debugLog('[clPrompter] ', 'createParmInput end2');
     return createInputForType(type || 'CHAR', name, dft, len || '', suggestions, isRestricted, full, alwVar, dspInput, rtnVal, idx, parm);
   }
 }
@@ -2360,7 +2367,7 @@ function createQualInput(
   const allowedVals = Array.from(new Set(fromMap.concat(xmlVals)));
   const restricted = isRestricted(qual);
 
-  console.log(`[createQualInput] ${qualName}: xmlVals=`, xmlVals, 'fromMap=', fromMap, 'allowedVals=', allowedVals, 'restricted=', restricted);
+  debugLog(`[createQualInput] ${qualName}: xmlVals=`, xmlVals, 'fromMap=', fromMap, 'allowedVals=', allowedVals, 'restricted=', restricted);
 
   // Default: for first part, prefer parent Dft if it’s among parent SngVal
   let dft = qualDft || '';
@@ -2494,9 +2501,9 @@ function renderSimpleParm(parm: ParmElement, kwd: string, container: HTMLElement
   let idx: number | undefined = undefined;
   if (instanceId && /_INST\d+$/.test(instanceId)) {
     idx = Number(instanceId.replace(/.*_INST/, ''));
-    console.log(`[renderSimpleParm] Extracted idx=${idx} from instanceId=${instanceId} for kwd=${kwd}`);
+    debugLog(`[renderSimpleParm] Extracted idx=${idx} from instanceId=${instanceId} for kwd=${kwd}`);
   } else {
-    console.log(`[renderSimpleParm] No idx extracted (instanceId=${instanceId}) for kwd=${kwd}`);
+    debugLog(`[renderSimpleParm] No idx extracted (instanceId=${instanceId}) for kwd=${kwd}`);
   }
 
   const input = createParmInput(inputName, allowedVals, restricted, dft, effectiveLenAttr, type, fullAttr, alwVar, dspInput, rtnVal, idx, parm as unknown as Element);
@@ -2585,7 +2592,7 @@ function renderSimpleParm(parm: ParmElement, kwd: string, container: HTMLElement
 
 // Render QUAL parm
 function renderQualParm(parm: ParmElement, kwd: string, container: HTMLElement, prompt: string, idx: number, max: number): void {
-  console.log('[clPrompter] ', 'renderQualParm start');
+  debugLog('[clPrompter] ', 'renderQualParm start');
 
   const qualParts = parm.querySelectorAll(':scope > Qual');
   const numParts = qualParts.length || 2;
@@ -2672,7 +2679,7 @@ function renderQualParm(parm: ParmElement, kwd: string, container: HTMLElement, 
     }
   }
 
-  console.log('[clPrompter] ', 'renderQualParm end');
+  debugLog('[clPrompter] ', 'renderQualParm end');
 }
 
 function populateSimpleParm(kwd: string, parm: Element, value: string) {
@@ -2691,7 +2698,7 @@ function populateSimpleParm(kwd: string, parm: Element, value: string) {
 
 // Render ELEM parm
 function renderElemParm(parm: ParmElement, kwd: string, idx: number, container: HTMLElement, prompt: string, dft: string, max: number): void {
-  console.log('[clPrompter] ', 'renderElemParm start');
+  debugLog('[clPrompter] ', 'renderElemParm start');
   const isMultiInstance = max > 1; // Don't pre-fill defaults for multi-instance
   const fieldset = document.createElement('fieldset');
   fieldset.className = 'elem-group';
@@ -2956,12 +2963,12 @@ function renderElemParm(parm: ParmElement, kwd: string, idx: number, container: 
     }
   });
   container.appendChild(fieldset);
-  console.log('[clPrompter] ', 'renderElemParm end');
+  debugLog('[clPrompter] ', 'renderElemParm end');
 }
 
 // Render parm instance
 function renderParmInstance(parm: ParmElement, kwd: string, idx: number, max: number, multiGroupDiv: HTMLElement | null): HTMLElement {
-  console.log('[clPrompter] ', 'renderParmInstance start');
+  debugLog('[clPrompter] ', 'renderParmInstance start');
   const instDiv = document.createElement('div');
   instDiv.className = 'parm-instance';
   instDiv.dataset.kwd = kwd;
@@ -2983,7 +2990,7 @@ function renderParmInstance(parm: ParmElement, kwd: string, idx: number, max: nu
   if (idx > 0 && dft) {
     const parentSngVals = getParentSngVals(parm);
     if (parentSngVals.has(dft.toUpperCase())) {
-      console.log(`[renderParmInstance] ${kwd} idx=${idx}: default "${dft}" is a SngVal, using empty string instead`);
+      debugLog(`[renderParmInstance] ${kwd} idx=${idx}: default "${dft}" is a SngVal, using empty string instead`);
       dft = '';
     }
   }
@@ -3007,7 +3014,7 @@ function renderParmInstance(parm: ParmElement, kwd: string, idx: number, max: nu
   if (max > 1 && multiGroupDiv) {
     addMultiInstanceControls(instDiv, parm, kwd, idx, max, multiGroupDiv);
   }
-  console.log('[clPrompter] ', 'renderParmInstance end');
+  debugLog('[clPrompter] ', 'renderParmInstance end');
   return instDiv;
 }
 
@@ -3042,7 +3049,7 @@ function hideBtnTooltip(): void {
 }
 
 function addMultiInstanceControls(container: HTMLElement, parm: ParmElement, kwd: string, idx: number, max: number, multiGroupDiv: HTMLElement): void {
-  console.log('[clPrompter] ', 'addMultiInstanceControls start');
+  debugLog('[clPrompter] ', 'addMultiInstanceControls start');
   const btnBar = document.createElement('div');
   btnBar.className = 'multi-inst-controls';
 
@@ -3063,12 +3070,12 @@ function addMultiInstanceControls(container: HTMLElement, parm: ParmElement, kwd
 
         // Apply dark green color to new instance if it was in the original command
         const newInput = newInst.querySelector('input[name], textarea[name]') as HTMLInputElement;
-        console.log('[+ button] New input:', newInput, 'name:', newInput?.name, 'wasInOriginalCommand:', wasInOriginalCommand(newInput?.name || ''));
+        debugLog('[+ button] New input:', newInput, 'name:', newInput?.name, 'wasInOriginalCommand:', wasInOriginalCommand(newInput?.name || ''));
         if (newInput && wasInOriginalCommand(newInput.name)) {
-          console.log('[+ button] Applying dark green color to:', newInput.name);
+          debugLog('[+ button] Applying dark green color to:', newInput.name);
           newInput.style.color = '#006400';
         } else {
-          console.log('[+ button] NOT applying color. newInput:', !!newInput, 'wasInOriginalCommand:', wasInOriginalCommand(newInput?.name || ''));
+          debugLog('[+ button] NOT applying color. newInput:', !!newInput, 'wasInOriginalCommand:', wasInOriginalCommand(newInput?.name || ''));
         }
 
         // Reconfigure tab order to include the newly added instance
@@ -3121,18 +3128,18 @@ function addMultiInstanceControls(container: HTMLElement, parm: ParmElement, kwd
     btnBar.appendChild(removeBtn);
   }
   container.appendChild(btnBar);
-  console.log('[clPrompter] ', 'addMultiInstanceControls end');
+  debugLog('[clPrompter] ', 'addMultiInstanceControls end');
 }
 
 // Main form renderer
 function loadForm(): void {
   const ts = new Date().toISOString().substring(11, 23);
   const _tLF = performance.now();
-  console.log(`[${ts}] [loadForm] START`);
+  debugLog(`[${ts}] [loadForm] START`);
   state.isInitializing = true;
   state.touchedFields.clear();
   state.elementsToTrack = [];
-  console.log(`[${ts}] [loadForm] isInitializing = true, touchedFields cleared, queue cleared`);
+  debugLog(`[${ts}] [loadForm] isInitializing = true, touchedFields cleared, queue cleared`);
   if (!state.xmlDoc) return;
   const form = document.getElementById('clForm');
   if (!form) return;
@@ -3159,24 +3166,24 @@ function loadForm(): void {
       form.appendChild(renderParmInstance(parm, kwd, 0, 1, null));
     }
   });
-  console.log(`[clPrompter:PERF]   renderParmInstances (${state.parms.length} parms): ${(performance.now() - _tRender).toFixed(1)}ms`);
+  debugLog(`[clPrompter:PERF]   renderParmInstances (${state.parms.length} parms): ${(performance.now() - _tRender).toFixed(1)}ms`);
 
   // Calculate and apply optimal label width after all parameters are rendered
   const _tOpt = performance.now();
   optimizeLabelWidth();
-  console.log(`[clPrompter:PERF]   optimizeLabelWidth: ${(performance.now() - _tOpt).toFixed(1)}ms`);
+  debugLog(`[clPrompter:PERF]   optimizeLabelWidth: ${(performance.now() - _tOpt).toFixed(1)}ms`);
 
   // Form initialization complete - now track user touches
   const ts2 = new Date().toISOString().substring(11, 23);
-  console.log(`[${ts2}] [loadForm] Setting isInitializing = false`);
+  debugLog(`[${ts2}] [loadForm] Setting isInitializing = false`);
   state.isInitializing = false;
-  console.log(`[${ts2}] [loadForm] About to call attachStoredListeners()`);
+  debugLog(`[${ts2}] [loadForm] About to call attachStoredListeners()`);
   const _tAsl = performance.now();
   attachStoredListeners();
-  console.log(`[clPrompter:PERF]   attachStoredListeners: ${(performance.now() - _tAsl).toFixed(1)}ms`);
+  debugLog(`[clPrompter:PERF]   attachStoredListeners: ${(performance.now() - _tAsl).toFixed(1)}ms`);
   const _tAifc = performance.now();
   applyInitialFieldColors();
-  console.log(`[clPrompter:PERF]   applyInitialFieldColors: ${(performance.now() - _tAifc).toFixed(1)}ms`);
+  debugLog(`[clPrompter:PERF]   applyInitialFieldColors: ${(performance.now() - _tAifc).toFixed(1)}ms`);
   const _tTab = performance.now();
   // Only schedule the focus timer here if no values will be populated afterward.
   // When state.originalParmMap has entries, populateFormFromValues() runs in a
@@ -3184,14 +3191,14 @@ function loadForm(): void {
   // there (after PmtCtl visibility is applied) avoids a double-focus race.
   const _willPopulate = Object.keys(state.originalParmMap).length > 0;
   configureTabOrder(!_willPopulate); // Configure tab navigation to move between input fields
-  console.log(`[clPrompter:PERF]   configureTabOrder: ${(performance.now() - _tTab).toFixed(1)}ms`);
+  debugLog(`[clPrompter:PERF]   configureTabOrder: ${(performance.now() - _tTab).toFixed(1)}ms`);
   const _tFocus = performance.now();
   configureFocusIndicators(); // Add visual focus indicators (arrows) to all inputs
-  console.log(`[clPrompter:PERF]   configureFocusIndicators: ${(performance.now() - _tFocus).toFixed(1)}ms`);
+  debugLog(`[clPrompter:PERF]   configureFocusIndicators: ${(performance.now() - _tFocus).toFixed(1)}ms`);
   const _tPmtctl = performance.now();
   applyPmtCtlVisibility(); // Apply initial prompt-control show/hide based on current field values
-  console.log(`[clPrompter:PERF]   applyPmtCtlVisibility: ${(performance.now() - _tPmtctl).toFixed(1)}ms`);
-  console.log(`[${ts2}] [loadForm] END - Form ready for user interaction`);
+  debugLog(`[clPrompter:PERF]   applyPmtCtlVisibility: ${(performance.now() - _tPmtctl).toFixed(1)}ms`);
+  debugLog(`[${ts2}] [loadForm] END - Form ready for user interaction`);
 }
 
 // Calculate the longest label and set a CSS custom property for optimal grid sizing
@@ -3214,7 +3221,7 @@ function optimizeLabelWidth(): void {
   // Set CSS custom property on the document root
   document.documentElement.style.setProperty('--clp-label-width', `${optimalWidth}ch`);
 
-  console.log(`[clPrompter] Optimized label width: ${optimalWidth}ch (max label: ${maxLength} chars)`);
+  debugLog(`[clPrompter] Optimized label width: ${optimalWidth}ch (max label: ${maxLength} chars)`);
 }
 
 function getParentSngVals(parm: Element): Set<string> {
@@ -3268,21 +3275,21 @@ function isNestedElemAtDefault(parm: Element, elemIndex: number, selector: (subI
 
     const input = selector(j);
     const value = (input?.value || '').trim();
-    console.log(`[DEBUG nested] SUB${j} value: "${value}", default: "${subDefault}"`);
+    debugLog(`[DEBUG nested] SUB${j} value: "${value}", default: "${subDefault}"`);
 
     // If value exists and doesn't match default, this nested ELEM is not at default
     if (value && !matchesDefault(value, subDefault)) {
-      console.log(`[DEBUG nested] SUB${j} NON-DEFAULT (value doesn't match)`);
+      debugLog(`[DEBUG nested] SUB${j} NON-DEFAULT (value doesn't match)`);
       return false;
     }
     // If value is empty and default is not empty, also not at default
     if (!value && subDefault) {
-      console.log(`[DEBUG nested] SUB${j} NON-DEFAULT (empty value but has default)`);
+      debugLog(`[DEBUG nested] SUB${j} NON-DEFAULT (empty value but has default)`);
       return false;
     }
   }
 
-  console.log(`[DEBUG nested] All subs at defaults`);
+  debugLog(`[DEBUG nested] All subs at defaults`);
   return true;
 }
 
@@ -3411,14 +3418,14 @@ function splitQualLeftToRight(val: string): string[] {
 
 // Populate form from values
 function populateFormFromValues(values: ParmMap): void {
-  console.log('[clPrompter] populateFormFromValues start, values:', values);
+  debugLog('[clPrompter] populateFormFromValues start, values:', values);
   state.isInitializing = true;
   Object.entries(values).forEach(([kwd, val]) => {
-    console.log(`[clPrompter] Populating ${kwd} with val:`, val);
+    debugLog(`[clPrompter] Populating ${kwd} with val:`, val);
 
     const parm = state.parms.find(p => p.getAttribute('Kwd') === kwd);
     if (!parm) {
-      console.log(`[clPrompter] Parm not found for ${kwd}`);
+      debugLog(`[clPrompter] Parm not found for ${kwd}`);
       return;
     }
     const max = parseInt(parm.getAttribute('Max') || '1', 10);
@@ -3447,7 +3454,7 @@ function populateFormFromValues(values: ParmMap): void {
             if (input.classList?.contains('cbinput-container')) {
               const actualInput = input.querySelector('.cbinput-input') as HTMLInputElement;
               if (actualInput) {
-                console.log(`[clPrompter] Found cbInput container, using actual input element`);
+                debugLog(`[clPrompter] Found cbInput container, using actual input element`);
                 input = actualInput;
               }
             }
@@ -3466,13 +3473,13 @@ function populateFormFromValues(values: ParmMap): void {
         populateQualInputs(parm, state.parmMetas[kwd] || {}, kwd, instances[0], 0, document);
       } else {
         let input = document.querySelector(`[name="${kwd}"]`) as HTMLInputElement;
-        console.log(`[clPrompter] Input for ${kwd}:`, input);
+        debugLog(`[clPrompter] Input for ${kwd}:`, input);
         if (input) {
           // Check if we found a cbInput container - if so, get the actual input element
           if (input.classList?.contains('cbinput-container')) {
             const actualInput = input.querySelector('.cbinput-input') as HTMLInputElement;
             if (actualInput) {
-              console.log(`[clPrompter] Found cbInput container, using actual input element`);
+              debugLog(`[clPrompter] Found cbInput container, using actual input element`);
               input = actualInput;
             }
           }
@@ -3480,11 +3487,11 @@ function populateFormFromValues(values: ParmMap): void {
           const rawVal = instances[0][0]; // Simple param: first instance, first element
           const allowedVals = (state.allowedValsMap || {})[kwd] || [];
           const normalizedVal = normalizeValue(rawVal, allowedVals, parm);
-          console.log(`[clPrompter] Setting ${kwd} from "${input.value}" to "${normalizedVal}" (original: "${rawVal}")`);
+          debugLog(`[clPrompter] Setting ${kwd} from "${input.value}" to "${normalizedVal}" (original: "${rawVal}")`);
           input.value = normalizedVal;
-          console.log(`[clPrompter] Set ${kwd} to "${input.value}"`);
+          debugLog(`[clPrompter] Set ${kwd} to "${input.value}"`);
         } else {
-          console.log(`[clPrompter] Input not found for ${kwd}`);
+          debugLog(`[clPrompter] Input not found for ${kwd}`);
         }
       }
     }
@@ -3510,21 +3517,21 @@ function populateFormFromValues(values: ParmMap): void {
     el.dataset.preExpandValue = el.value;
   });
 
-  console.log('[clPrompter] populateFormFromValues end');
+  debugLog('[clPrompter] populateFormFromValues end');
 }
 
 // Helpers for population (simplified; expand as needed)
 function populateElemInputs(parm: ParmElement, parmMeta: ParmMetaMap[string], kwd: string, instance: string[], idx: number, container: HTMLElement | Document): void {
-  console.log(`[clPrompter] populateElemInputs for ${kwd}, instance:`, instance);
-  console.log(`[clPrompter] Instance array length: ${instance.length}`);
+  debugLog(`[clPrompter] populateElemInputs for ${kwd}, instance:`, instance);
+  debugLog(`[clPrompter] Instance array length: ${instance.length}`);
   const elemParts = parm.querySelectorAll(':scope > Elem');
-  console.log(`[clPrompter] Number of ELEM parts in XML: ${elemParts.length}`);
+  debugLog(`[clPrompter] Number of ELEM parts in XML: ${elemParts.length}`);
 
   instance.forEach((elemValue, i) => {
-    console.log(`[clPrompter] Processing ELEM ${i}: value="${elemValue}"`);
+    debugLog(`[clPrompter] Processing ELEM ${i}: value="${elemValue}"`);
     const elem = elemParts[i] as Element | undefined;
     if (!elem) {
-      console.log(`[clPrompter] ❌ No ELEM definition found for index ${i}`);
+      debugLog(`[clPrompter] ❌ No ELEM definition found for index ${i}`);
       return;
     }
     const elemType = String(elem.getAttribute('Type') || 'CHAR');
@@ -3536,10 +3543,10 @@ function populateElemInputs(parm: ParmElement, parmMeta: ParmMetaMap[string], kw
       let qualParts: string[];
       if (Array.isArray(elemValue)) {
         qualParts = elemValue; // Already split by parser
-        console.log(`[clPrompter] QUAL is already array:`, qualParts);
+        debugLog(`[clPrompter] QUAL is already array:`, qualParts);
       } else {
         qualParts = splitQualLeftToRight(elemValue); // Split the string
-        console.log(`[clPrompter] QUAL split from string "${elemValue}":`, qualParts);
+        debugLog(`[clPrompter] QUAL split from string "${elemValue}":`, qualParts);
       }
       // Use full name with INST for consistency with webview input naming
       populateQualInputs(elem as unknown as ParmElement, parmMeta, `${kwd}_INST${idx}_ELEM${i}`, qualParts, idx, container);
@@ -3549,17 +3556,17 @@ function populateElemInputs(parm: ParmElement, parmMeta: ParmMetaMap[string], kw
         // Nested ELEM group - parse parenthesized content
         // elemValue can be a string like "(*BEFORE 'text')" or already an array [] from parser
         const subParts = Array.isArray(elemValue) ? elemValue : parseParenthesizedContent(elemValue);
-        console.log(`[clPrompter] Nested ELEM ${kwd}_INST${idx}_ELEM${i} subParts:`, subParts);
+        debugLog(`[clPrompter] Nested ELEM ${kwd}_INST${idx}_ELEM${i} subParts:`, subParts);
 
         subParts.forEach((subPart, j) => {
           let input = container.querySelector(`[name="${kwd}_INST${idx}_ELEM${i}_SUB${j}"]`) as any;
-          console.log(`[clPrompter] Input ${kwd}_INST${idx}_ELEM${i}_SUB${j}:`, input);
+          debugLog(`[clPrompter] Input ${kwd}_INST${idx}_ELEM${i}_SUB${j}:`, input);
           if (input) {
             // Check if we found a cbInput container - if so, get the actual input element
             if (input.classList?.contains('cbinput-container')) {
               const actualInput = input.querySelector('.cbinput-input');
               if (actualInput) {
-                console.log(`[clPrompter] Found cbInput container, using actual input element`);
+                debugLog(`[clPrompter] Found cbInput container, using actual input element`);
                 input = actualInput;
               }
             }
@@ -3567,25 +3574,25 @@ function populateElemInputs(parm: ParmElement, parmMeta: ParmMetaMap[string], kw
             const sNode = subElems[j] as Element | null;
             const allowedVals = sNode ? ((state.allowedValsMap || {})[`${kwd}_INST${idx}_ELEM${i}_SUB${j}`] || []) : [];
             const normalizedVal = normalizeValue(subPart, allowedVals, sNode);
-            console.log(`[clPrompter] Setting ${kwd}_INST${idx}_ELEM${i}_SUB${j} from "${input.value}" to "${normalizedVal}" (original: "${subPart}")`);
+            debugLog(`[clPrompter] Setting ${kwd}_INST${idx}_ELEM${i}_SUB${j} from "${input.value}" to "${normalizedVal}" (original: "${subPart}")`);
             input.value = normalizedVal;
-            console.log(`[clPrompter] Set ${kwd}_INST${idx}_ELEM${i}_SUB${j} to "${input.value}"`);
+            debugLog(`[clPrompter] Set ${kwd}_INST${idx}_ELEM${i}_SUB${j} to "${input.value}"`);
             const len = Number.parseInt(String(sNode?.getAttribute('Len') || ''), 10) || undefined;
             const inl = resolveInlPmtLen(String(sNode?.getAttribute('InlPmtLen') || ''));
             ensureMinInputWidth(input as HTMLElement, { len, inlPmtLen: inl, valueLen: String(subPart ?? '').length });
           } else {
-            console.log(`[clPrompter] Input not found for ${kwd}_INST${idx}_ELEM${i}_SUB${j}`);
+            debugLog(`[clPrompter] Input not found for ${kwd}_INST${idx}_ELEM${i}_SUB${j}`);
           }
         });
       } else {
         let input = container.querySelector(`[name="${kwd}_INST${idx}_ELEM${i}"]`) as any;
-        console.log(`[clPrompter] Input ${kwd}_INST${idx}_ELEM${i}:`, input);
+        debugLog(`[clPrompter] Input ${kwd}_INST${idx}_ELEM${i}:`, input);
         if (input) {
           // Check if we found a cbInput container - if so, get the actual input element
           if (input.classList?.contains('cbinput-container')) {
             const actualInput = input.querySelector('.cbinput-input');
             if (actualInput) {
-              console.log(`[clPrompter] Found cbInput container, using actual input element`);
+              debugLog(`[clPrompter] Found cbInput container, using actual input element`);
               input = actualInput;
             }
           }
@@ -3594,24 +3601,24 @@ function populateElemInputs(parm: ParmElement, parmMeta: ParmMetaMap[string], kw
           // and from state.allowedValsMap as fallback
           const allowedFromMap = (state.allowedValsMap || {})[kwd] || [];
           const normalizedVal = normalizeValue(elemValue, allowedFromMap, elem);
-          console.log(`[clPrompter] Setting ${kwd}_INST${idx}_ELEM${i} from "${input.value}" to "${normalizedVal}" (original: "${elemValue}")`);
+          debugLog(`[clPrompter] Setting ${kwd}_INST${idx}_ELEM${i} from "${input.value}" to "${normalizedVal}" (original: "${elemValue}")`);
           input.value = normalizedVal;
-          console.log(`[clPrompter] Set ${kwd}_INST${idx}_ELEM${i} to "${input.value}"`);
+          debugLog(`[clPrompter] Set ${kwd}_INST${idx}_ELEM${i} to "${input.value}"`);
           const len = Number.parseInt(String(elem.getAttribute('Len') || ''), 10) || undefined;
           const inl = resolveInlPmtLen(String(elem.getAttribute('InlPmtLen') || ''));
           ensureMinInputWidth(input as HTMLElement, { len, inlPmtLen: inl, valueLen: String(elemValue ?? '').length });
         } else {
-          console.log(`[clPrompter] Input not found for ${kwd}_INST${idx}_ELEM${i}`);
+          debugLog(`[clPrompter] Input not found for ${kwd}_INST${idx}_ELEM${i}`);
         }
       }
     }
   });
-  console.log('[clPrompter] populateElemInputs end');
+  debugLog('[clPrompter] populateElemInputs end');
 }
 
 
 function populateQualInputs(parm: ParmElement, parmMeta: ParmMetaMap[string], kwd: string, instance: string[], idx: number, container: HTMLElement | Document): void {
-  console.log('[clPrompter] populateQualInputs start, instance:', instance);
+  debugLog('[clPrompter] populateQualInputs start, instance:', instance);
 
   const qualNodes = parm.querySelectorAll(':scope > Qual');
 
@@ -3625,7 +3632,7 @@ function populateQualInputs(parm: ParmElement, parmMeta: ParmMetaMap[string], kw
     if (input.classList?.contains('cbinput-container')) {
       const actualInput = input.querySelector('.cbinput-input');
       if (actualInput) {
-        console.log(`[clPrompter] Found cbInput container, using actual input element`);
+        debugLog(`[clPrompter] Found cbInput container, using actual input element`);
         input = actualInput;
       }
     }
@@ -3634,24 +3641,24 @@ function populateQualInputs(parm: ParmElement, parmMeta: ParmMetaMap[string], kw
     const qNode = qualNodes[i] as Element | null;
     const allowedVals = (state.allowedValsMap || {})[`${kwd}_QUAL${i}`] || [];
     const newVal = normalizeValue(rawVal, allowedVals, qNode);
-    console.log(`[clPrompter] Input ${kwd}_QUAL${i}:`, input);
+    debugLog(`[clPrompter] Input ${kwd}_QUAL${i}:`, input);
 
     // Set normalized value
     if (input.value !== newVal) {
-      console.log(`[clPrompter] Setting ${kwd}_QUAL${i} from "${input.value}" to "${newVal}" (original: "${rawVal}")`);
+      debugLog(`[clPrompter] Setting ${kwd}_QUAL${i} from "${input.value}" to "${newVal}" (original: "${rawVal}")`);
       input.value = newVal;
-      console.log(`[clPrompter] Set ${kwd}_QUAL${i} to "${input.value}"`);
+      debugLog(`[clPrompter] Set ${kwd}_QUAL${i} to "${input.value}"`);
     }
 
     const len = Number.parseInt(String(qNode?.getAttribute('Len') || ''), 10) || undefined;
     const inl = Number.parseInt(String(qNode?.getAttribute('InlPmtLen') || ''), 10) || undefined;
     ensureMinInputWidth(input as HTMLElement, { len, inlPmtLen: inl, valueLen: newVal.length });
   }
-  console.log('[clPrompter] populateQualInputs end');
+  debugLog('[clPrompter] populateQualInputs end');
 }
 
 function ensureInstanceCount(group: HTMLElement, parm: ParmElement, kwd: string, targetCount: number, max: number): void {
-  console.log('[clPrompter] ', 'ensureInstanceCount start');
+  debugLog('[clPrompter] ', 'ensureInstanceCount start');
   // NOTE: This must be synchronous. populateFormFromValues calls it without
   // awaiting, and the body-reveal sequence (setTimeout(0) x2 + rAF) flushes
   // within a few ms. Any async yield here (e.g. setTimeout(r, 10)) causes the
@@ -3672,7 +3679,7 @@ function ensureInstanceCount(group: HTMLElement, parm: ParmElement, kwd: string,
       group.appendChild(newInst);
     }
   }
-  console.log('[clPrompter] ', 'ensureInstanceCount end');
+  debugLog('[clPrompter] ', 'ensureInstanceCount end');
 }
 ///////
 // Assemble current values
@@ -3710,11 +3717,11 @@ function assembleCurrentParmMap(): ParmMap {
             firstElemInput = inst.querySelector(`[name="${kwd}_INST${instIdx}_ELEM0"]`) as HTMLInputElement | null;
           }
           const firstElemVal = (firstElemInput?.value || '').trim();
-          console.log(`[DEBUG] ${kwd} instance ELEM0 value: "${firstElemVal}"`);
+          debugLog(`[DEBUG] ${kwd} instance ELEM0 value: "${firstElemVal}"`);
 
           // Skip instance if first ELEM is empty (user never filled it)
           if (!firstElemVal) {
-            console.log(`[DEBUG] ${kwd} instance SKIPPED - empty ELEM0`);
+            debugLog(`[DEBUG] ${kwd} instance SKIPPED - empty ELEM0`);
             return;
           }
 
@@ -3723,7 +3730,7 @@ function assembleCurrentParmMap(): ParmMap {
           if (firstElem) {
             const elem0SngVals = getElemSngVals(firstElem);
             if (elem0SngVals.size > 0 && firstElemVal && elem0SngVals.has(firstElemVal.toUpperCase())) {
-              console.log(`[DEBUG] ${kwd} ELEM0 matches ELEM-level SngVal: ${firstElemVal}, returning single value`);
+              debugLog(`[DEBUG] ${kwd} ELEM0 matches ELEM-level SngVal: ${firstElemVal}, returning single value`);
               arr.push(firstElemVal);
               return;
             }
@@ -3735,13 +3742,13 @@ function assembleCurrentParmMap(): ParmMap {
 
           // Check if value matches parent SngVal (PARM-level, can replace entire parameter)
           if (firstElemVal && parentSngVals.has(firstElemVal.toUpperCase())) {
-            console.log(`[DEBUG] ${kwd} ELEM0 matches parent SngVal: ${firstElemVal}`);
+            debugLog(`[DEBUG] ${kwd} ELEM0 matches parent SngVal: ${firstElemVal}`);
             if (matchesDefault(firstElemVal, parentParmDefault)) {
-              console.log(`[DEBUG] ${kwd} ELEM0 matches parent default: ${parentParmDefault}`);
+              debugLog(`[DEBUG] ${kwd} ELEM0 matches parent default: ${parentParmDefault}`);
               // First ELEM matches SngVal AND default - check if other ELEMs have non-default values
               isFirstElemSpecialAndDefault = true;
             } else {
-              console.log(`[DEBUG] ${kwd} ELEM0 does NOT match parent default: ${parentParmDefault}`);
+              debugLog(`[DEBUG] ${kwd} ELEM0 does NOT match parent default: ${parentParmDefault}`);
               // SngVal but not default - return just this value
               arr.push(firstElemVal);
               return;
@@ -3750,13 +3757,13 @@ function assembleCurrentParmMap(): ParmMap {
 
           // If first ELEM matches special value AND default, check if ANY other ELEM has non-default value
           if (isFirstElemSpecialAndDefault) {
-            console.log(`[DEBUG] ${kwd} checking other ELEMs for non-default values...`);
+            debugLog(`[DEBUG] ${kwd} checking other ELEMs for non-default values...`);
             let hasOtherNonDefault = false;
             for (let i = 1; i < elemParts.length; i++) {
               const elem = elemParts[i] as Element;
               const elemType = elem.getAttribute('Type') || 'CHAR';
               const elemDefault = getElemFormDefault(parm, i); // Use form default
-              console.log(`[DEBUG] ${kwd} ELEM${i} form default: "${elemDefault}"`);
+              debugLog(`[DEBUG] ${kwd} ELEM${i} form default: "${elemDefault}"`);
 
               if (elemType === 'QUAL') {
                 const parts: string[] = [];
@@ -3784,9 +3791,9 @@ function assembleCurrentParmMap(): ParmMap {
                 } else {
                   const input = inst.querySelector(`[name="${kwd}_INST${instIdx}_ELEM${i}"]`) as HTMLInputElement | null;
                   const v = (input?.value || '').trim();
-                  console.log(`[DEBUG] ${kwd} ELEM${i} value: "${v}"`);
+                  debugLog(`[DEBUG] ${kwd} ELEM${i} value: "${v}"`);
                   if (v && !matchesDefault(v, elemDefault)) {
-                    console.log(`[DEBUG] ${kwd} ELEM${i} is NON-DEFAULT`);
+                    debugLog(`[DEBUG] ${kwd} ELEM${i} is NON-DEFAULT`);
                     hasOtherNonDefault = true;
                     break;
                   }
@@ -3796,16 +3803,16 @@ function assembleCurrentParmMap(): ParmMap {
 
             // If no other ELEM has non-default value, omit entire parameter
             if (!hasOtherNonDefault) {
-              console.log(`[DEBUG] ${kwd} instance SKIPPED - all ELEMs at defaults`);
+              debugLog(`[DEBUG] ${kwd} instance SKIPPED - all ELEMs at defaults`);
               return;
             }
-            console.log(`[DEBUG] ${kwd} instance INCLUDED - has non-default ELEM`);
+            debugLog(`[DEBUG] ${kwd} instance INCLUDED - has non-default ELEM`);
             // Otherwise fall through to assemble full ELEM group
           }
 
           // Even if first ELEM is not a special value, check if ALL ELEMs are at defaults
           if (!isFirstElemSpecialAndDefault) {
-            console.log(`[DEBUG] ${kwd} checking if ALL ELEMs are at defaults...`);
+            debugLog(`[DEBUG] ${kwd} checking if ALL ELEMs are at defaults...`);
             let allAtDefaults = true;
             for (let i = 0; i < elemParts.length; i++) {
               const elem = elemParts[i] as Element;
@@ -3846,7 +3853,7 @@ function assembleCurrentParmMap(): ParmMap {
             }
 
             if (allAtDefaults) {
-              console.log(`[DEBUG] ${kwd} instance SKIPPED - all ELEMs at defaults`);
+              debugLog(`[DEBUG] ${kwd} instance SKIPPED - all ELEMs at defaults`);
               return;
             }
           }
@@ -3855,12 +3862,12 @@ function assembleCurrentParmMap(): ParmMap {
           const parentInOriginal = wasInOriginalCommand(kwd);
           const elemVals: string[] = [];
           let lastNonDefaultIndex = -1;
-          console.log(`[DEBUG] ${kwd} assembling elemVals, elemParts.length=${elemParts.length}, parentInOriginal=${parentInOriginal}`);
+          debugLog(`[DEBUG] ${kwd} assembling elemVals, elemParts.length=${elemParts.length}, parentInOriginal=${parentInOriginal}`);
 
           elemParts.forEach((elem, i) => {
             const elemType = (elem as Element).getAttribute('Type') || 'CHAR';
             const elemDefault = getElemFormDefault(parm, i); // Use form default for output assembly
-            console.log(`[DEBUG] ${kwd} ELEM${i}: type=${elemType}, formDefault="${elemDefault}"`);
+            debugLog(`[DEBUG] ${kwd} ELEM${i}: type=${elemType}, formDefault="${elemDefault}"`);
 
             if (elemType === 'QUAL') {
               // Collect QUAL parts (UI order), then LIFO back out and join safely
@@ -3875,15 +3882,15 @@ function assembleCurrentParmMap(): ParmMap {
                 }
               }
               const joined = joinQualParts([...parts].reverse()); // omit empties, no stray '/'
-              console.log(`[DEBUG] ${kwd} ELEM${i} (QUAL): joined="${joined}", anyTouched=${anyQualTouched}`);
+              debugLog(`[DEBUG] ${kwd} ELEM${i} (QUAL): joined="${joined}", anyTouched=${anyQualTouched}`);
               if (joined) {
                 elemVals.push(joined);
                 // Mark as modified only if any QUAL field was touched
                 if (anyQualTouched) {
                   lastNonDefaultIndex = i;
-                  console.log(`[DEBUG] ${kwd} ELEM${i}: set lastNonDefaultIndex=${i} (QUAL was touched)`);
+                  debugLog(`[DEBUG] ${kwd} ELEM${i}: set lastNonDefaultIndex=${i} (QUAL was touched)`);
                 } else {
-                  console.log(`[DEBUG] ${kwd} ELEM${i}: QUAL not touched, not marking as modified`);
+                  debugLog(`[DEBUG] ${kwd} ELEM${i}: QUAL not touched, not marking as modified`);
                 }
               } else {
                 elemVals.push(''); // placeholder to maintain index alignment
@@ -3918,38 +3925,38 @@ function assembleCurrentParmMap(): ParmMap {
                 const input = inst.querySelector(`[name="${kwd}_INST${instIdx}_ELEM${i}"]`) as HTMLInputElement | null;
                 const v = (input?.value || '').trim();
                 const fieldName = `${kwd}_INST${instIdx}_ELEM${i}`;
-                console.log(`[DEBUG] ${kwd} ELEM${i}: input value="${v}", touched=${isFieldTouched(fieldName)}`);
+                debugLog(`[DEBUG] ${kwd} ELEM${i}: input value="${v}", touched=${isFieldTouched(fieldName)}`);
                 if (v) {
                   elemVals.push(v);
                   // Mark as modified only if field was touched by user
                   if (isFieldTouched(fieldName)) {
                     lastNonDefaultIndex = i;
-                    console.log(`[DEBUG] ${kwd} ELEM${i}: updated lastNonDefaultIndex to ${i} (field was touched)`);
+                    debugLog(`[DEBUG] ${kwd} ELEM${i}: updated lastNonDefaultIndex to ${i} (field was touched)`);
                   } else {
-                    console.log(`[DEBUG] ${kwd} ELEM${i}: not touched, not marking as modified`);
+                    debugLog(`[DEBUG] ${kwd} ELEM${i}: not touched, not marking as modified`);
                   }
                 } else {
                   elemVals.push(''); // placeholder to maintain index alignment
-                  console.log(`[DEBUG] ${kwd} ELEM${i}: empty, pushed placeholder`);
+                  debugLog(`[DEBUG] ${kwd} ELEM${i}: empty, pushed placeholder`);
                 }
               }
             }
           });
 
           // Only include ELEMs if any were modified (have values)
-          console.log(`[DEBUG] ${kwd} lastNonDefaultIndex=${lastNonDefaultIndex}, elemVals:`, elemVals);
-          console.log(`[DEBUG] ${kwd} wasInOriginalCommand=${parentInOriginal}`);
+          debugLog(`[DEBUG] ${kwd} lastNonDefaultIndex=${lastNonDefaultIndex}, elemVals:`, elemVals);
+          debugLog(`[DEBUG] ${kwd} wasInOriginalCommand=${parentInOriginal}`);
           if (lastNonDefaultIndex >= 0) {
             // Include all ELEM values up to and including the last one with a value
             const valsToInclude = elemVals.slice(0, lastNonDefaultIndex + 1).filter(v => v.length > 0);
-            console.log(`[DEBUG] ${kwd} valsToInclude:`, valsToInclude);
+            debugLog(`[DEBUG] ${kwd} valsToInclude:`, valsToInclude);
             if (valsToInclude.length > 0) {
               arr.push(valsToInclude);
             }
           } else if (parentInOriginal) {
             // Include all values as-is if parent was in original command
             const valsToInclude = elemVals.filter(v => v.length > 0);
-            console.log(`[DEBUG] ${kwd} valsToInclude (parentInOriginal):`, valsToInclude);
+            debugLog(`[DEBUG] ${kwd} valsToInclude (parentInOriginal):`, valsToInclude);
             if (valsToInclude.length > 0) {
               arr.push(valsToInclude);
             }
@@ -3978,7 +3985,7 @@ function assembleCurrentParmMap(): ParmMap {
               // A QUAL is considered "modified" if user touched it OR parent parameter was in original command
               if (userVal && (isFieldTouched(fieldName) || parentInOriginal)) {
                 lastModifiedIndex = i;
-                console.log(`[DEBUG] ${kwd} QUAL${i}: modified (touched=${isFieldTouched(fieldName)} or parentInOriginal=${parentInOriginal})`);
+                debugLog(`[DEBUG] ${kwd} QUAL${i}: modified (touched=${isFieldTouched(fieldName)} or parentInOriginal=${parentInOriginal})`);
               }
             }
 
@@ -4001,16 +4008,16 @@ function assembleCurrentParmMap(): ParmMap {
           // Simple multi-instance parameter - use touch tracking only
           const input = inst.querySelector(`[name="${kwd}"]`) as HTMLInputElement | null;
           const v = (input?.value || '').trim();
-          console.log(`[DEBUG] ${kwd} current value: "${v}"`);
-          console.log(`[DEBUG] ${kwd} isFieldTouched: ${isFieldTouched(kwd)}`);
-          console.log(`[DEBUG] ${kwd} wasInOriginalCommand: ${wasInOriginalCommand(kwd)}`);
+          debugLog(`[DEBUG] ${kwd} current value: "${v}"`);
+          debugLog(`[DEBUG] ${kwd} isFieldTouched: ${isFieldTouched(kwd)}`);
+          debugLog(`[DEBUG] ${kwd} wasInOriginalCommand: ${wasInOriginalCommand(kwd)}`);
 
           // Include only if: touched OR was in original command
           if (v && (isFieldTouched(kwd) || wasInOriginalCommand(kwd))) {
-            console.log(`[DEBUG] ${kwd} INCLUDED - touched=${isFieldTouched(kwd)} or wasInOriginal=${wasInOriginalCommand(kwd)}`);
+            debugLog(`[DEBUG] ${kwd} INCLUDED - touched=${isFieldTouched(kwd)} or wasInOriginal=${wasInOriginalCommand(kwd)}`);
             arr.push(v);
           } else {
-            console.log(`[DEBUG] ${kwd} SKIPPED - not touched and not in original command`);
+            debugLog(`[DEBUG] ${kwd} SKIPPED - not touched and not in original command`);
           }
         }
       });
@@ -4032,14 +4039,14 @@ function assembleCurrentParmMap(): ParmMap {
           const firstElem = elemParts[0] as Element;
           const elem0SngVals = getElemSngVals(firstElem);
           if (elem0SngVals.size > 0 && firstElemVal && elem0SngVals.has(firstElemVal.toUpperCase())) {
-            console.log(`[assembleCommand] ${kwd}: ELEM0="${firstElemVal}" matches ELEM-level SngVal`);
+            debugLog(`[assembleCommand] ${kwd}: ELEM0="${firstElemVal}" matches ELEM-level SngVal`);
             const touched = isFieldTouched(`${kwd}_INST0_ELEM0`);
             const inOriginal = wasInOriginalCommand(kwd);
             if (touched || inOriginal) {
-              console.log(`[assembleCommand] ${kwd}="${firstElemVal}" ✅ INCLUDED (ELEM SngVal, touched or in original)`);
+              debugLog(`[assembleCommand] ${kwd}="${firstElemVal}" ✅ INCLUDED (ELEM SngVal, touched or in original)`);
               map[kwd] = firstElemVal;
             } else {
-              console.log(`[assembleCommand] ${kwd}="${firstElemVal}" ❌ SKIPPED (ELEM SngVal, not touched and not in original)`);
+              debugLog(`[assembleCommand] ${kwd}="${firstElemVal}" ❌ SKIPPED (ELEM SngVal, not touched and not in original)`);
             }
             return;
           }
@@ -4051,22 +4058,22 @@ function assembleCurrentParmMap(): ParmMap {
 
         // Check if value matches parent SngVal
         if (firstElemVal && parentSngVals.has(firstElemVal.toUpperCase())) {
-          console.log(`[assembleCommand] ${kwd}: ELEM0="${firstElemVal}" matches parent SngVal`);
+          debugLog(`[assembleCommand] ${kwd}: ELEM0="${firstElemVal}" matches parent SngVal`);
           if (matchesDefault(firstElemVal, parentParmDefault)) {
-            console.log(`[assembleCommand] ${kwd}: matches default "${parentParmDefault}", checking other ELEMs`);
+            debugLog(`[assembleCommand] ${kwd}: matches default "${parentParmDefault}", checking other ELEMs`);
             // First ELEM matches SngVal AND default - check if other ELEMs have non-default values
             isFirstElemSpecialAndDefault = true;
           } else {
             // SngVal but not default - check if touched or in original command
             const touched = isFieldTouched(`${kwd}_INST0_ELEM0`);
             const inOriginal = wasInOriginalCommand(kwd);
-            console.log(`[assembleCommand] ${kwd}: SngVal "${firstElemVal}" != default, touched=${touched}, inOriginal=${inOriginal}`);
+            debugLog(`[assembleCommand] ${kwd}: SngVal "${firstElemVal}" != default, touched=${touched}, inOriginal=${inOriginal}`);
 
             if (touched || inOriginal) {
-              console.log(`[assembleCommand] ${kwd}="${firstElemVal}" ✅ INCLUDED (SngVal path, touched or in original)`);
+              debugLog(`[assembleCommand] ${kwd}="${firstElemVal}" ✅ INCLUDED (SngVal path, touched or in original)`);
               map[kwd] = firstElemVal;
             } else {
-              console.log(`[assembleCommand] ${kwd}="${firstElemVal}" ❌ SKIPPED (SngVal path, not touched and not in original)`);
+              debugLog(`[assembleCommand] ${kwd}="${firstElemVal}" ❌ SKIPPED (SngVal path, not touched and not in original)`);
             }
             return;
           }
@@ -4075,22 +4082,22 @@ function assembleCurrentParmMap(): ParmMap {
           const firstElem = elemParts[0] as Element;
           const firstElemSpcVals = getElemSpcVals(firstElem);
           if (firstElemVal && firstElemSpcVals.has(firstElemVal.toUpperCase())) {
-            console.log(`[assembleCommand] ${kwd}: ELEM0="${firstElemVal}" matches ELEM SpcVal`);
+            debugLog(`[assembleCommand] ${kwd}: ELEM0="${firstElemVal}" matches ELEM SpcVal`);
             if (matchesDefault(firstElemVal, parentParmDefault)) {
-              console.log(`[assembleCommand] ${kwd}: matches default "${parentParmDefault}", checking other ELEMs`);
+              debugLog(`[assembleCommand] ${kwd}: matches default "${parentParmDefault}", checking other ELEMs`);
               // First ELEM matches SpcVal AND default - check if other ELEMs have non-default values
               isFirstElemSpecialAndDefault = true;
             } else {
               // SpcVal but not default - check if touched or in original command
               const touched = isFieldTouched(`${kwd}_INST0_ELEM0`);
               const inOriginal = wasInOriginalCommand(kwd);
-              console.log(`[assembleCommand] ${kwd}: SpcVal "${firstElemVal}" != default, touched=${touched}, inOriginal=${inOriginal}`);
+              debugLog(`[assembleCommand] ${kwd}: SpcVal "${firstElemVal}" != default, touched=${touched}, inOriginal=${inOriginal}`);
 
               if (touched || inOriginal) {
-                console.log(`[assembleCommand] ${kwd}="${firstElemVal}" ✅ INCLUDED (SpcVal path, touched or in original)`);
+                debugLog(`[assembleCommand] ${kwd}="${firstElemVal}" ✅ INCLUDED (SpcVal path, touched or in original)`);
                 map[kwd] = firstElemVal;
               } else {
-                console.log(`[assembleCommand] ${kwd}="${firstElemVal}" ❌ SKIPPED (SpcVal path, not touched and not in original)`);
+                debugLog(`[assembleCommand] ${kwd}="${firstElemVal}" ❌ SKIPPED (SpcVal path, not touched and not in original)`);
               }
               return;
             }
@@ -4101,7 +4108,7 @@ function assembleCurrentParmMap(): ParmMap {
         // Exclusivity logic removed: Only include parameter if any field was touched or parent was in original command.
 
         // Assemble single-instance ELEM parameter
-        console.log(`[assembleCommand] ${kwd}: Starting ELEM assembly, elemParts.length=${elemParts.length}`);
+        debugLog(`[assembleCommand] ${kwd}: Starting ELEM assembly, elemParts.length=${elemParts.length}`);
         const elemVals: string[] = [];
         let lastNonDefaultIndex = -1;
 
@@ -4121,15 +4128,15 @@ function assembleCurrentParmMap(): ParmMap {
               }
             }
             const joined = joinQualParts([...parts].reverse());
-            console.log(`[assembleCommand] ${kwd}_ELEM${i} (QUAL): joined="${joined}", anyTouched=${anyQualTouched}`);
+            debugLog(`[assembleCommand] ${kwd}_ELEM${i} (QUAL): joined="${joined}", anyTouched=${anyQualTouched}`);
             if (joined) {
               elemVals.push(joined);
               // Mark as modified only if any QUAL field was touched
               if (anyQualTouched) {
                 lastNonDefaultIndex = i;
-                console.log(`[assembleCommand] ${kwd}_ELEM${i}: set lastNonDefaultIndex=${i} (QUAL was touched)`);
+                debugLog(`[assembleCommand] ${kwd}_ELEM${i}: set lastNonDefaultIndex=${i} (QUAL was touched)`);
               } else {
-                console.log(`[assembleCommand] ${kwd}_ELEM${i}: QUAL not touched, not marking as modified`);
+                debugLog(`[assembleCommand] ${kwd}_ELEM${i}: QUAL not touched, not marking as modified`);
               }
             } else {
               elemVals.push(''); // placeholder to maintain index alignment
@@ -4161,15 +4168,15 @@ function assembleCurrentParmMap(): ParmMap {
               const input = document.querySelector(`[name="${kwd}_INST0_ELEM${i}"]`) as HTMLInputElement | null;
               const v = (input?.value || '').trim();
               const fieldName = `${kwd}_INST0_ELEM${i}`;
-              console.log(`[assembleCommand] ${kwd}_ELEM${i}: value="${v}", touched=${isFieldTouched(fieldName)}`);
+              debugLog(`[assembleCommand] ${kwd}_ELEM${i}: value="${v}", touched=${isFieldTouched(fieldName)}`);
               if (v) {
                 elemVals.push(v);
                 // Mark as modified only if field was touched by user
                 if (isFieldTouched(fieldName)) {
                   lastNonDefaultIndex = i;
-                  console.log(`[assembleCommand] ${kwd}_ELEM${i}: set lastNonDefaultIndex=${i} (field was touched)`);
+                  debugLog(`[assembleCommand] ${kwd}_ELEM${i}: set lastNonDefaultIndex=${i} (field was touched)`);
                 } else {
-                  console.log(`[assembleCommand] ${kwd}_ELEM${i}: not touched, not marking as modified`);
+                  debugLog(`[assembleCommand] ${kwd}_ELEM${i}: not touched, not marking as modified`);
                 }
               } else {
                 elemVals.push(''); // placeholder to maintain index alignment
@@ -4180,23 +4187,23 @@ function assembleCurrentParmMap(): ParmMap {
 
         // Only include ELEMs if any were touched OR parent parameter was in original command
         const parentInOriginal = wasInOriginalCommand(kwd);
-        console.log(`[assembleCommand] ${kwd}: lastNonDefaultIndex=${lastNonDefaultIndex}, parentInOriginal=${parentInOriginal}, elemVals=`, elemVals);
+        debugLog(`[assembleCommand] ${kwd}: lastNonDefaultIndex=${lastNonDefaultIndex}, parentInOriginal=${parentInOriginal}, elemVals=`, elemVals);
         if (lastNonDefaultIndex >= 0) {
           // Usual case: user touched something, include up to last touched
           const trimmedVals = elemVals.slice(0, lastNonDefaultIndex + 1).filter(v => v.length > 0);
           const joined = trimmedVals.join(' ');
-          console.log(`[assembleCommand] ${kwd}: ✅ INCLUDING because lastNonDefaultIndex >= 0 (user touched ELEM fields)`);
-          console.log(`[assembleCommand] ${kwd}: trimmedVals=`, trimmedVals, `joined="${joined}"`);
+          debugLog(`[assembleCommand] ${kwd}: ✅ INCLUDING because lastNonDefaultIndex >= 0 (user touched ELEM fields)`);
+          debugLog(`[assembleCommand] ${kwd}: trimmedVals=`, trimmedVals, `joined="${joined}"`);
           if (trimmedVals.length > 0) {
             // Return as array for proper formatting by extension
             map[kwd] = trimmedVals;
-            console.log(`[assembleCommand] ${kwd}: ADDED to map as array`, trimmedVals);
+            debugLog(`[assembleCommand] ${kwd}: ADDED to map as array`, trimmedVals);
           } else {
-            console.log(`[assembleCommand] ${kwd}: ❌ NOT adding - trimmedVals empty after filtering`);
+            debugLog(`[assembleCommand] ${kwd}: ❌ NOT adding - trimmedVals empty after filtering`);
           }
         } else if (parentInOriginal) {
           // Special case: present in original command, include all original subfields (even if empty)
-          console.log(`[assembleCommand] ${kwd}: ✅ INCLUDING because parentInOriginal=true (was in original command)`);
+          debugLog(`[assembleCommand] ${kwd}: ✅ INCLUDING because parentInOriginal=true (was in original command)`);
           // Find the number of subfields in the original command
           let origVals: string[] = [];
           if (state.originalParmMap && state.originalParmMap[kwd]) {
@@ -4212,17 +4219,17 @@ function assembleCurrentParmMap(): ParmMap {
               origVals = orig.split(' ');
             }
           }
-          console.log(`[assembleCommand] ${kwd}: origVals from originalParmMap=`, origVals);
+          debugLog(`[assembleCommand] ${kwd}: origVals from originalParmMap=`, origVals);
           // Output as many subfields as were present in the original command
           const valsToInclude = elemVals.slice(0, Math.max(origVals.length, 1));
-          console.log(`[assembleCommand] ${kwd}: valsToInclude (${valsToInclude.length} elements)=`, valsToInclude);
+          debugLog(`[assembleCommand] ${kwd}: valsToInclude (${valsToInclude.length} elements)=`, valsToInclude);
           // Do not filter out empty subfields - return as array for proper formatting
           if (valsToInclude.length > 0) {
             map[kwd] = valsToInclude;
-            console.log(`[assembleCommand] ${kwd}: ADDED to map (parentInOriginal path)`, valsToInclude);
+            debugLog(`[assembleCommand] ${kwd}: ADDED to map (parentInOriginal path)`, valsToInclude);
           }
         } else {
-          console.log(`[assembleCommand] ${kwd}: ❌ NOT including - lastNonDefaultIndex < 0 and not in original command`);
+          debugLog(`[assembleCommand] ${kwd}: ❌ NOT including - lastNonDefaultIndex < 0 and not in original command`);
         }
       } else if (hasQual) {
         // Collect QUAL inputs (UI order)
@@ -4248,7 +4255,7 @@ function assembleCurrentParmMap(): ParmMap {
             }
           }
 
-          console.log(`[DEBUG] ${kwd} QUAL lastModifiedIndex:`, lastModifiedIndex);
+          debugLog(`[DEBUG] ${kwd} QUAL lastModifiedIndex:`, lastModifiedIndex);
 
           // If any QUAL was modified, output all QUALs up to and including the last modified one
           if (lastModifiedIndex >= 0) {
@@ -4256,7 +4263,7 @@ function assembleCurrentParmMap(): ParmMap {
             const qualParts = parm.querySelectorAll(':scope > Qual');
             const firstQualMin = parseInt((qualParts[0] as Element)?.getAttribute('Min') || '0', 10);
             if (firstQualMin > 0 && (!parts[0] || parts[0].trim() === '')) {
-              console.log(`[DEBUG] ${kwd} SKIPPED - empty required first QUAL`);
+              debugLog(`[DEBUG] ${kwd} SKIPPED - empty required first QUAL`);
               return; // Don't output parameter if required first QUAL is empty
             }
 
@@ -4290,15 +4297,15 @@ function assembleCurrentParmMap(): ParmMap {
           const origVal = state.originalParmMap[kwd];
           if (origVal) {
             value = String(origVal);
-            console.log(`[assembleCommand] ${kwd} using original value: ${value} (form value was empty)`);
+            debugLog(`[assembleCommand] ${kwd} using original value: ${value} (form value was empty)`);
           }
         }
 
         if (value && (touched || inOriginal)) {
-          console.log(`[assembleCommand] ${kwd}=${value} INCLUDED (touched=${touched}, inOriginal=${inOriginal})`);
+          debugLog(`[assembleCommand] ${kwd}=${value} INCLUDED (touched=${touched}, inOriginal=${inOriginal})`);
           map[kwd] = value;
         } else {
-          console.log(`[assembleCommand] ${kwd}=${value || '(empty)'} SKIPPED (touched=${touched}, inOriginal=${inOriginal})`);
+          debugLog(`[assembleCommand] ${kwd}=${value || '(empty)'} SKIPPED (touched=${touched}, inOriginal=${inOriginal})`);
         }
       }
     }
@@ -4310,16 +4317,16 @@ function assembleCurrentParmMap(): ParmMap {
 
 // Helper function to normalize newlines in all values (from textarea fields)
 function normalizeNewlinesInValues(values: Record<string, any>): void {
-  console.log('[clPrompter] normalizeNewlinesInValues - START');
+  debugLog('[clPrompter] normalizeNewlinesInValues - START');
   for (const key in values) {
     const value = values[key];
-    console.log(`[clPrompter] normalizeNewlines checking key: ${key}, type: ${typeof value}, isArray: ${Array.isArray(value)}`);
+    debugLog(`[clPrompter] normalizeNewlines checking key: ${key}, type: ${typeof value}, isArray: ${Array.isArray(value)}`);
     if (typeof value === 'string') {
       const hasNewline = /\r\n|\n|\r/.test(value);
       if (hasNewline) {
-        console.log(`[clPrompter] normalizeNewlines FOUND newline in ${key}, before: ${JSON.stringify(value)}`);
+        debugLog(`[clPrompter] normalizeNewlines FOUND newline in ${key}, before: ${JSON.stringify(value)}`);
         values[key] = value.replace(/\r\n|\n|\r/g, ' ');
-        console.log(`[clPrompter] normalizeNewlines after: ${JSON.stringify(values[key])}`);
+        debugLog(`[clPrompter] normalizeNewlines after: ${JSON.stringify(values[key])}`);
       }
     } else if (Array.isArray(value)) {
       // Handle arrays (multi-instance parameters)
@@ -4336,7 +4343,7 @@ function normalizeNewlinesInValues(values: Record<string, any>): void {
       });
     }
   }
-  console.log('[clPrompter] normalizeNewlinesInValues - END');
+  debugLog('[clPrompter] normalizeNewlinesInValues - END');
 }
 
 // ========================================
@@ -4950,7 +4957,7 @@ function showDepErrorBanner(errors: string[]): void {
 
 // Event handlers
 function onSubmit(): void {
-  console.log('[clPrompter] ', 'onSubmit (Enter) start');
+  debugLog('[clPrompter] ', 'onSubmit (Enter) start');
   const values = assembleCurrentParmMap();
 
   // Normalize newlines in all parameter values (textarea fields can have Shift+Enter)
@@ -4960,7 +4967,7 @@ function onSubmit(): void {
   // Per-field "Required" error messages are shown inline next to each missing field.
   const missingRequired = checkRequiredParms();
   if (missingRequired > 0) {
-    console.log('[clPrompter] onSubmit blocked: ' + missingRequired + ' required parameter(s) missing');
+    debugLog('[clPrompter] onSubmit blocked: ' + missingRequired + ' required parameter(s) missing');
     return;
   }
 
@@ -4970,7 +4977,7 @@ function onSubmit(): void {
   const depErrors = evaluateAllDepConstraints(true);
   showDepErrorBanner(depErrors);
   if (depErrors.length > 0) {
-    console.log('[clPrompter] onSubmit blocked by Dep constraint violations:', depErrors);
+    debugLog('[clPrompter] onSubmit blocked by Dep constraint violations:', depErrors);
     return;
   }
 
@@ -4987,20 +4994,20 @@ function onSubmit(): void {
 
   const cmdName = state.xmlDoc?.querySelector('Cmd')?.getAttribute('CmdName') || state.cmdName;
   vscode?.postMessage({ type: 'submit', cmdName, values } as SubmitMessage);
-  console.log('[clPrompter] ', 'onSubmit (Enter) end');
+  debugLog('[clPrompter] ', 'onSubmit (Enter) end');
 }
 
 function onCancel(): void {
-  console.log('[clPrompter] ', 'onCancel (F3=Cancel) start');
+  debugLog('[clPrompter] ', 'onCancel (F3=Cancel) start');
   const cmdName = state.xmlDoc?.querySelector('Cmd')?.getAttribute('CmdName') || state.cmdName;
   vscode?.postMessage({ type: 'cancel', cmdName } as CancelMessage);
-  console.log('[clPrompter] ', 'onCancel (F3=Cancel) end');
+  debugLog('[clPrompter] ', 'onCancel (F3=Cancel) end');
 }
 
 function wirePrompterControls(): void {
-  console.log('[clPrompter] ', 'wirePrompterControls start');
+  debugLog('[clPrompter] ', 'wirePrompterControls start');
   if (state.controlsWired) return;
-  console.log('[clPrompter] ', 'wirePrompterControls continuing...');
+  debugLog('[clPrompter] ', 'wirePrompterControls continuing...');
   const form = document.getElementById('clForm');
   const submitBtn = document.getElementById('submitBtn');
   const cancelBtn = document.getElementById('cancelBtn');
@@ -5078,7 +5085,7 @@ function wirePrompterControls(): void {
         // Blur the active element first so blur-dependent handlers run (e.g. & field expansion)
         // before form values are collected for submission.
         (target as HTMLElement).blur();
-        console.log('[Enter key] Submitting form from:', target.tagName, 'name:', (target as HTMLInputElement).name);
+        debugLog('[Enter key] Submitting form from:', target.tagName, 'name:', (target as HTMLInputElement).name);
         (form as HTMLFormElement).requestSubmit();
       }
     } else if (e.key === 'Escape' || e.key === 'F3') {
@@ -5095,7 +5102,7 @@ function wirePrompterControls(): void {
   });
 
   state.controlsWired = true;
-  console.log('[clPrompter] ', 'wirePrompterControls end');
+  debugLog('[clPrompter] ', 'wirePrompterControls end');
 
   // Live Dep constraint re-validation: re-evaluate all constraints on any input blur
   // Using event delegation on the form so we don't need to re-wire after each render
@@ -5140,7 +5147,7 @@ function wirePrompterControls(): void {
 }
 
 function resetPrompterState(): void {
-  console.log('[clPrompter] ', 'resetPrompterState start (never called?)');
+  debugLog('[clPrompter] ', 'resetPrompterState start (never called?)');
   state.xmlDoc = null;
   state.parms = [];
   state.allowedValsMap = {};
@@ -5156,17 +5163,17 @@ function resetPrompterState(): void {
   state.controlsWired = false;
   const form = document.getElementById('clForm');
   if (form) form.innerHTML = '';
-  console.log('[clPrompter] ', 'resetPrompterState end');
+  debugLog('[clPrompter] ', 'resetPrompterState end');
 }
 
 // Message handler
 window.addEventListener('message', event => {
-  console.log('[clPrompter] ', 'addEventListener(\'message\') start');
-  console.log('[clPrompter] Received message:', event.data);  // Add this
+  debugLog('[clPrompter] ', 'addEventListener(\'message\') start');
+  debugLog('[clPrompter] Received message:', event.data);  // Add this
   const message = event.data as WebviewMessage;
   if (message.type === 'formData') {
     const _t0 = performance.now();
-    console.log(`[clPrompter:PERF] formData message received`);
+    debugLog(`[clPrompter:PERF] formData message received`);
     if (state.hasProcessedFormData) return;
     state.hasProcessedFormData = true;
     // Hide body immediately — for fresh panels the body starts at opacity:1 by default.
@@ -5176,7 +5183,7 @@ window.addEventListener('message', event => {
     const parser = new DOMParser();
     state.xmlDoc = parser.parseFromString(message.xml, 'text/xml');
     const _tParsed = performance.now();
-    console.log(`[clPrompter:PERF] XML parse: ${(_tParsed - _t0).toFixed(1)}ms  (xml length=${message.xml.length})`);
+    debugLog(`[clPrompter:PERF] XML parse: ${(_tParsed - _t0).toFixed(1)}ms  (xml length=${message.xml.length})`);
     state.parms = Array.from(state.xmlDoc.querySelectorAll('Parm')) as ParmElement[];
     // Sort parameters by PosNbr to ensure correct display order
     state.parms.sort((a, b) => {
@@ -5184,7 +5191,7 @@ window.addEventListener('message', event => {
       const posB = parseInt(b.getAttribute('PosNbr') || '9999', 10);
       return posA - posB;
     });
-    console.log('[clPrompter] Parsed parms:', state.parms.length);  // Add this
+    debugLog('[clPrompter] Parsed parms:', state.parms.length);  // Add this
     state.allowedValsMap = message.allowedValsMap || {};
     state.depConstraints = (message as any).depConstraints || [];
     state.valToMapToMap = (message as any).valToMapToMap || {};
@@ -5195,13 +5202,13 @@ window.addEventListener('message', event => {
 
     // Update main title with command name and prompt
     const cmdPrompt = (message as any).cmdPrompt || '';
-    console.log('[clPrompter] cmdName:', state.cmdName, 'cmdPrompt:', cmdPrompt);
+    debugLog('[clPrompter] cmdName:', state.cmdName, 'cmdPrompt:', cmdPrompt);
     const mainTitle = document.getElementById('mainTitle');
     if (mainTitle && state.cmdName) {
       // Uppercase the command name for consistent display
       const upperCmdName = state.cmdName.toUpperCase();
       mainTitle.textContent = cmdPrompt ? `${upperCmdName} (${cmdPrompt})` : upperCmdName;
-      console.log('[clPrompter] Set mainTitle to:', mainTitle.textContent);
+      debugLog('[clPrompter] Set mainTitle to:', mainTitle.textContent);
     }
 
     state.originalParmMap = message.paramMap || message.parmMap || {};
@@ -5214,25 +5221,25 @@ window.addEventListener('message', event => {
     // Store the convertParmValueToUpperCase setting
     if (config && typeof config.convertParmValueToUpperCase === 'boolean') {
       state.convertParmValueToUpperCase = config.convertParmValueToUpperCase;
-      console.log('[clPrompter] convertParmValueToUpperCase set to:', state.convertParmValueToUpperCase);
+      debugLog('[clPrompter] convertParmValueToUpperCase set to:', state.convertParmValueToUpperCase);
     }
 
     // Store the parmExpansionMax setting
     if (config && typeof config.parmExpansionMax === 'number' && config.parmExpansionMax >= 16) {
       state.parmExpansionMax = config.parmExpansionMax;
-      console.log('[clPrompter] parmExpansionMax set to:', state.parmExpansionMax);
+      debugLog('[clPrompter] parmExpansionMax set to:', state.parmExpansionMax);
     }
 
     // Store the parmExpansionSize setting
     if (config && typeof config.parmExpansionSize === 'number' && config.parmExpansionSize >= 1) {
       state.parmExpansionSize = config.parmExpansionSize;
-      console.log('[clPrompter] parmExpansionSize set to:', state.parmExpansionSize);
+      debugLog('[clPrompter] parmExpansionSize set to:', state.parmExpansionSize);
     }
 
     const _tPreLoad = performance.now();
     loadForm();
     const _tPostLoad = performance.now();
-    console.log(`[clPrompter:PERF] loadForm(): ${(_tPostLoad - _tPreLoad).toFixed(1)}ms`);
+    debugLog(`[clPrompter:PERF] loadForm(): ${(_tPostLoad - _tPreLoad).toFixed(1)}ms`);
     wirePrompterControls();
 
     // Collect every custom-element tag currently present in the form so we can
@@ -5252,7 +5259,7 @@ window.addEventListener('message', event => {
     const waitForCustomElements = (): Promise<void> => {
       const tags = collectCustomTags();
       if (tags.length === 0) return Promise.resolve();
-      console.log('[clPrompter] Waiting for custom elements:', tags.join(', '));
+      debugLog('[clPrompter] Waiting for custom elements:', tags.join(', '));
       const _tWait = performance.now();
       const whenDefinedAll: Promise<void> = Promise.all(
         tags.map(t => customElements.whenDefined(t).catch(() => undefined))
@@ -5261,7 +5268,7 @@ window.addEventListener('message', event => {
       // DevTools or bundle load failure), proceed with reveal after 2 seconds.
       const timeout = new Promise<void>(resolve => setTimeout(resolve, 2000));
       return Promise.race([whenDefinedAll, timeout]).then(() => {
-        console.log(`[clPrompter:PERF] customElements.whenDefined wait: ${(performance.now() - _tWait).toFixed(1)}ms`);
+        debugLog(`[clPrompter:PERF] customElements.whenDefined wait: ${(performance.now() - _tWait).toFixed(1)}ms`);
       });
     };
 
@@ -5284,22 +5291,22 @@ window.addEventListener('message', event => {
         // validation, AND wait for all custom elements to be defined, then
         // reveal the body in the next animation frame.
         setTimeout(() => {
-          console.log('[clPrompter:PERF] reveal tick 1');
+          debugLog('[clPrompter:PERF] reveal tick 1');
           setTimeout(() => {
-            console.log('[clPrompter:PERF] reveal tick 2 (pre-validateAllRangeInputs)');
+            debugLog('[clPrompter:PERF] reveal tick 2 (pre-validateAllRangeInputs)');
             try {
               validateAllRangeInputs();
             } catch (e) {
               console.error('[clPrompter] validateAllRangeInputs threw:', e);
             }
-            console.log('[clPrompter:PERF] reveal tick 2 (post-validateAllRangeInputs, calling waitForCustomElements)');
+            debugLog('[clPrompter:PERF] reveal tick 2 (post-validateAllRangeInputs, calling waitForCustomElements)');
             waitForCustomElements().then(() => {
-              console.log('[clPrompter:PERF] waitForCustomElements resolved, scheduling reveal rAF');
+              debugLog('[clPrompter:PERF] waitForCustomElements resolved, scheduling reveal rAF');
               requestAnimationFrame(() => {
                 document.documentElement.style.visibility = 'visible';
                 document.body.style.opacity = '1';
                 state.hasBeenRevealed = true;
-                console.log('[clPrompter:PERF] body opacity set to 1 (with-values path)');
+                debugLog('[clPrompter:PERF] body opacity set to 1 (with-values path)');
               });
             }).catch(err => {
               console.error('[clPrompter] waitForCustomElements rejected:', err);
@@ -5316,16 +5323,16 @@ window.addEventListener('message', event => {
       // before revealing to avoid a post-reveal layout shift.
       requestAnimationFrame(() => {
         setTimeout(() => {
-          console.log('[clPrompter:PERF] reveal tick 1 (no-values path)');
+          debugLog('[clPrompter:PERF] reveal tick 1 (no-values path)');
           setTimeout(() => {
-            console.log('[clPrompter:PERF] reveal tick 2 (no-values path, calling waitForCustomElements)');
+            debugLog('[clPrompter:PERF] reveal tick 2 (no-values path, calling waitForCustomElements)');
             waitForCustomElements().then(() => {
-              console.log('[clPrompter:PERF] waitForCustomElements resolved (no-values path)');
+              debugLog('[clPrompter:PERF] waitForCustomElements resolved (no-values path)');
               requestAnimationFrame(() => {
                 document.documentElement.style.visibility = 'visible';
                 document.body.style.opacity = '1';
                 state.hasBeenRevealed = true;
-                console.log('[clPrompter:PERF] body opacity set to 1 (no-values path)');
+                debugLog('[clPrompter:PERF] body opacity set to 1 (no-values path)');
               });
             }).catch(err => {
               console.error('[clPrompter] waitForCustomElements rejected:', err);
@@ -5337,15 +5344,15 @@ window.addEventListener('message', event => {
         }, 0);
       });
     }
-    console.log(`[clPrompter:PERF] formData total (sync): ${(performance.now() - _t0).toFixed(1)}ms`);
+    debugLog(`[clPrompter:PERF] formData total (sync): ${(performance.now() - _t0).toFixed(1)}ms`);
   } else if (message.type === 'setLabel') {
     // Handle label and comment message
     state.cmdLabel = (message as any).label || '';
     // Strip delimiters from comment before storing in state
     const incomingComment = (message as any).comment || '';
     state.cmdComment = incomingComment ? incomingComment.replace(/^\/\*\s*/, '').replace(/\s*\*\/$/, '').trim() : '';
-    console.log('[clPrompter] Set cmdLabel to:', state.cmdLabel);
-    console.log('[clPrompter] Set cmdComment to:', state.cmdComment);
+    debugLog('[clPrompter] Set cmdLabel to:', state.cmdLabel);
+    debugLog('[clPrompter] Set cmdComment to:', state.cmdComment);
     // Update the HTML inputs
     const labelInput = document.getElementById('cmdLabel') as HTMLInputElement;
     if (labelInput) {
@@ -5359,7 +5366,7 @@ window.addEventListener('message', event => {
     // If formData hasn't been processed yet, this is a label-only prompter
     // Wire up controls so submit/cancel buttons work
     if (!state.hasProcessedFormData) {
-      console.log('[clPrompter] Label-only prompter detected, wiring controls');
+      debugLog('[clPrompter] Label-only prompter detected, wiring controls');
       state.hasProcessedFormData = true;
       wirePrompterControls();
       document.documentElement.style.visibility = 'visible';
@@ -5367,18 +5374,18 @@ window.addEventListener('message', event => {
     }
   } else if (message.type === 'nestedResult') {
     // Handle nested prompter result - update the field with the returned command string
-    console.log('[clPrompter] Received nested result for field:', (message as any).fieldId, 'value:', (message as any).commandString);
+    debugLog('[clPrompter] Received nested result for field:', (message as any).fieldId, 'value:', (message as any).commandString);
     const fieldId = (message as any).fieldId;
     const commandString = (message as any).commandString;
     if (commandString && fieldId) {
       const field = document.querySelector(`[name="${fieldId}"]`) as HTMLTextAreaElement | HTMLInputElement;
       if (field && (field.tagName === 'TEXTAREA' || field.tagName === 'INPUT')) {
-        console.log('[clPrompter] Updating field', fieldId, 'with value:', commandString);
+        debugLog('[clPrompter] Updating field', fieldId, 'with value:', commandString);
         field.value = commandString;
         field.focus();
         // Mark as touched
         state.touchedFields.add(fieldId);
-        console.log('[clPrompter] Field updated successfully');
+        debugLog('[clPrompter] Field updated successfully');
       } else {
         console.warn('[clPrompter] Could not find field:', fieldId);
       }
@@ -5387,7 +5394,7 @@ window.addEventListener('message', event => {
     }
   } else if (message.type === 'ping') {
     // Respond to ping to confirm webview is alive and responsive
-    console.log('[clPrompter] Received ping, sending pong');
+    debugLog('[clPrompter] Received ping, sending pong');
     vscode?.postMessage({ type: 'pong', hasProcessedFormData: state.hasProcessedFormData });
   } else if (message.type === 'reset') {
     // Immediately hide body so the old command form never flashes when the panel is revealed
@@ -5421,7 +5428,7 @@ window.addEventListener('message', event => {
       `<p>${errMsg.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}</p>`
     );
   }
-  console.log('[clPrompter] ', 'addEventListener(\'message\') end');
+  debugLog('[clPrompter] ', 'addEventListener(\'message\') end');
 });
 
 // VS Code webview content updates use document.open()/write() on a recycled
@@ -5447,7 +5454,7 @@ let _revealRestoreTimer: ReturnType<typeof setTimeout> | null = null;
 
 document.addEventListener('visibilitychange', () => {
   if (document.hidden) {
-    console.log('[clPrompter] visibilitychange: hidden — blanking content');
+    debugLog('[clPrompter] visibilitychange: hidden — blanking content');
     document.documentElement.style.visibility = 'hidden';
     document.body.style.opacity = '0';
     if (state.hasBeenRevealed) {
@@ -5455,14 +5462,14 @@ document.addEventListener('visibilitychange', () => {
       _revealRestoreTimer = setTimeout(() => {
         _revealRestoreTimer = null;
         if (state.hasBeenRevealed) {
-          console.log('[clPrompter] visibilitychange: self-healing restore (visible event never fired)');
+          debugLog('[clPrompter] visibilitychange: self-healing restore (visible event never fired)');
           document.documentElement.style.visibility = 'visible';
           document.body.style.opacity = '1';
         }
       }, 400);
     }
   } else if (state.hasBeenRevealed) {
-    console.log('[clPrompter] visibilitychange: visible, form revealed — restoring');
+    debugLog('[clPrompter] visibilitychange: visible, form revealed — restoring');
     if (_revealRestoreTimer !== null) { clearTimeout(_revealRestoreTimer); _revealRestoreTimer = null; }
     document.documentElement.style.visibility = 'visible';
     document.body.style.opacity = '1';

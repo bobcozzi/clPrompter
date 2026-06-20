@@ -584,6 +584,11 @@ export function quoteIfNeeded(val: string, allowedVals: string[] = [], parmType:
     return trimmed;
   }
 
+  // Logical expressions (Type=LGL) must be emitted as expressions, not string literals.
+  if (type === 'LGL') {
+    return convertParmValueToUpperCase ? uppercaseVariablesInExpression(trimmed) : trimmed;
+  }
+
   function isCLQuotedString(s: string): boolean {
     if (s.length < 2 || !s.startsWith("'") || !s.endsWith("'")) return false;
     const inner = s.slice(1, -1);
