@@ -52,7 +52,7 @@ All notable changes to this project are documented in this file.
 ### What's Changed
 
 - **Marketplace packaging hardening**: The VSIX packaging rules were tightened to exclude embedded archives (`.tgz`, `.zip`, `.gz`), PDF files, and non-runtime artifacts that can trigger Marketplace virus-scan false positives. A publish preflight check was also added to fail packaging if risky archive/binary artifacts are detected in the VSIX payload.
-- **Documentation updates**: README was clarified for UDTF lifecycle behavior (install only when missing or when shipped version is newer) and to note that CL syntax checking is now delivered by IBM `vscode-clle`.
+- **Documentation updates**: README was clarified for UDTF lifecycle behavior (install only when missing or when shipped version is newer) and to note that CL syntax checking has now been moved to the IBM `vscode-clle` extension and is now used directly by the IBM CLLE extension for CL syntax checking.
 
 ## [1.0.9] - 2026-05-22
 
@@ -264,13 +264,13 @@ All notable changes to this project are documented in this file.
   - `clearCMDXMLCache(cmdKey?)` is exported for programmatic invalidation of one entry or the whole cache.
 
   **Measured results (CPYF, 14 parameters, XML length ≈ 7,800 bytes):**
-  | Operation | Before cache | After cache (first prompt) | After cache (repeat prompt) |
-  |---|---|---|---|
-  | `CALL QCDRCMDD` (IBM i) | ~21,000ms | ~21,000ms | **0ms** |
-  | IFS read via `openTextDocument` | ~490ms | ~490ms | **0ms** |
-  | `buildAllMaps` (XML parse, 5 maps) | ~9ms | ~9ms | ~9ms |
-  | Webview render (14 parms) | ~9ms | ~9ms | ~9ms |
-  | **Total** | **~21,500ms** | **~21,500ms** | **~18ms** |
+  | Operation                          | Before cache  | After cache (first prompt) | After cache (repeat prompt) |
+  | ---------------------------------- | ------------- | -------------------------- | --------------------------- |
+  | `CALL QCDRCMDD` (IBM i)            | ~21,000ms     | ~21,000ms                  | **0ms**                     |
+  | IFS read via `openTextDocument`    | ~490ms        | ~490ms                     | **0ms**                     |
+  | `buildAllMaps` (XML parse, 5 maps) | ~9ms          | ~9ms                       | ~9ms                        |
+  | Webview render (14 parms)          | ~9ms          | ~9ms                       | ~9ms                        |
+  | **Total**                          | **~21,500ms** | **~21,500ms**              | **~18ms**                   |
 
 - **Session warm-up on connect**: A configurable ILE command is fired silently in the background when Code for IBM i establishes a connection, giving Mapepire's JVM service job a head-start before the user prompts their first command.
   - Setting: `clPrompter.sessionWarmupCommand` (default `"DSPLIBL"`). Set to blank string to disable.
