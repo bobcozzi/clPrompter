@@ -30,9 +30,10 @@ import * as os from 'os';
 import { CodeForIBMi } from "@halcyontech/vscode-ibmi-types";
 export let code4i: CodeForIBMi;
 import { Extension, extensions } from "vscode";
-import { CmdHelpChecker, CmdXmlChecker } from './components/hostFunctions';
+import { CmdHelpChecker, CmdRunChecker, CmdXmlChecker } from './components/hostFunctions';
 
 import { initializePrompter, CLPrompter, CLPrompterCallback } from './clPrompter';
+import { CommandEntryViewProvider } from './commandEntryView';
 
 import { ParmMeta, ParmMetaMap } from './types';
 import {
@@ -142,7 +143,7 @@ function extractParamHtml(html: string, cmdName: string, kwd: string): string | 
     let depth = 1;
     let pos = divStart + 4;
     while (depth > 0 && pos < html.length) {
-        const nextOpen  = htmlUpper.indexOf('<DIV',  pos);
+        const nextOpen = htmlUpper.indexOf('<DIV', pos);
         const nextClose = htmlUpper.indexOf('</DIV', pos);
         if (nextClose === -1) { break; }
         if (nextOpen !== -1 && nextOpen < nextClose) {
@@ -221,12 +222,48 @@ async function saveHelpTextDebugFile(cmdName: string, parmName: string, helpHtml
 }
 
 export async function activate(context: vscode.ExtensionContext) {
+    await vscode.commands.executeCommand('setContext', 'clprompter.ibmiLoaded', false);
+    await vscode.commands.executeCommand('setContext', 'clprompter.connected', false);
+    await vscode.commands.executeCommand('setContext', 'clprompter.commandEntryVisible', false);
+
+    const applyCommandEntryStartupVisibility = async (): Promise<void> => {
+        const config = vscode.workspace.getConfiguration('clPrompter');
+        const showAtStartup = config.get<boolean>('showCommandEntryInPanelAtStartup', true);
+        await vscode.commands.executeCommand('setContext', 'clprompter.commandEntryVisible', showAtStartup);
+    };
+
+    await applyCommandEntryStartupVisibility();
+
+    context.subscriptions.push(vscode.workspace.onDidChangeConfiguration(event => {
+        if (!event.affectsConfiguration('clPrompter.showCommandEntryInPanelAtStartup')) {
+            return;
+        }
+        void applyCommandEntryStartupVisibility();
+    }));
+
+    const commandEntry = new CommandEntryViewProvider(context, () => code4i?.instance?.getConnection());
+    context.subscriptions.push(
+        vscode.window.registerWebviewViewProvider(CommandEntryViewProvider.viewType, commandEntry),
+        vscode.commands.registerCommand('clprompter.openCommandEntry', async () => {
+            await vscode.commands.executeCommand('setContext', 'clprompter.commandEntryVisible', true);
+            await vscode.commands.executeCommand('workbench.view.extension.clprompterCommandEntry');
+            commandEntry.focus();
+        }),
+        vscode.commands.registerCommand('clprompter.closeCommandEntry', async () => {
+            await vscode.commands.executeCommand('setContext', 'clprompter.commandEntryVisible', false);
+        }),
+        vscode.commands.registerCommand('clprompter.runCommandEntry', () => commandEntry.requestRun()),
+        vscode.commands.registerCommand('clprompter.promptCommandEntry', () => commandEntry.requestPrompt()),
+        vscode.commands.registerCommand('clprompter.cancelCommandEntry', () => commandEntry.requestCancel()),
+        vscode.commands.registerCommand('clprompter.clearCommandEntry', () => commandEntry.clear())
+    );
 
     baseExtension = extensions.getExtension<CodeForIBMi>("halcyontechltd.code-for-ibmi");
     if (baseExtension) {
         if (!baseExtension.isActive) {
             await baseExtension.activate();
         }
+        await vscode.commands.executeCommand('setContext', 'clprompter.ibmiLoaded', true);
         code4i = baseExtension.exports;
 
         // Register the CMD_HELP and CMD_XML UDTF components so Code for IBM i
@@ -235,6 +272,8 @@ export async function activate(context: vscode.ExtensionContext) {
         code4i.componentRegistry.registerComponent(context, cmdHelpChecker);
         const cmdXmlChecker = new CmdXmlChecker();
         code4i.componentRegistry.registerComponent(context, cmdXmlChecker);
+        const cmdRunChecker = new CmdRunChecker();
+        code4i.componentRegistry.registerComponent(context, cmdRunChecker);
 
         // If the extension activates while a connection is already live (e.g. lazy
         // activation), the ComponentManager won't have called our component for the
@@ -248,7 +287,7 @@ export async function activate(context: vscode.ExtensionContext) {
                 const conn = code4i?.instance?.getConnection();
                 if (!conn) { return; }
                 const state = await cmdHelpChecker.getRemoteState(conn, '');
-                if (state !== 'Installed') {
+                if (state.status !== 'Installed') {
                     await cmdHelpChecker.update(conn, '');
                 }
             } catch (e) {
@@ -266,13 +305,31 @@ export async function activate(context: vscode.ExtensionContext) {
                 const conn = code4i?.instance?.getConnection();
                 if (!conn) { return; }
                 const state = await cmdXmlChecker.getRemoteState(conn, '');
-                if (state !== 'Installed') {
+                if (state.status !== 'Installed') {
                     await cmdXmlChecker.update(conn, '');
                 }
             } catch (e) {
                 console.error(`[clPrompter] CmdXmlChecker manual check failed: ${e}`);
             } finally {
                 cmdXmlCheckRunning = false;
+            }
+        };
+
+        let cmdRunCheckRunning = false;
+        const runCmdRunCheck = async () => {
+            if (cmdRunCheckRunning) { return; }
+            cmdRunCheckRunning = true;
+            try {
+                const conn = code4i?.instance?.getConnection();
+                if (!conn) { return; }
+                const state = await cmdRunChecker.getRemoteState(conn, '');
+                if (state.status !== 'Installed') {
+                    await cmdRunChecker.update(conn, '');
+                }
+            } catch (e) {
+                console.error(`[clPrompter] CmdRunChecker manual check failed: ${e}`);
+            } finally {
+                cmdRunCheckRunning = false;
             }
         };
 
@@ -368,14 +425,23 @@ export async function activate(context: vscode.ExtensionContext) {
 
             (async () => {
                 const conn = code4i?.instance?.getConnection();
-                if (!conn) { return; }
+                if (!conn) {
+                    return;
+                }
 
-                // Run all XML warms in parallel — each uses its own SSH exec channel so
-                // there is no serialization penalty. Total wall-clock time ≈ one command.
-                await Promise.allSettled(cmds.map(cmd => warmXmlCache(cmd)));
+                try {
+                    // Run all XML warms in parallel — each uses its own SSH exec channel so
+                    // there is no serialization penalty. Total wall-clock time ≈ one command.
+                    await Promise.allSettled(cmds.map(cmd => warmXmlCache(cmd)));
+                } catch (err) {
+                    console.log(`[clPrompter] prefetch failed: ${String(err)}`);
+                }
             })();
         };
 
+        code4i.instance.subscribe(context, 'connected', 'clPrompter-connected-context', () => {
+            void vscode.commands.executeCommand('setContext', 'clprompter.connected', true);
+        });
         code4i.instance.subscribe(context, 'connected', 'clPrompter-keepalive-start', startKeepAlive);
         code4i.instance.subscribe(context, 'connected', 'clPrompter-prefetch', prefetch);
         // Patch runSQL on every new connection so we can log what external SQL is
@@ -388,15 +454,19 @@ export async function activate(context: vscode.ExtensionContext) {
         // handles new connections automatically (it calls getRemoteState/update on all
         // registered components at connect time). The manual call below handles only
         // the case where the extension activates into an already-live session.
+        code4i.instance.subscribe(context, 'disconnected', 'clPrompter-connected-context', () => {
+            void vscode.commands.executeCommand('setContext', 'clprompter.connected', false);
+        });
         code4i.instance.subscribe(context, 'disconnected', 'clPrompter-keepalive-stop', stopKeepAlive);
 
         // Start immediately if already connected when the extension activates.
         if (code4i.instance.getConnection()) {
+            void vscode.commands.executeCommand('setContext', 'clprompter.connected', true);
             patchRunSQL(code4i.instance.getConnection() as any);
             startKeepAlive();
             // Run both UDTF checks in parallel, then prefetch — serialized relative
             // to prefetch so upload/compile steps don't race for SSH channels.
-            Promise.allSettled([runCmdHelpCheck(), runCmdXmlCheck()]).finally(() => prefetch());
+            Promise.allSettled([runCmdHelpCheck(), runCmdXmlCheck(), runCmdRunCheck()]).finally(() => prefetch());
         }
 
         // Ensure the interval is cleared when the extension is deactivated.
@@ -408,6 +478,9 @@ export async function activate(context: vscode.ExtensionContext) {
             clpHelpCache.clear();
         });
     } else {
+        await vscode.commands.executeCommand('setContext', 'clprompter.ibmiLoaded', false);
+        await vscode.commands.executeCommand('setContext', 'clprompter.connected', false);
+        await vscode.commands.executeCommand('setContext', 'clprompter.commandEntryVisible', false);
         vscode.window.showErrorMessage("Code for IBM i extension is not installed or not found.");
     }
     try {
@@ -435,7 +508,7 @@ export async function activate(context: vscode.ExtensionContext) {
                 const document = editor.document;
 
                 // Only activate for supported languages
-                const supportedLangs = ['clle', 'clp', 'cl','cmd', 'bnd'];
+                const supportedLangs = ['clle', 'clp', 'cl', 'cmd', 'bnd'];
                 if (!supportedLangs.includes(document.languageId)) {
                     vscode.window.showInformationMessage('CL Prompter: Not a supported IBM i source type.');
                     return;
@@ -729,7 +802,7 @@ export class ClPromptPanel {
         ClPromptPanel.panels.get(panelKey)?.resetWebviewState();
         const xml = await getCMDXML(cmdName);
 
-// Write XML to clp_cmdDefn_<cmdName>.xml file for debugging (if enabled)
+        // Write XML to clp_cmdDefn_<cmdName>.xml file for debugging (if enabled)
         const config = vscode.workspace.getConfiguration('clPrompter');
         const saveCmdXMLToFile = config.get<boolean>('saveCmdXMLToFile', false);
 
@@ -905,63 +978,63 @@ export class ClPromptPanel {
         this._disposables.push(
             panel.webview.onDidReceiveMessage(message => {
                 if (message.type === 'webviewReady') {
-                if (this._sentFormData) {
-                    // webviewReady while _sentFormData=true means the webview JS context
-                    // was reloaded (VS Code reclaimed memory or internal renderer restart).
-                    // Reset _sentFormData and fall through to resend formData so the panel
-                    // is populated instead of left blank.
-                    this._sentFormData = false;
-                }
+                    if (this._sentFormData) {
+                        // webviewReady while _sentFormData=true means the webview JS context
+                        // was reloaded (VS Code reclaimed memory or internal renderer restart).
+                        // Reset _sentFormData and fall through to resend formData so the panel
+                        // is populated instead of left blank.
+                        this._sentFormData = false;
+                    }
 
-                // For label-only lines (no command), skip XML processing and just send label/comment
-                if (!this._cmdName || this._cmdName.trim() === '') {
+                    // For label-only lines (no command), skip XML processing and just send label/comment
+                    if (!this._cmdName || this._cmdName.trim() === '') {
+                        panel.webview.postMessage({ type: "setLabel", label: this._cmdLabel, comment: this._cmdComment });
+                        this._sentFormData = true;
+                        return;
+                    }
+
+                    // Extract command prompt from XML
+                    let cmdPrompt = '';
+                    try {
+                        const parser = new DOMParser();
+                        const xmlDoc = parser.parseFromString(this._xml, 'application/xml');
+                        const cmdNodes = xmlDoc.getElementsByTagName('Cmd');
+                        if (cmdNodes.length > 0) {
+                            const cmdNode = cmdNodes[0];
+                            cmdPrompt = cmdNode.getAttribute('Prompt') || '';
+                        }
+                    } catch (err) {
+                        console.error('[clPrompter] webviewReady: Failed to parse XML for command prompt:', err);
+                    }
+
+                    const { allowedValsMap, depConstraints, valToMapToMap, defaultValMap, pmtCtlMap } = buildAllMaps(this._xml);
+                    const config = vscode.workspace.getConfiguration('clPrompter');
+                    const keywordColor = config.get('kwdColor');
+                    const valueColor = config.get('kwdValueColor');
+                    const autoAdjust = config.get('kwdColorAutoAdjust');
+                    const convertParmValueToUpperCase = config.get('convertParmValueToUpperCase', true);
+                    const parmExpansionMax = config.get('parmExpansionMax', 5000);
+                    const parmExpansionSize = config.get('parmExpansionSize', 16);
+
+                    panel.webview.postMessage({
+                        type: 'formData',
+                        xml: this._xml,
+                        allowedValsMap,
+                        depConstraints,
+                        valToMapToMap,
+                        defaultValMap,
+                        pmtCtlMap,
+                        cmdName: this._cmdName,
+                        cmdPrompt: cmdPrompt,
+                        paramMap: this._parmMap,
+                        parmMap: this._parmMap,
+                        parmMetas: this._parmMetas,
+                        config: { keywordColor, valueColor, autoAdjust, convertParmValueToUpperCase, parmExpansionMax, parmExpansionSize }
+                    });
                     panel.webview.postMessage({ type: "setLabel", label: this._cmdLabel, comment: this._cmdComment });
                     this._sentFormData = true;
-                    return;
                 }
-
-                // Extract command prompt from XML
-                let cmdPrompt = '';
-                try {
-                    const parser = new DOMParser();
-                    const xmlDoc = parser.parseFromString(this._xml, 'application/xml');
-                    const cmdNodes = xmlDoc.getElementsByTagName('Cmd');
-                    if (cmdNodes.length > 0) {
-                        const cmdNode = cmdNodes[0];
-                        cmdPrompt = cmdNode.getAttribute('Prompt') || '';
-                    }
-                } catch (err) {
-                    console.error('[clPrompter] webviewReady: Failed to parse XML for command prompt:', err);
-                }
-
-                const { allowedValsMap, depConstraints, valToMapToMap, defaultValMap, pmtCtlMap } = buildAllMaps(this._xml);
-                const config = vscode.workspace.getConfiguration('clPrompter');
-                const keywordColor = config.get('kwdColor');
-                const valueColor = config.get('kwdValueColor');
-                const autoAdjust = config.get('kwdColorAutoAdjust');
-                const convertParmValueToUpperCase = config.get('convertParmValueToUpperCase', true);
-                const parmExpansionMax = config.get('parmExpansionMax', 5000);
-                const parmExpansionSize = config.get('parmExpansionSize', 16);
-
-                panel.webview.postMessage({
-                    type: 'formData',
-                    xml: this._xml,
-                    allowedValsMap,
-                    depConstraints,
-                    valToMapToMap,
-                    defaultValMap,
-                    pmtCtlMap,
-                    cmdName: this._cmdName,
-                    cmdPrompt: cmdPrompt,
-                    paramMap: this._parmMap,
-                    parmMap: this._parmMap,
-                    parmMetas: this._parmMetas,
-                    config: { keywordColor, valueColor, autoAdjust, convertParmValueToUpperCase, parmExpansionMax, parmExpansionSize }
-                });
-                panel.webview.postMessage({ type: "setLabel", label: this._cmdLabel, comment: this._cmdComment });
-                this._sentFormData = true;
-            }
-        })
+            })
         );
 
         this._panel.webview.html = this.getHtmlForPrompter(this._panel.webview, this._cmdName, this._xml);
@@ -1376,7 +1449,7 @@ export class ClPromptPanel {
                                 type: 'paramHelp',
                                 kwd,
                                 title: detail.name,
-                                helpHtml: rawHtml ?? `<p>${detail.description.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}</p>`
+                                helpHtml: rawHtml ?? `<p>${detail.description.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</p>`
                             });
                         } catch (err) {
                             console.error('[clPrompter] getParamHelp error:', err);
@@ -1552,28 +1625,28 @@ export { CLPrompter, CLPrompterCallback };
 
 // Build ordered positional KWDs from ParmMetaMap.posNbr
 function getPositionalKwdsFromMetaMap(meta: ParmMetaMap | undefined): string[] {
-  if (!meta) return [];
-  return Object.entries(meta)
-    .filter(([, m]) => typeof m.posNbr === 'number' && (m.posNbr as number) > 0)
-    .sort((a, b) => (a[1].posNbr as number) - (b[1].posNbr as number))
-    .map(([kwd]) => kwd);
+    if (!meta) return [];
+    return Object.entries(meta)
+        .filter(([, m]) => typeof m.posNbr === 'number' && (m.posNbr as number) > 0)
+        .sort((a, b) => (a[1].posNbr as number) - (b[1].posNbr as number))
+        .map(([kwd]) => kwd);
 }
 
 // Quote/paren-aware extraction for each KWD
 function buildOriginalParmMapFromLine(cmdLine: string, meta: ParmMetaMap | undefined, cmdMaxPos?: number): Record<string, any> {
-  const map: Record<string, any> = {};
-  const positionalKwds = getPositionalKwdsFromMetaMap(meta);
+    const map: Record<string, any> = {};
+    const positionalKwds = getPositionalKwdsFromMetaMap(meta);
 
-  const normalized = positionalKwds.length
-    ? rewriteLeadingPositionalsByList(cmdLine, positionalKwds, cmdMaxPos)
-    : cmdLine;
+    const normalized = positionalKwds.length
+        ? rewriteLeadingPositionalsByList(cmdLine, positionalKwds, cmdMaxPos)
+        : cmdLine;
 
-  const kwds = meta ? Object.keys(meta) : [];
-  for (const kwd of kwds) {
-    const arg = safeExtractKwdArg(normalized, kwd);
-    if (arg != null) map[kwd] = arg.trim();
-  }
-  return map;
+    const kwds = meta ? Object.keys(meta) : [];
+    for (const kwd of kwds) {
+        const arg = safeExtractKwdArg(normalized, kwd);
+        if (arg != null) map[kwd] = arg.trim();
+    }
+    return map;
 }
 
 // ...existing helpers...
@@ -2040,22 +2113,22 @@ function orderParmMapByMetas(parmMetas: ParmMeta[], parmMap: Record<string, any>
 }
 
 function isQualifiedName(value: string): boolean {
-  const s = String(value ?? '').trim();
-  if (!s || s.startsWith("'") || s.startsWith('"')) return false; // already quoted
-  if (s.startsWith('(') && s.endsWith(')')) return false; // ELEM group, already handled
-  if (/\s|,/.test(s)) return false; // spaces/commas → not a simple qual
-  const parts = s.split('/');
-  if (parts.length < 1 || parts.length > 3) return false;
-  const partOk = (p: string) =>
-    p.length > 0 &&
-    (/^\*[A-Z0-9_]+$/i.test(p) || /^[A-Z0-9_$#@][A-Z0-9_$#@]*$/i.test(p));
-  return parts.every(partOk);
+    const s = String(value ?? '').trim();
+    if (!s || s.startsWith("'") || s.startsWith('"')) return false; // already quoted
+    if (s.startsWith('(') && s.endsWith(')')) return false; // ELEM group, already handled
+    if (/\s|,/.test(s)) return false; // spaces/commas → not a simple qual
+    const parts = s.split('/');
+    if (parts.length < 1 || parts.length > 3) return false;
+    const partOk = (p: string) =>
+        p.length > 0 &&
+        (/^\*[A-Z0-9_]+$/i.test(p) || /^[A-Z0-9_$#@][A-Z0-9_$#@]*$/i.test(p));
+    return parts.every(partOk);
 }
 
 // Build the list of positional keywords in order of PosNbr (1..MaxPos)
 function getPositionalKwdsFromMetas(parmMetas: ParmMeta[]): string[] {
-  return parmMetas
-    .filter(m => Number(m.PosNbr) > 0)
-    .sort((a, b) => Number(a.PosNbr) - Number(b.PosNbr))
-    .map(m => m.Kwd);
+    return parmMetas
+        .filter(m => Number(m.PosNbr) > 0)
+        .sort((a, b) => Number(a.PosNbr) - Number(b.PosNbr))
+        .map(m => m.Kwd);
 }

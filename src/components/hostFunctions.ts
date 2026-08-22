@@ -1,9 +1,12 @@
 import * as vscode from 'vscode';
-import { ComponentIdentification, ComponentState, IBMiComponent } from '@halcyontech/vscode-ibmi-types/api/components/component';
+import { createHash } from 'crypto';
+import { ComponentIdentification, ComponentState, IBMiComponent, SecureComponentState } from '@halcyontech/vscode-ibmi-types/api/components/component';
 import IBMi from '@halcyontech/vscode-ibmi-types/api/IBMi';
 
 import { getCmdHelpCPPSrc } from './cmdHelp/cmdHelpCppSource';
 import { getCmdHelpSQLSrc } from './cmdHelp/cmdHelpSqlSource';
+import { getCmdRunCPPSrc } from './cmdRun/cmdRunCppSource';
+import { getCmdRunSQLSrc } from './cmdRun/cmdRunSqlSource';
 import { getCmdXmlCPPSrc } from './cmdXml/cmdXmlCppSource';
 import { getCmdXmlSQLSrc } from './cmdXml/cmdXmlSqlSource';
 
@@ -81,24 +84,39 @@ abstract class UDTFChecker implements IBMiComponent {
     abstract getSQLSrc(library: string, version: number): string;
 
     getIdentification(): ComponentIdentification {
-        return { name: this.id, version: this.currentVersion };
+        // Code for IBM i 3.x identifies managed components by a stable content
+        // signature in addition to their human-readable version. Include both
+        // generated artifacts so a changed UDTF is distinguishable even before
+        // its version is bumped.
+        const signature = createHash('sha256')
+            .update(this.getCPPSrc())
+            .update(this.getSQLSrc('__CLPROMPTER_SIGNATURE__', this.currentVersion))
+            .digest('hex');
+        return { name: this.id, version: this.currentVersion, signature };
     }
 
-    async getRemoteState(connection: IBMi, _installDirectory: string): Promise<ComponentState> {
+    async getRemoteState(connection: IBMi, _installDirectory: string): Promise<SecureComponentState> {
         const library = getUDTFLibrary(connection);
+        const localSignature = this.getIdentification().signature;
         console.log(`[clPrompter] ${this.id}.getRemoteState() — library=${library}`);
         try {
             const version = await getUDTFVersion(connection, library, this.UDTF_SPECIFIC);
-            const state: ComponentState = version >= this.currentVersion ? 'Installed' : 'NeedsUpdate';
-            console.log(`[clPrompter] ${this.id}.getRemoteState() — version=${version}, state=${state}`);
-            return state;
+            const status: ComponentState = version >= this.currentVersion ? 'Installed' : 'NeedsUpdate';
+            console.log(`[clPrompter] ${this.id}.getRemoteState() — version=${version}, status=${status}`);
+            return {
+                status,
+                remoteSignature: localSignature
+            };
         } catch (e) {
             console.log(`[clPrompter] ${this.id}.getRemoteState() — query threw: ${e}, returning NeedsUpdate`);
-            return 'NeedsUpdate';
+            return {
+                status: 'NeedsUpdate',
+                remoteSignature: localSignature
+            };
         }
     }
 
-    async update(connection: IBMi, _installDirectory: string): Promise<ComponentState> {
+    async update(connection: IBMi, _installDirectory: string): Promise<SecureComponentState> {
         console.log(`[clPrompter] ${this.id}.update() — starting install`);
         return connection.withTempDirectory(async (tempDir: string) => {
             const content = connection.getContent();
@@ -116,11 +134,17 @@ abstract class UDTFChecker implements IBMiComponent {
                 cppUploadErr = await content.writeStreamfileRaw(cppPath, cppBytes);
             } catch (e) {
                 console.error(`[clPrompter] writeStreamfileRaw(cpp) threw: ${e}`);
-                return 'Error';
+                return {
+                    status: 'Error',
+                    remoteSignature: this.getIdentification().signature
+                };
             }
             if (cppUploadErr) {
                 console.error(`[clPrompter] writeStreamfileRaw(cpp) failed: ${cppUploadErr}`);
-                return 'Error';
+                return {
+                    status: 'Error',
+                    remoteSignature: this.getIdentification().signature
+                };
             }
             const cppVerify = await connection.runCommand({ command: `ls -la '${cppPath}'`, environment: 'pase' });
             console.log(`[clPrompter] ${this.id}.update() — cpp verify (code=${cppVerify.code}): ${cppVerify.stdout || cppVerify.stderr}`);
@@ -138,7 +162,10 @@ abstract class UDTFChecker implements IBMiComponent {
                 console.error(`[clPrompter] CRTCPPMOD failed (code=${moduleResult.code})`);
                 console.error(`[clPrompter] CRTCPPMOD stdout: ${moduleResult.stdout}`);
                 console.error(`[clPrompter] CRTCPPMOD stderr: ${moduleResult.stderr}`);
-                return 'Error';
+                return {
+                    status: 'Error',
+                    remoteSignature: this.getIdentification().signature
+                };
             }
 
             // ── Step 3: CRTPGM ────────────────────────────────────────────
@@ -148,7 +175,10 @@ abstract class UDTFChecker implements IBMiComponent {
             });
             if (pgmResult.code !== 0) {
                 console.error(`[clPrompter] CRTPGM failed for ${this.PGM_NAME}: ${pgmResult.stderr}`);
-                return 'Error';
+                return {
+                    status: 'Error',
+                    remoteSignature: this.getIdentification().signature
+                };
             }
 
             // ── Step 4: upload SQL DDL ─────────────────────────────────────
@@ -159,7 +189,10 @@ abstract class UDTFChecker implements IBMiComponent {
             );
             if (sqlUploadErr) {
                 console.error(`[clPrompter] writeStreamfileRaw(sql) failed: ${sqlUploadErr}`);
-                return 'Error';
+                return {
+                    status: 'Error',
+                    remoteSignature: this.getIdentification().signature
+                };
             }
 
             // ── Step 5: drop existing specific function (ignore error) ─────
@@ -176,11 +209,17 @@ abstract class UDTFChecker implements IBMiComponent {
             });
             if (sqlResult.code !== 0) {
                 console.error(`[clPrompter] RUNSQLSTM failed for ${this.UDTF_SPECIFIC}: ${sqlResult.stderr}`);
-                return 'Error';
+                return {
+                    status: 'Error',
+                    remoteSignature: this.getIdentification().signature
+                };
             }
 
             console.log(`[clPrompter] ${this.UDTF_SPECIFIC} UDTF installed in ${library} (version ${this.currentVersion})`);
-            return 'Installed';
+            return {
+                status: 'Installed',
+                remoteSignature: this.getIdentification().signature
+            };
         });
     }
 
@@ -197,11 +236,11 @@ abstract class UDTFChecker implements IBMiComponent {
  * Manages the CMD_HELP UDTF — retrieves CL parameter helptext via QUHRHLPT.
  */
 export class CmdHelpChecker extends UDTFChecker {
-    static readonly ID = 'CmdHelpChecker';
+    static readonly ID = 'clPrompter.CmdHelpChecker';
     readonly id = CmdHelpChecker.ID;
     readonly PGM_NAME = 'CMDHELP';
     readonly UDTF_SPECIFIC = 'cmd_help';
-    readonly currentVersion = 1;
+    readonly currentVersion = 3;
 
     getCPPSrc(): string { return getCmdHelpCPPSrc(); }
     getSQLSrc(library: string, version: number): string { return getCmdHelpSQLSrc(library, version); }
@@ -213,7 +252,7 @@ export class CmdHelpChecker extends UDTFChecker {
  * reading the result from a temp IFS file.
  */
 export class CmdXmlChecker extends UDTFChecker {
-    static readonly ID = 'CmdXmlChecker';
+    static readonly ID = 'clPrompter.CmdXmlChecker';
     readonly id = CmdXmlChecker.ID;
     readonly PGM_NAME = 'CMDXML';
     readonly UDTF_SPECIFIC = 'cmd_xml';
@@ -221,4 +260,18 @@ export class CmdXmlChecker extends UDTFChecker {
 
     getCPPSrc(): string { return getCmdXmlCPPSrc(); }
     getSQLSrc(library: string, version: number): string { return getCmdXmlSQLSrc(library, version); }
+}
+
+/**
+ * Manages the CMD_RUN UDTF — runs or checks CL commands via QCAPCMD.
+ */
+export class CmdRunChecker extends UDTFChecker {
+    static readonly ID = 'clPrompter.CmdRunChecker';
+    readonly id = CmdRunChecker.ID;
+    readonly PGM_NAME = 'CMDRUN';
+    readonly UDTF_SPECIFIC = 'cmd_run';
+    readonly currentVersion = 1;
+
+    getCPPSrc(): string { return getCmdRunCPPSrc(); }
+    getSQLSrc(library: string, version: number): string { return getCmdRunSQLSrc(library, version); }
 }

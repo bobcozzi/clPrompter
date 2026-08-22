@@ -2,6 +2,27 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.0.17] - 2026-08-22
+
+### What's New
+
+- **New CL Command Entry Panel**: Adds a dedicated VS Code Webview View panel (`clprompter.commandEntryView`) for running CL commands.
+- **Integrated execution workflow in the CL Command Entry panel**:
+  - Run CL commands through `CMD_RUN` UDTF using the existing Code for IBM i SQL runner.
+  - Choose execution mode directly in the view: `*RUN` (Normal) or `*LIMIT` (Limited user).
+  - Review ordered IBM i message output (message ID, severity, message type, message text, second-level message text).
+  - Track elapsed execution time and outcome (`success`, `warning`, `error`) per run.
+  - Interactive commands, such as `WRKOBJ`, `WRKACTJOB`, or `DSPLIBL OUTPUT(*)` will *not* show their interactive screen. It should be used for batch-style CL commands.
+- **Execution log and command recall**:
+  - Persistent CL Command history (stored in extension global state) for reuse across sessions.
+  - Keyboard recall-history. `ArrowUp` / `ArrowDown` can be used to retrieve prior, next CL Command.
+  - Click-to-recall. By clicking on an old CL command, it is copied to the input box for re-use.
+  - Double-click-to-copy. By double-clicking on an old CL Command, it is copied to the Clipboard.
+  - Clear button removes or clears the job log messages from the panel.
+- **CL Command Entry startup visibility setting**: Added `clPrompter.showCommandEntryInPanelAtStartup` so users can choose whether this CL Command Entry is visible automatically when the extension starts.
+- **Explicit VSCODE Command Palette controls for this view**: New `CLPROMPTER: Open CL Command Entry` and `CLPROMPTER: Close CL Command Entry` commands allow Users to explicitly show/hide the CL Command Entry panel on demand.
+- **Prompting**: In the CL Command Entry view, users can type a CL command and invoke prompting with either classic `F4=Prompt` or the on-screen **Prompt** button. After the CL Prompter returns the completed command string to the input field, the command is staged and is **not** run automatically; execution occurs only when the user presses **Run** or `Enter`. Note that this differs from traditional IBM i 5250 Command Entry prompting behavior.
+
 ## [1.0.16] - 2026-06-20
 
 ### What's Changed

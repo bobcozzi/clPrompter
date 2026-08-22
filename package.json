@@ -2,7 +2,7 @@
   "name": "clprompter",
   "displayName": "Bob Cozzi's CL Prompter and Formatter for IBM i",
   "description": "IBM i CL Prompting and Formatting: Built for modern development",
-  "version": "1.0.16",
+  "version": "1.0.17",
   "author": {
     "name": "Bob Cozzi",
     "url": "https://github.com/bobcozzi"
@@ -28,12 +28,16 @@
     "vscode": "^1.74.0"
   },
   "activationEvents": [
+    "onStartupFinished",
     "onLanguage:clle",
     "onLanguage:clp",
     "onLanguage:cl",
     "onLanguage:cmd",
+    "onExtension:halcyontechltd.code-for-ibmi",
     "onLanguage:bnd",
-    "onCommand:clPrompter.clPrompter"
+    "onCommand:clPrompter.clPrompter",
+    "onView:clprompter.commandEntryView",
+    "onCommand:clprompter.openCommandEntry"
   ],
   "contributes": {
     "commands": [
@@ -48,6 +52,30 @@
       {
         "command": "clPrompter.formatEntireFile",
         "title": "Format CL (file)"
+      },
+      {
+        "command": "clprompter.openCommandEntry",
+        "title": "CLPROMPTER: Open CL Command Entry"
+      },
+      {
+        "command": "clprompter.closeCommandEntry",
+        "title": "CLPROMPTER: Close CL Command Entry"
+      },
+      {
+        "command": "clprompter.runCommandEntry",
+        "title": "CLPROMPTER: Run Command Entry"
+      },
+      {
+        "command": "clprompter.promptCommandEntry",
+        "title": "CLPROMPTER: Prompt Command Entry"
+      },
+      {
+        "command": "clprompter.cancelCommandEntry",
+        "title": "CLPROMPTER: Request Cancel Command Entry"
+      },
+      {
+        "command": "clprompter.clearCommandEntry",
+        "title": "CLPROMPTER: Clear Command Entry Results"
       }
     ],
     "keybindings": [
@@ -64,6 +92,11 @@
           "type": "boolean",
           "default": true,
           "description": "Enable F4=Prompt for CL commands"
+        },
+        "clPrompter.showCommandEntryInPanelAtStartup": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show CL Command Entry in the Panel at startup. Disable this setting to keep the Command Entry panel hidden until you open it manually."
         },
         "clPrompter.kwdColor": {
           "type": "string",
@@ -229,27 +262,51 @@
           "group": "1_modification"
         }
       ]
+    },
+    "viewsContainers": {
+      "panel": [
+        {
+          "id": "clprompterCommandEntry",
+          "title": "CL Command Entry",
+          "icon": "images/clPrompter.png"
+        }
+      ]
+    },
+    "views": {
+      "clprompterCommandEntry": [
+        {
+          "id": "clprompter.commandEntryView",
+          "name": "CL Command Entry",
+          "type": "webview",
+          "icon": "images/clPrompter.png",
+          "when": "clprompter.commandEntryVisible"
+        }
+      ]
     }
   },
   "scripts": {
     "compile-webview": "tsc -p tsconfig.webview.json",
     "vscode:prepublish": "npm run compile",
     "compile": "tsc -p ./",
+    "lint:css": "stylelint \"src/webview-assets/**/*.css\"",
     "lint": "eslint",
+    "lint:all": "npm run lint && npm run lint:css",
     "watch": "tsc -w -p ./",
     "copy-assets": "cp -r src/webview-assets/* media/",
     "build": "npm run compile && npm run compile-webview && npm run copy-assets",
-    "test:api": "tsc src/testAPICall.ts --outDir out --module commonjs --target es2020 --esModuleInterop --skipLibCheck && node out/testAPICall.js"
+    "test:api": "tsc src/testAPICall.ts --outDir out --module commonjs --target es2020 --esModuleInterop --skipLibCheck && node out/testAPICall.js",
+    "test:command-entry": "tsc src/test/testCommandEntry.ts --outDir out --module commonjs --target es2020 --esModuleInterop --skipLibCheck && node out/test/testCommandEntry.js"
   },
   "devDependencies": {
     "@types/node": "20.8.10",
     "@types/vscode": "^1.73.0",
     "@types/xmldom": "^0.1.34",
     "esbuild": "^0.25.6",
+    "stylelint": "^16.8.2",
     "typescript": "^5.8.2"
   },
   "dependencies": {
-    "@halcyontech/vscode-ibmi-types": "^2.16.0",
+    "@halcyontech/vscode-ibmi-types": "^3.0.12",
     "@vscode-elements/elements": "^2.4.0",
     "@vscode/webview-ui-toolkit": "^1.4.0",
     "@xmldom/xmldom": "^0.9.10",
