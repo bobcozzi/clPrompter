@@ -226,16 +226,29 @@ export async function activate(context: vscode.ExtensionContext) {
     await vscode.commands.executeCommand('setContext', 'clprompter.connected', false);
     await vscode.commands.executeCommand('setContext', 'clprompter.commandEntryVisible', false);
 
-    const applyCommandEntryStartupVisibility = async (): Promise<void> => {
+    const getCommandEntryStartupMode = (): 'At Start Up' | 'After IBM i Connection' | 'No' => {
         const config = vscode.workspace.getConfiguration('clPrompter');
-        const showAtStartup = config.get<boolean>('showCommandEntryInPanelAtStartup', true);
-        await vscode.commands.executeCommand('setContext', 'clprompter.commandEntryVisible', showAtStartup);
+        const raw = config.get<string>('showCLCommandEntry', 'At Start Up');
+
+        if (raw === 'After IBM i Connection' || raw === 'No') {
+            return raw;
+        }
+        return 'At Start Up';
+    };
+
+    const applyCommandEntryStartupVisibility = async (): Promise<void> => {
+        const startupMode = getCommandEntryStartupMode();
+        const hasConnection = !!code4i?.instance?.getConnection();
+        const shouldShow =
+            startupMode === 'At Start Up'
+            || (startupMode === 'After IBM i Connection' && hasConnection);
+        await vscode.commands.executeCommand('setContext', 'clprompter.commandEntryVisible', shouldShow);
     };
 
     await applyCommandEntryStartupVisibility();
 
     context.subscriptions.push(vscode.workspace.onDidChangeConfiguration(event => {
-        if (!event.affectsConfiguration('clPrompter.showCommandEntryInPanelAtStartup')) {
+        if (!event.affectsConfiguration('clPrompter.showCLCommandEntry')) {
             return;
         }
         void applyCommandEntryStartupVisibility();
@@ -441,6 +454,11 @@ export async function activate(context: vscode.ExtensionContext) {
 
         code4i.instance.subscribe(context, 'connected', 'clPrompter-connected-context', () => {
             void vscode.commands.executeCommand('setContext', 'clprompter.connected', true);
+        });
+        code4i.instance.subscribe(context, 'connected', 'clPrompter-command-entry-startup-mode', () => {
+            if (getCommandEntryStartupMode() === 'After IBM i Connection') {
+                void vscode.commands.executeCommand('setContext', 'clprompter.commandEntryVisible', true);
+            }
         });
         code4i.instance.subscribe(context, 'connected', 'clPrompter-keepalive-start', startKeepAlive);
         code4i.instance.subscribe(context, 'connected', 'clPrompter-prefetch', prefetch);
@@ -1072,6 +1090,10 @@ export class ClPromptPanel {
             async message => {
                 switch (message.type) {
                     case 'submit': {
+                        if (message.submitMode === 'f12') {
+                            vscode.window.setStatusBarMessage('CL Command prompting ended with F12=Cancel', 3000);
+                        }
+
                         // Handle label-only lines (no command)
                         if (!this._cmdName || this._cmdName.trim() === '') {
 
@@ -1220,6 +1242,14 @@ export class ClPromptPanel {
                         break;
                     }
                     case 'cancel': {
+                        if (message.cancelMode === 'f3') {
+                            vscode.window.setStatusBarMessage('CL Command prompting ended with F3=Cancel', 3000);
+                        } else if (message.cancelMode === 'escape') {
+                            vscode.window.setStatusBarMessage('CL Command prompting ended with ESC=Cancel', 3000);
+                        } else if (message.cancelMode === 'button') {
+                            vscode.window.setStatusBarMessage('CL Command prompting ended with Cancel', 3000);
+                        }
+
                         // If this is a nested prompter, resolve with null
                         if (this._isNested && this._nestedResolver) {
                             this._nestedResolver(null);

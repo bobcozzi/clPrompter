@@ -138,13 +138,13 @@ function requestParamHelp(kwd: string): void {
 function showHelpOverlay(kwd: string, title: string, helpHtml: string): void {
   const overlay = document.getElementById('clp-help-overlay');
   const titleEl = document.getElementById('clp-help-title');
-  const bodyEl  = document.getElementById('clp-help-body');
+  const bodyEl = document.getElementById('clp-help-body');
   if (!overlay || !titleEl || !bodyEl) { return; }
   // Don't repeat the keyword when title === kwd (UDTF paths pass title: kwd)
   titleEl.textContent = (title && title.toUpperCase() !== kwd.toUpperCase()) ? `${kwd} — ${title}` : kwd;
   // Strip any TOC anchor the UDTF or GENCMDDOC may inject
   const cleaned = helpHtml.replace(/<a\s[^>]*name\s*=\s*["']TOC["'][^>]*>[\s\S]*?<\/a>/gi, '');
-  bodyEl.innerHTML    = cleaned;
+  bodyEl.innerHTML = cleaned;
   overlay.classList.add('visible');
 }
 
@@ -425,7 +425,7 @@ function normalizeValue(value: string, allowedValues: string[], parm: Element | 
   // NEVER modify quoted strings - they preserve case regardless of Case attribute
   // Check for surrounding quotes (apostrophes)
   if ((value.startsWith("'") && value.endsWith("'")) ||
-      (value.startsWith('"') && value.endsWith('"'))) {
+    (value.startsWith('"') && value.endsWith('"'))) {
     return value;
   }
 
@@ -1326,7 +1326,7 @@ function configureSngValExclusivityForFirstInstance(input: HTMLInputElement, par
 
   // Check if already wrapped by another validation
   const isAlreadyWrapped = parent.classList.contains('parm-validation-wrapper') ||
-                          parent.classList.contains('range-validation-wrapper');
+    parent.classList.contains('range-validation-wrapper');
 
   // Create error message span
   const errorSpan = document.createElement('span');
@@ -1634,7 +1634,7 @@ function configureTabOrder(focusFirst: boolean = true): void {
     return;
   }
 
-// Get cmdLabel and cmdComment (they're outside the form)
+  // Get cmdLabel and cmdComment (they're outside the form)
   const cmdLabel = document.getElementById('cmdLabel');
   const cmdComment = document.getElementById('cmdComment');
 
@@ -1821,7 +1821,7 @@ function configureFocusIndicators(): void {
 
         // Keep indicator if moving within same form-group OR same textarea-cbinput-container
         if ((parentFormGroup && parentFormGroup === relatedFormGroup) ||
-            (parentContainer && parentContainer === relatedContainer)) {
+          (parentContainer && parentContainer === relatedContainer)) {
           debugLog('[blur] ✓ Keeping indicator - focus staying in same group');
           return;
         }
@@ -3624,7 +3624,7 @@ function populateQualInputs(parm: ParmElement, parmMeta: ParmMetaMap[string], kw
 
   // FIFO into inputs: QUAL0 ← instance[0], QUAL1 ← instance[1], ...
   let i = 0;
-  for (;; i++) {
+  for (; ; i++) {
     let input = container.querySelector(`[name="${kwd}_QUAL${i}"]`) as any;
     if (!input) break;
 
@@ -4860,7 +4860,7 @@ function setRequiredParmError(kwd: string, show: boolean): void {
   if (!parent) return;
 
   const inWrapper = parent.classList.contains('parm-validation-wrapper') ||
-                    parent.classList.contains('range-validation-wrapper');
+    parent.classList.contains('range-validation-wrapper');
 
   if (show && !inWrapper) {
     const wrapper = document.createElement('div');
@@ -4956,29 +4956,52 @@ function showDepErrorBanner(errors: string[]): void {
 }
 
 // Event handlers
-function onSubmit(): void {
-  debugLog('[clPrompter] ', 'onSubmit (Enter) start');
+function onSubmit(opts: { bypassValidation?: boolean } = {}): void {
+  const bypassValidation = opts.bypassValidation === true;
+  debugLog('[clPrompter] ', `onSubmit (${bypassValidation ? 'F12=Return without validation' : 'Enter=Return with validation'}) start`);
+
+  if (!bypassValidation) {
+    const formEl = document.getElementById('clForm') as HTMLFormElement | null;
+    if (formEl) {
+      // Hard gate: Enter submit must not proceed while any browser/custom validity
+      // errors are still active. This closes timing windows where blur validators
+      // may not have completed before requestSubmit() runs.
+      const hasNativeInvalid = !formEl.checkValidity();
+      const hasInlineErrors = formEl.querySelector('.validation-error, .prompter-error-msg.visible') !== null;
+      if (hasNativeInvalid || hasInlineErrors) {
+        formEl.reportValidity();
+        debugLog('[clPrompter] onSubmit blocked: unresolved field validation errors present');
+        return;
+      }
+    }
+  }
+
   const values = assembleCurrentParmMap();
 
   // Normalize newlines in all parameter values (textarea fields can have Shift+Enter)
   normalizeNewlinesInValues(values);
 
-  // Check required parameters (Min >= 1 at PARM level) first.
-  // Per-field "Required" error messages are shown inline next to each missing field.
-  const missingRequired = checkRequiredParms();
-  if (missingRequired > 0) {
-    debugLog('[clPrompter] onSubmit blocked: ' + missingRequired + ' required parameter(s) missing');
-    return;
-  }
+  if (!bypassValidation) {
+    // Check required parameters (Min >= 1 at PARM level) first.
+    // Per-field "Required" error messages are shown inline next to each missing field.
+    const missingRequired = checkRequiredParms();
+    if (missingRequired > 0) {
+      debugLog('[clPrompter] onSubmit blocked: ' + missingRequired + ' required parameter(s) missing');
+      return;
+    }
 
-  // Evaluate cross-parameter Dep constraints and block submission if there are violations.
-  // atSubmit=true bypasses the touched-field guard so "specify at least one" rules fire
-  // even when the user pressed Enter without touching any involved field.
-  const depErrors = evaluateAllDepConstraints(true);
-  showDepErrorBanner(depErrors);
-  if (depErrors.length > 0) {
-    debugLog('[clPrompter] onSubmit blocked by Dep constraint violations:', depErrors);
-    return;
+    // Evaluate cross-parameter Dep constraints and block submission if there are violations.
+    // atSubmit=true bypasses the touched-field guard so "specify at least one" rules fire
+    // even when the user pressed Enter without touching any involved field.
+    const depErrors = evaluateAllDepConstraints(true);
+    showDepErrorBanner(depErrors);
+    if (depErrors.length > 0) {
+      debugLog('[clPrompter] onSubmit blocked by Dep constraint violations:', depErrors);
+      return;
+    }
+  } else {
+    // F12 behavior: return current command regardless of any validation state.
+    showDepErrorBanner([]);
   }
 
   // Include label in values if present (normalize newlines just in case)
@@ -4993,15 +5016,20 @@ function onSubmit(): void {
   }
 
   const cmdName = state.xmlDoc?.querySelector('Cmd')?.getAttribute('CmdName') || state.cmdName;
-  vscode?.postMessage({ type: 'submit', cmdName, values } as SubmitMessage);
-  debugLog('[clPrompter] ', 'onSubmit (Enter) end');
+  vscode?.postMessage({
+    type: 'submit',
+    cmdName,
+    values,
+    submitMode: bypassValidation ? 'f12' : 'enter'
+  } as SubmitMessage);
+  debugLog('[clPrompter] ', `onSubmit (${bypassValidation ? 'F12' : 'Enter'}) end`);
 }
 
-function onCancel(): void {
-  debugLog('[clPrompter] ', 'onCancel (F3=Cancel) start');
+function onCancel(mode: 'f3' | 'escape' | 'button' = 'button'): void {
+  debugLog('[clPrompter] ', `onCancel (${mode}=Cancel) start`);
   const cmdName = state.xmlDoc?.querySelector('Cmd')?.getAttribute('CmdName') || state.cmdName;
-  vscode?.postMessage({ type: 'cancel', cmdName } as CancelMessage);
-  debugLog('[clPrompter] ', 'onCancel (F3=Cancel) end');
+  vscode?.postMessage({ type: 'cancel', cmdName, cancelMode: mode } as CancelMessage);
+  debugLog('[clPrompter] ', `onCancel (${mode}=Cancel) end`);
 }
 
 function wirePrompterControls(): void {
@@ -5036,7 +5064,7 @@ function wirePrompterControls(): void {
   }
 
   if (submitBtn) {
-    submitBtn.addEventListener('click', onSubmit);
+    submitBtn.addEventListener('click', () => onSubmit());
     // Trap Tab key on submit button to wrap back to first input
     submitBtn.addEventListener('keydown', (e) => {
       if (e.key === 'Tab' && !e.shiftKey) {
@@ -5048,7 +5076,7 @@ function wirePrompterControls(): void {
     });
   }
   if (cancelBtn) {
-    cancelBtn.addEventListener('click', onCancel);
+    cancelBtn.addEventListener('click', () => onCancel('button'));
   }
 
   // Trap Shift+Tab on first input to wrap to comment field
@@ -5088,6 +5116,10 @@ function wirePrompterControls(): void {
         debugLog('[Enter key] Submitting form from:', target.tagName, 'name:', (target as HTMLInputElement).name);
         (form as HTMLFormElement).requestSubmit();
       }
+    } else if (e.key === 'F12') {
+      e.preventDefault();
+      // Return current command state as-is, intentionally bypassing validation.
+      onSubmit({ bypassValidation: true });
     } else if (e.key === 'Escape' || e.key === 'F3') {
       e.preventDefault();
       // Close help overlay first; if it was open, don't also cancel the prompter
@@ -5096,7 +5128,7 @@ function wirePrompterControls(): void {
         closeHelpOverlay();
         return;
       }
-      onCancel();
+      onCancel(e.key === 'F3' ? 'f3' : 'escape');
     }
     // Shift+Enter in textareas: allow newline (don't preventDefault above)
   });
@@ -5413,7 +5445,7 @@ window.addEventListener('message', event => {
     pendingHelpKwd = null;
     dismissHelpToast();
     showHelpOverlay(
-      String(message.kwd   || ''),
+      String(message.kwd || ''),
       String(message.title || ''),
       String(message.helpHtml || '<p>(No help text available for this parameter.)</p>')
     );
@@ -5425,7 +5457,7 @@ window.addEventListener('message', event => {
     showHelpOverlay(
       String(message.kwd || ''),
       'Help unavailable',
-      `<p>${errMsg.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}</p>`
+      `<p>${errMsg.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</p>`
     );
   }
   debugLog('[clPrompter] ', 'addEventListener(\'message\') end');

@@ -2,7 +2,7 @@
   "name": "clprompter",
   "displayName": "Bob Cozzi's CL Prompter and Formatter for IBM i",
   "description": "IBM i CL Prompting and Formatting: Built for modern development",
-  "version": "1.0.17",
+  "version": "1.0.18",
   "author": {
     "name": "Bob Cozzi",
     "url": "https://github.com/bobcozzi"
@@ -93,10 +93,20 @@
           "default": true,
           "description": "Enable F4=Prompt for CL commands"
         },
-        "clPrompter.showCommandEntryInPanelAtStartup": {
-          "type": "boolean",
-          "default": true,
-          "description": "Show CL Command Entry in the Panel at startup. Disable this setting to keep the Command Entry panel hidden until you open it manually."
+        "clPrompter.showCLCommandEntry": {
+          "type": "string",
+          "default": "At Start Up",
+          "enum": [
+            "At Start Up",
+            "After IBM i Connection",
+            "No"
+          ],
+          "enumDescriptions": [
+            "Show CL Command Entry immediately when VS Code starts.",
+            "Show CL Command Entry after an IBM i connection is established.",
+            "Do not auto-show CL Command Entry; use Open CL Command Entry when needed."
+          ],
+          "description": "Controls when the CL Command Entry panel is auto-shown."
         },
         "clPrompter.kwdColor": {
           "type": "string",

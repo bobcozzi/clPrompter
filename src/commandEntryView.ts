@@ -11,6 +11,7 @@ type CommandEntryRequest =
     | { type: 'ready' }
     | { type: 'run'; command: string; mode: CommandExecutionMode }
     | { type: 'prompt'; command: string }
+    | { type: 'requestHistoryPicker' }
     | { type: 'copyCommand'; command: string }
     | { type: 'copySqlJobId'; sqlJobId: string }
     | { type: 'requestSqlJobId' }
@@ -65,6 +66,9 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
             case 'prompt':
                 await this.prompt(message.command);
                 break;
+            case 'requestHistoryPicker':
+                await this.showHistoryPicker();
+                break;
             case 'copyCommand':
                 await this.copyCommandToClipboard(message.command);
                 break;
@@ -103,6 +107,32 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
         this.post({ type: 'notice', message: `Copied SQL job ID ${trimmed} to clipboard.` });
     }
 
+    private async showHistoryPicker(): Promise<void> {
+        const history = this.history();
+        if (history.length === 0) {
+            this.post({ type: 'notice', message: 'No command history is available yet.' });
+            return;
+        }
+
+        const items = history.map((entry, index) => ({
+            label: entry.command,
+            description: entry.mode,
+            picked: index === 0,
+            entry
+        }));
+
+        const selected = await vscode.window.showQuickPick(items, {
+            placeHolder: 'Select a CL command from history',
+            matchOnDescription: true,
+            ignoreFocusOut: false
+        });
+
+        if (!selected) { return; }
+
+        this.post({ type: 'setCommandMode', command: selected.entry.command, mode: selected.entry.mode });
+        this.post({ type: 'focusInput' });
+    }
+
     private async prompt(command: string): Promise<void> {
         if (!command.trim()) { this.post({ type: 'notice', message: 'Enter a CL command to prompt.' }); return; }
         try {
@@ -111,6 +141,10 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
         } catch (error) {
             this.output.appendLine(`[Command Entry] Prompt failed: ${String(error)}`);
             this.post({ type: 'notice', message: 'Unable to open the CL prompter. See CLPROMPTER Output for details.' });
+        } finally {
+            this.post({ type: 'focusInput' });
+            // Webview focus can race panel disposal, so retry once.
+            setTimeout(() => this.post({ type: 'focusInput' }), 50);
         }
     }
 
@@ -219,7 +253,7 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
                     <div class="command-row">
                         <label class="sr-only" for="command">CL command</label>
                         <div class="command-input-wrap">
-                            <input id="command" type="text" spellcheck="false" autocomplete="off" placeholder="Enter a CL command" aria-label="CL command">
+                            <textarea id="command" spellcheck="false" placeholder="Enter a CL command" aria-label="CL command" rows="2"></textarea>
                             <button id="clear-command" type="button" aria-label="Clear command input" title="Clear command input">×</button>
                         </div>
                         <button id="run" type="button" aria-label="Run command" data-tooltip="Run command">Run</button>
@@ -238,8 +272,9 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
                             <option value="90">90</option>
                             <option value="99">99</option>
                         </select>
-                        <button id="go-to-top" type="button" aria-label="Go to Top of Log" data-tooltip="Go to Top of Log">↑</button>
-                        <button id="go-to-bottom" type="button" aria-label="Go to Bottom of Log" data-tooltip="Go to Bottom of Log">↓</button>
+                        <button id="history-picker" type="button" aria-label="Open command history" data-tooltip="CL History">…</button>
+                        <button id="history-prev" type="button" aria-label="Recall prior command (F9)" data-tooltip="Retrieve Prior, right-Click=History">↑</button>
+                        <button id="history-next" type="button" aria-label="Recall next command (F10)" data-tooltip="Retrieve Next, right-Click=History">↓</button>
                         <button id="clear" type="button" aria-label="Clear log" data-tooltip="Clear log">Clear Log</button>
                         <select id="mode" aria-label="Run mode" title="Run CL Command">
                             <option value="*RUN" title="Run CL Command">Run</option>

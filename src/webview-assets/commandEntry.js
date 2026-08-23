@@ -1,17 +1,20 @@
 (() => {
-  const state = vscode.getState() || { command: '', mode: '*RUN', filterSeverity: 0, history: [], executions: [] };
+  const state = vscode.getState() || { command: '', mode: '*RUN', filterSeverity: 0, history: [], executions: [], commandHeightPx: 0 };
   const maxExecutions = 30, maxMessages = 100;
   const noConnectionText = 'no connection';
+  const minTextareaRows = 2;
   const command = document.getElementById('command'), mode = document.getElementById('mode'), severityFilter = document.getElementById('message-severity-filter');
-  const run = document.getElementById('run'), prompt = document.getElementById('prompt'), clear = document.getElementById('clear'), clearCommand = document.getElementById('clear-command'), goToTop = document.getElementById('go-to-top'), goToBottom = document.getElementById('go-to-bottom');
+  const run = document.getElementById('run'), prompt = document.getElementById('prompt'), clear = document.getElementById('clear'), clearCommand = document.getElementById('clear-command'), historyPicker = document.getElementById('history-picker'), historyPrev = document.getElementById('history-prev'), historyNext = document.getElementById('history-next');
   const statusText = document.getElementById('status-text'), statusJobId = document.getElementById('status-jobid'), results = document.getElementById('results');
   let historyIndex = -1, runningStartedAt, runningTimerId, historyDraft = '', sqlJobPollingId;
+  let baseMinHeightPx = 0, autoResizing = false;
   const save = () => {
     state.command = command.value;
     state.mode = mode.value;
     state.filterSeverity = Number(severityFilter?.value || 0);
     state.history = state.history || [];
     state.executions = state.executions || [];
+    state.commandHeightPx = Number(state.commandHeightPx || 0);
     vscode.setState(state);
   };
   const formatElapsed = ms => ms < 1000 ? `${ms} ms` : `${(ms / 1000).toFixed(1)} s`;
@@ -77,12 +80,58 @@
   const updateClearCommandState = () => {
     clearCommand.disabled = command.value.length === 0;
   };
+  const normalizeCommand = value => String(value || '').replace(/[\r\n]+/g, '');
+  const lineCount = value => Math.max(minTextareaRows, String(value || '').split(/\r\n|\n|\r/).length);
+  const rememberCommandHeight = heightPx => {
+    const rounded = Math.max(baseMinHeightPx, Math.round(Number(heightPx || 0)));
+    if (!Number.isFinite(rounded) || rounded <= 0) { return; }
+    if (rounded === Number(state.commandHeightPx || 0)) { return; }
+    state.commandHeightPx = rounded;
+    save();
+  };
+  const measureBaseHeight = () => {
+    if (baseMinHeightPx > 0) { return baseMinHeightPx; }
+    autoResizing = true;
+    command.style.height = 'auto';
+    const measured = Math.ceil(command.scrollHeight);
+    autoResizing = false;
+    baseMinHeightPx = Math.max(measured, 1);
+    return baseMinHeightPx;
+  };
+  const resizeCommandInput = () => {
+    const minHeight = measureBaseHeight();
+    const rememberedHeight = Math.max(minHeight, Number(state.commandHeightPx || 0));
+    command.rows = Math.max(minTextareaRows, lineCount(command.value));
+    autoResizing = true;
+    command.style.height = 'auto';
+    const autoHeight = Math.max(minHeight, Math.ceil(command.scrollHeight));
+    command.style.height = `${Math.max(autoHeight, rememberedHeight)}px`;
+    autoResizing = false;
+  };
+  const recallPrevious = () => {
+    if (!state.history.length) { return; }
+    if (historyIndex === -1) {
+      historyDraft = command.value;
+    }
+    if (historyIndex < state.history.length - 1) {
+      historyIndex += 1;
+      applyHistoryEntry(historyIndex);
+    }
+  };
+  const recallNext = () => {
+    if (!state.history.length) { return; }
+    if (historyIndex > -1) {
+      historyIndex -= 1;
+    }
+    applyHistoryEntry(historyIndex);
+  };
   const clearCommandInput = () => {
     command.value = '';
     historyDraft = '';
     historyIndex = -1;
     save();
     updateClearCommandState();
+    resizeCommandInput();
     command.focus();
   };
   const applyHistoryEntry = (index) => {
@@ -92,6 +141,7 @@
       updateModeTooltip();
       save();
       updateClearCommandState();
+      resizeCommandInput();
       const end = command.value.length;
       command.setSelectionRange(end, end);
       return;
@@ -103,16 +153,17 @@
     updateModeTooltip();
     save();
     updateClearCommandState();
+    resizeCommandInput();
     const end = command.value.length;
     command.setSelectionRange(end, end);
     command.focus();
   };
-  function render() {
+  function render({ pinNewest = false } = {}) {
     const previousScrollTop = results.scrollTop;
     results.replaceChildren();
     const minSeverity = Number(state.filterSeverity || 0);
     state.executions.forEach((execution, index) => {
-      const isLatest = index === state.executions.length - 1;
+      const isLatest = index === 0;
       const article = document.createElement('article');
       article.className = `execution${isLatest ? ' latest' : ''}`;
       if (execution.collapsed) { article.classList.add('collapsed'); }
@@ -137,7 +188,7 @@
       const toggleMessages = () => {
         execution.collapsed = !execution.collapsed;
         save();
-        render();
+        render({ pinNewest: false });
       };
       const copyCommandToClipboard = () => {
         vscode.postMessage({ type: 'copyCommand', command: execution.command });
@@ -296,6 +347,15 @@
       }
       results.append(article);
     });
+    if (pinNewest) {
+      const newest = results.querySelector('.execution.latest');
+      if (newest) {
+        requestAnimationFrame(() => {
+          results.scrollTop = Math.max(0, newest.offsetTop);
+        });
+        return;
+      }
+    }
     results.scrollTop = previousScrollTop;
   }
   const text = (tag, value, className) => { const el = document.createElement(tag); el.textContent = value || ''; if (className) el.className = className; return el; };
@@ -326,10 +386,23 @@
     }
   }
   function requestRun() {
+    const normalized = normalizeCommand(command.value);
+    if (normalized !== command.value) {
+      command.value = normalized;
+      resizeCommandInput();
+    }
     save();
-    vscode.postMessage({ type: 'run', command: command.value, mode: mode.value });
+    vscode.postMessage({ type: 'run', command: normalized, mode: mode.value });
   }
-  function requestPrompt() { save(); vscode.postMessage({ type: 'prompt', command: command.value }); }
+  function requestPrompt() {
+    const normalized = normalizeCommand(command.value);
+    if (normalized !== command.value) {
+      command.value = normalized;
+      resizeCommandInput();
+    }
+    save();
+    vscode.postMessage({ type: 'prompt', command: normalized });
+  }
   command.value = state.command || '';
   mode.value = state.mode || '*RUN';
   updateModeTooltip();
@@ -339,7 +412,18 @@
   save();
   render();
   updateClearCommandState();
-  command.addEventListener('input', () => { historyDraft = ''; historyIndex = -1; save(); updateClearCommandState(); }); mode.addEventListener('change', () => { updateModeTooltip(); save(); }); mode.addEventListener('mousedown', updateModeTooltip); if (severityFilter) severityFilter.addEventListener('change', () => { save(); render(); });
+  if (typeof ResizeObserver === 'function') {
+    const observer = new ResizeObserver(entries => {
+      if (autoResizing || !entries.length) { return; }
+      const height = Math.ceil(entries[0].contentRect.height);
+      if (height > 0) {
+        rememberCommandHeight(height);
+      }
+    });
+    observer.observe(command);
+  }
+  resizeCommandInput();
+  command.addEventListener('input', () => { historyDraft = ''; historyIndex = -1; save(); updateClearCommandState(); resizeCommandInput(); }); mode.addEventListener('change', () => { updateModeTooltip(); save(); }); mode.addEventListener('mousedown', updateModeTooltip); if (severityFilter) severityFilter.addEventListener('change', () => { save(); render(); });
   command.addEventListener('keydown', event => {
     if (event.key === 'Enter') { event.preventDefault(); requestRun(); return; }
     if (event.key === 'F4' || event.key === 'f4' || event.code === 'F4') {
@@ -347,27 +431,56 @@
       requestPrompt();
       return;
     }
-    if (!(event.key === 'ArrowUp' || event.key === 'ArrowDown')) return;
-    if (!state.history.length) return;
-    event.preventDefault();
-    if (historyIndex === -1 && event.key === 'ArrowUp') {
-      historyDraft = command.value;
-    }
-    if (event.key === 'ArrowUp') {
-      if (historyIndex < state.history.length - 1) {
-        historyIndex += 1;
-        applyHistoryEntry(historyIndex);
-      }
+    if (event.key === 'F9' || event.key === 'f9' || event.code === 'F9') {
+      event.preventDefault();
+      recallPrevious();
       return;
     }
-    if (historyIndex > -1) {
-      historyIndex -= 1;
+    if (event.key === 'F10' || event.key === 'f10' || event.code === 'F10') {
+      event.preventDefault();
+      recallNext();
+      return;
     }
-    applyHistoryEntry(historyIndex);
+    if (!(event.key === 'ArrowUp' || event.key === 'ArrowDown')) return;
+    if (!state.history.length) return;
+    const valueLength = command.value.length;
+    const selectionStart = Number(command.selectionStart || 0);
+    const selectionEnd = Number(command.selectionEnd || 0);
+    const hasSelection = selectionStart !== selectionEnd;
+    if (event.key === 'ArrowUp' && !hasSelection && selectionStart === 0) {
+      event.preventDefault();
+      recallPrevious();
+      return;
+    }
+    if (event.key === 'ArrowDown' && !hasSelection && selectionEnd === valueLength) {
+      event.preventDefault();
+      recallNext();
+    }
   });
   run.addEventListener('click', requestRun); prompt.addEventListener('click', requestPrompt); clear.addEventListener('click', () => vscode.postMessage({ type: 'clear' })); clearCommand.addEventListener('click', clearCommandInput);
-  goToTop?.addEventListener('click', () => { results.scrollTop = 0; });
-  goToBottom?.addEventListener('click', () => { results.scrollTop = results.scrollHeight; });
+  historyPicker?.addEventListener('click', event => {
+    event.preventDefault();
+    vscode.postMessage({ type: 'requestHistoryPicker' });
+    command.focus();
+  });
+  historyPrev?.addEventListener('click', event => {
+    if (event.ctrlKey || event.metaKey) {
+      event.preventDefault();
+      vscode.postMessage({ type: 'requestHistoryPicker' });
+      return;
+    }
+    recallPrevious();
+    command.focus();
+  });
+  historyNext?.addEventListener('click', event => {
+    if (event.ctrlKey || event.metaKey) {
+      event.preventDefault();
+      vscode.postMessage({ type: 'requestHistoryPicker' });
+      return;
+    }
+    recallNext();
+    command.focus();
+  });
   statusJobId?.addEventListener('click', selectStatusJobId);
   statusJobId?.addEventListener('keydown', event => {
     if (event.key === 'Enter' || event.key === ' ') {
@@ -388,7 +501,7 @@
         setStatusJobId(message.sqlJobId || '');
         if (message.running) { setRunning(true, Date.now()); }
         render();
-        results.scrollTop = results.scrollHeight;
+        results.scrollTop = 0;
         startSqlJobPollingIfNeeded();
         break;
       case 'running':
@@ -401,18 +514,18 @@
         startSqlJobPollingIfNeeded();
         break;
       case 'cancelRequested': setStatusMessage('Cancel requested… IBM i may ignore this when no interruptible SQL statement is active.'); break; case 'cancelAccepted': setStatusJobId(message.sqlJobId || ''); setStatusMessage(`Cancel requested for job ${message.sqlJobId}. Waiting for IBM i to complete the original request.`); break; case 'cancelFailed': setStatusMessage(message.message); break; case 'execution': {
-        state.executions = [...(state.executions || []), { ...message.execution, messages: (message.execution.messages || []).slice(0, maxMessages) }].slice(-maxExecutions);
+        state.executions = [{ ...message.execution, messages: (message.execution.messages || []).slice(0, maxMessages) }, ...(state.executions || [])].slice(0, maxExecutions);
         state.history = [{ command: message.execution.command, mode: message.execution.mode }, ...state.history.filter(item => item.command !== message.execution.command || item.mode !== message.execution.mode)].slice(0, 100);
         command.value = '';
         historyDraft = '';
         historyIndex = -1;
         save();
         updateClearCommandState();
-        render();
-        results.lastElementChild?.scrollIntoView({ block: 'nearest' });
+        resizeCommandInput();
+        render({ pinNewest: true });
         break;
       }
-      case 'setCommand': command.value = message.command; save(); updateClearCommandState(); command.focus(); break; case 'clearResults': state.executions = []; save(); render(); break; case 'focusInput': command.focus(); break; case 'runCurrent': requestRun(); break; case 'promptCurrent': requestPrompt(); break; case 'notice': setStatusMessage(message.message); break;
+      case 'setCommand': command.value = message.command; save(); updateClearCommandState(); resizeCommandInput(); command.focus(); break; case 'setCommandMode': command.value = message.command; mode.value = message.mode || mode.value; updateModeTooltip(); save(); updateClearCommandState(); resizeCommandInput(); command.focus(); break; case 'clearResults': state.executions = []; save(); render(); break; case 'focusInput': command.focus(); break; case 'runCurrent': requestRun(); break; case 'promptCurrent': requestPrompt(); break; case 'notice': setStatusMessage(message.message); break;
     }
   });
   window.addEventListener('beforeunload', () => {

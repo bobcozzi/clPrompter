@@ -2,6 +2,23 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.0.18] - 2026-08-23
+
+### What's New
+
+- **Dedicated CL History button**: Added a subtle ellipsis button to open the command history picker directly.
+- **Expanded command input**: The CL command textbox is longer by default and still resizable.
+- **LIFO command history behavior**: Command recall now surfaces the most recently used commands first.
+- **UX/UI polish**: Refined the command entry layout, hover text, and history controls for a cleaner VS Code-like feel.
+- **Launch Control**: The CL Command Entry panel can now be launched at startup, after an IBM i connection, or on demand.
+- **CMD_RUN**: A new SQL UDTF was introduced in the prior release but was not mentioned. `CMD_RUN` is uploaded to your IBM i server host system and compiled into your VSCODE-IBMI "temp" library. It is used by the CL Command Entry panel to run CL commands and obtain resulting messages, if any.
+
+### What's Fixed
+
+- **CL Prompter validation behavior**: Pressing Enter or clicking the Enter button now validates the prompted command before returning it. Previously, if an invalid parameter value was entered and the user pressed Enter without leaving that input field, the command was returned with the invalid value. This has been fixed.
+- **F3 and F12 return paths**: F12 returns the current command string without blocking on validation errors, and F3 cancels and reverts to the original command string. This matches the behavior of the IBM i 5250 CL Command Entry display.
+- **Status feedback**: Added temporary status message feedback in the status bar for F12, F3, ESC, and Cancel.
+
 ## [1.0.17] - 2026-08-22
 
 ### What's New
@@ -12,7 +29,7 @@ All notable changes to this project are documented in this file.
   - Choose execution mode directly in the view: `*RUN` (Normal) or `*LIMIT` (Limited user).
   - Review ordered IBM i message output (message ID, severity, message type, message text, second-level message text).
   - Track elapsed execution time and outcome (`success`, `warning`, `error`) per run.
-  - Interactive commands, such as `WRKOBJ`, `WRKACTJOB`, or `DSPLIBL OUTPUT(*)` will *not* show their interactive screen. It should be used for batch-style CL commands.
+  - Interactive commands, such as `WRKOBJ`, `WRKACTJOB`, or `DSPLIBL OUTPUT(*)` do *not* show their interactive screen. It should be used for batch-style CL commands.
 - **Execution log and command recall**:
   - Persistent CL Command history (stored in extension global state) for reuse across sessions.
   - Keyboard recall-history. `ArrowUp` / `ArrowDown` can be used to retrieve prior, next CL Command.

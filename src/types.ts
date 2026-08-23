@@ -172,14 +172,16 @@ export interface SubmitMessage {
   type: 'submit';
   cmdName: string;
   values: { [kwd: string]: any };
+  submitMode?: 'enter' | 'f12';
 }
 
 export interface CancelMessage {
   type: 'cancel';
   cmdName: string;
+  cancelMode?: 'f3' | 'escape' | 'button';
 }
 
-export type WebviewMessage = FormDataMessage | SubmitMessage | CancelMessage | { type: string; [key: string]: any };
+export type WebviewMessage = FormDataMessage | SubmitMessage | CancelMessage | { type: string;[key: string]: any };
 
 // Internal state
 export interface PrompterState {

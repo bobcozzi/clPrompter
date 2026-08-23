@@ -4588,26 +4588,48 @@ function showDepErrorBanner(errors) {
     }
 }
 // Event handlers
-function onSubmit() {
-    debugLog('[clPrompter] ', 'onSubmit (Enter) start');
+function onSubmit(opts = {}) {
+    const bypassValidation = opts.bypassValidation === true;
+    debugLog('[clPrompter] ', `onSubmit (${bypassValidation ? 'F12=Return without validation' : 'Enter=Return with validation'}) start`);
+    if (!bypassValidation) {
+        const formEl = document.getElementById('clForm');
+        if (formEl) {
+            // Hard gate: Enter submit must not proceed while any browser/custom validity
+            // errors are still active. This closes timing windows where blur validators
+            // may not have completed before requestSubmit() runs.
+            const hasNativeInvalid = !formEl.checkValidity();
+            const hasInlineErrors = formEl.querySelector('.validation-error, .prompter-error-msg.visible') !== null;
+            if (hasNativeInvalid || hasInlineErrors) {
+                formEl.reportValidity();
+                debugLog('[clPrompter] onSubmit blocked: unresolved field validation errors present');
+                return;
+            }
+        }
+    }
     const values = assembleCurrentParmMap();
     // Normalize newlines in all parameter values (textarea fields can have Shift+Enter)
     normalizeNewlinesInValues(values);
-    // Check required parameters (Min >= 1 at PARM level) first.
-    // Per-field "Required" error messages are shown inline next to each missing field.
-    const missingRequired = checkRequiredParms();
-    if (missingRequired > 0) {
-        debugLog('[clPrompter] onSubmit blocked: ' + missingRequired + ' required parameter(s) missing');
-        return;
+    if (!bypassValidation) {
+        // Check required parameters (Min >= 1 at PARM level) first.
+        // Per-field "Required" error messages are shown inline next to each missing field.
+        const missingRequired = checkRequiredParms();
+        if (missingRequired > 0) {
+            debugLog('[clPrompter] onSubmit blocked: ' + missingRequired + ' required parameter(s) missing');
+            return;
+        }
+        // Evaluate cross-parameter Dep constraints and block submission if there are violations.
+        // atSubmit=true bypasses the touched-field guard so "specify at least one" rules fire
+        // even when the user pressed Enter without touching any involved field.
+        const depErrors = evaluateAllDepConstraints(true);
+        showDepErrorBanner(depErrors);
+        if (depErrors.length > 0) {
+            debugLog('[clPrompter] onSubmit blocked by Dep constraint violations:', depErrors);
+            return;
+        }
     }
-    // Evaluate cross-parameter Dep constraints and block submission if there are violations.
-    // atSubmit=true bypasses the touched-field guard so "specify at least one" rules fire
-    // even when the user pressed Enter without touching any involved field.
-    const depErrors = evaluateAllDepConstraints(true);
-    showDepErrorBanner(depErrors);
-    if (depErrors.length > 0) {
-        debugLog('[clPrompter] onSubmit blocked by Dep constraint violations:', depErrors);
-        return;
+    else {
+        // F12 behavior: return current command regardless of any validation state.
+        showDepErrorBanner([]);
     }
     // Include label in values if present (normalize newlines just in case)
     if (state.cmdLabel && state.cmdLabel.trim()) {
@@ -4619,14 +4641,19 @@ function onSubmit() {
         values['comment'] = '/* ' + normalizedComment + ' */';
     }
     const cmdName = state.xmlDoc?.querySelector('Cmd')?.getAttribute('CmdName') || state.cmdName;
-    vscode?.postMessage({ type: 'submit', cmdName, values });
-    debugLog('[clPrompter] ', 'onSubmit (Enter) end');
+    vscode?.postMessage({
+        type: 'submit',
+        cmdName,
+        values,
+        submitMode: bypassValidation ? 'f12' : 'enter'
+    });
+    debugLog('[clPrompter] ', `onSubmit (${bypassValidation ? 'F12' : 'Enter'}) end`);
 }
-function onCancel() {
-    debugLog('[clPrompter] ', 'onCancel (F3=Cancel) start');
+function onCancel(mode = 'button') {
+    debugLog('[clPrompter] ', `onCancel (${mode}=Cancel) start`);
     const cmdName = state.xmlDoc?.querySelector('Cmd')?.getAttribute('CmdName') || state.cmdName;
-    vscode?.postMessage({ type: 'cancel', cmdName });
-    debugLog('[clPrompter] ', 'onCancel (F3=Cancel) end');
+    vscode?.postMessage({ type: 'cancel', cmdName, cancelMode: mode });
+    debugLog('[clPrompter] ', `onCancel (${mode}=Cancel) end`);
 }
 function wirePrompterControls() {
     debugLog('[clPrompter] ', 'wirePrompterControls start');
@@ -4658,7 +4685,7 @@ function wirePrompterControls() {
         });
     }
     if (submitBtn) {
-        submitBtn.addEventListener('click', onSubmit);
+        submitBtn.addEventListener('click', () => onSubmit());
         // Trap Tab key on submit button to wrap back to first input
         submitBtn.addEventListener('keydown', (e) => {
             if (e.key === 'Tab' && !e.shiftKey) {
@@ -4670,7 +4697,7 @@ function wirePrompterControls() {
         });
     }
     if (cancelBtn) {
-        cancelBtn.addEventListener('click', onCancel);
+        cancelBtn.addEventListener('click', () => onCancel('button'));
     }
     // Trap Shift+Tab on first input to wrap to comment field
     if (labelInput && commentInput) {
@@ -4708,6 +4735,11 @@ function wirePrompterControls() {
                 form.requestSubmit();
             }
         }
+        else if (e.key === 'F12') {
+            e.preventDefault();
+            // Return current command state as-is, intentionally bypassing validation.
+            onSubmit({ bypassValidation: true });
+        }
         else if (e.key === 'Escape' || e.key === 'F3') {
             e.preventDefault();
             // Close help overlay first; if it was open, don't also cancel the prompter
@@ -4716,7 +4748,7 @@ function wirePrompterControls() {
                 closeHelpOverlay();
                 return;
             }
-            onCancel();
+            onCancel(e.key === 'F3' ? 'f3' : 'escape');
         }
         // Shift+Enter in textareas: allow newline (don't preventDefault above)
     });

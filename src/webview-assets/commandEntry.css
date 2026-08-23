@@ -28,6 +28,7 @@ body {
 }
 
 input,
+textarea,
 select,
 button {
     font: inherit;
@@ -37,11 +38,17 @@ button {
     min-height: 24px;
 }
 
-input {
+#command {
     width: 100%;
     padding: 2px 24px 2px 6px;
     font-family: var(--vscode-editor-font-family);
     box-sizing: border-box;
+    line-height: 1.35;
+    min-height: calc(1.35em * 2 + 6px);
+    resize: vertical;
+    overflow-y: auto;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
 }
 
 button {
@@ -129,10 +136,25 @@ button[data-tooltip]:focus-visible::after {
     line-height: 1.2;
 }
 
-#go-to-top:hover::after,
-#go-to-top:focus-visible::after,
-#go-to-bottom:hover::after,
-#go-to-bottom:focus-visible::after,
+#history-picker {
+    min-width: 24px;
+    width: 24px;
+    padding: 0 4px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 18px;
+    line-height: 1;
+    letter-spacing: 0;
+    transform: translateY(-1px);
+}
+
+#history-picker:hover::after,
+#history-picker:focus-visible::after,
+#history-prev:hover::after,
+#history-prev:focus-visible::after,
+#history-next:hover::after,
+#history-next:focus-visible::after,
 #clear:hover::after,
 #clear:focus-visible::after {
     left: auto;
@@ -232,13 +254,15 @@ button[data-tooltip]:focus-visible::after {
     margin: 7px 0;
     padding: 7px;
     border-left: 3px solid var(--vscode-editor-foreground);
-    background: var(--vscode-textBlockQuote-background);
+    background: transparent;
     contain: content;
 }
 
 .execution.latest {
     border-left-color: var(--vscode-testing-iconPassed);
-    background: transparent;
+    background: var(--vscode-textBlockQuote-background);
+    outline: 1px solid var(--vscode-testing-iconPassed, #2a8a2a);
+    outline-offset: -1px;
 }
 
 .execution.collapsed {
@@ -364,12 +388,13 @@ header {
 
 .message.warning {
     border-color: var(--vscode-testing-iconQueued);
+    color: var(--vscode-terminal-ansiYellow, #d4a000);
 }
 
 .message.error,
 .failure {
-    border-color: var(--vscode-testing-iconFailed);
-    color: var(--vscode-errorForeground);
+    border-color: var(--vscode-testing-iconFailed, #f14c4c);
+    color: #f55353;
 }
 
 .failure {

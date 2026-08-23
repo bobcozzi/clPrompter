@@ -39,8 +39,9 @@ export interface CommandEntryHistory {
 
 export function classifyMessage(severity: number, type: string): CommandMessageKind {
     const normalizedType = type.trim().toUpperCase();
-    // Keep visual emphasis minimal: only hard errors are highlighted.
+    // Keep visual emphasis minimal: hard errors are highlighted red, diagnostics are highlighted yellow.
     if (/ESCAPE|ERROR/.test(normalizedType)) { return 'error'; }
+    if (/DIAG|WARNING/.test(normalizedType)) { return 'warning'; }
     return 'info';
 }
 
