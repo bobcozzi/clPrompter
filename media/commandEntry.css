@@ -162,6 +162,28 @@ button[data-tooltip]:focus-visible::after {
     transform: none;
 }
 
+#mode-tooltip-wrap {
+    position: relative;
+    display: inline-flex;
+}
+
+#mode-tooltip-wrap:not(.tooltip-suppressed)[data-tooltip]:hover::after {
+    content: attr(data-tooltip);
+    position: absolute;
+    top: calc(100% + 6px);
+    right: 0;
+    white-space: nowrap;
+    padding: 2px 6px;
+    border-radius: 3px;
+    background: var(--vscode-editorHoverWidget-background, var(--vscode-editor-background));
+    color: var(--vscode-editorHoverWidget-foreground, var(--vscode-foreground));
+    border: 1px solid var(--vscode-editorHoverWidget-border, var(--vscode-contrastBorder, transparent));
+    z-index: 20;
+    pointer-events: none;
+    font-size: 11px;
+    line-height: 1.2;
+}
+
 #clear-command:disabled {
     opacity: 0;
     pointer-events: none;
@@ -255,7 +277,7 @@ button[data-tooltip]:focus-visible::after {
     padding: 7px;
     border-left: 3px solid var(--vscode-editor-foreground);
     background: transparent;
-    contain: content;
+    contain: layout style;
 }
 
 .execution.latest {
@@ -292,6 +314,31 @@ header {
     color: var(--vscode-textLink-foreground, var(--vscode-foreground));
     -webkit-user-select: none;
     user-select: none;
+    position: relative;
+}
+
+.execution-replay {
+    position: relative;
+}
+
+.execution-command[data-tooltip]:hover::after,
+.execution-command[data-tooltip]:focus-visible::after,
+.execution-replay[data-tooltip]:hover::after,
+.execution-replay[data-tooltip]:focus-visible::after {
+    content: attr(data-tooltip);
+    position: absolute;
+    top: calc(100% + 6px);
+    left: 0;
+    white-space: nowrap;
+    padding: 2px 6px;
+    border-radius: 3px;
+    background: var(--vscode-editorHoverWidget-background, var(--vscode-editor-background));
+    color: var(--vscode-editorHoverWidget-foreground, var(--vscode-foreground));
+    border: 1px solid var(--vscode-editorHoverWidget-border, var(--vscode-contrastBorder, transparent));
+    z-index: 20;
+    pointer-events: none;
+    font-size: 11px;
+    line-height: 1.2;
 }
 
 .execution-command:hover,

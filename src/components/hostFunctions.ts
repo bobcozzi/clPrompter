@@ -270,7 +270,7 @@ export class CmdRunChecker extends UDTFChecker {
     readonly id = CmdRunChecker.ID;
     readonly PGM_NAME = 'CMDRUN';
     readonly UDTF_SPECIFIC = 'cmd_run';
-    readonly currentVersion = 1;
+    readonly currentVersion = 2;
 
     getCPPSrc(): string { return getCmdRunCPPSrc(); }
     getSQLSrc(library: string, version: number): string { return getCmdRunSQLSrc(library, version); }

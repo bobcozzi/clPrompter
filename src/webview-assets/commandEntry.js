@@ -8,6 +8,11 @@
   const statusText = document.getElementById('status-text'), statusJobId = document.getElementById('status-jobid'), results = document.getElementById('results');
   let historyIndex = -1, runningStartedAt, runningTimerId, historyDraft = '', sqlJobPollingId;
   let baseMinHeightPx = 0, autoResizing = false;
+  // Wrap the mode select so we can render a custom CSS tooltip with fast hover behavior.
+  const modeTooltipWrap = document.createElement('span');
+  modeTooltipWrap.id = 'mode-tooltip-wrap';
+  mode.parentNode?.insertBefore(modeTooltipWrap, mode);
+  modeTooltipWrap.appendChild(mode);
   const save = () => {
     state.command = command.value;
     state.mode = mode.value;
@@ -74,8 +79,17 @@
   const updateModeTooltip = () => {
     const selected = mode.options[mode.selectedIndex];
     const help = selected?.title || 'Run mode';
-    mode.title = help;
+    modeTooltipWrap.setAttribute('data-tooltip', help);
+    mode.removeAttribute('title');
     mode.setAttribute('aria-description', help);
+  };
+
+  const suppressModeTooltip = () => {
+    modeTooltipWrap.classList.add('tooltip-suppressed');
+  };
+
+  const restoreModeTooltip = () => {
+    modeTooltipWrap.classList.remove('tooltip-suppressed');
   };
   const updateClearCommandState = () => {
     clearCommand.disabled = command.value.length === 0;
@@ -170,13 +184,13 @@
       const header = document.createElement('header');
       const meta = `${new Date(execution.startedAt).toLocaleString()} · ${execution.mode} · ${formatElapsed(execution.elapsedMs)}`;
       const replayMarker = text('span', execution.collapsed ? '▶' : '▼', 'execution-replay');
-      replayMarker.title = 'Click=Fold/Expand, Double-Click=Copy';
+      replayMarker.setAttribute('data-tooltip', 'Click=Fold/Expand, Double-Click=Copy');
       replayMarker.tabIndex = 0;
       const commandEl = text('strong', execution.command, 'execution-command');
-      commandEl.title = 'Click=Recall, Double-Click=Copy';
+      commandEl.setAttribute('data-tooltip', 'Click=Recall, Double-Click=Copy');
       commandEl.tabIndex = 0;
       let clickTimer;
-      const singleClickDelayMs = 350;
+      const singleClickDelayMs = 140;
       const reuseCommand = () => {
         command.value = execution.command;
         mode.value = execution.mode;
@@ -423,7 +437,16 @@
     observer.observe(command);
   }
   resizeCommandInput();
-  command.addEventListener('input', () => { historyDraft = ''; historyIndex = -1; save(); updateClearCommandState(); resizeCommandInput(); }); mode.addEventListener('change', () => { updateModeTooltip(); save(); }); mode.addEventListener('mousedown', updateModeTooltip); if (severityFilter) severityFilter.addEventListener('change', () => { save(); render(); });
+  command.addEventListener('input', () => { historyDraft = ''; historyIndex = -1; save(); updateClearCommandState(); resizeCommandInput(); });
+  mode.addEventListener('change', () => { updateModeTooltip(); save(); restoreModeTooltip(); });
+  mode.addEventListener('mousedown', () => { updateModeTooltip(); suppressModeTooltip(); });
+  mode.addEventListener('keydown', event => {
+    if (event.key === 'Enter' || event.key === ' ' || event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      suppressModeTooltip();
+    }
+  });
+  mode.addEventListener('blur', restoreModeTooltip);
+  if (severityFilter) severityFilter.addEventListener('change', () => { save(); render(); });
   command.addEventListener('keydown', event => {
     if (event.key === 'Enter') { event.preventDefault(); requestRun(); return; }
     if (event.key === 'F4' || event.key === 'f4' || event.code === 'F4') {
@@ -498,6 +521,14 @@
     const message = event.data; switch (message.type) {
       case 'initialize':
         state.history = message.history || [];
+        if (message.clearInputOnStartup) {
+          command.value = '';
+          historyDraft = '';
+          historyIndex = -1;
+          save();
+          updateClearCommandState();
+          resizeCommandInput();
+        }
         setStatusJobId(message.sqlJobId || '');
         if (message.running) { setRunning(true, Date.now()); }
         render();

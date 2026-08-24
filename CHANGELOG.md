@@ -2,6 +2,17 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.0.19] - 2026-08-25 -- Security Release
+
+### What's New
+
+#### CL Command Entry
+- **A List of Prohibited Commands is Added**: The integrated Command Entry panel now restricts running a very small number of IBM i CL commands. Command Entry may no longer run `PWODWNSYS`, `ENDSYS`, or `ENDTCPSVR`. If these commands are detected, the function issues message CPF1038 as well as SQLSTATE 57014. Other commands may be added to this list, if they are determined to be a security risk.
+
+### What's Fixed
+- **Hover (Tooltip) Text** now appears faster and more consistently.
+- **Clear command input upon start up** a bug was introduced that prevented CLPROMPTER from being able to clear the input field on the CL Command Entry panel when a Connection is first established. This has been fixed.
+
 ## [1.0.18] - 2026-08-23
 
 ### What's New

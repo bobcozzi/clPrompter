@@ -25,6 +25,7 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
     private running = false;
     private activeExecutionId: string | undefined;
     private cancelRequested = false;
+    private clearInputOnFirstReady = true;
     private readonly output = vscode.window.createOutputChannel('CLPROMPTER');
     private readonly service = new CommandEntryService();
 
@@ -58,7 +59,14 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
     private async receive(message: CommandEntryRequest): Promise<void> {
         switch (message.type) {
             case 'ready':
-                this.post({ type: 'initialize', history: this.history(), running: this.running, sqlJobId: this.currentSqlJobId() });
+                this.post({
+                    type: 'initialize',
+                    history: this.history(),
+                    running: this.running,
+                    sqlJobId: this.currentSqlJobId(),
+                    clearInputOnStartup: this.clearInputOnFirstReady
+                });
+                this.clearInputOnFirstReady = false;
                 break;
             case 'clear':
                 this.post({ type: 'clearResults' });
