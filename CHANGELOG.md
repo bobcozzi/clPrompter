@@ -6,12 +6,13 @@ All notable changes to this project are documented in this file.
 
 ### What's New
 
+#### CL Command Entry Enhancements
 - **Dedicated CL History button**: Added a subtle ellipsis button to open the command history picker directly.
 - **Expanded command input**: The CL command textbox is longer by default and still resizable.
 - **LIFO command history behavior**: Command recall now surfaces the most recently used commands first.
 - **UX/UI polish**: Refined the command entry layout, hover text, and history controls for a cleaner VS Code-like feel.
 - **Launch Control**: The CL Command Entry panel can now be launched at startup, after an IBM i connection, or on demand.
-- **CMD_RUN**: A new SQL UDTF was introduced in the prior release but was not mentioned. `CMD_RUN` is uploaded to your IBM i server host system and compiled into your VSCODE-IBMI "temp" library. It is used by the CL Command Entry panel to run CL commands and obtain resulting messages, if any.
+- **CMD_RUN**: A new SQL UDTF was introduced in the prior release but was not mentioned. `CMD_RUN` is uploaded to the connected IBM i server host and compiled into your Code for IBM i (`vscode-ibmi`) extension's "temp" library. This function is used by the CL Command Entry panel to run CL commands and obtain its resulting messages.
 
 ### What's Fixed
 

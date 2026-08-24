@@ -65,49 +65,44 @@ The `CL Command Entry Panel` is intended for **non-interactive CL commands** suc
 ### Command Entry Features
 
 - **Run commands** — Enter a CL command and run it directly from the panel.
-- **Prompt commands** — Use **F4** or **Prompt** to open CL Prompting for the current command text, then return the prompted command to the input field.
+- **Prompt commands** — Use **F4** or **Prompt** to open CL Prompting for the current command text, then return the prompted command to the input field. Command parameter help is available inside the prompter, just like the 5250 prompter.
 - **Run modes** — Choose `*RUN` (normal) or `*LIMIT` (limited user) before execution.
-- **Message detail output** — View returned IBM i messages including message ID, severity, type, text, and second-level text when available.
+- **Message detail output** — A message log (similar to a joblog) is rendered for each CL command you run.
 - **Execution feedback** — See elapsed time and final outcome for each command (`success`, `warning`, `error`).
-- **History and recall** — Reuse previously entered commands across sessions; use `ArrowUp`/`ArrowDown` and click/double-click recall actions.
-- **Panel visibility control** — Control startup visibility with **Show Command Entry in Panel at Startup** and explicit show/hide commands from the Command Palette:
+- **History and recall** — Reuse previously entered commands across sessions; use `ArrowUp`/`ArrowDown` (or `F9` and `F10` just like the 5250 Command entery. You can also bring up a list of previously run CL commands and select a command from it.
+- **Panel visibility control** — `Command Entry` visibility can be on demand, at start up, or after a connection. For on-demand visibility, use either of the following new VSCODE commands (Cmd+Shift+P/Ctrl+Shift+P):
   - **CLPROMPTER: Open CL Command Entry**
   - **CLPROMPTER: Close CL Command Entry**
 
 ### Limitations and Behavior Notes
 
-- **Interactive CL commands are not interactive in this panel** — Commands like `WRKOBJ`, `WRKACTJOB`, and `DSPLIBL OUTPUT(*)` do not display green-screen style interactive UIs here.
-- **Cancel Request is disabled** — The cancel action issues `QSYS2.CANCEL_SQL` for the active SQL job; it usually does not terminate a currently running CL command, and has for this release been removed/disabled. Future updates will unlikely have a solution to cancel request (SYSRQS Option 2-style cancelling).
-- **Prompt does not auto-run** — After prompting, the returned command text is staged in the input command line; it is run only when you press **Run** or `Enter` after it is inserted into the input command line. Note that this is purposely different from the classic IBM i 52520 Command Entry screen's behavior.
+- **Interactive CL commands are not supported in the Command Entry panel** — Commands like `WRKOBJ`, `WRKACTJOB`, and `DSPLIBL OUTPUT(*)` do not display the 5250 style interactive UI and therefore are not support. Unpredictable results may occur.
+- **Cancel Request is disabled** — The cancel action feature was implemented via `QSYS2.CANCEL_SQL` but that did not accomplish a valid cancel of the commands. We were going for a `SysReq Option 2` style end-request options, which this interface cannot currently perform. We continue to research other options and solutions to cancel a running CL command, and will implement it when one is designed that works for this situation.
+- **Prompt does not auto-run** — After prompting a CL command, the command string is returned to the input command line but not automatically run. To run the command, press `Enter` or the **Run** button. Note that this is purposely different from the classic IBM i 52520 Command Entry screen's behavior.
 
 ## Features
 
 ### CL Prompter Features
 
-#### Enhanced User Experience
-
 - **Visual Focus Indicator** — Clear arrow (▶) indicator shows which input field currently has focus, making it easy to navigate through complex command parameters.
 - **Tab Navigation** — Press TAB to move seamlessly between input fields, just like traditional 5250 prompting.
 - **Comment Preservation** — Trailing comments on your CL commands are automatically preserved and properly formatted when you submit the prompter.
-- **F3=Cancel** — Press F3 during prompting to cancel and return to your code without changes.
-- **Enter=Apply** — Press Enter during a prompter to apply the changes to the CL source.
-
-#### Intelligent Formatting
-
-- **Automatic Formatting on Return from Prompting** — When you press Enter to apply changes from the prompter, your CL command is automatically formatted according to your formatting preferences—just like the IBM i prompter formats commands on the host system.
-- **ELEM Parameter Handling** — Complex ELEM parameters (like LOG, EXTRA, etc.) stay together on a single line when possible for better readability.
-- **Multi-line Comment Support** — Long comments are automatically wrapped and properly indented on continuation lines.
-- **Qualified Name Formatting** — Properly handles qualified objects like LIB/OBJECT throughout the prompter.
+- **Help Text** - Simlar to the 5250 CL promtper, CL Command Help is provided for each parameter. Look for the `?` near the parameter to call up that parameters online helptext. The helptext engine used by CL Prompter is must more efficient that other interfaces CL helptext so there is little to no lag between requesting the Helptext and viewing it.
+- **F3=Exit** — Press `F3` during prompting to cancel and return to your code without changes. Users may also use the `ESC` key instead of `F3`.
+- **Enter=Apply** — Press Enter during a prompter to returns the completed CL command string to the editor.
+- **F12=Cancel** - Press `F12` during prompter to cancel the prompter and return the current Command string, including any invalid parameter values, to the editor.
+- **Focus based validation** - Each parameter's restrictions are validated when you attempt to move the cursor out of the parameter's input field. A message is immediately displayed near the parameter. Resolve the issue before continuing, or press F3 to return without fixing the issue.
 
 ### CL Formatter Features
 
-- **Single Statement or Whole File** — Format just the current CL command or the entire source file with intelligent syntax handling.
-- **Comment Preservation** — Trailing comments are preserved and properly formatted with automatic wrapping for long comments.
-- **Intelligent Keyword Alignment** — Configurable keyword positioning and continuation line indentation for consistent, readable code.
-- **ELEM Parameter Handling** — Complex ELEM parameters stay together on a single line when possible for better readability.
-- **Qualified Name Support** — Properly formats qualified objects like LIB/OBJECT throughout your CL code.
-- **Multi-line Formatting** — Automatically wraps long commands with proper continuation character (`&`) and indentation.
-- **Case Conversion** — Choose between uppercase, lowercase, or no case conversion for both commands and values.
+- **Automatic Formatting on Return from Prompting** — When you press Enter to apply changes from the prompter, your CL command is automatically reformatted to match your preferences, just like the IBM i prompter.
+- **Single Statement or Whole File** — Format a single CL command or an entire source file.
+- **Intelligent Keyword Alignment** — Configurable keyword and continuation indentation keep CL source consistent and readable.
+- **ELEM Parameter Handling** — Complex ELEM parameters such as `CHGJOB`'s `LOG` parameter stay grouped on a single line when possible.
+- **Comment Preservation** — Trailing comments are kept intact and wrapped cleanly across continuation lines.
+- **Qualified Name Formatting** — Properly formatted qualified object names, such as `QIWS/QCUSTCDT` are supported.
+- **Multi-line Formatting** — Long commands are wrapped onto multiple lines with proper indentation.
+- **Case Conversion** — Configurable command name, keyword name and parameter values can be automatically converted to uppercase, lowercase, or kept in their original format.
 
 ### Customization & Configuration
 
@@ -118,7 +113,7 @@ The `CL Command Entry Panel` is intended for **non-interactive CL commands** suc
 - **Command Entry Startup Visibility** — Enable or disable **Show Command Entry in Panel at Startup** to control whether the CL Command Entry panel appears automatically when the extension starts.
 - **Open/Close Command Entry Commands** — Use **CLPROMPTER: Open CL Command Entry** and **CLPROMPTER: Close CL Command Entry** from the Command Palette to explicitly show or hide the CL Command Entry panel.
 
-### Diagnostic Tools (for troubleshooting)
+### Diagnostic Tools (for interal use and troubleshooting)
 
 - **Save Command XML** — Optionally save the IBM i command definition XML to a file for analysis.
 - **Save Prompter HTML** — Optionally save the generated prompter HTML for diagnostic purposes when reporting issues.
