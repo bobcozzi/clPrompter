@@ -79,6 +79,12 @@ The `CL Command Entry Panel` is intended for **non-interactive CL commands** suc
 - **Interactive CL commands are not supported in the Command Entry panel** — Commands like `WRKOBJ`, `WRKACTJOB`, and `DSPLIBL OUTPUT(*)` do not display the 5250 style interactive UI and therefore are not support. Unpredictable results may occur.
 - **Cancel Request is disabled** — The cancel action feature was implemented via `QSYS2.CANCEL_SQL` but that did not accomplish a valid cancel of the commands. We were going for a `SysReq Option 2` style end-request options, which this interface cannot currently perform. We continue to research other options and solutions to cancel a running CL command, and will implement it when one is designed that works for this situation.
 - **Prompt does not auto-run** — After prompting a CL command, the command string is returned to the input command line but not automatically run. To run the command, press `Enter` or the **Run** button. Note that this is purposely different from the classic IBM i 52520 Command Entry screen's behavior.
+- **SQL fetch window is configurable** — CL Command Entry SQL statements (`sql: ...`) use two settings:
+  - `clPrompter.commandEntrySqlFetchLimitEnabled` controls whether SQL rows are loaded in chunks.
+  - `clPrompter.commandEntrySqlFetchLimitRows` is the manual **Load more rows** chunk size (for example `1000` or `2000`).
+  - `clPrompter.commandEntrySqlPrefetchRows` is the initial/background prefetch size (default `200`) loaded before manual load-more is needed.
+  - When chunked loading is disabled (`false`), behavior is equivalent to `*NOMAX` (fetch all available rows on run).
+  - Dedicated-job mode still uses backend sub-chunks as needed, and the SQL Results panel appends rows dynamically.
 
 ## Features
 

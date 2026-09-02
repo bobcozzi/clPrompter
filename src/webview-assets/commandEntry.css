@@ -136,7 +136,7 @@ button[data-tooltip]:focus-visible::after {
     line-height: 1.2;
 }
 
-#history-picker {
+#toolbar-menu {
     min-width: 24px;
     width: 24px;
     padding: 0 4px;
@@ -149,14 +149,52 @@ button[data-tooltip]:focus-visible::after {
     transform: translateY(-1px);
 }
 
-#history-picker:hover::after,
-#history-picker:focus-visible::after,
+.toolbar-menu-wrap {
+    position: relative;
+    display: inline-flex;
+}
+
+.toolbar-menu-list {
+    position: absolute;
+    top: calc(100% + 4px);
+    right: 0;
+    z-index: 30;
+    min-width: 190px;
+    display: none;
+    flex-direction: column;
+    padding: 4px;
+    border-radius: 6px;
+    background: var(--vscode-editorHoverWidget-background, var(--vscode-editor-background));
+    border: 1px solid var(--vscode-editorHoverWidget-border, var(--vscode-contrastBorder, transparent));
+    box-shadow: 0 6px 14px color-mix(in srgb, #000 35%, transparent);
+}
+
+.toolbar-menu-list.is-open {
+    display: flex;
+}
+
+.toolbar-menu-list button {
+    text-align: left;
+    border: none;
+    border-radius: 4px;
+    padding: 4px 8px;
+    min-height: 22px;
+    background: transparent;
+    color: var(--vscode-foreground);
+}
+
+.toolbar-menu-list button:hover,
+.toolbar-menu-list button:focus-visible {
+    background: var(--vscode-list-hoverBackground, color-mix(in srgb, var(--vscode-input-background) 80%, var(--vscode-foreground) 20%));
+    outline: none;
+}
+
+#toolbar-menu:hover::after,
+#toolbar-menu:focus-visible::after,
 #history-prev:hover::after,
 #history-prev:focus-visible::after,
 #history-next:hover::after,
-#history-next:focus-visible::after,
-#clear:hover::after,
-#clear:focus-visible::after {
+#history-next:focus-visible::after {
     left: auto;
     right: 0;
     transform: none;

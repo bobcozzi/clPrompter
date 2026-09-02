@@ -4,9 +4,10 @@
   const noConnectionText = 'no connection';
   const minTextareaRows = 2;
   const command = document.getElementById('command'), mode = document.getElementById('mode'), severityFilter = document.getElementById('message-severity-filter');
-  const run = document.getElementById('run'), prompt = document.getElementById('prompt'), clear = document.getElementById('clear'), clearCommand = document.getElementById('clear-command'), historyPicker = document.getElementById('history-picker'), historyPrev = document.getElementById('history-prev'), historyNext = document.getElementById('history-next');
+  const run = document.getElementById('run'), prompt = document.getElementById('prompt'), clearCommand = document.getElementById('clear-command'), toolbarMenu = document.getElementById('toolbar-menu'), toolbarMenuList = document.getElementById('toolbar-menu-list'), menuViewLog = document.getElementById('menu-view-log'), menuClearLog = document.getElementById('menu-clear-log'), menuStartNewJob = document.getElementById('menu-start-new-job'), historyPrev = document.getElementById('history-prev'), historyNext = document.getElementById('history-next');
   const statusText = document.getElementById('status-text'), statusJobId = document.getElementById('status-jobid'), results = document.getElementById('results');
   let historyIndex = -1, runningStartedAt, runningTimerId, historyDraft = '', sqlJobPollingId;
+  let showStartupFetchLimitStatus = true;
   let baseMinHeightPx = 0, autoResizing = false;
   // Wrap the mode select so we can render a custom CSS tooltip with fast hover behavior.
   const modeTooltipWrap = document.createElement('span');
@@ -25,6 +26,11 @@
   const formatElapsed = ms => ms < 1000 ? `${ms} ms` : `${(ms / 1000).toFixed(1)} s`;
   const setStatusMessage = (message = '') => {
     statusText.textContent = message;
+  };
+  const startupFetchLimitStatus = (value = '') => {
+    const normalized = String(value || '').trim();
+    if (!normalized) { return ''; }
+    return normalized;
   };
   const hasRealSqlJobId = () => {
     const value = statusJobId.textContent?.trim().toLowerCase();
@@ -90,6 +96,31 @@
 
   const restoreModeTooltip = () => {
     modeTooltipWrap.classList.remove('tooltip-suppressed');
+  };
+  if (toolbarMenuList) {
+    toolbarMenuList.classList.remove('is-open');
+    toolbarMenuList.setAttribute('aria-hidden', 'true');
+  }
+  const closeToolbarMenu = () => {
+    if (!toolbarMenuList || !toolbarMenu) { return; }
+    toolbarMenuList.classList.remove('is-open');
+    toolbarMenuList.setAttribute('aria-hidden', 'true');
+    toolbarMenu.setAttribute('aria-expanded', 'false');
+  };
+  const openToolbarMenu = () => {
+    if (!toolbarMenuList || !toolbarMenu) { return; }
+    toolbarMenuList.classList.add('is-open');
+    toolbarMenuList.setAttribute('aria-hidden', 'false');
+    toolbarMenu.setAttribute('aria-expanded', 'true');
+  };
+  const toggleToolbarMenu = () => {
+    if (!toolbarMenuList || !toolbarMenu) { return; }
+    if (!toolbarMenuList.classList.contains('is-open')) {
+      openToolbarMenu();
+      menuViewLog?.focus();
+      return;
+    }
+    closeToolbarMenu();
   };
   const updateClearCommandState = () => {
     clearCommand.disabled = command.value.length === 0;
@@ -480,12 +511,79 @@
       recallNext();
     }
   });
-  run.addEventListener('click', requestRun); prompt.addEventListener('click', requestPrompt); clear.addEventListener('click', () => vscode.postMessage({ type: 'clear' })); clearCommand.addEventListener('click', clearCommandInput);
-  historyPicker?.addEventListener('click', event => {
+  run.addEventListener('click', requestRun); prompt.addEventListener('click', requestPrompt); clearCommand.addEventListener('click', clearCommandInput);
+  toolbarMenu?.addEventListener('click', event => {
     event.preventDefault();
+    toggleToolbarMenu();
+  });
+  toolbarMenu?.addEventListener('keydown', event => {
+    if (event.key === 'ArrowDown' || event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      openToolbarMenu();
+      menuViewLog?.focus();
+    }
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      closeToolbarMenu();
+      command.focus();
+    }
+  });
+  menuViewLog?.addEventListener('click', () => {
+    closeToolbarMenu();
     vscode.postMessage({ type: 'requestHistoryPicker' });
     command.focus();
   });
+  menuClearLog?.addEventListener('click', () => {
+    closeToolbarMenu();
+    vscode.postMessage({ type: 'clear' });
+    command.focus();
+  });
+  menuStartNewJob?.addEventListener('click', () => {
+    closeToolbarMenu();
+    vscode.postMessage({ type: 'startNewJob' });
+    command.focus();
+  });
+  toolbarMenuList?.addEventListener('keydown', event => {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      closeToolbarMenu();
+      toolbarMenu?.focus();
+      return;
+    }
+
+    if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') {
+      return;
+    }
+
+    const menuItems = [menuViewLog, menuClearLog, menuStartNewJob].filter(Boolean);
+    if (!menuItems.length) { return; }
+    event.preventDefault();
+    const currentIndex = menuItems.indexOf(document.activeElement);
+    if (event.key === 'ArrowDown') {
+      const nextIndex = (currentIndex + 1 + menuItems.length) % menuItems.length;
+      menuItems[nextIndex].focus();
+      return;
+    }
+    const prevIndex = (currentIndex - 1 + menuItems.length) % menuItems.length;
+    menuItems[prevIndex].focus();
+  });
+  document.addEventListener('click', event => {
+    if (!toolbarMenuList || !toolbarMenu) { return; }
+    if (!toolbarMenuList.classList.contains('is-open')) { return; }
+    const target = event.target;
+    if (!(target instanceof Node)) {
+      closeToolbarMenu();
+      return;
+    }
+    if (toolbarMenu.contains(target) || toolbarMenuList.contains(target)) {
+      return;
+    }
+    closeToolbarMenu();
+  });
+  command.addEventListener('focus', () => {
+    closeToolbarMenu();
+  });
+  window.addEventListener('blur', closeToolbarMenu);
   historyPrev?.addEventListener('click', event => {
     if (event.ctrlKey || event.metaKey) {
       event.preventDefault();
@@ -531,11 +629,20 @@
         }
         setStatusJobId(message.sqlJobId || '');
         if (message.running) { setRunning(true, Date.now()); }
+        if (showStartupFetchLimitStatus) {
+          const startupStatus = startupFetchLimitStatus(message.sqlFetchLimitDisplay);
+          if (startupStatus) {
+            setStatusMessage(startupStatus);
+          }
+        }
         render();
         results.scrollTop = 0;
         startSqlJobPollingIfNeeded();
         break;
       case 'running':
+        if (message.running) {
+          showStartupFetchLimitStatus = false;
+        }
         setStatusJobId(message.sqlJobId || '');
         setRunning(message.running, message.startedAt);
         startSqlJobPollingIfNeeded();
@@ -544,6 +651,13 @@
         setStatusJobId(message.sqlJobId || '');
         startSqlJobPollingIfNeeded();
         break;
+      case 'sqlFetchLimitStatus': {
+        const status = startupFetchLimitStatus(message.sqlFetchLimitDisplay);
+        if (status) {
+          setStatusMessage(status);
+        }
+        break;
+      }
       case 'cancelRequested': setStatusMessage('Cancel requested… IBM i may ignore this when no interruptible SQL statement is active.'); break; case 'cancelAccepted': setStatusJobId(message.sqlJobId || ''); setStatusMessage(`Cancel requested for job ${message.sqlJobId}. Waiting for IBM i to complete the original request.`); break; case 'cancelFailed': setStatusMessage(message.message); break; case 'execution': {
         state.executions = [{ ...message.execution, messages: (message.execution.messages || []).slice(0, maxMessages) }, ...(state.executions || [])].slice(0, maxExecutions);
         state.history = [{ command: message.execution.command, mode: message.execution.mode }, ...state.history.filter(item => item.command !== message.execution.command || item.mode !== message.execution.mode)].slice(0, 100);

@@ -74,6 +74,10 @@
         "title": "CLPROMPTER: Request Cancel Command Entry"
       },
       {
+        "command": "clprompter.startNewCommandEntryJob",
+        "title": "CLPROMPTER: Start New Command Entry SQL Job"
+      },
+      {
         "command": "clprompter.clearCommandEntry",
         "title": "CLPROMPTER: Clear Command Entry Results"
       }
@@ -107,6 +111,28 @@
             "Do not auto-show CL Command Entry; use Open CL Command Entry when needed."
           ],
           "description": "Controls when the CL Command Entry panel is auto-shown."
+        },
+        "clPrompter.commandEntryUseDedicatedJob": {
+          "type": "boolean",
+          "default": false,
+          "description": "Run Command Entry CL and SQL using a CLPROMPTER-owned dedicated SQL job instead of the shared Code for IBM i SQL job."
+        },
+        "clPrompter.commandEntrySqlFetchLimitEnabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable chunked SQL row loading for CL Command Entry statements. Disable for *NOMAX behavior (fetch all rows on run)."
+        },
+        "clPrompter.commandEntrySqlFetchLimitRows": {
+          "type": "integer",
+          "default": 1000,
+          "minimum": 1,
+          "description": "SQL chunk size for CL Command Entry statements when chunked loading is enabled. This is how many rows each manual 'Load more rows' request retrieves."
+        },
+        "clPrompter.commandEntrySqlPrefetchRows": {
+          "type": "integer",
+          "default": 200,
+          "minimum": 1,
+          "description": "Initial/background SQL prefetch size for CL Command Entry statements. This is the number of rows loaded before you need to press 'Load more rows'."
         },
         "clPrompter.kwdColor": {
           "type": "string",

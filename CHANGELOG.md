@@ -2,6 +2,17 @@
 
 All notable changes to this project are documented in this file.
 
+## [Unreleased]
+
+### What's New
+
+#### CL Command Entry
+- **Configurable SQL fetch limit**: Added settings for SQL statements entered as `sql: ...` in Command Entry.
+  - `clPrompter.commandEntrySqlFetchLimitEnabled` toggles max-row limiting.
+  - `clPrompter.commandEntrySqlFetchLimitRows` sets the numeric cap.
+  - Turning limit-enabled off is equivalent to `*NOMAX` (fetch all rows).
+- **Dedicated-job chunked SQL retrieval**: Dedicated job mode now keeps fetching SQL results in backend chunks so larger result sets can be returned consistently even when a single host execute call is capped.
+
 ## [1.0.19] - 2026-08-25 -- Security Release
 
 ### What's New

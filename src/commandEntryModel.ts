@@ -30,6 +30,20 @@ export interface CommandExecution {
     outcome: 'success' | 'warning' | 'error';
     messages: CommandMessage[];
     failure?: string;
+    sqlResult?: SqlResultPayload;
+}
+
+export interface SqlResultPayload {
+    statement: string;
+    columns: string[];
+    rows: Record<string, unknown>[];
+    rowCount: number;
+    displayedRowCount: number;
+    truncated: boolean;
+    sessionId?: string;
+    hasMoreRows?: boolean;
+    fetchSize?: number;
+    prefetchSize?: number;
 }
 
 export interface CommandEntryHistory {

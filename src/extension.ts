@@ -54,6 +54,7 @@ import * as path from 'path';
 import { buildAPI2PartName, buildQualName } from './QlgPathName';
 import { collectCLCmd, buildAllowedValsMap, buildDepConstraints, buildValToMapToMap, buildDefaultValMap, buildPmtCtlMap, buildAllMaps } from './extractor';
 import { getCMDXML, clearCMDXMLCache, warmXmlCache, getCmdHelpViaUDTF } from './getcmdxml';
+import { runUserSql, UserSqlResult } from './tools';
 
 import {
     tokenizeCL,
@@ -257,6 +258,7 @@ export async function activate(context: vscode.ExtensionContext) {
     const commandEntry = new CommandEntryViewProvider(context, () => code4i?.instance?.getConnection());
     context.subscriptions.push(
         vscode.window.registerWebviewViewProvider(CommandEntryViewProvider.viewType, commandEntry),
+        { dispose: () => { void commandEntry.dispose(); } },
         vscode.commands.registerCommand('clprompter.openCommandEntry', async () => {
             await vscode.commands.executeCommand('setContext', 'clprompter.commandEntryVisible', true);
             await vscode.commands.executeCommand('workbench.view.extension.clprompterCommandEntry');
@@ -268,6 +270,7 @@ export async function activate(context: vscode.ExtensionContext) {
         vscode.commands.registerCommand('clprompter.runCommandEntry', () => commandEntry.requestRun()),
         vscode.commands.registerCommand('clprompter.promptCommandEntry', () => commandEntry.requestPrompt()),
         vscode.commands.registerCommand('clprompter.cancelCommandEntry', () => commandEntry.requestCancel()),
+        vscode.commands.registerCommand('clprompter.startNewCommandEntryJob', () => commandEntry.requestStartNewJob()),
         vscode.commands.registerCommand('clprompter.clearCommandEntry', () => commandEntry.clear())
     );
 
@@ -1873,6 +1876,24 @@ export async function downloadStreamfile(
         vscode.window.showErrorMessage(`Failed to download streamfile: ${err}`);
         return undefined;
     }
+}
+
+/**
+ * Convenience wrapper for executing caller-provided SQL on the active IBM i connection.
+ */
+export async function runUserSqlOnActiveConnection<T = Record<string, unknown>>(
+    statement: string,
+    bindings?: unknown[]
+): Promise<UserSqlResult<T>> {
+    const connection = code4i?.instance?.getConnection();
+    if (!connection) {
+        throw new Error('No active IBM i connection.');
+    }
+    if (!connection.sqlRunnerAvailable()) {
+        throw new Error('IBM i SQL runner is not available.');
+    }
+
+    return runUserSql<T>(connection, statement, bindings);
 }
 
 

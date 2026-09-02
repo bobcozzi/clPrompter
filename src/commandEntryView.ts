@@ -2,7 +2,9 @@ import * as vscode from 'vscode';
 import IBMi from '@halcyontech/vscode-ibmi-types/api/IBMi';
 import { CLPrompter } from './clPrompter';
 import { CommandEntryHistory, CommandExecutionMode } from './commandEntryModel';
-import { buildCancelSqlJobCommand, CommandEntryService, normalizeSqlJobId } from './commandEntryService';
+import { buildCancelSqlJobCommand, CommandEntryService } from './commandEntryService';
+import { CommandEntryJobManager } from './commandEntryJobManager';
+import { notifySqlResultSessionClosed, setSqlResultPanelRequestHandler, showSqlResultPanel } from './sqlResultPanel';
 
 const HISTORY_KEY = 'commandEntry.history';
 const MAX_HISTORY = 100;
@@ -16,7 +18,12 @@ type CommandEntryRequest =
     | { type: 'copySqlJobId'; sqlJobId: string }
     | { type: 'requestSqlJobId' }
     | { type: 'requestCancel' }
+    | { type: 'startNewJob' }
     | { type: 'clear' };
+
+function isSqlPrefixedCommand(command: string): boolean {
+    return /^\s*sql\s*:/i.test(command);
+}
 
 /** Persistent panel webview. It deliberately does not own an IBM i connection. */
 export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
@@ -27,13 +34,28 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
     private cancelRequested = false;
     private clearInputOnFirstReady = true;
     private readonly output = vscode.window.createOutputChannel('CLPROMPTER');
-    private readonly service = new CommandEntryService();
+    private readonly jobManager = new CommandEntryJobManager(this.output);
+    private readonly service = new CommandEntryService(this.jobManager);
 
     constructor(
         private readonly context: vscode.ExtensionContext,
         private readonly getConnection: () => IBMi | undefined
     ) {
-        context.subscriptions.push(this.output);
+        setSqlResultPanelRequestHandler((request) => this.handleSqlResultPanelRequest(request));
+
+        this.context.subscriptions.push(vscode.workspace.onDidChangeConfiguration(event => {
+            if (!event.affectsConfiguration('clPrompter.commandEntrySqlFetchLimitEnabled')
+                && !event.affectsConfiguration('clPrompter.commandEntrySqlFetchLimitRows')
+                && !event.affectsConfiguration('clPrompter.commandEntrySqlPrefetchRows')
+                && !event.affectsConfiguration('clPrompter.commandEntrySqlFetchLimit')) {
+                return;
+            }
+
+            this.post({
+                type: 'sqlFetchLimitStatus',
+                sqlFetchLimitDisplay: this.sqlFetchLimitDisplay()
+            });
+        }));
     }
 
     resolveWebviewView(view: vscode.WebviewView): void {
@@ -54,7 +76,34 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
     requestRun(): void { this.post({ type: 'runCurrent' }); }
     requestPrompt(): void { this.post({ type: 'promptCurrent' }); }
     requestCancel(): void { this.post({ type: 'requestCancel' }); }
-    clear(): void { this.post({ type: 'clearResults' }); }
+    requestStartNewJob(): void { void this.startNewJob(); }
+    clear(): void {
+        void this.service.closeSqlSession();
+        this.post({ type: 'clearResults' });
+    }
+
+    async dispose(): Promise<void> {
+        await this.service.closeSqlSession();
+        setSqlResultPanelRequestHandler(undefined);
+        await this.jobManager.dispose();
+        this.output.dispose();
+    }
+
+    private async handleSqlResultPanelRequest(request: { type: 'loadMore' | 'loadAll' | 'prefetch' | 'closeSession'; sessionId: string }) {
+        if (request.type === 'closeSession') {
+            await this.service.closeSqlSession(request.sessionId);
+            return undefined;
+        }
+
+        const connection = this.getConnection();
+        if (!connection || !connection.sqlRunnerAvailable()) {
+            throw new Error('Not connected to IBM i, or the SQL runner is unavailable.');
+        }
+
+        const fetchAll = request.type === 'loadAll';
+        const prefetchRows = request.type === 'prefetch' ? this.service.getConfiguredPrefetchRows() : undefined;
+        return this.service.loadMoreSql(connection, request.sessionId, fetchAll, prefetchRows);
+    }
 
     private async receive(message: CommandEntryRequest): Promise<void> {
         switch (message.type) {
@@ -64,9 +113,13 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
                     history: this.history(),
                     running: this.running,
                     sqlJobId: this.currentSqlJobId(),
+                    sqlFetchLimitDisplay: this.sqlFetchLimitDisplay(),
                     clearInputOnStartup: this.clearInputOnFirstReady
                 });
                 this.clearInputOnFirstReady = false;
+
+                // Automatically initialize dedicated job if enabled and not already initialized
+                this.initializeDedicatedJobIfNeeded();
                 break;
             case 'clear':
                 this.post({ type: 'clearResults' });
@@ -88,6 +141,9 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
                 break;
             case 'requestCancel':
                 await this.submitCancelRequest();
+                break;
+            case 'startNewJob':
+                await this.startNewJob();
                 break;
             case 'run':
                 await this.run(message.command, message.mode);
@@ -143,6 +199,10 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
 
     private async prompt(command: string): Promise<void> {
         if (!command.trim()) { this.post({ type: 'notice', message: 'Enter a CL command to prompt.' }); return; }
+        if (isSqlPrefixedCommand(command)) {
+            this.post({ type: 'notice', message: 'Prompt is only available for CL commands. Run SQL statements directly.' });
+            return;
+        }
         try {
             const result = await CLPrompter(this.context.extensionUri, command);
             if (result && result !== command) { this.post({ type: 'setCommand', command: result }); }
@@ -159,6 +219,12 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
     private async run(command: string, mode: CommandExecutionMode): Promise<void> {
         if (this.running) { return; }
         if (!command.trim()) { this.post({ type: 'notice', message: 'Enter a CL command to run.' }); return; }
+
+        await this.service.closeSqlSession();
+        if (!isSqlPrefixedCommand(command)) {
+            notifySqlResultSessionClosed('SQL result session is no longer available. Run the SQL statement again.');
+        }
+
         const connection = this.getConnection();
         if (!connection || !connection.sqlRunnerAvailable()) {
             this.post({ type: 'execution', execution: this.failed(command, mode, 'Not connected to IBM i, or the Code for IBM i SQL runner is unavailable.') });
@@ -167,20 +233,20 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
         this.running = true;
         this.activeExecutionId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
         this.cancelRequested = false;
-        const rawSqlJobId = connection.getSqlJobId()?.trim();
-        const sqlJobId = normalizeSqlJobId(rawSqlJobId) ?? rawSqlJobId;
+        const sqlJobId = this.currentSqlJobId(connection);
         this.post({ type: 'running', running: true, executionId: this.activeExecutionId, startedAt: Date.now(), sqlJobId });
         try {
             const execution = await this.service.execute(connection, command, mode, this.activeExecutionId);
             this.remember({ command, mode });
             if (execution.failure) { this.output.appendLine(`[Command Entry] CMD_RUN failed: ${execution.failure}`); }
+            if (execution.sqlResult) {
+                showSqlResultPanel(execution.sqlResult);
+            }
             this.post({ type: 'execution', execution });
         } finally {
             this.running = false;
             this.activeExecutionId = undefined;
-            const refreshedRawSqlJobId = connection.getSqlJobId()?.trim();
-            const refreshedSqlJobId = normalizeSqlJobId(refreshedRawSqlJobId) ?? refreshedRawSqlJobId;
-            this.post({ type: 'running', running: false, sqlJobId: refreshedSqlJobId });
+            this.post({ type: 'running', running: false, sqlJobId: this.currentSqlJobId(connection) });
         }
     }
 
@@ -192,23 +258,28 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
         if (!this.running || !this.activeExecutionId || this.cancelRequested) { return; }
         this.cancelRequested = true;
         this.post({ type: 'cancelRequested' });
+        await this.service.closeSqlSession();
         const connection = this.getConnection();
-        const sqlJobId = normalizeSqlJobId(connection?.getSqlJobId());
+        const sqlJobId = this.currentSqlJobId(connection);
         if (!connection || !sqlJobId) {
-            const message = 'Cancel request unavailable: Code for IBM i did not provide a valid Mapepire SQL job ID.';
+            const message = 'Cancel request unavailable: no valid SQL job ID is available.';
             this.output.appendLine(`[Command Entry] ${message}`);
             this.post({ type: 'cancelFailed', message });
             this.cancelRequested = false;
             return;
         }
+
         try {
-            // sendCommand uses Code for IBM i's authenticated SSH facility, not
-            // connection.runSQL and therefore avoids the Mapepire SQL job.
+            if (this.jobManager.isDedicatedEnabled()) {
+                await this.jobManager.cancelActive(connection);
+                this.output.appendLine(`[Command Entry] Cancel requested for dedicated SQL job ${sqlJobId}.`);
+                this.post({ type: 'cancelAccepted', sqlJobId });
+                return;
+            }
+
             const cancelCommand = buildCancelSqlJobCommand(sqlJobId);
             this.output.appendLine(`[Command Entry] Sending cancel request for Mapepire SQL job ${sqlJobId}: ${cancelCommand}`);
-            const result = await connection.sendCommand({
-                command: cancelCommand
-            });
+            const result = await connection.sendCommand({ command: cancelCommand });
             this.output.appendLine(`[Command Entry] Cancel request for ${sqlJobId} completed with code ${result.code}. stdout=${result.stdout || '<empty>'}; stderr=${result.stderr || '<empty>'}`);
             if (result.code !== 0) {
                 const message = result.stderr || result.stdout || `IBM i command ended with code ${result.code}.`;
@@ -227,13 +298,81 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
         }
     }
 
+    private async startNewJob(): Promise<void> {
+        await this.service.closeSqlSession();
+
+        const connection = this.getConnection();
+        if (!connection || !connection.sqlRunnerAvailable()) {
+            this.post({ type: 'notice', message: 'Not connected to IBM i, or the SQL runner is unavailable.' });
+            return;
+        }
+
+        if (!this.jobManager.isDedicatedEnabled()) {
+            this.post({ type: 'notice', message: 'Dedicated SQL job mode is disabled. Enable clPrompter.commandEntryUseDedicatedJob to use Start New Job.' });
+            return;
+        }
+
+        try {
+            const sqlJobId = await this.jobManager.restartJob(connection);
+            this.post({ type: 'sqlJobId', sqlJobId });
+            this.post({ type: 'notice', message: sqlJobId ? `Started new dedicated SQL job ${sqlJobId}.` : 'Started new dedicated SQL job.' });
+        } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            this.output.appendLine(`[Command Entry] Start New Job failed: ${message}`);
+            this.post({ type: 'notice', message: `Start New Job failed: ${message}` });
+        }
+    }
+
     private failed(command: string, mode: CommandExecutionMode, failure: string) {
         return { id: `${Date.now()}-connection`, command, mode, startedAt: new Date().toISOString(), elapsedMs: 0, outcome: 'error' as const, messages: [], failure };
     }
 
-    private currentSqlJobId(): string | undefined {
-        const rawSqlJobId = this.getConnection()?.getSqlJobId()?.trim();
-        return normalizeSqlJobId(rawSqlJobId) ?? rawSqlJobId;
+    private currentSqlJobId(connection = this.getConnection()): string | undefined {
+        return this.jobManager.getDisplayJobId(connection);
+    }
+
+    private sqlFetchLimitDisplay(): string {
+        const config = vscode.workspace.getConfiguration('clPrompter');
+        const limitEnabled = config.get<boolean>('commandEntrySqlFetchLimitEnabled', true);
+        const prefetchRows = config.get<number>('commandEntrySqlPrefetchRows', 200);
+        const safePrefetchRows = Number.isInteger(prefetchRows) && prefetchRows > 0 ? prefetchRows : 200;
+        if (!limitEnabled) {
+            return `SQL rows: *NOMAX (fetch all on run)`;
+        }
+
+        const configuredRows = config.get<number>('commandEntrySqlFetchLimitRows', 1000);
+        const chunkRows = Number.isInteger(configuredRows) && configuredRows > 0 ? configuredRows : 1000;
+        const effectivePrefetchRows = Math.min(chunkRows, safePrefetchRows);
+        return `SQL rows: chunk ${chunkRows}, prefetch ${effectivePrefetchRows}`;
+    }
+
+    private async initializeDedicatedJobIfNeeded(): Promise<void> {
+        if (!this.jobManager.isDedicatedEnabled()) {
+            return; // Not enabled, skip
+        }
+
+        const connection = this.getConnection();
+        if (!connection || !connection.sqlRunnerAvailable()) {
+            return; // No connection available
+        }
+
+        // Check if we already have a job ID
+        const existingJobId = this.currentSqlJobId(connection);
+        if (existingJobId && existingJobId !== 'no connection') {
+            return; // Already initialized
+        }
+
+        // Create the dedicated job automatically
+        try {
+            this.output.appendLine(`[Command Entry] Auto-initializing dedicated SQL job on panel startup...`);
+            const sqlJobId = await this.jobManager.restartJob(connection);
+            if (sqlJobId) {
+                this.post({ type: 'sqlJobId', sqlJobId });
+                this.output.appendLine(`[Command Entry] Auto-initialized dedicated SQL job: ${sqlJobId}`);
+            }
+        } catch (error) {
+            this.output.appendLine(`[Command Entry] Auto-initialization failed: ${error instanceof Error ? error.message : String(error)}`);
+        }
     }
 
     private history(): CommandEntryHistory[] { return this.context.globalState.get<CommandEntryHistory[]>(HISTORY_KEY, []); }
@@ -280,10 +419,16 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
                             <option value="90">90</option>
                             <option value="99">99</option>
                         </select>
-                        <button id="history-picker" type="button" aria-label="Open command history" data-tooltip="CL History">…</button>
+                        <div class="toolbar-menu-wrap">
+                            <button id="toolbar-menu" type="button" aria-label="Open command menu" data-tooltip="Command menu" aria-haspopup="menu" aria-expanded="false">…</button>
+                            <div id="toolbar-menu-list" class="toolbar-menu-list" role="menu" aria-hidden="true">
+                                <button id="menu-view-log" type="button" role="menuitem">View Log</button>
+                                <button id="menu-clear-log" type="button" role="menuitem">Clear Log</button>
+                                <button id="menu-start-new-job" type="button" role="menuitem">Start New Server Job</button>
+                            </div>
+                        </div>
                         <button id="history-prev" type="button" aria-label="Recall prior command (F9)" data-tooltip="Retrieve Prior, right-Click=History">↑</button>
                         <button id="history-next" type="button" aria-label="Recall next command (F10)" data-tooltip="Retrieve Next, right-Click=History">↓</button>
-                        <button id="clear" type="button" aria-label="Clear log" data-tooltip="Clear log">Clear Log</button>
                         <select id="mode" aria-label="Run mode" title="Run CL Command">
                             <option value="*RUN" title="Run CL Command">Run</option>
                             <option value="*LIMIT" title="Run as Limited USRPRF">Limit</option>
