@@ -2,27 +2,50 @@
 
 All notable changes to this project are documented in this file.
 
-## [Unreleased]
+## [Preview of CL Command Entry]
+
+## [1.0.22] - 2026-09-04
+
+### What's New
+
+- **SETTINGS Enhancements** the CL Prompter settings for the Command Entry panel are now named consistently with more clear setting names and related settings are grouped together.
+- **SQL Job Default Changed** previously CL Command Entry shared the same IBM i host SQL Job as the Code for IBM i extension and allowed the end-user to change it so that it will use its own SQL Job, separate from the CODE for IBM i SQL Job. This default behavior has changed in this release. CL Command Entry now uses its own SQL Job by default. Users switch it back to sharing the same IBM i host SQL Job as the CODE for IBM i extension in Settings.
+- The SQL Job's joblog output (displayed by double-clicking on the job name in the Command Entry panel) is now more condensed an usable.
+- The CL Command Log (which appears below the input area) no longer uses a Border decoration except that first/last CL command. This provides a more compact log and makes viewing it easer.
+- Running some SQL commands no longer requires the `SQL:` prefix. The `SELECT`, `VALUES` and `WITH` (SQL CTE) statements do not require the `SQL:` prefix. If you have custom CL Commands with one of those 3 names, you can still run them by using the prefix `CL:` followed by the CL command. This forces the Command Entry panel to treate those SQL command names as CL commands. For example: `CL: SELECT OPTION(*PRINT)` For SQL statements such as: `INSERT`, `UPDATE`, `MERGE` or `WITH` the `SQL:` prefix is always required. Without that prefix, Command Entry assumes any other command names are CL commands.
+- Previously run CL command may no be more easily retrieved using the Arrow UP/Down keys, or using F9=Previous or F8=Next function keys.
+- You can now easily expand or contract the Command Entry Log messages, using the context menu button `...` or by pressing F10.
+- SQL Statements are, but default, not logged into the Command Entry log. To log them like any CL command, change the setting of the `cmdEntryLogSqlStatementsToCommandLog` setting.
+
+### What's New
+
+#### Executeable Code Snippets
+A new toolbar button `{ }` shows you a list of pre-written (mostly) SQL statements that the CL Command Entry can run and show you the results. For example, you can easily look at your library list by clicking on `Job->Info->Library List` that appears in the drop down.
 
 ## [1.0.21] - 2026-09-03
 
 ### What's New
 
 #### Early Experience
-- **Early experience: CL Command Entry Panel with SQL output support**: The CL Command Entry panel now delivers a more complete early SQL experience with integrated SQL result rendering and operational controls aligned with command-entry workflows. This means you can now not only run CL commands, but SQL statements from CL Command Entry using the `SQL:` prefix.
+- **Early experience: CL Command Entry now supports SQL results**: You can now run both CL commands and SQL statements from the CL Command Entry panel and see SQL results directly in a view panel. For SQL, you can type `sql:` before the statement (example: `sql: select * from qiws.qcustcdt`). You can also just start with `SELECT` or `VALUES` and CL Prompter treats it as SQL automatically. Other SQL statements require that `SQL:` prefix.
 
 #### CL Command Entry
-- **Restructured Command Entry menu**: The toolbar menu was reorganized and expanded with clearer operational actions, including CL history viewing/clearing, message-details expansion/collapse, dedicated-job restart, and dedicated SQL cancel operations.
-- **Enhanced logging controls**: Message-detail visibility is now configurable from the menu, with improved command-message summary behavior and cleaner runtime diagnostics for SQL-result metadata exploration.
-- **Configurable SQL fetch limit**: Added settings for SQL statements entered as `sql: ...` in Command Entry.
-  - `clPrompter.commandEntrySqlFetchLimitEnabled` toggles max-row limiting.
-  - `clPrompter.commandEntrySqlFetchLimitRows` sets the numeric cap.
-  - Turning limit-enabled off is equivalent to `*NOMAX` (fetch all rows).
-- **New Dedicated SQL Job for Command Entry**: Command Entry can now run SQL and CL in its own CLPROMPTER-managed SQL job rather than sharing the main `Code for IBM i` host SQL job.
-  - **Server mode requirement with automatic fallback**: This capability requires Mapepire Server mode. When Server mode is not enabled/available, Command Entry automatically falls back to the shared SQL job.
-  - **Improved isolation**: Command Entry work no longer competes as directly with other extension activity on the shared host job.
-  - **More predictable large-result retrieval**: Results are fetched in controlled page-sized requests, which improves reliability when host-side single-call limits are encountered.
-  - **Operational controls in the UI**: Start New Server Job and Cancel SQL for Server Job are available from the Command Entry menu when dedicated mode is enabled. That menu is available by clicking the `...` button on the Command Entry toolbar.
+- **Simpler Command Entry menu**: The `...` menu on the toolbar was cleaned up so common tasks are easier to find:
+  - View or clear CL command history
+    - Remove All history log entries, all SQL statements, or all CL commands from history.
+  - Show more or less message detail (similar to the F10 toggle on 5250 Command Entry)
+  - Reconnect Server Job (ends the current dedicated SQL job and starts a new one)
+  - Cancel a running SQL request
+- **Message logging is easier to control**: You can now choose how much message detail you want to see directly from the menu. This helps keep normal output cleaner while still letting you view deeper details when troubleshooting.
+- **SQL row-limit settings (optional)**: You can control how many rows are returned for SQL entered in Command Entry (`sql: ...`).
+  - `clPrompter.commandEntrySqlFetchLimitEnabled`: turn row limiting on/off
+  - `clPrompter.commandEntrySqlFetchLimitRows`: set the maximum rows to return
+  - If row limiting is off, it behaves like `*NOMAX` (return all rows)
+- **Optional dedicated SQL job for Command Entry**: Command Entry can run CL and SQL in its own CLPROMPTER-managed SQL job instead of always sharing the main `Code for IBM i` job.
+  - **Requires Server mode, with automatic fallback**: If Mapepire Server mode is available, dedicated mode is used. If not, Command Entry automatically uses the shared SQL job.
+  - **Less contention with other work**: Command Entry activity is less likely to be delayed by other extension operations.
+  - **More reliable large SQL results**: Large result sets are read in page-sized chunks, which helps avoid host single-request limits.
+  - **Menu actions for dedicated mode**: When dedicated mode is active, the `...` menu includes Reconnect Server Job and Cancel SQL for Server Job.
 
 ### What's Fixed
 
@@ -43,7 +66,7 @@ All notable changes to this project are documented in this file.
 
 #### Logging
 - **Reduced default output noise**: High-volume Command Entry diagnostics (snippet internals, route snapshots, keep-alive and Mapepire dumps) are now quiet by default.
-- **New optional verbose diagnostic switch**: Added `clPrompter.commandEntryVerboseLogging` to re-enable detailed tracing only when troubleshooting.
+- **New optional debug diagnostic switch**: Added `clPrompter.cmdEntryDebugLogging` to re-enable detailed tracing only when troubleshooting.
 
 ## [1.0.19] - 2026-08-25 -- Security Release
 

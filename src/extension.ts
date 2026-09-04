@@ -95,8 +95,17 @@ let _pendingExternalSQL: { sql: string; t0: number } | undefined;
 let extensionObjectSequence = 0;
 const extensionObjectIds = new WeakMap<object, number>();
 
-function isCommandEntryVerboseLoggingEnabled(): boolean {
-    return vscode.workspace.getConfiguration('clPrompter').get<boolean>('commandEntryVerboseLogging', false);
+function isCommandEntryDebugLoggingEnabled(): boolean {
+    const config = vscode.workspace.getConfiguration('clPrompter');
+    const current = config.get<boolean | undefined>('cmdEntryDebugLogging');
+    if (current !== undefined) {
+        return current;
+    }
+    const previous = config.get<boolean | undefined>('cmdEntryVerboseLogging');
+    if (previous !== undefined) {
+        return previous;
+    }
+    return config.get<boolean>('commandEntryVerboseLogging', false);
 }
 
 function getExtensionObjectId(value: unknown): number | undefined {
@@ -250,47 +259,77 @@ async function saveHelpTextDebugFile(cmdName: string, parmName: string, helpHtml
 }
 
 export async function activate(context: vscode.ExtensionContext) {
+    const setCommandEntryAvailable = async (available: boolean): Promise<void> => {
+        await vscode.commands.executeCommand('setContext', 'clprompter.commandEntryAvailable', available);
+    };
+
+    const revealCommandEntryContainer = async (): Promise<void> => {
+        await vscode.commands.executeCommand('workbench.view.extension.clprompterCommandEntryMain');
+    };
+
     await context.workspaceState.update('clprompter.commandEntryTouchedThisSession', false);
     await vscode.commands.executeCommand('setContext', 'clprompter.ibmiLoaded', false);
     await vscode.commands.executeCommand('setContext', 'clprompter.connected', false);
-    await vscode.commands.executeCommand('setContext', 'clprompter.commandEntryVisible', false);
+    await setCommandEntryAvailable(false);
     await vscode.commands.executeCommand('setContext', 'clprompter.codeSnippetManagerVisible', false);
 
-    const getCommandEntryStartupMode = (): 'At Start Up' | 'After IBM i Connection' | 'No' => {
+    const getCommandEntryStartupMode = (): 'After Connection' | 'On Demand' => {
         const config = vscode.workspace.getConfiguration('clPrompter');
-        const raw = config.get<string>('showCLCommandEntry', 'At Start Up');
+        const raw = String(
+            config.get<string | undefined>('cmdEntryShow')
+            ?? config.get<string>('showCLCommandEntry', 'After Connection')
+        );
+        const normalized = raw.trim().toLowerCase().replace(/\s+/g, ' ');
 
-        if (raw === 'After IBM i Connection' || raw === 'No') {
-            return raw;
+        if (normalized === 'on demand' || normalized === 'on-demand' || normalized === 'no') {
+            return 'On Demand';
         }
-        return 'At Start Up';
+        return 'After Connection';
     };
 
     const applyCommandEntryStartupVisibility = async (): Promise<void> => {
         const startupMode = getCommandEntryStartupMode();
         const hasConnection = !!code4i?.instance?.getConnection();
-        const shouldShow =
-            startupMode === 'At Start Up'
-            || (startupMode === 'After IBM i Connection' && hasConnection);
-        await vscode.commands.executeCommand('setContext', 'clprompter.commandEntryVisible', shouldShow);
-    };
+        const touchedThisSession = context.workspaceState.get<boolean>('clprompter.commandEntryTouchedThisSession', false);
 
-    await applyCommandEntryStartupVisibility();
+        const shouldBeAvailable = startupMode === 'After Connection'
+            ? hasConnection
+            : touchedThisSession;
+        await setCommandEntryAvailable(shouldBeAvailable);
 
-    context.subscriptions.push(vscode.workspace.onDidChangeConfiguration(event => {
-        if (!event.affectsConfiguration('clPrompter.showCLCommandEntry')) {
-            return;
+        if (startupMode === 'After Connection' && hasConnection && !touchedThisSession) {
+            await context.workspaceState.update('clprompter.commandEntryTouchedThisSession', true);
+            await vscode.commands.executeCommand('clprompter.codeSnippet.resolvePinnedVisibility');
         }
-        void applyCommandEntryStartupVisibility();
-    }));
+    };
 
     const commandEntryOutput = vscode.window.createOutputChannel('CLPROMPTER');
 
     const commandEntryDebugLog = (message: string): void => {
-        if (isCommandEntryVerboseLoggingEnabled()) {
+        if (isCommandEntryDebugLoggingEnabled()) {
             commandEntryOutput.appendLine(message);
         }
     };
+
+    const sharedJobManager = new CommandEntryJobManager(commandEntryOutput);
+    const sharedCommandService = new CommandEntryService(sharedJobManager);
+    sharedCommandEntryJobManager = sharedJobManager;
+    sharedCommandEntryService = sharedCommandService;
+    const multiSqlJob = createMultiSqlJobApi(
+        () => code4i?.instance?.getConnection(),
+        sharedJobManager,
+        sharedCommandService,
+        commandEntryOutput
+    );
+    const commandEntry = new CommandEntryViewProvider(
+        context,
+        () => code4i?.instance?.getConnection(),
+        {
+            output: commandEntryOutput,
+            jobManager: sharedJobManager,
+            service: sharedCommandService
+        }
+    );
 
     const redactConfigValue = (key: string, value: unknown): unknown => {
         if (/pass|secret|token|apikey|api_key|pwd|credential/i.test(key)) {
@@ -300,7 +339,7 @@ export async function activate(context: vscode.ExtensionContext) {
     };
 
     const logMapepireConnectionDump = (conn: any, reason: string): void => {
-        if (!isCommandEntryVerboseLoggingEnabled()) {
+        if (!isCommandEntryDebugLoggingEnabled()) {
             return;
         }
         if (!conn) {
@@ -329,38 +368,23 @@ export async function activate(context: vscode.ExtensionContext) {
         );
     };
 
-    const sharedJobManager = new CommandEntryJobManager(commandEntryOutput);
-    const sharedCommandService = new CommandEntryService(sharedJobManager);
-    sharedCommandEntryJobManager = sharedJobManager;
-    sharedCommandEntryService = sharedCommandService;
-    const multiSqlJob = createMultiSqlJobApi(
-        () => code4i?.instance?.getConnection(),
-        sharedJobManager,
-        sharedCommandService,
-        commandEntryOutput
-    );
-    const commandEntry = new CommandEntryViewProvider(
-        context,
-        () => code4i?.instance?.getConnection(),
-        {
-            output: commandEntryOutput,
-            jobManager: sharedJobManager,
-            service: sharedCommandService
-        }
-    );
     context.subscriptions.push(
-        vscode.window.registerWebviewViewProvider(CommandEntryViewProvider.viewType, commandEntry),
+        vscode.window.registerWebviewViewProvider(CommandEntryViewProvider.viewType, commandEntry, {
+            webviewOptions: {
+                retainContextWhenHidden: true
+            }
+        }),
         registerCodeSnippetManagerView(context, commandEntry),
         { dispose: () => { void commandEntry.dispose(); } },
         vscode.commands.registerCommand('clprompter.openCommandEntry', async () => {
             await context.workspaceState.update('clprompter.commandEntryTouchedThisSession', true);
-            await vscode.commands.executeCommand('setContext', 'clprompter.commandEntryVisible', true);
-            await vscode.commands.executeCommand('workbench.view.extension.clprompterCommandEntry');
+            await setCommandEntryAvailable(true);
+            await revealCommandEntryContainer();
             await vscode.commands.executeCommand('clprompter.codeSnippet.resolvePinnedVisibility');
             commandEntry.focus();
         }),
         vscode.commands.registerCommand('clprompter.closeCommandEntry', async () => {
-            await vscode.commands.executeCommand('setContext', 'clprompter.commandEntryVisible', false);
+            await vscode.commands.executeCommand('workbench.action.closePanel');
         }),
         vscode.commands.registerCommand('clprompter.runCommandEntry', () => commandEntry.requestRun()),
         vscode.commands.registerCommand('clprompter.promptCommandEntry', () => commandEntry.requestPrompt()),
@@ -370,6 +394,16 @@ export async function activate(context: vscode.ExtensionContext) {
         vscode.commands.registerCommand('clprompter.exportCodeSnippets', () => commandEntry.requestExportCodeSnippets()),
         vscode.commands.registerCommand('clprompter.importCodeSnippets', () => commandEntry.requestImportCodeSnippets())
     );
+
+    await applyCommandEntryStartupVisibility();
+
+    context.subscriptions.push(vscode.workspace.onDidChangeConfiguration(event => {
+        if (!event.affectsConfiguration('clPrompter.cmdEntryShow')
+            && !event.affectsConfiguration('clPrompter.showCLCommandEntry')) {
+            return;
+        }
+        void applyCommandEntryStartupVisibility();
+    }));
 
     baseExtension = extensions.getExtension<CodeForIBMi>("halcyontechltd.code-for-ibmi");
     if (baseExtension) {
@@ -562,14 +596,16 @@ export async function activate(context: vscode.ExtensionContext) {
 
         code4i.instance.subscribe(context, 'connected', 'clPrompter-connected-context', () => {
             void vscode.commands.executeCommand('setContext', 'clprompter.connected', true);
+            void commandEntry.handleConnectionAvailable(code4i?.instance?.getConnection());
         });
         code4i.instance.subscribe(context, 'connected', 'clPrompter-mapepire-dump', () => {
             const conn = code4i?.instance?.getConnection();
             logMapepireConnectionDump(conn as any, 'connected-event');
         });
         code4i.instance.subscribe(context, 'connected', 'clPrompter-command-entry-startup-mode', () => {
-            if (getCommandEntryStartupMode() === 'After IBM i Connection') {
-                void vscode.commands.executeCommand('setContext', 'clprompter.commandEntryVisible', true);
+            const startupMode = getCommandEntryStartupMode();
+            if (startupMode === 'After Connection') {
+                void applyCommandEntryStartupVisibility();
             }
         });
         code4i.instance.subscribe(context, 'connected', 'clPrompter-keepalive-start', startKeepAlive);
@@ -605,6 +641,8 @@ export async function activate(context: vscode.ExtensionContext) {
         if (code4i.instance.getConnection()) {
             const initialConnection = code4i.instance.getConnection() as any;
             void vscode.commands.executeCommand('setContext', 'clprompter.connected', true);
+            void commandEntry.handleConnectionAvailable(initialConnection);
+            void applyCommandEntryStartupVisibility();
             patchRunSQL(initialConnection);
             logMapepireConnectionDump(initialConnection, 'activate-existing-connection');
             startKeepAlive();
@@ -624,7 +662,6 @@ export async function activate(context: vscode.ExtensionContext) {
     } else {
         await vscode.commands.executeCommand('setContext', 'clprompter.ibmiLoaded', false);
         await vscode.commands.executeCommand('setContext', 'clprompter.connected', false);
-        await vscode.commands.executeCommand('setContext', 'clprompter.commandEntryVisible', false);
         vscode.window.showErrorMessage("Code for IBM i extension is not installed or not found.");
     }
     try {

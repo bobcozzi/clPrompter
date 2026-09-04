@@ -1,8 +1,17 @@
 import * as vscode from 'vscode';
 import IBMi from '@halcyontech/vscode-ibmi-types/api/IBMi';
 
-function isCommandEntryVerboseLoggingEnabled(): boolean {
-    return vscode.workspace.getConfiguration('clPrompter').get<boolean>('commandEntryVerboseLogging', false);
+function isCommandEntryDebugLoggingEnabled(): boolean {
+    const config = vscode.workspace.getConfiguration('clPrompter');
+    const current = config.get<boolean | undefined>('cmdEntryDebugLogging');
+    if (current !== undefined) {
+        return current;
+    }
+    const previous = config.get<boolean | undefined>('cmdEntryVerboseLogging');
+    if (previous !== undefined) {
+        return previous;
+    }
+    return config.get<boolean>('commandEntryVerboseLogging', false);
 }
 
 function normalizeSqlJobId(jobId: string | undefined): string | undefined {
@@ -111,7 +120,7 @@ export class CommandEntryJobManager {
     constructor(private readonly output?: vscode.OutputChannel) { }
 
     private debugLog(message: string): void {
-        if (isCommandEntryVerboseLoggingEnabled()) {
+        if (isCommandEntryDebugLoggingEnabled()) {
             this.output?.appendLine(message);
         }
     }
@@ -125,7 +134,7 @@ export class CommandEntryJobManager {
         connection: IBMi,
         extra?: string
     ): void {
-        if (!isCommandEntryVerboseLoggingEnabled()) {
+        if (!isCommandEntryDebugLoggingEnabled()) {
             return;
         }
         const connectionKey = this.buildConnectionKey(connection);
@@ -148,7 +157,7 @@ export class CommandEntryJobManager {
         const observed = normalizeSqlJobId(connection.getSqlJobId());
         const previous = this.observedSharedJobIds.get(key);
         this.observedSharedJobIds.set(key, observed);
-        if (observed !== previous && isCommandEntryVerboseLoggingEnabled()) {
+        if (observed !== previous && isCommandEntryDebugLoggingEnabled()) {
             this.output?.appendLine(`[Command Entry][JobRoute] observed shared job ID changed (${reason}) ${previous ?? '<none>'} -> ${observed ?? '<none>'}`);
         }
     }
@@ -161,7 +170,16 @@ export class CommandEntryJobManager {
     }
 
     isDedicatedEnabled(): boolean {
-        return vscode.workspace.getConfiguration('clPrompter').get<boolean>('commandEntryUseDedicatedJob', false);
+        const config = vscode.workspace.getConfiguration('clPrompter');
+        const useShared = config.get<boolean | undefined>('cmdEntryUseSharedSQLJob');
+        if (useShared !== undefined) {
+            return !useShared;
+        }
+        const current = config.get<boolean | undefined>('cmdEntryUseDedicatedJob');
+        if (current !== undefined) {
+            return current;
+        }
+        return config.get<boolean>('commandEntryUseDedicatedJob', false);
     }
 
     hasActiveDedicatedJob(connection?: IBMi): boolean {

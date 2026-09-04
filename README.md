@@ -76,11 +76,11 @@ The `CL Command Entry Panel` is intended for **non-interactive CL commands** suc
   - **CLPROMPTER: Close CL Command Entry**
 - **Flexible menu launch on `...`** — The Command Entry menu opens with click, right-click, and Ctrl/Cmd+click on the `...` toolbar button.
 
-### Dedicated SQL Job Reconnect (Recommended)
+### Dedicated SQL Job Reconnect (Optional)
 
 If you use dedicated Command Entry job mode, these settings and steps ensure your IBM i job environment is reset correctly:
 
-1. Enable `clPrompter.commandEntryUseDedicatedJob=true`.
+1. Set `clPrompter.cmdEntryUseSharedSQLJob=false`.
 2. In Code for IBM i connection settings, enable `mapepireUseServer=true` (Connect to remote Mapepire Server).
 3. Connect to IBM i and open Command Entry.
 4. CLPROMPTER now performs a one-time startup reconnect cycle for the dedicated SQL job in server mode so stale job environment settings (for example prior library-list changes) are not carried over between VS Code sessions.
@@ -96,12 +96,13 @@ Notes:
 - **Interactive CL commands are not supported in the Command Entry panel** — Commands like `WRKOBJ`, `WRKACTJOB`, and `DSPLIBL OUTPUT(*)` do not display the 5250 style interactive UI and therefore are not support. Unpredictable results may occur.
 - **Cancel Request is disabled** — The cancel action feature was implemented via `QSYS2.CANCEL_SQL` but that did not accomplish a valid cancel of the commands. We were going for a `SysReq Option 2` style end-request options, which this interface cannot currently perform. We continue to research other options and solutions to cancel a running CL command, and will implement it when one is designed that works for this situation.
 - **Prompt does not auto-run** — After prompting a CL command, the command string is returned to the input command line but not automatically run. To run the command, press `Enter` or the **Run** button. Note that this is purposely different from the classic IBM i 52520 Command Entry screen's behavior.
-- **SQL fetch window is configurable** — CL Command Entry SQL statements (`sql: ...`) use two settings:
-  - `clPrompter.commandEntrySqlFetchLimitEnabled` controls whether SQL rows are loaded incrementally.
-  - `clPrompter.commandEntrySqlFetchLimitRows` sets the maximum rows per fetch (for example `1000` or `2000`) for manual **Load more rows** requests.
-  - `clPrompter.commandEntrySqlPrefetchRows` is the initial/background prefetch size (default `200`) loaded before manual load-more is needed.
+- **SQL fetch window is configurable** — CL Command Entry SQL statements (`sql: ...`) use these settings:
+  - `clPrompter.cmdEntryLimitSqlFetch` controls whether SQL rows are loaded incrementally.
+  - `clPrompter.cmdEntrySqlFetchRowLimit` sets the maximum rows per fetch (for example `1000` or `2000`) for manual **Load more rows** requests.
+  - `clPrompter.cmdEntrySqlFirstPageRowsToFetch` is the first-page row count (default `200`) used only when the SQL statement is first run.
+  - After the first page, manual **Load more rows** uses `clPrompter.cmdEntrySqlFetchRowLimit`.
   - When incremental loading is disabled (`false`), behavior is equivalent to `*NOMAX` (fetch all available rows on run).
-  - Dedicated-job mode still uses backend sub-fetches as needed, and the SQL Results panel appends rows dynamically.
+  - Dedicated-job mode (when `clPrompter.cmdEntryUseSharedSQLJob=false`) still uses backend sub-fetches as needed, and the SQL Results panel appends rows dynamically.
   - If `SQL:` is omitted, statements beginning with `SELECT` or `VALUES` are automatically treated as SQL.
 - **Code Snippet templating** — Code Snippets support runtime substitution variables:
   - `${sqlJobId}` (`nnnnnn/user/job`)
@@ -114,7 +115,7 @@ Notes:
   - `CLPROMPTER: Export Code Snippets`
   - `CLPROMPTER: Import Code Snippets`
   - Import options are `Merge`, `Replace All`, and `Add New Only`.
-- **Optional startup history clear** — Set `clPrompter.commandEntryClearHistoryOnStartup=true` to clear Command Entry command history and message log when CLPROMPTER starts.
+- **Optional startup history clear** — Set `clPrompter.cmdEntryClearHistoryOnStartup=true` to clear Command Entry command history and message log when CLPROMPTER starts.
 
 ## Features
 

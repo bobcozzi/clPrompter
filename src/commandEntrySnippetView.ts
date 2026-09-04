@@ -1,25 +1,57 @@
 import * as vscode from 'vscode';
 import { CodeSnippetRecord, CommandEntryViewProvider, DEFAULT_CODE_SNIPPET_GROUPS } from './commandEntryView';
 
-type TreeClickAction = 'Run' | 'Copy' | 'Copy to Cmd Entry';
+type TreeClickAction = 'Run' | 'View full statement' | 'No-op';
+
+function buildSnippetViewUri(label: string, language: 'sql' | 'clle'): vscode.Uri {
+    const cleaned = label
+        .trim()
+        .replace(/[^a-zA-Z0-9._ -]+/g, '')
+        .replace(/\s+/g, ' ')
+        .slice(0, 48)
+        .trim();
+    const stem = cleaned.length > 0 ? cleaned : 'Code Snippet';
+    const extension = language === 'sql' ? 'sql' : 'clle';
+    return vscode.Uri.parse(`untitled:${stem}.${extension}`);
+}
+
+async function openSnippetViewDocument(uri: vscode.Uri, language: 'sql' | 'clle', content: string): Promise<vscode.TextDocument> {
+    const document = await vscode.workspace.openTextDocument(uri);
+    if (document.languageId !== language) {
+        await vscode.languages.setTextDocumentLanguage(document, language);
+    }
+    const fullRange = new vscode.Range(document.positionAt(0), document.positionAt(document.getText().length));
+    const edit = new vscode.WorkspaceEdit();
+    edit.replace(document.uri, fullRange, content);
+    await vscode.workspace.applyEdit(edit);
+    return document;
+}
 
 function getTreeClickAction(): TreeClickAction {
     const config = vscode.workspace.getConfiguration('clPrompter');
-    const raw = String(config.get<string>('codeSnippetTreeClickAction', 'Run') || 'Run').trim();
-    if (raw === 'Copy' || raw === 'Copy to Cmd Entry') {
+    const raw = String(config.get<string>('cmdEntryCodeSnippetTreeClickAction', 'Run') || 'Run').trim();
+    if (raw === 'View full statement' || raw === 'No-op') {
         return raw;
     }
     return 'Run';
 }
 
-function commandIdForTreeClickAction(action: TreeClickAction): string {
+function commandForTreeClickAction(action: TreeClickAction, snippet: CodeSnippetRecord): vscode.Command | undefined {
     switch (action) {
-        case 'Copy':
-            return 'clprompter.codeSnippet.copy';
-        case 'Copy to Cmd Entry':
-            return 'clprompter.codeSnippet.copyToCommandEntry';
+        case 'View full statement':
+            return {
+                command: 'clprompter.codeSnippet.viewFullStatement',
+                title: `Code Snippet: ${action}`,
+                arguments: [snippet]
+            };
+        case 'No-op':
+            return undefined;
         default:
-            return 'clprompter.codeSnippet.run';
+            return {
+                command: 'clprompter.codeSnippet.run',
+                title: `Code Snippet: ${action}`,
+                arguments: [snippet]
+            };
     }
 }
 
@@ -39,11 +71,7 @@ class CodeSnippetPreviewTreeItem extends vscode.TreeItem {
         this.id = `preview.${snippet.id}`;
         this.contextValue = snippet.source === 'built-in' ? 'codeSnippetPreviewBuiltIn' : 'codeSnippetPreviewUser';
         this.tooltip = new vscode.MarkdownString(['```text', snippet.codeTemplate, '```'].join('\n'));
-        this.command = {
-            command: commandIdForTreeClickAction(clickAction),
-            title: `Code Snippet: ${clickAction}`,
-            arguments: [snippet]
-        };
+        this.command = commandForTreeClickAction(clickAction, snippet);
     }
 }
 
@@ -62,11 +90,7 @@ class CodeSnippetTreeItem extends vscode.TreeItem {
             '```'
         ].join('\n'));
         this.contextValue = snippet.source === 'built-in' ? 'codeSnippetBuiltIn' : 'codeSnippetUser';
-        this.command = {
-            command: commandIdForTreeClickAction(clickAction),
-            title: `Code Snippet: ${clickAction}`,
-            arguments: [snippet]
-        };
+        this.command = commandForTreeClickAction(clickAction, snippet);
     }
 }
 
@@ -617,6 +641,25 @@ export function registerCodeSnippetManagerView(
                 await commandEntry.executeCodeSnippetById(snippet.id);
             }
         }),
+        vscode.commands.registerCommand('clprompter.codeSnippet.viewFullStatement', async (item?: CodeSnippetTreeItem | CodeSnippetPreviewTreeItem | CodeSnippetRecord) => {
+            const snippet = resolveSnippet(item);
+            if (!snippet) {
+                return;
+            }
+
+            const resolution = commandEntry.resolveSnippetTemplateText(snippet.codeTemplate);
+            if (resolution.missing.length > 0) {
+                void vscode.window.showWarningMessage(`Snippet '${snippet.label}' requires unavailable value(s): ${resolution.missing.map((name) => `\${${name}}`).join(', ')}`);
+                return;
+            }
+
+            const language = /^\s*(SELECT|VALUES|WITH|INSERT|UPDATE|DELETE|MERGE|CALL)\b/i.test(resolution.resolved)
+                ? 'sql'
+                : 'clle';
+            const viewUri = buildSnippetViewUri(snippet.label, language);
+            const document = await openSnippetViewDocument(viewUri, language, resolution.resolved);
+            await vscode.window.showTextDocument(document, { preview: true });
+        }),
         vscode.commands.registerCommand('clprompter.codeSnippet.copy', async (item?: CodeSnippetTreeItem | CodeSnippetPreviewTreeItem | CodeSnippetRecord) => {
             const snippet = resolveSnippet(item);
             if (!snippet) {
@@ -671,7 +714,7 @@ export function registerCodeSnippetManagerView(
 
     subscriptions.push(
         vscode.workspace.onDidChangeConfiguration((event) => {
-            if (event.affectsConfiguration('clPrompter.codeSnippetTreeClickAction')) {
+            if (event.affectsConfiguration('clPrompter.cmdEntryCodeSnippetTreeClickAction')) {
                 provider.refresh();
             }
         }),

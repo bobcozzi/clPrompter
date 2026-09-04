@@ -3,6 +3,10 @@ import * as vscode from 'vscode';
 import { CommandExecution, CommandExecutionMode, SqlColumnMetadata, determineOutcome, mapCommandMessages } from './commandEntryModel';
 import { getUDTFLibrary } from './components/hostFunctions';
 import { CommandEntryJobManager } from './commandEntryJobManager';
+import { detectCommandEntryPrefix } from './commandEntryPrefixes';
+import { buildCancelSqlJobCommand, CMD_RUN_SQL, normalizeSqlJobId } from './commandEntrySqlHelpers';
+
+export { buildCancelSqlJobCommand, CMD_RUN_SQL, normalizeSqlJobId };
 
 const DEFAULT_SQL_RESULT_ROWS = 1000;
 const DEDICATED_SQL_PAGE_SIZE = 100;
@@ -25,12 +29,6 @@ interface SqlPagingSession {
     lastUsedAt: number;
 }
 
-export const CMD_RUN_SQL = `SELECT ORDINAL_POSITION, MSGID, MSGSEV, MSGTYPE, SENT_TIMESTAMP, MSGTEXT,
-SENT_BY_USER, SENT_FROM_PGM, SENT_FROM_STMT, SENT_FROM_MOD, SENT_FROM_PROC,
-SENT_TO_PGM, SENT_TO_STMT, SENT_TO_MOD, SENT_TO_PROC, SECLVLMSG
-FROM TABLE(sqltools.CMD_RUN(?, ?))
-ORDER BY ORDINAL_POSITION`;
-
 function buildCmdRunSql(library: string): string {
     return `SELECT ORDINAL_POSITION, MSGID, MSGSEV, MSGTYPE, SENT_TIMESTAMP, MSGTEXT,
 SENT_BY_USER, SENT_FROM_PGM, SENT_FROM_STMT, SENT_FROM_MOD, SENT_FROM_PROC,
@@ -39,24 +37,15 @@ FROM TABLE(${library}.CMD_RUN(?, ?))
 ORDER BY ORDINAL_POSITION`;
 }
 
-/** Validates the qualified-job format accepted by QSYS2.CANCEL_SQL. */
-export function normalizeSqlJobId(jobId: string | undefined): string | undefined {
-    const normalized = jobId?.trim().toUpperCase();
-    return normalized && /^\d{6}\/[A-Z0-9#$@]{1,10}\/[A-Z0-9#$@]{1,10}$/.test(normalized)
-        ? normalized
-        : undefined;
-}
-
-/** Direct SQL call text for QSYS2.CANCEL_SQL. */
-export function buildCancelSqlJobCommand(jobId: string): string {
-    const escapedJobId = jobId.replace(/'/g, "''");
-    const sqlCall = `CALL QSYS2.CANCEL_SQL('${escapedJobId}')`;
-    console.log(`Cancel SQL Request: ${sqlCall}\n`);
-    return sqlCall;
-}
-
 function extractSqlStatement(command: string): string | undefined {
     const text = String(command ?? '');
+
+    const explicitPrefix = detectCommandEntryPrefix(text);
+
+    // Explicit CL mode takes precedence over implicit SQL detection.
+    if (explicitPrefix === 'CL') {
+        return undefined;
+    }
 
     // Explicit SQL mode remains the primary path.
     const match = text.match(/^\s*sql\s*:\s*([\s\S]*)$/i);
@@ -702,12 +691,16 @@ function buildPagedSql(sql: string, offset: number, fetchRows: number): string {
 
 function resolveConfiguredSqlFetchLimit(): number {
     const config = vscode.workspace.getConfiguration('clPrompter');
-    const enabled = config.get<boolean>('commandEntrySqlFetchLimitEnabled', true);
+    const enabled = config.get<boolean | undefined>('cmdEntryLimitSqlFetch')
+        ?? config.get<boolean | undefined>('cmdEntrySqlFetchLimitEnabled')
+        ?? config.get<boolean>('commandEntrySqlFetchLimitEnabled', true);
     if (!enabled) {
         return NOMAX_SENTINEL;
     }
 
-    const configuredRows = config.get<number>('commandEntrySqlFetchLimitRows', DEFAULT_SQL_RESULT_ROWS);
+    const configuredRows = config.get<number | undefined>('cmdEntrySqlFetchRowLimit')
+        ?? config.get<number | undefined>('cmdEntrySqlFetchLimitRows')
+        ?? config.get<number>('commandEntrySqlFetchLimitRows', DEFAULT_SQL_RESULT_ROWS);
     if (Number.isInteger(configuredRows) && configuredRows > 0) {
         return configuredRows;
     }
@@ -726,7 +719,9 @@ function resolveConfiguredSqlFetchLimit(): number {
 
 function resolveConfiguredSqlPrefetchRows(): number {
     const config = vscode.workspace.getConfiguration('clPrompter');
-    const configuredRows = config.get<number>('commandEntrySqlPrefetchRows', SCROLL_PREFETCH_ROWS);
+    const configuredRows = config.get<number | undefined>('cmdEntrySqlFirstPageRowsToFetch')
+        ?? config.get<number | undefined>('cmdEntrySqlPrefetchRows')
+        ?? config.get<number>('commandEntrySqlPrefetchRows', SCROLL_PREFETCH_ROWS);
     if (Number.isInteger(configuredRows) && configuredRows > 0) {
         return configuredRows;
     }

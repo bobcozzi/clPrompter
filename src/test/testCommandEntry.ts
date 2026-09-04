@@ -1,6 +1,7 @@
 import * as assert from 'assert';
 import { classifyMessage, determineOutcome, mapCommandMessages } from '../commandEntryModel';
-import { buildCancelSqlJobCommand, CMD_RUN_SQL, normalizeSqlJobId } from '../commandEntryService';
+import { detectCommandEntryPrefix } from '../commandEntryPrefixes';
+import { buildCancelSqlJobCommand, CMD_RUN_SQL, normalizeSqlJobId } from '../commandEntrySqlHelpers';
 
 const messages = mapCommandMessages([
     { ORDINAL_POSITION: 2, MSGID: 'CPF0001', MSGSEV: 40, MSGTYPE: 'ESCAPE', MSGTEXT: 'Failed', SECLVLMSG: 'Details' },
@@ -16,4 +17,7 @@ assert.strictEqual(normalizeSqlJobId('123456/myuser/qzdasoinit'), '123456/MYUSER
 assert.strictEqual(normalizeSqlJobId('123456/USER/NOT VALID'), undefined);
 const cancelCommand = buildCancelSqlJobCommand('123456/MYUSER/QZDASOINIT');
 assert.match(cancelCommand, /^CALL\s+QSYS2\.CANCEL_SQL\('123456\/MYUSER\/QZDASOINIT'\)$/i);
+assert.strictEqual(detectCommandEntryPrefix('CL: CPYF FROMFILE(A) TOFILE(B)'), 'CL');
+assert.strictEqual(detectCommandEntryPrefix('   SQL: SELECT * FROM QIWS.QCUSTCDT'), 'SQL');
+assert.strictEqual(detectCommandEntryPrefix('SELECT * FROM QIWS.QCUSTCDT'), undefined);
 console.log('Command Entry model tests passed');

@@ -364,7 +364,28 @@ button[data-tooltip]:focus-visible::after {
 }
 
 .execution.collapsed {
-    opacity: .9;
+    opacity: .95;
+    margin: 2px 0;
+    padding: 2px 4px;
+    border-left: none;
+}
+
+.execution.collapsed header {
+    gap: 6px;
+    align-items: center;
+    line-height: 1.15;
+}
+
+.execution.collapsed .execution-replay,
+.execution.collapsed .execution-command,
+.execution.collapsed .meta {
+    line-height: 1.1;
+}
+
+.execution.latest.collapsed {
+    border-left: none;
+    background: transparent;
+    outline: none;
 }
 
 header {
@@ -387,7 +408,7 @@ header {
 
 .execution-command {
     cursor: pointer;
-    color: var(--vscode-textLink-foreground, var(--vscode-foreground));
+    color: var(--clp-command-log-color, var(--vscode-textLink-foreground, #569CD6));
     -webkit-user-select: none;
     user-select: none;
     position: relative;

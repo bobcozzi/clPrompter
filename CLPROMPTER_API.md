@@ -89,7 +89,7 @@ async function runSqlThroughClPrompter() {
     throw new Error('CLPrompter multiSqlJob API is unavailable.');
   }
 
-  // Optional: ensure dedicated job if dedicated mode is enabled in settings.
+  // Optional: ensure dedicated job if shared mode is disabled in settings.
   await multiSqlJob.ensureDedicatedJob();
 
   // Raw SQL execution.

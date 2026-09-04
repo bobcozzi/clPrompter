@@ -3,6 +3,7 @@ import IBMi from '@halcyontech/vscode-ibmi-types/api/IBMi';
 import { CLPrompter } from './clPrompter';
 import { CommandEntryHistory, CommandExecutionMode } from './commandEntryModel';
 import { CommandEntryService } from './commandEntryService';
+import { detectCommandEntryPrefix } from './commandEntryPrefixes';
 import { CommandEntryJobManager } from './commandEntryJobManager';
 import { configureSqlResultPanelAssets, notifySqlResultSessionClosed, setSqlResultPanelRequestHandler, showSqlResultPanel } from './sqlResultPanel';
 
@@ -25,10 +26,18 @@ type CommandEntryRequest =
     | { type: 'requestDisplayJoblog'; sqlJobId: string }
     | { type: 'requestSqlJobId' }
     | { type: 'requestCancelSqlJob' }
+    | { type: 'toggleSnippetsTreeView' }
+    | { type: 'manageCodeSnippets' }
+    | { type: 'addCodeSnippet' }
+    | { type: 'refreshCodeSnippets' }
+    | { type: 'importCodeSnippets' }
+    | { type: 'exportCodeSnippets' }
+    | { type: 'openCmdEntrySettings' }
     | { type: 'openSnippetsMenu' }
     | { type: 'openSqlSnippetsMenu' }
     | { type: 'menuDebug'; phase: string; payload?: unknown }
     | { type: 'toggleMessageDetails' }
+    | { type: 'toggleSqlStatementsToCommandLog' }
     | { type: 'startNewJob' }
     | { type: 'clearSqlHistoryAndMessages' }
     | { type: 'clearHistoryAndMessages' }
@@ -253,12 +262,31 @@ const BUILT_IN_SQL_SNIPPETS: ReadonlyArray<CommandEntrySqlSnippet> = [
 
 function isSqlCommandText(command: string): boolean {
     const text = String(command ?? '');
-    return /^\s*sql\s*:/i.test(text) || /^\s*(select|values|with)\b/i.test(text);
+    const explicitPrefix = detectCommandEntryPrefix(text);
+    if (explicitPrefix === 'CL') {
+        return false;
+    }
+    if (explicitPrefix === 'SQL') {
+        return true;
+    }
+    return /^\s*(select|values|with)\b/i.test(text);
+}
+
+function ensureSqlPrefixForRecall(command: string, isSql: boolean): string {
+    const text = String(command ?? '');
+    if (!isSql) {
+        return text;
+    }
+    if (detectCommandEntryPrefix(text)) {
+        return text;
+    }
+    const trimmed = text.trim();
+    return trimmed ? `SQL: ${trimmed}` : text;
 }
 
 /** Persistent panel webview. It deliberately does not own an IBM i connection. */
 export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
-    public static readonly viewType = 'clprompter.commandEntryView';
+    public static readonly viewType = 'clprompter.commandEntryView.main';
     private view: vscode.WebviewView | undefined;
     private running = false;
     private activeExecutionId: string | undefined;
@@ -290,13 +318,28 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
         setSqlResultPanelRequestHandler((request) => this.handleSqlResultPanelRequest(request));
 
         this.context.subscriptions.push(vscode.workspace.onDidChangeConfiguration(event => {
-            const sqlFetchConfigChanged = event.affectsConfiguration('clPrompter.commandEntrySqlFetchLimitEnabled')
+            const sqlFetchConfigChanged = event.affectsConfiguration('clPrompter.cmdEntryLimitSqlFetch')
+                || event.affectsConfiguration('clPrompter.cmdEntrySqlFetchLimitEnabled')
+                || event.affectsConfiguration('clPrompter.cmdEntrySqlFetchRowLimit')
+                || event.affectsConfiguration('clPrompter.cmdEntrySqlFetchLimitRows')
+                || event.affectsConfiguration('clPrompter.cmdEntrySqlFirstPageRowsToFetch')
+                || event.affectsConfiguration('clPrompter.cmdEntrySqlPrefetchRows')
+                || event.affectsConfiguration('clPrompter.commandEntrySqlFetchLimitEnabled')
                 || event.affectsConfiguration('clPrompter.commandEntrySqlFetchLimitRows')
                 || event.affectsConfiguration('clPrompter.commandEntrySqlPrefetchRows')
                 || event.affectsConfiguration('clPrompter.commandEntrySqlFetchLimit');
+            const sqlLogPreferenceChanged = event.affectsConfiguration('clPrompter.cmdEntryLogSqlStatementsToCommandLog')
+                || event.affectsConfiguration('clPrompter.commandEntryLogSqlStatementsToCommandEntryLog');
+            const appearanceChanged = event.affectsConfiguration('clPrompter.cmdEntryCommandTextColor')
+                || event.affectsConfiguration('clPrompter.commandEntryCommandTextColor');
             if (!sqlFetchConfigChanged
+                && !event.affectsConfiguration('clPrompter.cmdEntryUseSharedSQLJob')
+                && !event.affectsConfiguration('clPrompter.cmdEntryUseDedicatedJob')
                 && !event.affectsConfiguration('clPrompter.commandEntryUseDedicatedJob')
-                && !event.affectsConfiguration('clPrompter.commandEntryMessageDetails')) {
+                && !event.affectsConfiguration('clPrompter.cmdEntryMessageDetails')
+                && !event.affectsConfiguration('clPrompter.commandEntryMessageDetails')
+                && !sqlLogPreferenceChanged
+                && !appearanceChanged) {
                 return;
             }
 
@@ -307,7 +350,11 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
                 type: 'messageDetailsPreference',
                 mode: this.messageDetailsMode()
             });
+            this.postSqlLoggingPreference();
             this.postJobCapabilities();
+            if (appearanceChanged) {
+                this.postAppearancePreferences();
+            }
         }));
     }
 
@@ -316,11 +363,15 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
         view.webview.options = { enableScripts: true, localResourceRoots: [vscode.Uri.joinPath(this.context.extensionUri, 'media')] };
         view.webview.html = this.html(view.webview);
         view.webview.onDidReceiveMessage((message: CommandEntryRequest) => this.receive(message), undefined, this.context.subscriptions);
-        view.onDidDispose(() => { if (this.view === view) { this.view = undefined; } }, undefined, this.context.subscriptions);
+        view.onDidDispose(() => {
+            if (this.view === view) {
+                this.view = undefined;
+            }
+        }, undefined, this.context.subscriptions);
     }
 
     focus(): void {
-        this.view?.show?.(true);
+        this.view?.show?.(false);
         this.post({ type: 'focusInput' });
         // Revealing a view can create its webview asynchronously on first use.
         setTimeout(() => this.post({ type: 'focusInput' }), 75);
@@ -459,6 +510,8 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
                     canStartNewJob: this.jobManager.isDedicatedEnabled(),
                     canCancelSqlJob: this.jobManager.isDedicatedEnabled(),
                     messageDetailsMode: this.messageDetailsMode(),
+                    logSqlStatementsToCommandLog: this.logSqlStatementsToCommandLogEnabled(),
+                    commandTextColor: this.commandEntryCommandTextColor(),
                     clearInputOnStartup: this.clearInputOnFirstReady,
                     clearHistoryOnStartup
                 });
@@ -508,6 +561,28 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
             case 'openSnippetsMenu':
                 await this.openSnippetsMenu();
                 break;
+            case 'toggleSnippetsTreeView':
+                await vscode.commands.executeCommand('clprompter.toggleCodeSnippetsTreeView');
+                break;
+            case 'manageCodeSnippets':
+                await vscode.commands.executeCommand('clprompter.manageCodeSnippets');
+                break;
+            case 'addCodeSnippet':
+                await vscode.commands.executeCommand('clprompter.manageCodeSnippets');
+                await vscode.commands.executeCommand('clprompter.codeSnippet.add');
+                break;
+            case 'refreshCodeSnippets':
+                await vscode.commands.executeCommand('clprompter.codeSnippet.refresh');
+                break;
+            case 'importCodeSnippets':
+                await this.importCodeSnippetsFromJson();
+                break;
+            case 'exportCodeSnippets':
+                await this.exportCodeSnippetsToJson();
+                break;
+            case 'openCmdEntrySettings':
+                await vscode.commands.executeCommand('workbench.action.openSettings', 'clPrompter.cmdEntry');
+                break;
             case 'menuDebug': {
                 let payloadText = '';
                 if (message.payload !== undefined) {
@@ -522,6 +597,9 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
             }
             case 'toggleMessageDetails':
                 await this.toggleMessageDetailsPreference();
+                break;
+            case 'toggleSqlStatementsToCommandLog':
+                await this.toggleSqlStatementsToCommandLogPreference();
                 break;
             case 'startNewJob':
                 await this.startNewJob();
@@ -570,41 +648,26 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
             return;
         }
 
-        const escapedJob = qualifiedJob.replace(/'/g, "''");
-        const sql = [
-            'SELECT ORDINAL_POSITION,',
-            '       FROM_PROGRAM,',
-            '       FROM_INSTRUCTION,',
-            '       TO_PROGRAM,',
-            '       TO_INSTRUCTION,',
-            '       MESSAGE_ID,',
-            '       SEVERITY,',
-            '       CASE UPPER(TRIM(MESSAGE_TYPE))',
-            "         WHEN 'COMMAND' THEN '*CMD'",
-            "         WHEN 'COMPLETION' THEN '*COMP'",
-            "         WHEN 'DIAGNOSTIC' THEN '*DIAG'",
-            "         WHEN 'ESCAPE' THEN '*ESCAPE'",
-            "         WHEN 'INFORMATIONAL' THEN '*INFO'",
-            "         WHEN 'INQUIRY' THEN '*INQ'",
-            "         WHEN 'NOTIFY' THEN '*NOTIFY'",
-            "         WHEN 'REPLY' THEN '*RPY'",
-            "         WHEN 'REQUEST' THEN '*RQS'",
-            "         WHEN 'SCOPE' THEN '*SCOPE'",
-            "         WHEN 'SENDER' THEN '*SENDER'",
-            '         ELSE MESSAGE_TYPE',
-            '       END AS MESSAGE_TYPE,',
-            '       MESSAGE_TEXT,',
-            '       MESSAGE_SECOND_LEVEL_TEXT,',
-            '       QUALIFIED_JOB_NAME as JOB,',
-            '       MESSAGE_TIMESTAMP',
-            '  FROM TABLE (',
-            `      QSYS2.JOBLOG_INFO('${escapedJob}')`,
-            '    )',
-            '  ORDER BY ORDINAL_POSITION DESC',
-            '  FETCH FIRST 200 ROWS ONLY'
-        ].join('\n');
+        const fullJoblogSnippet = BUILT_IN_SQL_SNIPPETS.find((snippet) => snippet.id === 'builtin.full-joblog');
+        if (!fullJoblogSnippet) {
+            this.post({ type: 'notice', message: 'Built-in full joblog snippet is unavailable.' });
+            return;
+        }
 
-        const command = `SQL: ${sql}`;
+        const snippetContext: SnippetTemplateContext = {
+            ...this.buildSnippetContext(connection),
+            sqlJobId: qualifiedJob
+        };
+        const resolution = this.resolveSqlTemplate(fullJoblogSnippet.stmt, snippetContext);
+        if (resolution.missing.length > 0) {
+            this.post({
+                type: 'notice',
+                message: `Unable to resolve full joblog SQL template values: ${resolution.missing.map((name) => `\${${name}}`).join(', ')}`
+            });
+            return;
+        }
+
+        const command = `SQL: ${resolution.resolved}`;
         const execution = await this.service.execute(connection, command, '*RUN');
         if (execution.failure) {
             this.output.appendLine(`[Command Entry] Display Joblog failed for ${qualifiedJob}: ${execution.failure}`);
@@ -730,6 +793,7 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
         const isSql = isSqlCommandText(command);
         const shouldAddToHistory = options.logToHistory ?? this.shouldAddToHistory(sourceType, isSql);
         const shouldAddToCommandEntryLog = options.logToCommandEntryLog ?? this.shouldAddToCommandEntryLog(sourceType, isSql);
+        const commandForRecall = ensureSqlPrefixForRecall(command, isSql);
 
         await this.service.closeSqlSession();
         if (!isSql) {
@@ -767,16 +831,19 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
         });
         try {
             const execution = await this.service.execute(connection, command, mode, this.activeExecutionId);
+            const executionForPost = isSql
+                ? { ...execution, command: ensureSqlPrefixForRecall(execution.command, true) }
+                : execution;
             if (shouldAddToHistory) {
-                this.remember({ command, mode });
+                this.remember({ command: commandForRecall, mode, isSql });
             }
             if (execution.failure) { this.output.appendLine(`[Command Entry] CMD_RUN failed: ${execution.failure}`); }
-            if (execution.sqlResult) {
-                showSqlResultPanel(execution.sqlResult);
+            if (executionForPost.sqlResult) {
+                showSqlResultPanel(executionForPost.sqlResult);
             }
             this.post({
                 type: 'execution',
-                execution,
+                execution: executionForPost,
                 addToHistory: shouldAddToHistory,
                 addToCommandEntryLog: shouldAddToCommandEntryLog
             });
@@ -803,7 +870,7 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
         }
 
         if (!this.jobManager.isDedicatedEnabled()) {
-            this.post({ type: 'notice', message: 'Dedicated SQL job mode is disabled. Enable clPrompter.commandEntryUseDedicatedJob to use Reconnect Server Job.' });
+            this.post({ type: 'notice', message: 'Dedicated SQL job mode is disabled. Set clPrompter.cmdEntryUseSharedSQLJob=false to use Reconnect Server Job.' });
             return;
         }
 
@@ -2111,21 +2178,53 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
 
     private messageDetailsMode(): MessageDetailsMode {
         const config = vscode.workspace.getConfiguration('clPrompter');
-        const raw = String(config.get<string>('commandEntryMessageDetails', 'SHOW') || 'SHOW').trim().toUpperCase();
+        const raw = String(
+            config.get<string | undefined>('cmdEntryMessageDetails')
+            ?? config.get<string>('commandEntryMessageDetails', 'SHOW')
+            ?? 'SHOW'
+        ).trim().toUpperCase();
         return raw === 'HIDE' ? 'HIDE' : 'SHOW';
     }
 
     private clearHistoryOnStartupEnabled(): boolean {
-        return vscode.workspace.getConfiguration('clPrompter').get<boolean>('commandEntryClearHistoryOnStartup', false);
+        const config = vscode.workspace.getConfiguration('clPrompter');
+        return config.get<boolean | undefined>('cmdEntryClearHistoryOnStartup')
+            ?? config.get<boolean>('commandEntryClearHistoryOnStartup', false);
     }
 
     private async toggleMessageDetailsPreference(): Promise<void> {
         const config = vscode.workspace.getConfiguration('clPrompter');
         const current = this.messageDetailsMode();
         const next: MessageDetailsMode = current === 'SHOW' ? 'HIDE' : 'SHOW';
-        await config.update('commandEntryMessageDetails', next, vscode.ConfigurationTarget.Global);
+        await config.update('cmdEntryMessageDetails', next, vscode.ConfigurationTarget.Global);
         this.post({ type: 'messageDetailsPreference', mode: next });
         this.post({ type: 'notice', message: next === 'SHOW' ? 'Command message sections expanded.' : 'Command message sections collapsed.' });
+    }
+
+    private logSqlStatementsToCommandLogEnabled(): boolean {
+        const config = vscode.workspace.getConfiguration('clPrompter');
+        return config.get<boolean | undefined>('cmdEntryLogSqlStatementsToCommandLog')
+            ?? config.get<boolean>('commandEntryLogSqlStatementsToCommandEntryLog', false);
+    }
+
+    private postSqlLoggingPreference(): void {
+        this.post({
+            type: 'sqlLoggingPreference',
+            logSqlStatementsToCommandLog: this.logSqlStatementsToCommandLogEnabled()
+        });
+    }
+
+    private async toggleSqlStatementsToCommandLogPreference(): Promise<void> {
+        const config = vscode.workspace.getConfiguration('clPrompter');
+        const next = !this.logSqlStatementsToCommandLogEnabled();
+        await config.update('cmdEntryLogSqlStatementsToCommandLog', next, vscode.ConfigurationTarget.Global);
+        this.postSqlLoggingPreference();
+        this.post({
+            type: 'notice',
+            message: next
+                ? 'SQL statement logging to Command Entry Log is enabled.'
+                : 'SQL statement logging to Command Entry Log is disabled.'
+        });
     }
 
     private postJobCapabilities(): void {
@@ -2141,16 +2240,36 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
         });
     }
 
+    private postAppearancePreferences(): void {
+        this.post({
+            type: 'appearancePreferences',
+            commandTextColor: this.commandEntryCommandTextColor()
+        });
+    }
+
+    private commandEntryCommandTextColor(): string {
+        const config = vscode.workspace.getConfiguration('clPrompter');
+        const value = config.get<string | undefined>('cmdEntryCommandTextColor')
+            ?? config.get<string>('commandEntryCommandTextColor', '#569CD6');
+        return String(value || '#569CD6').trim() || '#569CD6';
+    }
+
     private sqlFetchLimitDisplay(): string {
         const config = vscode.workspace.getConfiguration('clPrompter');
-        const limitEnabled = config.get<boolean>('commandEntrySqlFetchLimitEnabled', true);
-        const prefetchRows = config.get<number>('commandEntrySqlPrefetchRows', 200);
+        const limitEnabled = config.get<boolean | undefined>('cmdEntryLimitSqlFetch')
+            ?? config.get<boolean | undefined>('cmdEntrySqlFetchLimitEnabled')
+            ?? config.get<boolean>('commandEntrySqlFetchLimitEnabled', true);
+        const prefetchRows = config.get<number | undefined>('cmdEntrySqlFirstPageRowsToFetch')
+            ?? config.get<number | undefined>('cmdEntrySqlPrefetchRows')
+            ?? config.get<number>('commandEntrySqlPrefetchRows', 200);
         const safePrefetchRows = Number.isInteger(prefetchRows) && prefetchRows > 0 ? prefetchRows : 200;
         if (!limitEnabled) {
             return `SQL rows: *NOMAX (fetch all on run)`;
         }
 
-        const configuredRows = config.get<number>('commandEntrySqlFetchLimitRows', 1000);
+        const configuredRows = config.get<number | undefined>('cmdEntrySqlFetchRowLimit')
+            ?? config.get<number | undefined>('cmdEntrySqlFetchLimitRows')
+            ?? config.get<number>('commandEntrySqlFetchLimitRows', 1000);
         const chunkRows = Number.isInteger(configuredRows) && configuredRows > 0 ? configuredRows : 1000;
         const effectivePrefetchRows = Math.min(chunkRows, safePrefetchRows);
         return `SQL rows: rows/fetch ${chunkRows}, prefetch ${effectivePrefetchRows}`;
@@ -2175,13 +2294,21 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
         try {
             this.output.appendLine(`[Command Entry] Auto-initializing dedicated SQL job on panel startup...`);
             const sqlJobId = await this.jobManager.restartJob(connection);
+            this.refreshSqlJobId(connection);
             if (sqlJobId) {
-                this.refreshSqlJobId(connection);
                 this.output.appendLine(`[Command Entry] Auto-initialized dedicated SQL job: ${sqlJobId}`);
             }
         } catch (error) {
+            this.refreshSqlJobId(connection);
             this.output.appendLine(`[Command Entry] Auto-initialization failed: ${error instanceof Error ? error.message : String(error)}`);
         }
+    }
+
+    public async handleConnectionAvailable(connection = this.getConnection()): Promise<void> {
+        this.refreshSqlJobId(connection);
+        this.postJobCapabilities();
+        await this.initializeDedicatedJobIfNeeded();
+        this.refreshSqlJobId(connection);
     }
 
     public refreshSqlJobId(connection = this.getConnection()): void {
@@ -2198,10 +2325,12 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
         const config = vscode.workspace.getConfiguration('clPrompter');
 
         if (sourceType === 'snippet') {
-            return config.get<boolean>('commandEntryLogSnippets', false);
+            return config.get<boolean | undefined>('cmdEntryLogSnippets')
+                ?? config.get<boolean>('commandEntryLogSnippets', false);
         }
         if (isSql) {
-            return config.get<boolean>('commandEntryLogSqlStatements', false);
+            return config.get<boolean | undefined>('cmdEntryLogSqlStatements')
+                ?? config.get<boolean>('commandEntryLogSqlStatements', false);
         }
         return true;
     }
@@ -2210,10 +2339,12 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
         const config = vscode.workspace.getConfiguration('clPrompter');
 
         if (sourceType === 'snippet') {
-            return config.get<boolean>('commandEntryLogSnippetsToCommandEntryLog', false);
+            return config.get<boolean | undefined>('cmdEntryLogSnippetsToCommandLog')
+                ?? config.get<boolean>('commandEntryLogSnippetsToCommandEntryLog', false);
         }
         if (isSql) {
-            return config.get<boolean>('commandEntryLogSqlStatementsToCommandEntryLog', false);
+            return config.get<boolean | undefined>('cmdEntryLogSqlStatementsToCommandLog')
+                ?? config.get<boolean>('commandEntryLogSqlStatementsToCommandEntryLog', false);
         }
         return true;
     }
@@ -2247,7 +2378,6 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
                         </div>
                         <button id="run" type="button" aria-label="Run command" data-tooltip="Run command">Run</button>
                         <button id="prompt" type="button" aria-label="Prompt command" data-tooltip="Prompt command">Prompt</button>
-                        <button id="snippets" type="button" aria-label="Open code snippets" data-tooltip="Code Snippets">{ }</button>
                         <label class="mode-label" for="message-severity-filter" title="Minimum Severity Filter">SEV</label>
                         <select id="message-severity-filter" aria-label="Minimum message severity to display" title="Minimum Severity Filter">
                             <option value="0">00</option>
@@ -2269,18 +2399,31 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
                                 <button id="menu-view-log" type="button" role="menuitem">View CL History</button>
                                 <button id="menu-clear-history" type="button" role="menuitem">Clear CL Cmd History</button>
                                 <button id="menu-clear-sql-log" type="button" role="menuitem">Clear SQL Stmt History</button>
+                                <button id="menu-toggle-sql-log" type="button" role="menuitem">Log SQL Statements</button>
                                 <button id="menu-clear-log" type="button" role="menuitem">Clear Log Messages</button>
                                 <button id="menu-start-new-job" type="button" role="menuitem">Reconnect Server Job</button>
                                 <button id="menu-cancel-sql-job" type="button" role="menuitem">Cancel Last SQL stmt</button>
                             </div>
                         </div>
-                        <button id="history-prev" type="button" aria-label="Recall prior command (F9)" data-tooltip="Retrieve Prior, right-Click=History">↑</button>
-                        <button id="history-next" type="button" aria-label="Recall next command (F8)" data-tooltip="Retrieve Next, right-Click=History">↓</button>
+                        <button id="history-prev" type="button" aria-label="Recall prior command (F9)" data-tooltip="F8=Retrieve Next CL Cmd">↑</button>
+                        <button id="history-next" type="button" aria-label="Recall next command (F8)" data-tooltip="F9=Retrieve Prior CL Cmd">↓</button>
                         <select id="mode" aria-label="Run mode" title="Run CL Command">
                             <option value="*RUN" title="Run CL Command">Run</option>
                             <option value="*LIMIT" title="Run as Limited USRPRF">Limit</option>
                             <option value="*CHECK" title="Syntax Check Only">Check</option>
                         </select>
+                        <div class="toolbar-menu-wrap">
+                            <button id="snippets" type="button" aria-label="Toggle code snippets tree view" data-tooltip="Toggle Code Snippets Tree View" aria-haspopup="menu" aria-expanded="false">{ }</button>
+                            <div id="snippets-menu-list" class="toolbar-menu-list" role="menu" aria-hidden="true">
+                                <button id="snippets-menu-manage" type="button" role="menuitem">Manage Code Snippets</button>
+                                <button id="snippets-menu-toggle" type="button" role="menuitem">Toggle Code Snippets Tree View</button>
+                                <button id="snippets-menu-refresh" type="button" role="menuitem">Refresh Code Snippets</button>
+                                <button id="snippets-menu-import" type="button" role="menuitem">Import Code Snippets...</button>
+                                <button id="snippets-menu-export" type="button" role="menuitem">Export Code Snippets...</button>
+                                <button id="snippets-menu-add" type="button" role="menuitem">Add more...</button>
+                            </div>
+                        </div>
+                        <button id="cmdentry-settings" type="button" aria-label="Open Command Entry settings" data-tooltip="Command Entry Settings">⚙</button>
                     </div>
                     <div id="status" role="status" aria-live="polite">
                         <span id="status-text"></span>

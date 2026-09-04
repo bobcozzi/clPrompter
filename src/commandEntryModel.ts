@@ -63,6 +63,7 @@ export interface SqlResultPayload {
 export interface CommandEntryHistory {
     command: string;
     mode: CommandExecutionMode;
+    isSql?: boolean;
 }
 
 export function classifyMessage(severity: number, type: string): CommandMessageKind {

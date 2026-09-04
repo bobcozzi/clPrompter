@@ -2,7 +2,7 @@
   "name": "clprompter",
   "displayName": "Bob Cozzi's CL Prompter and Formatter for IBM i",
   "description": "IBM i CL Prompting and Formatting: Built for modern development",
-  "version": "1.0.21",
+  "version": "1.0.22",
   "author": {
     "name": "Bob Cozzi",
     "url": "https://github.com/bobcozzi"
@@ -36,7 +36,7 @@
     "onExtension:halcyontechltd.code-for-ibmi",
     "onLanguage:bnd",
     "onCommand:clPrompter.clPrompter",
-    "onView:clprompter.commandEntryView",
+    "onView:clprompter.commandEntryView.main",
     "onCommand:clprompter.openCommandEntry",
     "onCommand:clprompter.manageCodeSnippets"
   ],
@@ -137,6 +137,11 @@
         "icon": "$(play)"
       },
       {
+        "command": "clprompter.codeSnippet.viewFullStatement",
+        "category": "Code Snippets",
+        "title": "View full statement"
+      },
+      {
         "command": "clprompter.codeSnippet.copy",
         "category": "Code Snippets",
         "title": "Copy"
@@ -193,49 +198,54 @@
           "default": true,
           "description": "Enable F4=Prompt for CL commands"
         },
-        "clPrompter.showCLCommandEntry": {
+        "clPrompter.cmdEntryShow": {
+          "order": 100,
           "type": "string",
-          "default": "At Start Up",
+          "default": "After Connection",
           "enum": [
-            "At Start Up",
-            "After IBM i Connection",
-            "No"
+            "After Connection",
+            "On Demand"
           ],
           "enumDescriptions": [
-            "Show CL Command Entry immediately when VS Code starts.",
             "Show CL Command Entry after an IBM i connection is established.",
-            "Do not auto-show CL Command Entry; use Open CL Command Entry when needed."
+            "On demand only: do not auto-show CL Command Entry. Open it manually with CLPROMPTER: Open CL Command Entry when needed."
           ],
-          "description": "Controls when the CL Command Entry panel is auto-shown."
+          "description": "Controls when the CL Command Entry panel is auto-shown. The On Demand option means manual open only, not never available."
         },
-        "clPrompter.commandEntryUseDedicatedJob": {
+        "clPrompter.cmdEntryUseSharedSQLJob": {
+          "order": 101,
           "type": "boolean",
           "default": false,
-          "description": "Run Command Entry CL and SQL using a CLPROMPTER-owned dedicated SQL job instead of the shared Code for IBM i SQL job."
+          "description": "Use the shared Code for IBM i SQL job for Command Entry CL and SQL. Set this to false to use a different/new SQL job for Command Entry requests. Recommend: `false`"
         },
-        "clPrompter.commandEntrySqlFetchLimitEnabled": {
+        "clPrompter.cmdEntryLimitSqlFetch": {
+          "order": 102,
           "type": "boolean",
           "default": true,
-          "description": "Enable incremental SQL row loading for CL Command Entry statements using `Entry Sql Fetch Limit Rows`. Uncheck this setting for a Fetch Limit of *NOMAX rows (fetch all rows on run)."
+          "description": "Enable incremental SQL row loading for CL Command Entry statements using `Cmd Entry Sql Fetch Row Limit`. Uncheck this setting for a Fetch Limit of *NOMAX rows (fetch all rows on run)."
         },
-        "clPrompter.commandEntryVerboseLogging": {
-          "type": "boolean",
-          "default": false,
-          "description": "Enable verbose diagnostic logging for CL Command Entry internals (job routing, keep-alive, and SQL execution detail)."
-        },
-        "clPrompter.commandEntrySqlFetchLimitRows": {
+        "clPrompter.cmdEntrySqlFetchRowLimit": {
+          "order": 104,
           "type": "integer",
           "default": 1000,
           "minimum": 1,
-          "description": "Controls the maximum number of rows per fetch request when `Entry Sql Fetch Limit` is checked. Ignored when that setting is unchecked (*NOMAX rows). Higher values can improve result set performance on fast IBM i servers."
+          "description": "Controls the maximum number of rows per fetch request when `cmdEntryLimitSqlFetch` is checked. Ignored when that setting is unchecked (*NOMAX rows). Higher values can improve result set performance on fast IBM i servers."
         },
-        "clPrompter.commandEntrySqlPrefetchRows": {
+        "clPrompter.cmdEntrySqlFirstPageRowsToFetch": {
+          "order": 103,
           "type": "integer",
           "default": 200,
           "minimum": 1,
-          "description": "Initial/background SQL prefetch size for CL Command Entry statements. This is the number of rows loaded before you need to press 'Load more rows'."
+          "description": "Rows fetched for the first page only when a SQL statement is run from Command Entry. After first-page display, additional loads use cmdEntrySqlFetchRowLimit."
         },
-        "clPrompter.commandEntryMessageDetails": {
+        "clPrompter.cmdEntryDebugLogging": {
+          "order": 105,
+          "type": "boolean",
+          "default": false,
+          "description": "Enable debug diagnostic logging for CL Command Entry internals (job routing, keep-alive, and SQL execution detail)."
+        },
+        "clPrompter.cmdEntryMessageDetails": {
+          "order": 106,
           "type": "string",
           "default": "SHOW",
           "enum": [
@@ -243,50 +253,64 @@
             "HIDE"
           ],
           "enumDescriptions": [
-            "Expand command-level message sections by default in Command Entry results.",
-            "Collapse command-level message sections by default in Command Entry results."
+            "Expand command-level message sections by default in Command Entry log.",
+            "Collapse command-level message sections by default in Command Entry log."
           ],
-          "description": "Controls whether each Command Entry result row is expanded or collapsed by default."
+          "description": "Controls whether Command Entry log entries are expanded or collapsed. Use F10 to toggle anytime."
         },
-        "clPrompter.commandEntryClearHistoryOnStartup": {
+        "clPrompter.cmdEntryCommandTextColor": {
+          "order": 107,
+          "type": "string",
+          "format": "color",
+          "default": "#569CD6",
+          "description": "Color of CL command text shown in the Command Entry log/history rows. Use CSS color values like #3794ff, blue, or rgb(52, 120, 246).",
+          "pattern": "^(#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{3}|[a-zA-Z]+|rgb\\(\\d+,\\s*\\d+,\\s*\\d+\\)|rgba\\(\\d+,\\s*\\d+,\\s*\\d+,\\s*[0-9.]+\\))$"
+        },
+        "clPrompter.cmdEntryClearHistoryOnStartup": {
+          "order": 108,
           "type": "boolean",
           "default": false,
           "description": "Clear Command Entry panel history and message log when the CLPROMPTER extension starts."
         },
-        "clPrompter.commandEntryLogSqlStatements": {
+        "clPrompter.cmdEntryLogSqlStatements": {
+          "order": 109,
           "type": "boolean",
           "default": false,
           "description": "Log SQL statements run from Command Entry to the Command Entry History Log."
         },
-        "clPrompter.commandEntryLogSqlStatementsToCommandEntryLog": {
+        "clPrompter.cmdEntryLogSqlStatementsToCommandLog": {
+          "order": 110,
           "type": "boolean",
           "default": false,
           "description": "Log SQL statements run from Command Entry to the Command Entry Log."
         },
-        "clPrompter.commandEntryLogSnippets": {
+        "clPrompter.cmdEntryLogSnippets": {
+          "order": 111,
           "type": "boolean",
           "default": false,
           "description": "Log Snippets that are run to the Command Entry History Log."
         },
-        "clPrompter.commandEntryLogSnippetsToCommandEntryLog": {
+        "clPrompter.cmdEntryLogSnippetsToCommandLog": {
+          "order": 112,
           "type": "boolean",
           "default": false,
           "description": "Log Snippets that are run to the Command Entry Log."
         },
-        "clPrompter.codeSnippetTreeClickAction": {
+        "clPrompter.cmdEntryCodeSnippetTreeClickAction": {
+          "order": 113,
           "type": "string",
-          "default": "Run",
+          "default": "No-op",
           "enum": [
             "Run",
-            "Copy",
-            "Copy to Cmd Entry"
+            "View full statement",
+            "No-op"
           ],
           "enumDescriptions": [
             "Run the selected Code Snippet.",
-            "Copy the selected Code Snippet text to the clipboard.",
-            "Copy the selected Code Snippet text into CL Command Entry."
+            "Open the fully resolved Code Snippet text in an editor tab.",
+            "Do nothing when a Code Snippet node is clicked."
           ],
-          "description": "Controls what single-clicking a Code Snippet in the tree view does."
+          "description": "Controls what happens when you click a Code Snippet in the tree view (setting key: clPrompter.cmdEntryCodeSnippetTreeClickAction)."
         },
         "clPrompter.kwdColor": {
           "type": "string",
@@ -494,19 +518,24 @@
           "group": "navigation@3"
         },
         {
-          "command": "clprompter.codeSnippet.edit",
+          "command": "clprompter.codeSnippet.viewFullStatement",
           "when": "view == clprompter.codeSnippetManagerView && (viewItem == codeSnippetUser || viewItem == codeSnippetBuiltIn || viewItem == codeSnippetPreviewUser || viewItem == codeSnippetPreviewBuiltIn)",
           "group": "navigation@4"
         },
         {
-          "command": "clprompter.codeSnippet.delete",
+          "command": "clprompter.codeSnippet.edit",
           "when": "view == clprompter.codeSnippetManagerView && (viewItem == codeSnippetUser || viewItem == codeSnippetBuiltIn || viewItem == codeSnippetPreviewUser || viewItem == codeSnippetPreviewBuiltIn)",
           "group": "navigation@5"
         },
         {
+          "command": "clprompter.codeSnippet.delete",
+          "when": "view == clprompter.codeSnippetManagerView && (viewItem == codeSnippetUser || viewItem == codeSnippetBuiltIn || viewItem == codeSnippetPreviewUser || viewItem == codeSnippetPreviewBuiltIn)",
+          "group": "navigation@6"
+        },
+        {
           "command": "clprompter.codeSnippet.refresh",
           "when": "view == clprompter.codeSnippetManagerView",
-          "group": "navigation@6"
+          "group": "navigation@7"
         },
         {
           "command": "clprompter.codeSnippet.moveUp",
@@ -540,7 +569,7 @@
     "viewsContainers": {
       "panel": [
         {
-          "id": "clprompterCommandEntry",
+          "id": "clprompterCommandEntryMain",
           "title": "CL Command Entry",
           "icon": "images/clPrompter.png"
         }
@@ -555,13 +584,13 @@
           "when": "clprompter.codeSnippetManagerVisible"
         }
       ],
-      "clprompterCommandEntry": [
+      "clprompterCommandEntryMain": [
         {
-          "id": "clprompter.commandEntryView",
+          "id": "clprompter.commandEntryView.main",
           "name": "CL Command Entry",
           "type": "webview",
           "icon": "images/clPrompter.png",
-          "when": "clprompter.commandEntryVisible"
+          "when": "clprompter.commandEntryAvailable"
         }
       ]
     }

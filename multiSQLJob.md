@@ -28,7 +28,12 @@ CL Prompter supports two execution modes for Command Entry:
 
 The mode is controlled by setting:
 
-- clPrompter.commandEntryUseDedicatedJob
+- clPrompter.cmdEntryUseSharedSQLJob
+
+Semantics:
+
+- true: use shared Code for IBM i SQL job
+- false: use CL Prompter dedicated SQL job
 
 ## Key Components and Responsibilities
 

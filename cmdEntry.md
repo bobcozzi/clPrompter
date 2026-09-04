@@ -2,221 +2,163 @@
 
 ## Purpose
 
-This document is a standalone guide for User testing of the CL Command Entry panel in the CLPROMPTER VSCODE extension.
+This guide explains how to test CL Command Entry in plain terms.
 
-The panel is designed for fast, editor-side execution of non-interactive CL commands or SQL statements against a IBM i host connection, with detailed resulting feedback.
+CL Command Entry lets you run non-interactive CL commands and SQL statements from a VS Code side panel and review results quickly.
 
-## Recalled Prior Chat State (Sep 2, 2026)
+## What It Is (and Is Not)
 
-From the prior-day "recovered previous chat state" thread, the key baseline was:
+Use it for:
 
-- Command Entry SQL/log UX updates were active and validated.
-- Message-details collapse/expand behavior had been revised to operate at command-row level.
-- SQL session stale/close behavior was patched to avoid misleading fetch status after session invalidation.
-- Dedicated SQL job behavior and server-mode dependency were clarified and tested.
-- Terminology and help text were refreshed to use "rows per fetch" language.
+- Running CL commands such as `CPYF`, `CHGJOB`, and similar non-interactive commands.
+- Prompting a command with `F4` or the `Prompt` button.
+- Running SQL statements and viewing SQL results.
 
-## What The Panel Is
+Do not use it for:
 
-CL Command Entry is a side-panel workspace for:
+- Commands that require an interactive 5250 screen.
 
-- Running non-interactive CL commands such as `CPYF`, `CHGJOB`, etc.
-- Prompting command strings using the CL prompter (`F4` or `Prompt`).
-- Running SQL statements by prefixing the input with `SQL:`.
+## Open and Close
 
-It is not intended to emulate full interactive 5250 command screens.
+In **VS Code Settings** (`Ctrl+,` or `Cmd+,`) search for `clPrompter` or specifically the `clPrompter.cmdEntryShow` entry. Then adjust when you'd like to have the Command Entry panel appear.
 
-## How To Open/Close It
-
-You can configure auto-show timing with setting `clPrompter.showCLCommandEntry`:
+This setting controls when the CL Command Entry panel opens automatically:
 
 - `At Start Up`
 - `After IBM i Connection`
-- `No`
+- `No` (on demand only)
 
-Manual commands from Command Palette:
+Command Palette entries:
 
 - `CLPROMPTER: Open CL Command Entry`
 - `CLPROMPTER: Close CL Command Entry`
 
-## Core UI Behavior
+## Core Behavior
 
-- Input area supports single/multi-line command text.
-- `Run` executes current input.
-- `Prompt` opens CL prompter for current command text.
-- `SEV` filter controls minimum message severity shown.
-- Run mode selector:
-  - `Run` (`*RUN`)
-  - `Limit` (`*LIMIT`)
-  - `Check` (`*CHECK`)
+- `Run` runs the current command text.
+- `Prompt` opens CL prompt support for the current command text.
+- `SEV` filters messages by minimum severity.
+- Modes:
+  - `Run` runs the CL or SQL Command
+  - `Limit` runs the CL command as a Limited User
+  - `Check` Syntax checks the CL command
+- Note that SQL statements are only supported in `Run` mode.
 
-History behavior:
+History and keyboard:
 
-- `ArrowUp`/`ArrowDown` for quick recall.
-- `F9` retrieves prior command (same direction as arrow up).
-- `F8` retrieves next command (same direction as arrow down).
-- `F10` toggles message-details expand/collapse (same behavior as menu option).
-- Right-click on history arrows opens full history picker.
-- History is persisted via extension global state and deduplicated by command+mode.
+- `ArrowUp` / `F9`: previous command
+- `ArrowDown` / `F8`: next command
+- `F10`: toggle message section collapse/expand default
+- Right-click history arrows: open full CL history picker
 
-## SQL Support (Current)
+## SQL Behavior
 
-### Entering SQL
+You can run SQL in two ways:
 
-Use `SQL:` prefix in Command Entry input, for example:
+- Prefix with `SQL:`
+- Start directly with `SELECT` or `VALUES` (auto-detected as SQL)
+
+Example:
 
 ```text
 SQL: SELECT * FROM QSYS2.JOBLOG_INFO FETCH FIRST 25 ROWS ONLY
 ```
 
-If a user omits the `SQL:` prefix, Command Entry also treats the input as SQL when the first word is `SELECT` or `VALUES`.
+SQL results open in the SQL Results panel.
 
-### Code Snippets Button
+## SQL Fetch Settings
 
-- The `Code Snippets` toolbar button opens a picker containing built-in and user-defined Code Snippets.
-- Code Snippets can be CL commands or SQL statements.
-- Selecting a Code Snippet runs it immediately.
-- Code Snippets support variable substitution:
+- `clPrompter.cmdEntryLimitSqlFetch` (default `true`)
+  - `true`: load rows incrementally
+  - `false`: equivalent to `*NOMAX` (fetch all rows on run)
+- `clPrompter.cmdEntrySqlFetchRowLimit` (default `1000`)
+  - max rows per fetch
+- `clPrompter.cmdEntrySqlFirstPageRowsToFetch` (default `200`)
+  - first-page rows only for a query run
+  - this value is used once when the query starts, then no longer used for that same query
+  - after first page, each load-more uses `clPrompter.cmdEntrySqlFetchRowLimit`
+
+## Code Snippets
+
+- `Code Snippets` button opens built-in and user-defined snippets.
+- Snippets can contain CL or SQL.
+- Selected snippet runs immediately.
+- Supported snippet variables:
   - `${sqlJobId}`
   - `${sqlJobName}`
   - `${sqlJobNumber}`
   - `${currentUser}`
   - `${currentLibrary}`
-- Picker includes:
-  - `Add more...` to open the Code Snippet manager in create mode
-  - `Manage Code Snippets...` to open Add/Edit/Delete/Reorder UI
-  - `Import Code Snippets...` to load JSON into your VS Code environment
-  - `Export Code Snippets...` to save user Code Snippets as JSON
-- Import options:
-  - `Merge`
-  - `Replace All`
-  - `Add New Only`
+- Snippet tools include add, manage, import, and export.
 
-### Result Handling
+## Command Menu (...)
 
-- SQL results render in the SQL Results panel.
-- Large results use incremental retrieval when enabled.
-- Panel supports background prefetch and manual "Load more rows".
-- Result status text uses IBM i centric "rows per fetch" terminology.
+Current menu items:
 
-### Fetch Settings
+- `Collapse Message Details` / `Expand Message Details`
+- `View CL History`
+- `Clear CL Cmd History`
+- `Clear SQL Stmt History`
+- `Clear Log Messages`
+- `Reconnect Server Job`
+- `Cancel Last SQL stmt`
 
-- `clPrompter.commandEntrySqlFetchLimitEnabled` (default `true`)
-  - `true`: incremental loading behavior
-  - `false`: equivalent to `*NOMAX` (fetch all rows on run)
+Message detail default behavior is controlled by `clPrompter.cmdEntryMessageDetails`:
 
-- `clPrompter.commandEntrySqlFetchLimitRows` (default `1000`)
-  - Maximum rows fetched per request
-
-- `clPrompter.commandEntrySqlPrefetchRows` (default `200`)
-  - Initial/background prefetch target before manual load-more is needed
+- `SHOW`: command rows start expanded
+- `HIDE`: command rows start collapsed
 
 ## Dedicated SQL Job Mode
 
 Setting:
 
-- `clPrompter.commandEntryUseDedicatedJob` (default `false`)
+- `clPrompter.cmdEntryUseSharedSQLJob` (default `true`)
 
 Behavior:
 
-- When `true`, Command Entry attempts to use a CLPROMPTER-owned SQL job (instead of sharing the main Code for IBM i SQL job).
-- Dedicated mode requires Code for IBM i remote Mapepire Server mode (`mapepireUseServer`) to be enabled.
-- If server mode is not available, UI messaging indicates the limitation and shared-path behavior/fallback applies.
+- By default, Command Entry uses the shared Code for IBM i SQL job.
+- Set `clPrompter.cmdEntryUseSharedSQLJob` to `false` to use a CLPROMPTER-managed dedicated SQL job.
+- Requires Code for IBM i Mapepire Server mode.
+- If server mode is unavailable, Command Entry falls back to shared-job behavior.
 
-Operational menu items related to dedicated mode:
+Dedicated menu actions:
 
-- `Reconnect Server Job`
-- `Cancel Last SQL stmt`
+- `Reconnect Server Job`: ends the current dedicated SQL job and starts a new one.
+- `Cancel Last SQL stmt`: sends a best-effort cancel request.
 
-## Command Menu ("...")
+## Command Log Appearance
 
-Current menu options include:
+- CL command text color is configurable with `clPrompter.cmdEntryCommandTextColor`.
+- Default command color is `#569CD6`.
+- Command text is intentionally non-bold.
+- In collapsed rows, the log uses a compact layout so more rows are visible in short panels.
 
-- `View CL Cmd History`
-- `Clear CL messages`
-- `Clear SQL History Log`
-- `Clear CL Cmd History`
-- `Collapse Message Details` / `Expand Message Details`
-- `Reconnect Server Job`
-- `Cancel Last SQL stmt`
+## SQL Job ID Field
 
-Important update:
+Right-side SQL job ID behavior:
 
-- Message-details preference now controls command-row reveal/collapse behavior (execution-level collapse).
-- If a command row is collapsed, nested message details are naturally hidden.
-
-Setting used:
-
-- `clPrompter.commandEntryMessageDetails`
-  - `SHOW` (default expanded command rows)
-  - `HIDE` (default collapsed command rows)
-
-## SQL Job ID Status Field
-
-The status field on the right supports:
-
-- Single-click: selects/copies the full job ID
-- Double-click: opens Display Joblog action
-- Right-click context menu:
+- Single-click: copy/select job ID
+- Double-click: run `Display Joblog`
+- Right-click menu:
   - `Copy job name`
   - `Display Joblog`
 
-## Expected Limitations
+## Known Limits
 
-- Interactive CL commands are not supported in this panel.
-  - Example classes: commands requiring 5250 interactive display flows.
-- Prompting does not auto-run.
-  - After prompt returns command text, user must explicitly Run/Enter.
-- SQL cancel is best-effort and depends on host-side interruptibility/state.
+- Prompting returns text to the input box but does not auto-run.
+- SQL cancel is best-effort and depends on host state.
 
-## Tester Checklist
+## Quick Test Checklist
 
-### A. Basic CL Execution
+1. Run a known non-interactive CL command and verify outcome/messages.
+2. Use `Prompt` (or `F4`) and verify prompt returns text without auto-run.
+3. Run SQL with `SQL:` and with direct `SELECT`.
+4. Verify SQL results appear and `Load more rows` works with default fetch settings.
+5. Toggle `Collapse/Expand Message Details` and verify default row state changes.
+6. In dedicated mode (`clPrompter.cmdEntryUseSharedSQLJob=false`) + server mode, test `Reconnect Server Job` and `Cancel Last SQL stmt`.
+7. Verify SQL job ID click, double-click, and right-click actions.
 
-1. Open Command Entry panel.
-2. Run a known non-interactive CL command.
-3. Confirm outcome, elapsed time, and message rows display correctly.
-
-### B. Prompt Integration
-
-1. Enter partial CL command.
-2. Use `Prompt` or `F4`.
-3. Return command to input and verify it does not auto-run.
-4. Run manually and verify output.
-
-### C. SQL Path
-
-1. Enter `SQL: SELECT ...` statement.
-2. Verify SQL Results panel opens and rows render.
-3. Validate fetch behavior with defaults (`rows/fetch` + prefetch).
-4. Change fetch settings and retest `Load more rows` behavior.
-5. Use `Clear SQL History Log` and confirm only SQL entries are removed from results/history while CL entries remain.
-6. Run at least one built-in SQL snippet and one user-defined snippet.
-7. Verify variable substitution by using a snippet with `${sqlJobId}` or `${currentUser}`.
-
-### D. Message Details Preference
-
-1. Toggle `Collapse/Expand Message Details` from menu.
-2. Run command(s) and verify command rows default to expanded/collapsed accordingly.
-
-### E. Dedicated Mode / Server Mode Matrix
-
-1. `commandEntryUseDedicatedJob=false`:
-   - Validate normal execution using shared path.
-2. `commandEntryUseDedicatedJob=true` and `mapepireUseServer=false`:
-   - Validate limitation messaging.
-3. `commandEntryUseDedicatedJob=true` and `mapepireUseServer=true`:
-   - Validate dedicated job ID behavior.
-   - Test `Reconnect Server Job`.
-   - Test `Cancel Last SQL stmt` (best-effort).
-
-### F. Job ID Interactions
-
-1. Single-click SQL job ID and confirm full value selection/copy behavior.
-2. Double-click SQL job ID and confirm Display Joblog action.
-3. Right-click SQL job ID and verify context menu actions.
-
-## Suggested Smoke SQL Statements
+## Suggested Smoke SQL
 
 ```sql
 SELECT CURRENT SERVER AS SERVER_NAME, CURRENT USER AS USER_NAME
@@ -229,12 +171,12 @@ FROM TABLE(QSYS2.JOBLOG_INFO('*'))
 FETCH FIRST 50 ROWS ONLY
 ```
 
-## Notes For Test Reporting
+## Issue Report Notes
 
-When reporting an issue, include:
+Include:
 
-- Exact command/SQL text used
-- `commandEntryUseDedicatedJob` setting value
-- Whether Code for IBM i Mapepire Server mode is enabled
-- Any `...` menu action used just before the issue
-- Screenshot of panel status text and SQL job ID (if visible)
+- Exact CL/SQL text used
+- `clPrompter.cmdEntryUseSharedSQLJob` value
+- Mapepire Server mode state in Code for IBM i
+- Any `...` menu action used immediately before the issue
+- Screenshot of status text and SQL job ID
