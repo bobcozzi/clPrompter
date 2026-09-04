@@ -34,6 +34,10 @@ import { CmdHelpChecker, CmdRunChecker, CmdXmlChecker } from './components/hostF
 
 import { initializePrompter, CLPrompter, CLPrompterCallback } from './clPrompter';
 import { CommandEntryViewProvider } from './commandEntryView';
+import { registerCodeSnippetManagerView } from './commandEntrySnippetView';
+import { CommandEntryJobManager } from './commandEntryJobManager';
+import { CommandEntryService } from './commandEntryService';
+import { createMultiSqlJobApi } from './multiSqlJobApi';
 
 import { ParmMeta, ParmMetaMap } from './types';
 import {
@@ -54,7 +58,6 @@ import * as path from 'path';
 import { buildAPI2PartName, buildQualName } from './QlgPathName';
 import { collectCLCmd, buildAllowedValsMap, buildDepConstraints, buildValToMapToMap, buildDefaultValMap, buildPmtCtlMap, buildAllMaps } from './extractor';
 import { getCMDXML, clearCMDXMLCache, warmXmlCache, getCmdHelpViaUDTF } from './getcmdxml';
-import { runUserSql, UserSqlResult } from './tools';
 
 import {
     tokenizeCL,
@@ -63,6 +66,8 @@ import {
 } from './tokenizeCL';
 
 let baseExtension: Extension<CodeForIBMi> | undefined;
+let sharedCommandEntryService: CommandEntryService | undefined;
+let sharedCommandEntryJobManager: CommandEntryJobManager | undefined;
 
 /**
  * Helptext cache populated by the PASE-based prefetch.
@@ -86,6 +91,28 @@ const clpHelpCache = new Map<string, string>();
  *  currently in flight on the shared Mapepire SQLJob.  Exported so getCMDXML
  *  and warmXmlCache can enrich their "busy" log lines with what is competing. */
 let _pendingExternalSQL: { sql: string; t0: number } | undefined;
+
+let extensionObjectSequence = 0;
+const extensionObjectIds = new WeakMap<object, number>();
+
+function isCommandEntryVerboseLoggingEnabled(): boolean {
+    return vscode.workspace.getConfiguration('clPrompter').get<boolean>('commandEntryVerboseLogging', false);
+}
+
+function getExtensionObjectId(value: unknown): number | undefined {
+    if (!value || typeof value !== 'object') {
+        return undefined;
+    }
+
+    const objectRef = value as object;
+    let id = extensionObjectIds.get(objectRef);
+    if (!id) {
+        extensionObjectSequence += 1;
+        id = extensionObjectSequence;
+        extensionObjectIds.set(objectRef, id);
+    }
+    return id;
+}
 
 const EXTERNAL_RUNSQL_DEBUG_LOGS = false;
 function debugLog(message: string): void {
@@ -223,9 +250,11 @@ async function saveHelpTextDebugFile(cmdName: string, parmName: string, helpHtml
 }
 
 export async function activate(context: vscode.ExtensionContext) {
+    await context.workspaceState.update('clprompter.commandEntryTouchedThisSession', false);
     await vscode.commands.executeCommand('setContext', 'clprompter.ibmiLoaded', false);
     await vscode.commands.executeCommand('setContext', 'clprompter.connected', false);
     await vscode.commands.executeCommand('setContext', 'clprompter.commandEntryVisible', false);
+    await vscode.commands.executeCommand('setContext', 'clprompter.codeSnippetManagerVisible', false);
 
     const getCommandEntryStartupMode = (): 'At Start Up' | 'After IBM i Connection' | 'No' => {
         const config = vscode.workspace.getConfiguration('clPrompter');
@@ -255,13 +284,79 @@ export async function activate(context: vscode.ExtensionContext) {
         void applyCommandEntryStartupVisibility();
     }));
 
-    const commandEntry = new CommandEntryViewProvider(context, () => code4i?.instance?.getConnection());
+    const commandEntryOutput = vscode.window.createOutputChannel('CLPROMPTER');
+
+    const commandEntryDebugLog = (message: string): void => {
+        if (isCommandEntryVerboseLoggingEnabled()) {
+            commandEntryOutput.appendLine(message);
+        }
+    };
+
+    const redactConfigValue = (key: string, value: unknown): unknown => {
+        if (/pass|secret|token|apikey|api_key|pwd|credential/i.test(key)) {
+            return '<redacted>';
+        }
+        return value;
+    };
+
+    const logMapepireConnectionDump = (conn: any, reason: string): void => {
+        if (!isCommandEntryVerboseLoggingEnabled()) {
+            return;
+        }
+        if (!conn) {
+            commandEntryDebugLog(`[Command Entry][MapepireDump] ${reason} no active connection`);
+            return;
+        }
+
+        const config = conn.getConfig?.() ?? {};
+        const configKeys = Object.keys(config)
+            .filter(key => key.toLowerCase().includes('mapepire'))
+            .sort();
+        const configPairs = configKeys.map(key => `${key}=${JSON.stringify(redactConfigValue(key, config[key]))}`);
+
+        const sharedJobId = String(conn.getSqlJobId?.() ?? '<none>');
+        const sharedJobStatus = String(conn.sqlJob?.getStatus?.() ?? '<unknown>');
+        const sqlRunnerAvailable = Boolean(conn.sqlRunnerAvailable?.());
+        const host = String(conn.currentHost ?? '<unknown-host>');
+        const user = String(conn.currentUser ?? '<unknown-user>');
+        const connectionName = String(conn.currentConnectionName ?? '<unknown-connection>');
+
+        commandEntryDebugLog(
+            `[Command Entry][MapepireDump] ${reason} connection=${connectionName} user=${user} host=${host} sqlRunnerAvailable=${sqlRunnerAvailable} sharedJobStatus=${sharedJobStatus} sharedJobId=${sharedJobId}`
+        );
+        commandEntryDebugLog(
+            `[Command Entry][MapepireDump] ${reason} config ${configPairs.length > 0 ? configPairs.join(', ') : '<no mapepire keys in connection config>'}`
+        );
+    };
+
+    const sharedJobManager = new CommandEntryJobManager(commandEntryOutput);
+    const sharedCommandService = new CommandEntryService(sharedJobManager);
+    sharedCommandEntryJobManager = sharedJobManager;
+    sharedCommandEntryService = sharedCommandService;
+    const multiSqlJob = createMultiSqlJobApi(
+        () => code4i?.instance?.getConnection(),
+        sharedJobManager,
+        sharedCommandService,
+        commandEntryOutput
+    );
+    const commandEntry = new CommandEntryViewProvider(
+        context,
+        () => code4i?.instance?.getConnection(),
+        {
+            output: commandEntryOutput,
+            jobManager: sharedJobManager,
+            service: sharedCommandService
+        }
+    );
     context.subscriptions.push(
         vscode.window.registerWebviewViewProvider(CommandEntryViewProvider.viewType, commandEntry),
+        registerCodeSnippetManagerView(context, commandEntry),
         { dispose: () => { void commandEntry.dispose(); } },
         vscode.commands.registerCommand('clprompter.openCommandEntry', async () => {
+            await context.workspaceState.update('clprompter.commandEntryTouchedThisSession', true);
             await vscode.commands.executeCommand('setContext', 'clprompter.commandEntryVisible', true);
             await vscode.commands.executeCommand('workbench.view.extension.clprompterCommandEntry');
+            await vscode.commands.executeCommand('clprompter.codeSnippet.resolvePinnedVisibility');
             commandEntry.focus();
         }),
         vscode.commands.registerCommand('clprompter.closeCommandEntry', async () => {
@@ -271,7 +366,9 @@ export async function activate(context: vscode.ExtensionContext) {
         vscode.commands.registerCommand('clprompter.promptCommandEntry', () => commandEntry.requestPrompt()),
         vscode.commands.registerCommand('clprompter.cancelCommandEntry', () => commandEntry.requestCancel()),
         vscode.commands.registerCommand('clprompter.startNewCommandEntryJob', () => commandEntry.requestStartNewJob()),
-        vscode.commands.registerCommand('clprompter.clearCommandEntry', () => commandEntry.clear())
+        vscode.commands.registerCommand('clprompter.clearCommandEntry', () => commandEntry.clear()),
+        vscode.commands.registerCommand('clprompter.exportCodeSnippets', () => commandEntry.requestExportCodeSnippets()),
+        vscode.commands.registerCommand('clprompter.importCodeSnippets', () => commandEntry.requestImportCodeSnippets())
     );
 
     baseExtension = extensions.getExtension<CodeForIBMi>("halcyontechltd.code-for-ibmi");
@@ -365,17 +462,31 @@ export async function activate(context: vscode.ExtensionContext) {
                 const conn = code4i?.instance?.getConnection();
                 if (!conn || !conn.sqlRunnerAvailable()) { return; }
 
+                const beforeJobId = conn.getSqlJobId?.() ?? '<none>';
+                const beforeJobIdRaw = String((conn as any).getSqlJobId?.() ?? '<none>');
+                const beforeStatus = (conn as any).sqlJob?.getStatus?.() ?? '<unknown>';
+                const beforeSqlJobObject = getExtensionObjectId((conn as any).sqlJob) ?? '<none>';
+                commandEntryDebugLog(`[Command Entry][KeepAlive] tick before sharedSqlJobObj=${beforeSqlJobObject} status=${beforeStatus} sharedJobId=${beforeJobId} sharedJobIdRaw=${beforeJobIdRaw}`);
+
                 // Skip the ping if the SQLJob is already busy — another query is in-flight,
                 // which itself proves the connection is alive.  No need to queue behind it.
                 const jobStatus: string | undefined = (conn as any).sqlJob?.getStatus?.();
-                if (jobStatus === 'busy') { return; }
+                if (jobStatus === 'busy') {
+                    commandEntryDebugLog('[Command Entry][KeepAlive] skip ping because shared SQL job status is busy.');
+                    return;
+                }
                 try {
                     // A lightweight SQL ping is sufficient — CMD_XML uses ACTGRP(*CALLER)
                     // so it lives in the Mapepire job's activation group and needs no
                     // separate warming.  We only need to keep the SQLJob itself alive so
                     // IBM i doesn't recycle the service job during idle periods.
                     await conn.runSQL(`VALUES 1`);
-                    // console.log(`[clPrompter] keep-alive: ping OK`);
+                    const afterJobId = conn.getSqlJobId?.() ?? '<none>';
+                    const afterJobIdRaw = String((conn as any).getSqlJobId?.() ?? '<none>');
+                    const afterStatus = (conn as any).sqlJob?.getStatus?.() ?? '<unknown>';
+                    const afterSqlJobObject = getExtensionObjectId((conn as any).sqlJob) ?? '<none>';
+                    commandEntryDebugLog(`[Command Entry][KeepAlive] ping OK after sharedSqlJobObj=${afterSqlJobObject} status=${afterStatus} sharedJobId=${afterJobId} sharedJobIdRaw=${afterJobIdRaw}`);
+                    commandEntry.refreshSqlJobId(conn as any);
                 } catch (err: any) {
                     // The keep-alive failed.  The most common cause is that the Mapepire
                     // SQLJob died (IBM i recycled the service job after an idle period).
@@ -399,20 +510,14 @@ export async function activate(context: vscode.ExtensionContext) {
                     //       && this.sqlJob.getStatus() !== JobStatus.ENDED;
                     const deadJobMsg = ['not yet setup', 'ended', 'not started'];
                     const isDeadJob = deadJobMsg.some(s => err?.message?.toLowerCase().includes(s));
+                    commandEntryOutput.appendLine(`[Command Entry][KeepAlive] ping failed message=${err?.message ?? String(err)} deadJobDetected=${isDeadJob}`);
+                    commandEntry.refreshSqlJobId(conn as any);
                     if (!isDeadJob) { return; } // unrelated error — leave it
 
-                    console.warn('[clPrompter] keep-alive: SQLJob appears dead, attempting restart…');
-                    try {
-                        // PoC hack: access private IBMi.sqlJob via type cast.
-                        // Replace with conn.restartSqlJob() once Code for IBM i adds it.
-                        const mapepire = await (conn as any).getComponent('mapepire');
-                        if (mapepire) {
-                            (conn as any).sqlJob = await mapepire.newJob(conn);
-                            console.log('[clPrompter] keep-alive: SQLJob restarted successfully');
-                        }
-                    } catch (restartErr: any) {
-                        console.error('[clPrompter] keep-alive: SQLJob restart failed:', restartErr?.message ?? restartErr);
-                    }
+                    // Do not manually create/restart SQL jobs here. Let Code for IBM i own
+                    // shared SQL job lifecycle so status-bar state stays authoritative.
+                    console.warn('[clPrompter] keep-alive: SQLJob appears dead; manual restart is disabled.');
+                    commandEntryOutput.appendLine('[Command Entry][KeepAlive] shared SQL job appears dead; manual restart is disabled (owned by Code for IBM i).');
                 }
             }, 60_000);
         };
@@ -458,6 +563,10 @@ export async function activate(context: vscode.ExtensionContext) {
         code4i.instance.subscribe(context, 'connected', 'clPrompter-connected-context', () => {
             void vscode.commands.executeCommand('setContext', 'clprompter.connected', true);
         });
+        code4i.instance.subscribe(context, 'connected', 'clPrompter-mapepire-dump', () => {
+            const conn = code4i?.instance?.getConnection();
+            logMapepireConnectionDump(conn as any, 'connected-event');
+        });
         code4i.instance.subscribe(context, 'connected', 'clPrompter-command-entry-startup-mode', () => {
             if (getCommandEntryStartupMode() === 'After IBM i Connection') {
                 void vscode.commands.executeCommand('setContext', 'clprompter.commandEntryVisible', true);
@@ -478,12 +587,26 @@ export async function activate(context: vscode.ExtensionContext) {
         code4i.instance.subscribe(context, 'disconnected', 'clPrompter-connected-context', () => {
             void vscode.commands.executeCommand('setContext', 'clprompter.connected', false);
         });
+        code4i.instance.subscribe(context, 'disconnected', 'clPrompter-command-entry-cleanup', () => {
+            void (async () => {
+                try {
+                    await sharedCommandService.closeSqlSession();
+                    await sharedJobManager.dispose();
+                    commandEntry.refreshSqlJobId();
+                    commandEntryOutput.appendLine('[Command Entry] Disconnected: dedicated SQL job and SQL session state cleaned up.');
+                } catch (error) {
+                    commandEntryOutput.appendLine(`[Command Entry] Disconnected cleanup warning: ${error instanceof Error ? error.message : String(error)}`);
+                }
+            })();
+        });
         code4i.instance.subscribe(context, 'disconnected', 'clPrompter-keepalive-stop', stopKeepAlive);
 
         // Start immediately if already connected when the extension activates.
         if (code4i.instance.getConnection()) {
+            const initialConnection = code4i.instance.getConnection() as any;
             void vscode.commands.executeCommand('setContext', 'clprompter.connected', true);
-            patchRunSQL(code4i.instance.getConnection() as any);
+            patchRunSQL(initialConnection);
+            logMapepireConnectionDump(initialConnection, 'activate-existing-connection');
             startKeepAlive();
             // Run both UDTF checks in parallel, then prefetch — serialized relative
             // to prefetch so upload/compile steps don't race for SSH channels.
@@ -638,7 +761,8 @@ export async function activate(context: vscode.ExtensionContext) {
     // Return API for external extensions
     return {
         CLPrompter,
-        CLPrompterCallback
+        CLPrompterCallback,
+        multiSqlJob
     };
 }
 
@@ -1656,6 +1780,18 @@ export class ClPromptPanel {
 // Note: The function is initialized in activate() after the extension context is available
 export { CLPrompter, CLPrompterCallback };
 
+export async function deactivate(): Promise<void> {
+    try {
+        await sharedCommandEntryService?.closeSqlSession();
+        await sharedCommandEntryJobManager?.dispose();
+    } catch (error) {
+        console.warn(`[clPrompter] deactivate cleanup warning: ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+        sharedCommandEntryService = undefined;
+        sharedCommandEntryJobManager = undefined;
+    }
+}
+
 // Build ordered positional KWDs from ParmMetaMap.posNbr
 function getPositionalKwdsFromMetaMap(meta: ParmMetaMap | undefined): string[] {
     if (!meta) return [];
@@ -1877,25 +2013,6 @@ export async function downloadStreamfile(
         return undefined;
     }
 }
-
-/**
- * Convenience wrapper for executing caller-provided SQL on the active IBM i connection.
- */
-export async function runUserSqlOnActiveConnection<T = Record<string, unknown>>(
-    statement: string,
-    bindings?: unknown[]
-): Promise<UserSqlResult<T>> {
-    const connection = code4i?.instance?.getConnection();
-    if (!connection) {
-        throw new Error('No active IBM i connection.');
-    }
-    if (!connection.sqlRunnerAvailable()) {
-        throw new Error('IBM i SQL runner is not available.');
-    }
-
-    return runUserSql<T>(connection, statement, bindings);
-}
-
 
 function extractDefaultsFromXML(xml: string): Record<string, any> {
     const defaults: Record<string, any> = {};

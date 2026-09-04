@@ -1,13 +1,14 @@
 import * as vscode from 'vscode';
-import { SqlResultPayload } from './commandEntryModel';
+import { SqlColumnMetadata, SqlResultPayload } from './commandEntryModel';
 
 const PANEL_TYPE = 'clprompter.sqlResults';
-const PANEL_TITLE = 'CLPROMPTER SQL Results';
+const PANEL_TITLE = 'SQL Results';
 
 type SqlResultPanelRequest =
     | { type: 'loadMore'; sessionId: string }
     | { type: 'loadAll'; sessionId: string }
     | { type: 'prefetch'; sessionId: string }
+    | { type: 'rerunSql'; statement: string }
     | { type: 'closeSession'; sessionId: string };
 
 type SqlResultPanelRequestHandler = (request: SqlResultPanelRequest) => Promise<SqlResultPayload | undefined>;
@@ -27,7 +28,13 @@ class SqlResultPanel {
                 PANEL_TYPE,
                 PANEL_TITLE,
                 vscode.ViewColumn.Beside,
-                { enableScripts: true, retainContextWhenHidden: true }
+                {
+                    enableScripts: true,
+                    retainContextWhenHidden: true,
+                    localResourceRoots: sqlResultPanelExtensionUri
+                        ? [vscode.Uri.joinPath(sqlResultPanelExtensionUri, 'media')]
+                        : undefined
+                }
             );
             this.panel.webview.onDidReceiveMessage((message: unknown) => {
                 void this.handleMessage(message);
@@ -45,7 +52,11 @@ class SqlResultPanel {
 
         this.activeSessionId = result.sessionId;
         this.panel.title = `${PANEL_TITLE} (${result.rowCount})`;
-        this.panel.webview.html = renderSqlResultHtml(result);
+        const extensionUri = sqlResultPanelExtensionUri;
+        const scriptUri = extensionUri
+            ? this.panel.webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'media', 'sqlResultPanel.js')).toString()
+            : '';
+        this.panel.webview.html = renderSqlResultHtml(result, this.panel.webview.cspSource, scriptUri);
     }
 
     private update(result: SqlResultPayload): void {
@@ -78,8 +89,25 @@ class SqlResultPanel {
             return;
         }
 
-        const request = message as { type?: string; sessionId?: string };
-        if (!request.type || !request.sessionId) {
+        const request = message as { type?: string; sessionId?: string; statement?: string };
+        if (!request.type) {
+            return;
+        }
+
+        if (request.type === 'rerunSql') {
+            const statement = String(request.statement || '').trim();
+            if (!statement) {
+                throw new Error('No SQL statement was provided to rerun.');
+            }
+
+            const updated = await this.requestHandler({ type: 'rerunSql', statement });
+            if (updated) {
+                this.update(updated);
+            }
+            return;
+        }
+
+        if (!request.sessionId) {
             return;
         }
 
@@ -100,6 +128,11 @@ class SqlResultPanel {
 }
 
 const singletonPanel = new SqlResultPanel();
+let sqlResultPanelExtensionUri: vscode.Uri | undefined;
+
+export function configureSqlResultPanelAssets(extensionUri: vscode.Uri): void {
+    sqlResultPanelExtensionUri = extensionUri;
+}
 
 export function showSqlResultPanel(result: SqlResultPayload): void {
     singletonPanel.show(result);
@@ -113,357 +146,75 @@ export function notifySqlResultSessionClosed(message?: string): void {
     singletonPanel.markSessionClosed(message);
 }
 
-function renderSqlResultHtml(result: SqlResultPayload): string {
+function renderSqlResultHtml(result: SqlResultPayload, cspSource: string, scriptUri: string): string {
     const columns = result.columns;
     const profiles = buildColumnProfiles(columns, result.rows);
-    const colHeaders = columns.map((column) => {
+    const initialPayload = buildClientPayload(result);
+    const columnMetadataByName = new Map((result.columnMetadata ?? []).map((entry) => [normalizeColumnKey(entry.name), entry]));
+    const colHeaders = columns.map((column, index) => {
         const profile = profiles[column];
-        const alignClass = shouldRightAlign(profile.kind) ? ' class="align-right"' : '';
-        return `<th${alignClass}>${escapeHtml(column)}</th>`;
+        const classes = ['sortable-col'];
+        if (shouldRightAlign(profile.kind)) {
+            classes.push('align-right');
+        }
+        const byName = columnMetadataByName.get(normalizeColumnKey(column));
+        const byScan = findMetadataForColumn(column, result.columnMetadata ?? []);
+        const byPosition = result.columnMetadata?.[index];
+        const metadata = byName ?? byScan ?? byPosition;
+        const headerText = resolveColumnHeaderText(column, metadata);
+        const tooltipText = buildColumnHeaderTooltip(column, metadata);
+        const headerHtml = renderColumnHeaderHtml(headerText);
+        return `<th class="${classes.join(' ')}" data-col-index="${index}" title="${escapeHtml(tooltipText)}" aria-sort="none">${headerHtml}</th>`;
     }).join('');
     const allHeaders = '<th class="align-right row-index-col">ROW</th>' + colHeaders;
-    const initialPayloadJson = safeJsonForScript(buildClientPayload(result));
+    const bootstrapPayloadJson = safeJsonForScript({
+        initialColumns: columns,
+        initialPayload
+    });
+    const initialBodyRowsHtml = renderRowCellsHtml(initialPayload.rowCells);
 
     const tableHtml = columns.length === 0
-        ? '<p class="empty">No columns were returned by this statement.</p>'
+        ? `<div class="paging-toolbar" id="paging-toolbar">
+                    <button id="rerun-sql" type="button" title="Refresh" aria-label="Refresh">&#x25B6;</button>
+                    <span class="toolbar-spacer"></span>
+                    <button id="toggle-sql-stmt" type="button" title="View SQL statement" aria-label="View SQL statement" aria-expanded="false">View SQL Stmt</button>
+                </div>
+                <p class="empty">No rows returned.</p>`
         : `<div class="paging-toolbar" id="paging-toolbar">
+                    <button id="rerun-sql" type="button" title="Refresh" aria-label="Refresh">&#x25B6;</button>
                     <button id="first-page" type="button" title="Top" aria-label="Top"><<</button>
                     <button id="prev-page" type="button" title="Prior page" aria-label="Prior page"><</button>
                                 <span id="page-summary">Page 1 of 1</span>
                     <button id="next-page" type="button" title="Next page" aria-label="Next page">></button>
                     <button id="last-page" type="button" title="Bottom" aria-label="Bottom">>></button>
-                                <label for="page-size">Rows:</label>
-                                <select id="page-size" aria-label="Rows per page">
+                                <label for="page-size" title="Paging size">Paging Size:</label>
+                                <select id="page-size" title="Paging size" aria-label="Paging size">
+                                    <option value="AUTO" selected>Auto</option>
                                         <option value="25">25</option>
-                                        <option value="50" selected>50</option>
+                                        <option value="50">50</option>
                                         <option value="100">100</option>
                                         <option value="250">250</option>
                                         <option value="500">500</option>
                                 </select>
-                    <button id="load-more" type="button" hidden>Load next</button>
-                    <button id="load-all" type="button" hidden>Load all</button>
-                    <span id="fetch-status" aria-live="polite"></span>
+                            <button id="load-more" type="button" title="Load more result rows" aria-label="Load more result rows" hidden>Load more</button>
+                            <button id="load-all" type="button" title="Load all remaining result rows" aria-label="Load all remaining result rows" hidden>Load all</button>
+                    <span id="fetch-status" aria-live="polite">Initializing table features...</span>
+                    <span class="toolbar-spacer"></span>
+                            <button id="toggle-sql-stmt" type="button" title="View SQL statement" aria-label="View SQL statement" aria-expanded="false">View SQL Stmt</button>
                         </div>
                 <p class="meta" id="result-meta"></p>
-                        <div class="table-wrap"><table><thead><tr>${allHeaders}</tr></thead><tbody id="results-body"></tbody></table></div>`;
+                    <div class="table-wrap"><table><thead><tr>${allHeaders}</tr></thead><tbody id="results-body">${initialBodyRowsHtml}</tbody></table></div>`;
 
-    const pagingScript = columns.length === 0
-        ? ''
-        : `<script>
-(() => {
-    const vscode = acquireVsCodeApi();
-    const initialPayload = ${initialPayloadJson};
-    let sessionId = initialPayload.sessionId || '';
-    let hasMoreRows = !!initialPayload.hasMoreRows;
-    let fetchSize = Number(initialPayload.fetchSize || 0);
-    let prefetchSize = Number(initialPayload.prefetchSize || 0);
-    let rows = initialPayload.rowCells || [];
-    const tbody = document.getElementById('results-body');
-    const firstBtn = document.getElementById('first-page');
-    const prevBtn = document.getElementById('prev-page');
-    const nextBtn = document.getElementById('next-page');
-    const lastBtn = document.getElementById('last-page');
-    const pageSizeSelect = document.getElementById('page-size');
-    const pageSummary = document.getElementById('page-summary');
-    const loadMoreBtn = document.getElementById('load-more');
-    const loadAllBtn = document.getElementById('load-all');
-    const fetchStatus = document.getElementById('fetch-status');
-    const resultMeta = document.getElementById('result-meta');
-    const tableWrap = document.querySelector('.table-wrap');
-
-    let pageSize = Number(pageSizeSelect?.value || 50);
-    let pageIndex = 0;
-    let loadInFlight = false;
-    let sessionUnavailable = false;
-    let rowOffsets = [];
-
-    function updateMeta() {
-        if (!resultMeta) return;
-        if (hasMoreRows) {
-            resultMeta.textContent = 'Loaded ' + rows.length + ' rows. More rows are available.';
-            return;
-        }
-        resultMeta.textContent = rows.length + ' rows returned.';
-    }
-
-    function setFetchLoading(isLoading, statusText) {
-        loadInFlight = isLoading;
-        if (loadMoreBtn) loadMoreBtn.disabled = isLoading;
-        if (loadAllBtn) loadAllBtn.disabled = isLoading;
-        if (fetchStatus) {
-            fetchStatus.textContent = statusText || '';
-        }
-    }
-
-    function updateFetchControls() {
-        const canFetchMore = !!sessionId && hasMoreRows;
-        if (loadMoreBtn) {
-            loadMoreBtn.hidden = !canFetchMore;
-            if (canFetchMore) {
-                const nextSize = fetchSize > 0 ? fetchSize : 1000;
-                loadMoreBtn.textContent = 'Load next ' + nextSize;
-            }
-        }
-        if (loadAllBtn) {
-            loadAllBtn.hidden = !canFetchMore;
-        }
-    }
-
-    function requestRows(requestType, statusText) {
-        if (!sessionId || !hasMoreRows || loadInFlight || sessionUnavailable) {
-            return;
-        }
-        setFetchLoading(true, statusText);
-        vscode.postMessage({ type: requestType, sessionId });
-    }
-
-    function isTerminalSessionError(messageText) {
-        if (!messageText) {
-            return false;
-        }
-        const normalized = String(messageText).toLowerCase();
-        return normalized.includes('session is no longer available')
-            || normalized.includes('run the sql statement again')
-            || normalized.includes('connection close')
-            || normalized.includes('connection closed');
-    }
-
-    function maybePrefetchNearEnd(totalPages) {
-        if (!sessionId || !hasMoreRows || loadInFlight) {
-            return;
-        }
-        if (pageIndex >= Math.max(0, totalPages - 2)) {
-            const sizeText = prefetchSize > 0 ? prefetchSize : 200;
-            requestRows('prefetch', 'Prefetching next ' + sizeText + ' rows...');
-        }
-    }
-
-    function getRenderedRows() {
-        if (!tbody) {
-            return [];
-        }
-        return Array.from(tbody.querySelectorAll('tr'));
-    }
-
-    function rebuildRowOffsets() {
-        const renderedRows = getRenderedRows();
-        rowOffsets = renderedRows.map((row) => row.offsetTop);
-    }
-
-    function findRowIndexForScrollTop(scrollTop) {
-        if (!rowOffsets.length) {
-            return 0;
-        }
-
-        let low = 0;
-        let high = rowOffsets.length - 1;
-        let best = 0;
-        while (low <= high) {
-            const mid = Math.floor((low + high) / 2);
-            if (rowOffsets[mid] <= scrollTop) {
-                best = mid;
-                low = mid + 1;
-            } else {
-                high = mid - 1;
-            }
-        }
-        return best;
-    }
-
-    function getTopVisibleRowIndex() {
-        if (!tableWrap) {
-            return 0;
-        }
-        if (rowOffsets.length === 0) {
-            return 0;
-        }
-        return findRowIndexForScrollTop(tableWrap.scrollTop + 1);
-    }
-
-    function getCurrentPageIndex() {
-        const totalPages = Math.max(1, Math.ceil(rows.length / pageSize));
-        const topRowIndex = getTopVisibleRowIndex();
-        return Math.max(0, Math.min(totalPages - 1, Math.floor(topRowIndex / pageSize)));
-    }
-
-    function syncPageFromScroll() {
-        pageIndex = getCurrentPageIndex();
-    }
-
-    function updatePageControls() {
-        const totalRows = rows.length;
-        const totalPages = Math.max(1, Math.ceil(totalRows / pageSize));
-
-        if (pageIndex > totalPages - 1) {
-            pageIndex = totalPages - 1;
-        }
-
-        if (pageSummary) {
-            pageSummary.textContent = 'Page ' + (pageIndex + 1) + ' of ' + totalPages + ' (' + totalRows + ' rows)';
-        }
-        if (firstBtn) firstBtn.disabled = pageIndex === 0;
-        if (prevBtn) prevBtn.disabled = pageIndex === 0;
-        if (nextBtn) nextBtn.disabled = pageIndex >= totalPages - 1;
-        if (lastBtn) lastBtn.disabled = pageIndex >= totalPages - 1;
-
-        maybePrefetchNearEnd(totalPages);
-    }
-
-    function renderRows(preserveScroll) {
-        if (!tbody) return;
-        const previousScrollTop = tableWrap ? tableWrap.scrollTop : 0;
-        tbody.innerHTML = rows.map((cells, index) => {
-            const tds = cells.map((cell) => {
-                const alignClass = cell.alignClass ? ' class="' + cell.alignClass + '"' : '';
-                return '<td' + alignClass + '>' + cell.html + '</td>';
-            }).join('');
-            return '<tr><td class="align-right row-index-col">' + (index + 1) + '</td>' + tds + '</tr>';
-        }).join('');
-
-        if (tableWrap) {
-            if (preserveScroll) {
-                tableWrap.scrollTop = Math.min(previousScrollTop, tableWrap.scrollHeight);
-            } else {
-                tableWrap.scrollTop = 0;
-            }
-        }
-
-        rebuildRowOffsets();
-
-        syncPageFromScroll();
-        updatePageControls();
-    }
-
-    function jumpToRow(rowIndex) {
-        if (!tableWrap) {
-            return;
-        }
-        if (rows.length === 0) {
-            pageIndex = 0;
-            updatePageControls();
-            return;
-        }
-
-        const targetRow = Math.max(0, Math.min(rows.length - 1, rowIndex));
-        if (targetRow >= rowOffsets.length) {
-            return;
-        }
-
-        tableWrap.scrollTop = Math.max(0, rowOffsets[targetRow]);
-        syncPageFromScroll();
-        updatePageControls();
-    }
-
-    firstBtn?.addEventListener('click', () => {
-        jumpToRow(0);
-    });
-
-    prevBtn?.addEventListener('click', () => {
-        const targetPageIndex = Math.max(0, getCurrentPageIndex() - 1);
-        jumpToRow(targetPageIndex * pageSize);
-    });
-
-    nextBtn?.addEventListener('click', () => {
-        const totalPages = Math.max(1, Math.ceil(rows.length / pageSize));
-        const targetPageIndex = Math.min(totalPages - 1, getCurrentPageIndex() + 1);
-        jumpToRow(targetPageIndex * pageSize);
-    });
-
-    lastBtn?.addEventListener('click', () => {
-        const totalPages = Math.max(1, Math.ceil(rows.length / pageSize));
-        const targetPageIndex = Math.max(0, totalPages - 1);
-        jumpToRow(targetPageIndex * pageSize);
-    });
-
-    pageSizeSelect?.addEventListener('change', () => {
-        pageSize = Math.max(1, Number(pageSizeSelect.value || 50));
-        syncPageFromScroll();
-        updatePageControls();
-    });
-
-    loadMoreBtn?.addEventListener('click', () => {
-        requestRows('loadMore', 'Loading next rows...');
-    });
-
-    loadAllBtn?.addEventListener('click', () => {
-        requestRows('loadAll', 'Loading all remaining rows...');
-    });
-
-    tableWrap?.addEventListener('scroll', () => {
-        syncPageFromScroll();
-        updatePageControls();
-
-        if (!tableWrap || loadInFlight || !sessionId || !hasMoreRows) {
-            return;
-        }
-        const nearBottom = (tableWrap.scrollTop + tableWrap.clientHeight) >= (tableWrap.scrollHeight - 120);
-        if (nearBottom) {
-            const sizeText = prefetchSize > 0 ? prefetchSize : 200;
-            requestRows('prefetch', 'Prefetching next ' + sizeText + ' rows...');
-        }
-    });
-
-    window.addEventListener('message', (event) => {
-        const message = event.data;
-        if (!message) {
-            return;
-        }
-
-        if (message.type === 'sqlSessionClosed') {
-            if (!message.sessionId || !sessionId || message.sessionId !== sessionId) {
-                return;
-            }
-
-            const noticeText = message.message || 'SQL result session is no longer available. Run the SQL statement again.';
-            sessionUnavailable = true;
-            sessionId = '';
-            hasMoreRows = false;
-            updateFetchControls();
-            setFetchLoading(false, noticeText);
-            return;
-        }
-
-        if (message.type === 'loadError') {
-            const errorText = message.message || 'Unable to load additional rows.';
-            if (isTerminalSessionError(errorText)) {
-                sessionUnavailable = true;
-                sessionId = '';
-                hasMoreRows = false;
-                updateFetchControls();
-            }
-            setFetchLoading(false, errorText);
-            return;
-        }
-
-        if (message.type !== 'sqlResultReplace' || !message.payload) {
-            return;
-        }
-
-        const payload = message.payload;
-        rows = Array.isArray(payload.rowCells) ? payload.rowCells : [];
-        sessionId = payload.sessionId || '';
-        hasMoreRows = !!payload.hasMoreRows;
-        fetchSize = Number(payload.fetchSize || 0);
-        prefetchSize = Number(payload.prefetchSize || 0);
-        sessionUnavailable = false;
-        updateMeta();
-        updateFetchControls();
-        setFetchLoading(false, hasMoreRows ? 'Additional rows loaded.' : 'All rows loaded.');
-        renderRows(true);
-    });
-
-    updateMeta();
-    updateFetchControls();
-
-    renderRows(false);
-})();
-</script>`;
+    const sqlResultsScriptTag = scriptUri
+        ? `<script src="${scriptUri}"></script>`
+        : '';
 
     return `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${cspSource} https: data:; style-src ${cspSource} 'unsafe-inline'; script-src ${cspSource};">
   <title>${PANEL_TITLE}</title>
   <style>
     :root {
@@ -491,6 +242,10 @@ function renderSqlResultHtml(result: SqlResultPayload): string {
       background: color-mix(in srgb, var(--bg) 92%, var(--fg) 8%);
       white-space: pre-wrap;
       word-break: break-word;
+            display: none;
+        }
+        .sql.is-visible {
+            display: block;
     }
     .meta {
       margin: 0 0 10px;
@@ -526,6 +281,14 @@ function renderSqlResultHtml(result: SqlResultPayload): string {
             padding: 3px 7px;
             font: inherit;
         }
+        #rerun-sql {
+            min-width: 28px;
+            width: 28px;
+            padding: 3px 0;
+            font-weight: 700;
+            font-size: 12px;
+            line-height: 1;
+        }
         .paging-toolbar button:disabled {
             opacity: 0.45;
             cursor: default;
@@ -541,11 +304,29 @@ function renderSqlResultHtml(result: SqlResultPayload): string {
         #fetch-status {
             color: var(--muted);
         }
+        .toolbar-spacer {
+            flex: 1 1 auto;
+        }
     table {
       width: max-content;
       min-width: 100%;
       border-collapse: collapse;
       table-layout: auto;
+    }
+    .stacked-header {
+      display: inline-flex;
+      flex-direction: column;
+      align-items: flex-start;
+        justify-content: flex-end;
+      gap: 0;
+      line-height: 1.15;
+      white-space: normal;
+      text-align: left;
+        pointer-events: none;
+    }
+    .stacked-header span {
+      display: block;
+      min-width: 0;
     }
     thead th {
       position: sticky;
@@ -558,7 +339,43 @@ function renderSqlResultHtml(result: SqlResultPayload): string {
       border-bottom: 1px solid var(--border);
       border-right: 1px solid var(--border);
       white-space: nowrap;
+            vertical-align: bottom;
+            position: sticky;
     }
+        thead th.sortable-col {
+            cursor: pointer;
+            user-select: none;
+            padding-right: 16px;
+        }
+        thead th.sortable-col:hover {
+            background: color-mix(in srgb, var(--header-bg) 82%, var(--fg) 18%);
+        }
+        thead th.sortable-col.is-sorted::after {
+            content: ' \\25B2';
+            font-size: 10px;
+            opacity: 0.9;
+            margin-left: 4px;
+        }
+        thead th.sortable-col.is-sorted.is-desc::after {
+            content: ' \\25BC';
+        }
+        .col-resize-handle {
+            position: absolute;
+            top: 0;
+            right: -2px;
+            width: 8px;
+            height: 100%;
+            cursor: col-resize;
+            z-index: 3;
+        }
+        .col-resize-handle:hover {
+            background: color-mix(in srgb, var(--vscode-focusBorder, var(--fg)) 45%, transparent);
+        }
+        body.is-col-resizing,
+        body.is-col-resizing * {
+            cursor: col-resize !important;
+            user-select: none;
+        }
     tbody td {
       padding: 6px 8px;
       border-bottom: 1px solid var(--border);
@@ -593,9 +410,10 @@ function renderSqlResultHtml(result: SqlResultPayload): string {
   </style>
 </head>
 <body>
-  <pre class="sql">${escapeHtml(result.statement)}</pre>
+    <pre class="sql" id="sql-statement">${escapeHtml(result.statement)}</pre>
+    <pre id="sql-results-bootstrap" style="display:none">${escapeHtml(bootstrapPayloadJson)}</pre>
   ${tableHtml}
-    ${pagingScript}
+    ${sqlResultsScriptTag}
 </body>
 </html>`;
 }
@@ -609,7 +427,10 @@ function buildClientPayload(result: SqlResultPayload) {
             const alignClass = shouldRightAlign(profile.kind) ? 'align-right' : '';
             return {
                 alignClass,
-                html: formatCell(row[column], profile)
+                html: formatCell(row[column], profile),
+                sortKind: profile.kind,
+                sortText: sortableTextValue(row[column]),
+                sortNumber: sortableNumericValue(row[column], profile.kind)
             };
         });
     });
@@ -621,8 +442,143 @@ function buildClientPayload(result: SqlResultPayload) {
         sessionId: result.sessionId ?? '',
         hasMoreRows: !!result.hasMoreRows,
         fetchSize: result.fetchSize ?? 0,
-        prefetchSize: result.prefetchSize ?? 0
+        prefetchSize: result.prefetchSize ?? 0,
+        columnMetadata: result.columnMetadata ?? []
     };
+}
+
+function renderRowCellsHtml(rowCells: Array<Array<{ alignClass?: string; html: string }>>): string {
+    return rowCells.map((cells, index) => {
+        const tds = cells.map((cell) => {
+            const alignClass = cell.alignClass ? ` class="${cell.alignClass}"` : '';
+            return `<td${alignClass}>${cell.html}</td>`;
+        }).join('');
+        return `<tr><td class="align-right row-index-col">${index + 1}</td>${tds}</tr>`;
+    }).join('');
+}
+
+function sortableTextValue(value: unknown): string {
+    if (value === null || value === undefined) {
+        return '';
+    }
+    if (value instanceof Date) {
+        return value.toISOString();
+    }
+    if (typeof value === 'object') {
+        try {
+            return JSON.stringify(value);
+        } catch (_stringifyError) {
+            return String(value);
+        }
+    }
+    return String(value);
+}
+
+function sortableNumericValue(value: unknown, kind: ColumnKind): number | undefined {
+    if (value === null || value === undefined) {
+        return undefined;
+    }
+
+    if (kind === 'number') {
+        if (typeof value === 'number' && Number.isFinite(value)) {
+            return value;
+        }
+        const text = String(value).trim();
+        return isNumericText(text) ? Number(text) : undefined;
+    }
+
+    if (value instanceof Date) {
+        return value.getTime();
+    }
+
+    const text = String(value).trim();
+    if (!text) {
+        return undefined;
+    }
+
+    if (kind === 'timestamp' || kind === 'date') {
+        const parsed = Date.parse(text);
+        return Number.isFinite(parsed) ? parsed : undefined;
+    }
+
+    if (kind === 'time') {
+        const match = text.match(/^(\d{1,2}):(\d{2})(?::(\d{2})(?:\.(\d{1,6}))?)?$/);
+        if (!match) {
+            return undefined;
+        }
+        const hours = Number(match[1]);
+        const minutes = Number(match[2]);
+        const seconds = Number(match[3] || '0');
+        const fractional = String(match[4] || '').padEnd(6, '0').slice(0, 6);
+        const micros = Number(fractional || '0');
+        return (((hours * 60 + minutes) * 60 + seconds) * 1000000) + micros;
+    }
+
+    return undefined;
+}
+
+function normalizeColumnKey(value: string | undefined): string {
+    return (value ?? '').trim().toUpperCase();
+}
+
+function findMetadataForColumn(columnName: string, metadata: SqlColumnMetadata[] | undefined): SqlColumnMetadata | undefined {
+    if (!metadata || metadata.length === 0) {
+        return undefined;
+    }
+
+    const match = metadata.find((entry) => normalizeColumnKey(entry.name) === normalizeColumnKey(columnName));
+    return match ?? metadata.find((entry) => normalizeColumnKey(entry.label) === normalizeColumnKey(columnName));
+}
+
+function resolveColumnHeaderText(columnName: string, metadata?: SqlColumnMetadata): string {
+    const preferred = metadata?.label?.trim() || metadata?.name?.trim() || columnName;
+    const cleaned = preferred.replace(/\r?\n/g, ' ').replace(/\s{2,}/g, ' ').trim();
+    if (!cleaned || cleaned.toUpperCase() === columnName.toUpperCase()) {
+        return columnName;
+    }
+    return cleaned;
+}
+
+function buildColumnHeaderTooltip(columnName: string, metadata?: SqlColumnMetadata): string {
+    const typeName = metadata?.typeName?.trim() || 'UNKNOWN';
+    const displaySize = typeof metadata?.displaySize === 'number' ? metadata.displaySize : undefined;
+    const scale = typeof metadata?.scale === 'number' ? metadata.scale : undefined;
+    const textDescription = metadata?.textDescription?.trim();
+    const ddsType = metadata?.ddsType?.trim();
+    const isIdentity = metadata?.isIdentity;
+    const label = metadata?.label?.trim();
+    const isExactNumeric = /^(NUMERIC|DECIMAL|DEC)$/i.test(typeName);
+    const sqlType = displaySize && displaySize > 0
+        ? (isExactNumeric && scale != null && scale >= 0 ? `${typeName}(${displaySize}, ${scale})` : `${typeName}(${displaySize})`)
+        : typeName;
+    const lines: string[] = [];
+    if (label && label.toUpperCase() !== columnName.toUpperCase()) {
+        lines.push(`Heading: ${label}`);
+    }
+    if (textDescription && textDescription.toUpperCase() !== columnName.toUpperCase() && (!label || textDescription.toUpperCase() !== label.toUpperCase())) {
+        lines.push(`Text: ${textDescription}`);
+    }
+    lines.push(`Column: ${columnName}`);
+    lines.push(`Type: ${sqlType}`);
+    if (ddsType) {
+        lines.push(`DDS Type: ${ddsType}`);
+    }
+    if (typeof isIdentity === 'boolean') {
+        lines.push(`Identity: ${isIdentity ? 'Yes' : 'No'}`);
+    }
+    return lines.join('\n');
+}
+
+function renderColumnHeaderHtml(displayText: string): string {
+    const lines = displayText
+        .replace(/\r?\n/g, ' ')
+        .split(/\s+/)
+        .filter(Boolean)
+        .slice(0, 3);
+
+    const visibleLines = lines.length > 0 ? lines : [displayText];
+    const spans = visibleLines.map((line) => `<span>${escapeHtml(line)}</span>`).join('');
+    return `<div class="stacked-header">${spans}</div>`;
 }
 
 function safeJsonForScript<T>(value: T): string {
@@ -656,7 +612,7 @@ function formatCell(value: unknown, profile: ColumnProfile): string {
     if (typeof value === 'object') {
         try {
             return escapeHtml(JSON.stringify(value));
-        } catch {
+        } catch (_jsonError) {
             return escapeHtml(String(value));
         }
     }

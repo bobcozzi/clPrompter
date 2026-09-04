@@ -54,7 +54,7 @@ button {
 button {
     color: var(--vscode-button-secondaryForeground, var(--vscode-foreground));
     background: var(--vscode-button-secondaryHoverBackground, color-mix(in srgb, var(--vscode-input-background) 85%, var(--vscode-foreground) 15%));
-    border: 1px solid var(--vscode-input-border, color-mix(in srgb, var(--vscode-foreground) 20%, transparent));
+    border: 1px solid var(--vscode-input-border, rgba(127, 127, 127, 0.2));
     border-radius: 4px;
     padding: 2px 8px;
     flex: 0 0 auto;
@@ -160,6 +160,8 @@ button[data-tooltip]:focus-visible::after {
     right: 0;
     z-index: 30;
     min-width: 190px;
+    max-width: min(260px, calc(100vw - 16px));
+    box-sizing: border-box;
     display: none;
     flex-direction: column;
     padding: 4px;
@@ -173,6 +175,20 @@ button[data-tooltip]:focus-visible::after {
     display: flex;
 }
 
+.toolbar-menu-list.flip-up {
+    top: auto;
+    bottom: calc(100% + 4px);
+}
+
+.toolbar-menu-list.compact-grid {
+    min-width: 250px;
+    max-width: min(360px, calc(100vw - 16px));
+    display: grid;
+    grid-template-columns: repeat(var(--toolbar-menu-columns, 2), minmax(0, 1fr));
+    gap: 2px;
+    align-items: stretch;
+}
+
 .toolbar-menu-list button {
     text-align: left;
     border: none;
@@ -183,10 +199,25 @@ button[data-tooltip]:focus-visible::after {
     color: var(--vscode-foreground);
 }
 
+.toolbar-menu-list.compact-grid button {
+    min-height: 18px;
+    padding: 2px 6px;
+    font-size: 11px;
+    line-height: 1.15;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
 .toolbar-menu-list button:hover,
 .toolbar-menu-list button:focus-visible {
     background: var(--vscode-list-hoverBackground, color-mix(in srgb, var(--vscode-input-background) 80%, var(--vscode-foreground) 20%));
     outline: none;
+}
+
+.toolbar-menu-list button:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
 }
 
 #toolbar-menu:hover::after,
@@ -262,6 +293,7 @@ button[data-tooltip]:focus-visible::after {
     font-size: .9em;
     color: var(--vscode-foreground);
     cursor: pointer;
+    -webkit-user-select: text;
     user-select: text;
     white-space: nowrap;
     border: 1px solid var(--vscode-input-border, transparent);
@@ -302,6 +334,12 @@ button[data-tooltip]:focus-visible::after {
     pointer-events: none;
     font-size: 11px;
     line-height: 1.2;
+}
+
+#status-job-menu {
+    min-width: 150px;
+    max-width: min(240px, calc(100vw - 16px));
+    z-index: 45;
 }
 
 #results {
@@ -359,21 +397,16 @@ header {
     position: relative;
 }
 
-.execution-command[data-tooltip]:hover::after,
-.execution-command[data-tooltip]:focus-visible::after,
-.execution-replay[data-tooltip]:hover::after,
-.execution-replay[data-tooltip]:focus-visible::after {
-    content: attr(data-tooltip);
-    position: absolute;
-    top: calc(100% + 6px);
-    left: 0;
+.history-hover-tooltip {
+    position: fixed;
     white-space: nowrap;
     padding: 2px 6px;
     border-radius: 3px;
     background: var(--vscode-editorHoverWidget-background, var(--vscode-editor-background));
     color: var(--vscode-editorHoverWidget-foreground, var(--vscode-foreground));
     border: 1px solid var(--vscode-editorHoverWidget-border, var(--vscode-contrastBorder, transparent));
-    z-index: 20;
+    box-shadow: 0 2px 8px color-mix(in srgb, #000 30%, transparent);
+    z-index: 1000;
     pointer-events: none;
     font-size: 11px;
     line-height: 1.2;

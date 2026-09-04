@@ -33,9 +33,23 @@ export interface CommandExecution {
     sqlResult?: SqlResultPayload;
 }
 
+export interface SqlColumnMetadata {
+    name: string;
+    label?: string;
+    typeName?: string;
+    displaySize?: number;
+    scale?: number;
+    textDescription?: string;
+    ddsType?: string;
+    isIdentity?: boolean;
+    schema?: string;
+    table?: string;
+}
+
 export interface SqlResultPayload {
     statement: string;
     columns: string[];
+    columnMetadata?: SqlColumnMetadata[];
     rows: Record<string, unknown>[];
     rowCount: number;
     displayedRowCount: number;

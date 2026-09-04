@@ -4,14 +4,46 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+## [1.0.21] - 2026-09-03
+
 ### What's New
 
+#### Early Experience
+- **Early experience: CL Command Entry Panel with SQL output support**: The CL Command Entry panel now delivers a more complete early SQL experience with integrated SQL result rendering and operational controls aligned with command-entry workflows. This means you can now not only run CL commands, but SQL statements from CL Command Entry using the `SQL:` prefix.
+
 #### CL Command Entry
+- **Restructured Command Entry menu**: The toolbar menu was reorganized and expanded with clearer operational actions, including CL history viewing/clearing, message-details expansion/collapse, dedicated-job restart, and dedicated SQL cancel operations.
+- **Enhanced logging controls**: Message-detail visibility is now configurable from the menu, with improved command-message summary behavior and cleaner runtime diagnostics for SQL-result metadata exploration.
 - **Configurable SQL fetch limit**: Added settings for SQL statements entered as `sql: ...` in Command Entry.
   - `clPrompter.commandEntrySqlFetchLimitEnabled` toggles max-row limiting.
   - `clPrompter.commandEntrySqlFetchLimitRows` sets the numeric cap.
   - Turning limit-enabled off is equivalent to `*NOMAX` (fetch all rows).
-- **Dedicated-job chunked SQL retrieval**: Dedicated job mode now keeps fetching SQL results in backend chunks so larger result sets can be returned consistently even when a single host execute call is capped.
+- **New Dedicated SQL Job for Command Entry**: Command Entry can now run SQL and CL in its own CLPROMPTER-managed SQL job rather than sharing the main `Code for IBM i` host SQL job.
+  - **Server mode requirement with automatic fallback**: This capability requires Mapepire Server mode. When Server mode is not enabled/available, Command Entry automatically falls back to the shared SQL job.
+  - **Improved isolation**: Command Entry work no longer competes as directly with other extension activity on the shared host job.
+  - **More predictable large-result retrieval**: Results are fetched in controlled page-sized requests, which improves reliability when host-side single-call limits are encountered.
+  - **Operational controls in the UI**: Start New Server Job and Cancel SQL for Server Job are available from the Command Entry menu when dedicated mode is enabled. That menu is available by clicking the `...` button on the Command Entry toolbar.
+
+### What's Fixed
+
+#### SQL Result Panel
+- **AUTO paging stability with variable row heights**: Paging movement in AUTO mode is now anchored to row/viewport behavior so large and wrapped rows do not drift or skip pages as often during repeated navigation.
+- **AUTO button-state reliability**: First/Prev/Next/Last controls now enable/disable based on actual top/bottom scroll boundaries in AUTO mode.
+- **Sorting/resizing/panel interaction polish**: SQL grid interactions were hardened so row navigation, column sorting, and sizing flows are more predictable during active paging sessions.
+
+#### SQL Result Metadata and UX
+- **Column heading metadata enrichment**: SQL result headers now resolve display headings and hover details more reliably by combining Query-result metadata with Db2 catalog enrichment.
+- **Catalog enrichment source upgraded to `QSYS2.SYSCOLUMNS2`**: Column metadata fallback now reads from `SYSCOLUMNS2` and includes richer attributes for future capabilities.
+- **Tooltip detail improvements**: Hover text now presents SQL-style type signatures (including numeric precision/scale spacing), column text descriptions, DDS type, and identity-column indicators when available.
+- **Header rendering polish**: Stacked heading labels are now bottom-aligned and tooltip behavior is stabilized across heading-only and name-only display cases.
+
+#### SQL Snippet Execution
+- **WITH-statement recognition fixed for snippet routing**: Snippets starting with `WITH` are now consistently recognized as SQL and routed down the SQL execution path.
+- **LATERAL paging-wrapper bypass**: Queries containing `LATERAL` are no longer forced through wrapper paging that could fail for valid correlated patterns; they now execute directly.
+
+#### Logging
+- **Reduced default output noise**: High-volume Command Entry diagnostics (snippet internals, route snapshots, keep-alive and Mapepire dumps) are now quiet by default.
+- **New optional verbose diagnostic switch**: Added `clPrompter.commandEntryVerboseLogging` to re-enable detailed tracing only when troubleshooting.
 
 ## [1.0.19] - 2026-08-25 -- Security Release
 

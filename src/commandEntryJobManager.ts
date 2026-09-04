@@ -1,6 +1,10 @@
 import * as vscode from 'vscode';
 import IBMi from '@halcyontech/vscode-ibmi-types/api/IBMi';
 
+function isCommandEntryVerboseLoggingEnabled(): boolean {
+    return vscode.workspace.getConfiguration('clPrompter').get<boolean>('commandEntryVerboseLogging', false);
+}
+
 function normalizeSqlJobId(jobId: string | undefined): string | undefined {
     const normalized = jobId?.trim().toUpperCase();
     return normalized && /^\d{6}\/[A-Z0-9#$@]{1,10}\/[A-Z0-9#$@]{1,10}$/.test(normalized)
@@ -40,18 +44,42 @@ function isPositiveInteger(value: unknown): value is number {
     return typeof value === 'number' && Number.isInteger(value) && value > 0;
 }
 
-function buildCancelSqlJobCommand(jobId: string): string {
-    // Use double quotes around the entire CL command to protect special characters
-    // Escape any internal double quotes
-    const escapedJobId = jobId.replace(/"/g, '\\"');
-    const sqlCall = `CALL QSYS2.CANCEL_SQL('${escapedJobId}')`;
-    const runSql = `RUNSQL SQL('${sqlCall}') COMMIT(*NONE) NAMING(*SYS)`;
-    const submitJobCmd = [
-        `SBMJOB CMD(${runSql})`,
-        'JOB(CLP_ENDRQS) JOBQ(QUSRNOMAX)',
-        'LOG(4 0 *SECLVL) LOGCLPGM(*YES) LOGOUTPUT(*JOBEND)'
-    ].join(' ');
-    return submitJobCmd;
+const CANCEL_SQL_STATEMENT = 'CALL QSYS2.CANCEL_SQL(?)';
+
+let connectionObjectSequence = 0;
+const connectionObjectIds = new WeakMap<object, number>();
+let genericObjectSequence = 0;
+const genericObjectIds = new WeakMap<object, number>();
+
+function getConnectionObjectId(connection: IBMi): number {
+    const objectRef = connection as unknown as object;
+    let id = connectionObjectIds.get(objectRef);
+    if (!id) {
+        connectionObjectSequence += 1;
+        id = connectionObjectSequence;
+        connectionObjectIds.set(objectRef, id);
+    }
+    return id;
+}
+
+function getGenericObjectId(value: unknown): number | undefined {
+    if (!value || typeof value !== 'object') {
+        return undefined;
+    }
+
+    const objectRef = value as object;
+    let id = genericObjectIds.get(objectRef);
+    if (!id) {
+        genericObjectSequence += 1;
+        id = genericObjectSequence;
+        genericObjectIds.set(objectRef, id);
+    }
+    return id;
+}
+
+function getSharedSqlJobStatus(connection: IBMi): string | undefined {
+    const status = (connection as any).sqlJob?.getStatus?.();
+    return typeof status === 'string' ? status : undefined;
 }
 
 type SqlJobLike = {
@@ -76,24 +104,91 @@ export class CommandEntryJobManager {
     private job: SqlJobLike | undefined;
     private connectionKey: string | undefined;
     private dedicatedJobId: string | undefined;
+    private readonly observedSharedJobIds = new Map<string, string | undefined>();
+    private readonly startupReconnectCompleted = new Set<string>();
     private status: DedicatedJobState['status'] = 'ended';
 
     constructor(private readonly output?: vscode.OutputChannel) { }
+
+    private debugLog(message: string): void {
+        if (isCommandEntryVerboseLoggingEnabled()) {
+            this.output?.appendLine(message);
+        }
+    }
+
+    private canUseDedicatedForConnection(connection?: IBMi): boolean {
+        return this.isDedicatedEnabled();
+    }
+
+    private logRouteSnapshot(
+        phase: string,
+        connection: IBMi,
+        extra?: string
+    ): void {
+        if (!isCommandEntryVerboseLoggingEnabled()) {
+            return;
+        }
+        const connectionKey = this.buildConnectionKey(connection);
+        const rawSharedJobId = connection.getSqlJobId() ?? '<none>';
+        const sharedJobId = normalizeSqlJobId(connection.getSqlJobId()) ?? '<none>';
+        const observedSharedJobId = this.observedSharedJobIds.get(connectionKey) ?? '<none>';
+        const dedicatedJobId = this.dedicatedJobId ?? '<none>';
+        const objectId = getConnectionObjectId(connection);
+        const sharedSqlJobObjectId = getGenericObjectId((connection as any).sqlJob) ?? '<none>';
+        const serverEnabled = this.isRemoteMapepireServerEnabled(connection);
+        const dedicatedEnabled = this.isDedicatedEnabled();
+        const sharedSqlJobStatus = getSharedSqlJobStatus(connection) ?? '<unknown>';
+        this.output?.appendLine(
+            `[Command Entry][JobRoute] ${phase} connObj=${objectId} key=${connectionKey} dedicatedEnabled=${dedicatedEnabled} serverEnabled=${serverEnabled} sharedSqlJobObj=${sharedSqlJobObjectId} sharedJobStatus=${sharedSqlJobStatus} sharedJobId=${sharedJobId} sharedJobIdRaw=${rawSharedJobId} observedSharedJobId=${observedSharedJobId} dedicatedJobId=${dedicatedJobId} status=${this.status}${extra ? ` ${extra}` : ''}`
+        );
+    }
+
+    private observeSharedJobId(connection: IBMi, reason: string): void {
+        const key = this.buildConnectionKey(connection);
+        const observed = normalizeSqlJobId(connection.getSqlJobId());
+        const previous = this.observedSharedJobIds.get(key);
+        this.observedSharedJobIds.set(key, observed);
+        if (observed !== previous && isCommandEntryVerboseLoggingEnabled()) {
+            this.output?.appendLine(`[Command Entry][JobRoute] observed shared job ID changed (${reason}) ${previous ?? '<none>'} -> ${observed ?? '<none>'}`);
+        }
+    }
+
+    private getObservedSharedJobId(connection?: IBMi): string | undefined {
+        if (!connection) {
+            return undefined;
+        }
+        return this.observedSharedJobIds.get(this.buildConnectionKey(connection));
+    }
 
     isDedicatedEnabled(): boolean {
         return vscode.workspace.getConfiguration('clPrompter').get<boolean>('commandEntryUseDedicatedJob', false);
     }
 
+    hasActiveDedicatedJob(connection?: IBMi): boolean {
+        if (!connection || !this.job || !this.connectionKey) {
+            return false;
+        }
+        return this.connectionKey === this.buildConnectionKey(connection) && this.status !== 'ended';
+    }
+
     getState(connection?: IBMi): DedicatedJobState {
         if (!this.isDedicatedEnabled()) {
-            const sharedJobId = normalizeSqlJobId(connection?.getSqlJobId());
+            const sharedJobId = this.getObservedSharedJobId(connection) ?? normalizeSqlJobId(connection?.getSqlJobId());
             return { enabled: false, jobId: sharedJobId, status: 'ready' };
+        }
+
+        if (!this.canUseDedicatedForConnection(connection)) {
+            if (connection) {
+                this.logRouteSnapshot('getState.shared.serverDisabled', connection);
+            }
+            const sharedJobId = this.getObservedSharedJobId(connection) ?? normalizeSqlJobId(connection?.getSqlJobId());
+            return { enabled: true, jobId: sharedJobId, status: 'ready' };
         }
 
         return {
             enabled: true,
             jobId: this.dedicatedJobId,
-            status: this.status
+            status: this.dedicatedJobId ? this.status : 'ended'
         };
     }
 
@@ -101,139 +196,226 @@ export class CommandEntryJobManager {
         return this.getState(connection).jobId;
     }
 
-    async runSQL(
+    private rowsFromExecutionResult(result: unknown): Record<string, unknown>[] {
+        if (Array.isArray(result)) {
+            this.debugLog(`[Command Entry] job.execute() returned array with ${result.length} rows`);
+            return result as Record<string, unknown>[];
+        }
+
+        if (result && typeof result === 'object') {
+            if ('data' in result && Array.isArray((result as any).data)) {
+                const rows = (result as any).data;
+                this.debugLog(`[Command Entry] job.execute() returned object with .data array containing ${rows.length} rows`);
+                return rows as Record<string, unknown>[];
+            }
+
+            if ('rows' in result && Array.isArray((result as any).rows)) {
+                const rows = (result as any).rows;
+                this.debugLog(`[Command Entry] job.execute() returned object with .rows array containing ${rows.length} rows`);
+                return rows as Record<string, unknown>[];
+            }
+        }
+
+        return [];
+    }
+
+    private async executeDedicatedSql(
+        job: SqlJobLike,
+        statements: string | string[],
+        options?: { bindings?: unknown[]; rows?: number }
+    ): Promise<unknown> {
+        const sqlWithBindings = Array.isArray(statements)
+            ? statements.map(stmt => substituteBindings(stmt, options?.bindings))
+            : substituteBindings(statements, options?.bindings);
+
+        const statementsStr = Array.isArray(sqlWithBindings)
+            ? sqlWithBindings.join('; ')
+            : sqlWithBindings;
+        if (options?.bindings && options.bindings.length > 0) {
+            this.debugLog(`[Command Entry] Executing with substituted bindings: SQL=${statementsStr.substring(0, 150)}...`);
+        }
+
+        const execute = (job as any).execute.bind(job) as (...args: unknown[]) => Promise<unknown>;
+        const requestedRows = options?.rows;
+        if (isPositiveInteger(requestedRows)) {
+            this.debugLog(`[Command Entry] Requesting up to ${requestedRows} SQL rows from dedicated job.`);
+            try {
+                return await execute(sqlWithBindings, { rows: requestedRows });
+            } catch {
+                try {
+                    return await execute(sqlWithBindings, undefined, requestedRows);
+                } catch {
+                    return await execute(sqlWithBindings);
+                }
+            }
+        }
+
+        return execute(sqlWithBindings);
+    }
+
+    async runSQLWithDetails(
         connection: IBMi,
         statements: string | string[],
         options?: { bindings?: unknown[]; rows?: number }
-    ): Promise<Record<string, unknown>[]> {
-        if (!this.isDedicatedEnabled()) {
-            return connection.runSQL(statements, {
-                bindings: options?.bindings as never[] | undefined,
-                rows: options?.rows
-            }) as Promise<Record<string, unknown>[]>;
+    ): Promise<{ rows: Record<string, unknown>[]; rawResult?: unknown }> {
+        this.logRouteSnapshot('runSQL.enter', connection, `rows=${options?.rows ?? '<none>'}`);
+
+        const runOnSharedJob = async (reason: string): Promise<{ rows: Record<string, unknown>[]; rawResult?: unknown }> => {
+            try {
+                const sharedResult = await connection.runSQL(statements, {
+                    bindings: options?.bindings as never[] | undefined,
+                    rows: options?.rows
+                });
+                return { rows: sharedResult as unknown as Record<string, unknown>[], rawResult: sharedResult };
+            } finally {
+                this.observeSharedJobId(connection, reason);
+            }
+        };
+
+        if (!this.canUseDedicatedForConnection(connection)) {
+            this.logRouteSnapshot('runSQL.route.shared.dedicatedDisabled', connection);
+            if (this.job) {
+                this.logRouteSnapshot('runSQL.route.shared.cleanupDedicated.beforeEnd', connection);
+                await this.endDedicatedJob();
+                this.logRouteSnapshot('runSQL.route.shared.cleanupDedicated.afterEnd', connection);
+            }
+            return runOnSharedJob('sharedOnlyMode');
         }
 
-        await this.ensureJob(connection);
+        try {
+            await this.ensureJob(connection);
+        } catch (error) {
+            this.output?.appendLine(`[Command Entry] Dedicated job is unavailable (${error instanceof Error ? error.message : String(error)}). Falling back to shared SQL job.`);
+            this.status = 'ended';
+            this.dedicatedJobId = undefined;
+            this.connectionKey = undefined;
+            this.logRouteSnapshot('runSQL.route.shared.ensureFailed', connection);
+            return runOnSharedJob('ensureFailed');
+        }
+
         const job = this.job;
         if (!job) {
-            throw new Error('Unable to create a dedicated CLPROMPTER SQL job.');
+            this.output?.appendLine('[Command Entry] Dedicated job handle missing. Falling back to shared SQL job.');
+            this.logRouteSnapshot('runSQL.route.shared.noDedicatedHandle', connection);
+            return runOnSharedJob('noDedicatedHandle');
         }
+
+        this.logRouteSnapshot('runSQL.route.dedicated', connection);
 
         this.status = 'busy';
         try {
-            // Mapepire's job.execute() may not support JDBC parameterized queries (? placeholders).
-            // If bindings are provided, substitute them directly into the SQL string.
-            const sqlWithBindings = Array.isArray(statements)
-                ? statements.map(stmt => substituteBindings(stmt, options?.bindings))
-                : substituteBindings(statements, options?.bindings);
+            const result = await this.executeDedicatedSql(job, statements, options);
+            const rows = this.rowsFromExecutionResult(result);
 
-            // Log the SQL and bindings for debugging
-            const statementsStr = Array.isArray(sqlWithBindings)
-                ? sqlWithBindings.join('; ')
-                : sqlWithBindings;
-            if (options?.bindings && options.bindings.length > 0) {
-                this.output?.appendLine(`[Command Entry] Executing with substituted bindings: SQL=${statementsStr.substring(0, 150)}...`);
-            }
-
-            // Execute WITHOUT bindings parameter (since we substituted them above).
-            // Some Mapepire builds support a rows hint; try common shapes and fallback.
-            const execute = (job as any).execute.bind(job) as (...args: unknown[]) => Promise<unknown>;
-            const requestedRows = options?.rows;
-            let result: unknown;
-
-            if (isPositiveInteger(requestedRows)) {
-                this.output?.appendLine(`[Command Entry] Requesting up to ${requestedRows} SQL rows from dedicated job.`);
-                try {
-                    result = await execute(sqlWithBindings, { rows: requestedRows });
-                } catch {
-                    try {
-                        result = await execute(sqlWithBindings, undefined, requestedRows);
-                    } catch {
-                        result = await execute(sqlWithBindings);
-                    }
-                }
-            } else {
-                result = await execute(sqlWithBindings);
-            }
-
-            // If result is already an array, return it
-            if (Array.isArray(result)) {
-                this.output?.appendLine(`[Command Entry] job.execute() returned array with ${result.length} rows`);
-                return result;
-            }
-
-            // Mapepire result object structure:
-            // { id, has_results, update_count, metadata, data, is_done, success, execution_time, ...methods }
-            if (result && typeof result === 'object') {
-                // Check for .data property (Mapepire's standard result format)
-                if ('data' in result && Array.isArray((result as any).data)) {
-                    const rows = (result as any).data;
-                    this.output?.appendLine(`[Command Entry] job.execute() returned object with .data array containing ${rows.length} rows`);
-                    return rows;
-                }
-
-                // Check for .rows property (alternative format)
-                if ('rows' in result && Array.isArray((result as any).rows)) {
-                    const rows = (result as any).rows;
-                    this.output?.appendLine(`[Command Entry] job.execute() returned object with .rows array containing ${rows.length} rows`);
-                    return rows;
-                }
-
-                // Check for .fetchAll() method
+            if (rows.length === 0 && result && typeof result === 'object') {
                 if ('fetchAll' in result && typeof (result as any).fetchAll === 'function') {
                     try {
-                        const rows = await (result as any).fetchAll();
-                        if (Array.isArray(rows)) {
-                            this.output?.appendLine(`[Command Entry] job.execute() result.fetchAll() returned ${rows.length} rows`);
-                            return rows;
+                        const fetched = await (result as any).fetchAll();
+                        if (Array.isArray(fetched)) {
+                            this.debugLog(`[Command Entry] job.execute() result.fetchAll() returned ${fetched.length} rows`);
+                            return { rows: fetched as Record<string, unknown>[], rawResult: result };
                         }
                     } catch (e) {
-                        this.output?.appendLine(`[Command Entry] result.fetchAll() failed: ${e instanceof Error ? e.message : String(e)}`);
+                        this.debugLog(`[Command Entry] result.fetchAll() failed: ${e instanceof Error ? e.message : String(e)}`);
                     }
                 }
 
-                // Check for .getRows() method
                 if ('getRows' in result && typeof (result as any).getRows === 'function') {
                     try {
-                        const rows = await (result as any).getRows();
-                        if (Array.isArray(rows)) {
-                            this.output?.appendLine(`[Command Entry] job.execute() result.getRows() returned ${rows.length} rows`);
-                            return rows;
+                        const fetched = await (result as any).getRows();
+                        if (Array.isArray(fetched)) {
+                            this.debugLog(`[Command Entry] job.execute() result.getRows() returned ${fetched.length} rows`);
+                            return { rows: fetched as Record<string, unknown>[], rawResult: result };
                         }
                     } catch (e) {
-                        this.output?.appendLine(`[Command Entry] result.getRows() failed: ${e instanceof Error ? e.message : String(e)}`);
+                        this.debugLog(`[Command Entry] result.getRows() failed: ${e instanceof Error ? e.message : String(e)}`);
                     }
                 }
 
-                // Log the actual structure for debugging
                 const resultKeys = Object.keys(result);
                 const resultMethods = resultKeys.filter(k => typeof (result as any)[k] === 'function');
-                this.output?.appendLine(`[Command Entry] job.execute() result has keys: ${resultKeys.join(', ')}`);
+                this.debugLog(`[Command Entry] job.execute() result has keys: ${resultKeys.join(', ')}`);
                 if (resultMethods.length > 0) {
-                    this.output?.appendLine(`[Command Entry] job.execute() result has methods: ${resultMethods.join(', ')}`);
+                    this.debugLog(`[Command Entry] job.execute() result has methods: ${resultMethods.join(', ')}`);
                 }
             }
 
-            // Return empty array as fallback
-            this.output?.appendLine(`[Command Entry] WARNING: Could not extract rows from result`);
-            return [];
+            if (rows.length > 0) {
+                return { rows, rawResult: result };
+            }
+
+            this.debugLog('[Command Entry] WARNING: Could not extract rows from result');
+            return { rows: [], rawResult: result };
         } catch (error) {
             this.output?.appendLine(`[Command Entry] SQL execution failed: ${error instanceof Error ? error.message : String(error)}`);
             throw error;
         } finally {
             this.status = this.job ? 'ready' : 'ended';
+            this.logRouteSnapshot('runSQL.exit', connection);
         }
     }
 
+    async runSQL(
+        connection: IBMi,
+        statements: string | string[],
+        options?: { bindings?: unknown[]; rows?: number }
+    ): Promise<Record<string, unknown>[]> {
+        const result = await this.runSQLWithDetails(connection, statements, options);
+        return result.rows;
+    }
+
     async restartJob(connection: IBMi): Promise<string | undefined> {
-        if (!this.isDedicatedEnabled()) {
+        this.logRouteSnapshot('restart.enter', connection);
+
+        if (!this.canUseDedicatedForConnection(connection)) {
+            this.logRouteSnapshot('restart.shared.sharedOnlyMode.beforeEnd', connection);
+            if (this.job) {
+                await this.endDedicatedJob();
+            }
+            this.logRouteSnapshot('restart.shared.sharedOnlyMode.afterEnd', connection);
+            this.observeSharedJobId(connection, 'restartSharedOnlyMode');
             return normalizeSqlJobId(connection.getSqlJobId());
         }
 
-        await this.cancelActive(connection);
-        await this.endDedicatedJob();
-        await this.ensureJob(connection);
-        return this.dedicatedJobId;
+        try {
+            await this.cancelActive(connection);
+            await this.endDedicatedJob();
+            await this.ensureJob(connection);
+            return this.dedicatedJobId;
+        } catch (error) {
+            this.output?.appendLine(`[Command Entry] Dedicated restart failed (${error instanceof Error ? error.message : String(error)}). Using shared SQL job.`);
+            this.status = 'ended';
+            this.dedicatedJobId = undefined;
+            this.connectionKey = undefined;
+            this.logRouteSnapshot('restart.shared.restartFailed', connection);
+            return normalizeSqlJobId(connection.getSqlJobId());
+        }
+    }
+
+    async ensureDedicatedJob(connection: IBMi): Promise<string | undefined> {
+        this.logRouteSnapshot('ensure.enter', connection);
+
+        if (!this.canUseDedicatedForConnection(connection)) {
+            this.logRouteSnapshot('ensure.shared.sharedOnlyMode.beforeEnd', connection);
+            if (this.job) {
+                await this.endDedicatedJob();
+            }
+            this.logRouteSnapshot('ensure.shared.sharedOnlyMode.afterEnd', connection);
+            this.observeSharedJobId(connection, 'ensureSharedOnlyMode');
+            return normalizeSqlJobId(connection.getSqlJobId());
+        }
+
+        try {
+            await this.ensureJob(connection);
+            return this.dedicatedJobId;
+        } catch (error) {
+            this.output?.appendLine(`[Command Entry] Dedicated ensure failed (${error instanceof Error ? error.message : String(error)}). Using shared SQL job.`);
+            this.status = 'ended';
+            this.dedicatedJobId = undefined;
+            this.connectionKey = undefined;
+            this.logRouteSnapshot('ensure.shared.ensureFailed', connection);
+            return normalizeSqlJobId(connection.getSqlJobId());
+        }
     }
 
     async cancelActive(connection: IBMi): Promise<void> {
@@ -246,42 +428,79 @@ export class CommandEntryJobManager {
             return;
         }
 
-        const cancelCommand = buildCancelSqlJobCommand(sqlJobId);
         this.output?.appendLine(`[Command Entry] Requesting cancel for dedicated SQL job ${sqlJobId}.`);
-        const result = await connection.sendCommand({ command: cancelCommand });
-        this.output?.appendLine(`[Command Entry] Dedicated cancel completed with code ${result.code}. stdout=${result.stdout || '<empty>'}; stderr=${result.stderr || '<empty>'}`);
+        await connection.runSQL(CANCEL_SQL_STATEMENT, { bindings: [sqlJobId] });
+        this.output?.appendLine(`[Command Entry] Dedicated cancel SQL request submitted for ${sqlJobId}.`);
     }
 
     async dispose(): Promise<void> {
         await this.endDedicatedJob();
     }
 
+    isRemoteMapepireServerEnabled(connection?: IBMi): boolean {
+        if (!connection) {
+            return false;
+        }
+        return (connection as any).getConfig?.().mapepireUseServer === true;
+    }
+
     private async ensureJob(connection: IBMi): Promise<void> {
         const key = this.buildConnectionKey(connection);
         if (this.job && this.connectionKey === key) {
-            this.output?.appendLine(`[Command Entry] Reusing existing dedicated SQL job`);
+            this.debugLog('[Command Entry] Reusing existing dedicated SQL job');
             this.status = 'ready';
             return;
         }
 
-        this.output?.appendLine(`[Command Entry] Creating new dedicated SQL job...`);
+        this.debugLog('[Command Entry] Creating new dedicated SQL job...');
         await this.endDedicatedJob();
+        await this.createDedicatedJob(connection, key);
 
-        this.output?.appendLine(`[Command Entry] Getting Mapepire component from connection...`);
+        // In Mapepire server mode, a recycled host job may carry previous session state
+        // (for example custom library list). Force one reconnect cycle per connection key
+        // at first acquisition so startup behavior matches explicit "Reconnect Server Job".
+        await this.maybeForceStartupReconnect(connection, key);
+    }
+
+    private async createDedicatedJob(connection: IBMi, key: string): Promise<void> {
+        this.debugLog('[Command Entry] Getting Mapepire component from connection...');
         const mapepire = await connection.getComponent('mapepire', { ignoreState: true }) as unknown as MapepireLike | undefined;
         if (!mapepire) {
             throw new Error('Code for IBM i Mapepire component is unavailable for dedicated CLPROMPTER job mode.');
         }
 
-        this.output?.appendLine(`[Command Entry] Creating new Mapepire job...`);
+        this.debugLog('[Command Entry] Creating new Mapepire job...');
         const jdbc = connection.getSqlJobJDBCOptions();
         this.job = await mapepire.newJob(connection, { jdbc });
         this.connectionKey = key;
         this.status = 'ready';
 
-        this.output?.appendLine(`[Command Entry] Reading dedicated SQL job ID...`);
+        this.debugLog('[Command Entry] Reading dedicated SQL job ID...');
         this.dedicatedJobId = await this.readDedicatedJobId(connection);
         this.output?.appendLine(`[Command Entry] Started dedicated SQL job ${this.dedicatedJobId || '<unknown>'}.`);
+    }
+
+    private async maybeForceStartupReconnect(connection: IBMi, key: string): Promise<void> {
+        if (!this.isRemoteMapepireServerEnabled(connection)) {
+            return;
+        }
+
+        if (this.startupReconnectCompleted.has(key)) {
+            return;
+        }
+
+        this.startupReconnectCompleted.add(key);
+        this.output?.appendLine('[Command Entry] Performing startup reconnect cycle for dedicated SQL job to reset host job environment.');
+
+        try {
+            await this.cancelActive(connection);
+        } catch (error) {
+            this.output?.appendLine(`[Command Entry] Startup reconnect cancel request failed (continuing): ${error instanceof Error ? error.message : String(error)}`);
+        }
+
+        await this.endDedicatedJob();
+        await this.createDedicatedJob(connection, key);
+        this.output?.appendLine('[Command Entry] Startup reconnect cycle complete. Dedicated SQL job environment reset.');
     }
 
     private async readDedicatedJobId(connection: IBMi): Promise<string | undefined> {
@@ -291,29 +510,29 @@ export class CommandEntryJobManager {
 
         try {
             // Tier 1: Check for properties on the job object
-            this.output?.appendLine(`[Command Entry] Checking Mapepire job object for ID properties...`);
+            this.debugLog('[Command Entry] Checking Mapepire job object for ID properties...');
             const jobProperties = ['jobId', 'id', 'getId', 'getJobId', 'jobName', 'jobinfo'];
             for (const prop of jobProperties) {
                 if (prop in this.job) {
                     const value = (this.job as any)[prop];
-                    this.output?.appendLine(`[Command Entry] Job.${prop} = ${typeof value === 'string' ? value : JSON.stringify(value)}`);
+                    this.debugLog(`[Command Entry] Job.${prop} = ${typeof value === 'string' ? value : JSON.stringify(value)}`);
                     if (typeof value === 'string') {
                         const normalized = normalizeSqlJobId(value);
                         if (normalized) {
-                            this.output?.appendLine(`[Command Entry] Dedicated SQL job ID from Job.${prop}: ${normalized}`);
+                            this.debugLog(`[Command Entry] Dedicated SQL job ID from Job.${prop}: ${normalized}`);
                             return normalized;
                         }
                     } else if (typeof value === 'function') {
                         try {
                             const result = await value.call(this.job);
-                            this.output?.appendLine(`[Command Entry] Job.${prop}() returned: ${typeof result === 'string' ? result : JSON.stringify(result)}`);
+                            this.debugLog(`[Command Entry] Job.${prop}() returned: ${typeof result === 'string' ? result : JSON.stringify(result)}`);
                             const normalized = normalizeSqlJobId(result);
                             if (normalized) {
-                                this.output?.appendLine(`[Command Entry] Dedicated SQL job ID from Job.${prop}(): ${normalized}`);
+                                this.debugLog(`[Command Entry] Dedicated SQL job ID from Job.${prop}(): ${normalized}`);
                                 return normalized;
                             }
                         } catch (e) {
-                            this.output?.appendLine(`[Command Entry] Job.${prop}() threw: ${e instanceof Error ? e.message : String(e)}`);
+                            this.debugLog(`[Command Entry] Job.${prop}() threw: ${e instanceof Error ? e.message : String(e)}`);
                         }
                     }
                 }
@@ -328,26 +547,26 @@ export class CommandEntryJobManager {
 
             for (const query of sqlQueries) {
                 try {
-                    this.output?.appendLine(`[Command Entry] Trying SQL query: ${query}`);
+                    this.debugLog(`[Command Entry] Trying SQL query: ${query}`);
                     const rows = await this.job.execute(query);
                     const row = rows?.[0];
                     if (row) {
                         const value = row.JOB_ID ?? row.JOB_NAME ?? Object.values(row)[0];
-                        this.output?.appendLine(`[Command Entry] Query returned: ${typeof value === 'string' ? value : JSON.stringify(value)}`);
+                        this.debugLog(`[Command Entry] Query returned: ${typeof value === 'string' ? value : JSON.stringify(value)}`);
                         const normalized = normalizeSqlJobId(value == null ? undefined : String(value));
                         if (normalized) {
-                            this.output?.appendLine(`[Command Entry] Dedicated SQL job ID from SQL: ${normalized}`);
+                            this.debugLog(`[Command Entry] Dedicated SQL job ID from SQL: ${normalized}`);
                             return normalized;
                         }
                     } else {
-                        this.output?.appendLine(`[Command Entry] Query returned no rows`);
+                        this.debugLog('[Command Entry] Query returned no rows');
                     }
                 } catch (e) {
-                    this.output?.appendLine(`[Command Entry] Query failed: ${e instanceof Error ? e.message : String(e)}`);
+                    this.debugLog(`[Command Entry] Query failed: ${e instanceof Error ? e.message : String(e)}`);
                 }
             }
 
-            this.output?.appendLine(`[Command Entry] All attempts to retrieve dedicated SQL job ID failed`);
+            this.debugLog('[Command Entry] All attempts to retrieve dedicated SQL job ID failed');
             return undefined;
         } catch (error) {
             this.output?.appendLine(`[Command Entry] Unexpected error reading dedicated SQL job ID: ${error instanceof Error ? error.message : String(error)}`);

@@ -69,10 +69,27 @@ The `CL Command Entry Panel` is intended for **non-interactive CL commands** suc
 - **Run modes** — Choose `*RUN` (normal) or `*LIMIT` (limited user) before execution.
 - **Message detail output** — A message log (similar to a joblog) is rendered for each CL command you run.
 - **Execution feedback** — See elapsed time and final outcome for each command (`success`, `warning`, `error`).
-- **History and recall** — Reuse previously entered commands across sessions; use `ArrowUp`/`ArrowDown` (or `F9` and `F10` just like the 5250 Command entery. You can also bring up a list of previously run CL commands and select a command from it.
+- **History and recall** — Reuse previously entered commands across sessions; use `ArrowUp`/`ArrowDown` or function keys (`F9=Prior`, `F8=Next`, `F10=Expand/Collapse messages`). You can also bring up a list of previously run CL commands and select a command from it.
+- **Code Snippets button** — A dedicated `Code Snippets` button `{ }` opens a list of reusable Code Snippets. Code Snippets can be CL commands or SQL statements.
 - **Panel visibility control** — `Command Entry` visibility can be on demand, at start up, or after a connection. For on-demand visibility, use either of the following new VSCODE commands (Cmd+Shift+P/Ctrl+Shift+P):
   - **CLPROMPTER: Open CL Command Entry**
   - **CLPROMPTER: Close CL Command Entry**
+- **Flexible menu launch on `...`** — The Command Entry menu opens with click, right-click, and Ctrl/Cmd+click on the `...` toolbar button.
+
+### Dedicated SQL Job Reconnect (Recommended)
+
+If you use dedicated Command Entry job mode, these settings and steps ensure your IBM i job environment is reset correctly:
+
+1. Enable `clPrompter.commandEntryUseDedicatedJob=true`.
+2. In Code for IBM i connection settings, enable `mapepireUseServer=true` (Connect to remote Mapepire Server).
+3. Connect to IBM i and open Command Entry.
+4. CLPROMPTER now performs a one-time startup reconnect cycle for the dedicated SQL job in server mode so stale job environment settings (for example prior library-list changes) are not carried over between VS Code sessions.
+5. Any time you need a clean dedicated job manually, use Command Entry menu `...` -> `Reconnect Server Job`.
+
+Notes:
+
+- On IBM i disconnect, CLPROMPTER now closes its dedicated SQL job/session state.
+- On VS Code extension deactivation, CLPROMPTER performs dedicated job cleanup again as a safety net.
 
 ### Limitations and Behavior Notes
 
@@ -80,11 +97,24 @@ The `CL Command Entry Panel` is intended for **non-interactive CL commands** suc
 - **Cancel Request is disabled** — The cancel action feature was implemented via `QSYS2.CANCEL_SQL` but that did not accomplish a valid cancel of the commands. We were going for a `SysReq Option 2` style end-request options, which this interface cannot currently perform. We continue to research other options and solutions to cancel a running CL command, and will implement it when one is designed that works for this situation.
 - **Prompt does not auto-run** — After prompting a CL command, the command string is returned to the input command line but not automatically run. To run the command, press `Enter` or the **Run** button. Note that this is purposely different from the classic IBM i 52520 Command Entry screen's behavior.
 - **SQL fetch window is configurable** — CL Command Entry SQL statements (`sql: ...`) use two settings:
-  - `clPrompter.commandEntrySqlFetchLimitEnabled` controls whether SQL rows are loaded in chunks.
-  - `clPrompter.commandEntrySqlFetchLimitRows` is the manual **Load more rows** chunk size (for example `1000` or `2000`).
+  - `clPrompter.commandEntrySqlFetchLimitEnabled` controls whether SQL rows are loaded incrementally.
+  - `clPrompter.commandEntrySqlFetchLimitRows` sets the maximum rows per fetch (for example `1000` or `2000`) for manual **Load more rows** requests.
   - `clPrompter.commandEntrySqlPrefetchRows` is the initial/background prefetch size (default `200`) loaded before manual load-more is needed.
-  - When chunked loading is disabled (`false`), behavior is equivalent to `*NOMAX` (fetch all available rows on run).
-  - Dedicated-job mode still uses backend sub-chunks as needed, and the SQL Results panel appends rows dynamically.
+  - When incremental loading is disabled (`false`), behavior is equivalent to `*NOMAX` (fetch all available rows on run).
+  - Dedicated-job mode still uses backend sub-fetches as needed, and the SQL Results panel appends rows dynamically.
+  - If `SQL:` is omitted, statements beginning with `SELECT` or `VALUES` are automatically treated as SQL.
+- **Code Snippet templating** — Code Snippets support runtime substitution variables:
+  - `${sqlJobId}` (`nnnnnn/user/job`)
+  - `${sqlJobName}` (`job` only)
+  - `${sqlJobNumber}` (`nnnnnn` only)
+  - `${currentUser}`
+  - `${currentLibrary}`
+- **Code Snippet management UI** — From Code Snippets menu choose **Add more...** or **Manage Code Snippets...** to open the editor for Add/Edit/Delete/Reorder of user Code Snippets. Built-in Code Snippets are read-only.
+- **Code Snippet sharing** — Use these commands from Command Palette:
+  - `CLPROMPTER: Export Code Snippets`
+  - `CLPROMPTER: Import Code Snippets`
+  - Import options are `Merge`, `Replace All`, and `Add New Only`.
+- **Optional startup history clear** — Set `clPrompter.commandEntryClearHistoryOnStartup=true` to clear Command Entry command history and message log when CLPROMPTER starts.
 
 ## Features
 

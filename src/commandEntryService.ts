@@ -1,9 +1,8 @@
 import IBMi from '@halcyontech/vscode-ibmi-types/api/IBMi';
 import * as vscode from 'vscode';
-import { CommandExecution, CommandExecutionMode, determineOutcome, mapCommandMessages } from './commandEntryModel';
+import { CommandExecution, CommandExecutionMode, SqlColumnMetadata, determineOutcome, mapCommandMessages } from './commandEntryModel';
 import { getUDTFLibrary } from './components/hostFunctions';
 import { CommandEntryJobManager } from './commandEntryJobManager';
-import { runUserSql } from './tools';
 
 const DEFAULT_SQL_RESULT_ROWS = 1000;
 const DEDICATED_SQL_PAGE_SIZE = 100;
@@ -16,6 +15,7 @@ interface SqlPagingSession {
     connectionKey: string;
     statement: string;
     rows: Record<string, unknown>[];
+    columnMetadata?: SqlColumnMetadata[];
     columns: string[];
     nextOffset: number;
     fetchSize: number;
@@ -47,24 +47,31 @@ export function normalizeSqlJobId(jobId: string | undefined): string | undefined
         : undefined;
 }
 
-/** CL sent through the connection's existing SSH/ILE command facility. */
+/** Direct SQL call text for QSYS2.CANCEL_SQL. */
 export function buildCancelSqlJobCommand(jobId: string): string {
-    const sqlCall = `CALL QSYS2.CANCEL_SQL(''${jobId}'')`;
-    const runSql = `RUNSQL SQL('${sqlCall}') COMMIT(*NONE) NAMING(*SYS)`;
-    const submitJobCmd = [
-        `SBMJOB CMD(${runSql}) `,
-        'JOB(C4I_ENDRQS) JOBQ(QUSRNOMAX)',
-        'LOG(4 0 *SECLVL) LOGCLPGM(*YES) LOGOUTPUT(*JOBEND)'
-    ].join(' ');
-    console.log(`Cancel Request: ${submitJobCmd}\n`);
-    return submitJobCmd;
+    const escapedJobId = jobId.replace(/'/g, "''");
+    const sqlCall = `CALL QSYS2.CANCEL_SQL('${escapedJobId}')`;
+    console.log(`Cancel SQL Request: ${sqlCall}\n`);
+    return sqlCall;
 }
 
 function extractSqlStatement(command: string): string | undefined {
-    const match = String(command).match(/^\s*sql\s*:\s*([\s\S]*)$/i);
-    if (!match) { return undefined; }
-    const statement = (match[1] || '').trim();
-    return statement || undefined;
+    const text = String(command ?? '');
+
+    // Explicit SQL mode remains the primary path.
+    const match = text.match(/^\s*sql\s*:\s*([\s\S]*)$/i);
+    if (match) {
+        const statement = (match[1] || '').trim();
+        return statement || undefined;
+    }
+
+    // Smart fallback: if SQL prefix is omitted, treat SELECT/VALUES/WITH as SQL.
+    const trimmed = text.trim();
+    if (/^(SELECT|VALUES|WITH)\b/i.test(trimmed)) {
+        return trimmed;
+    }
+
+    return undefined;
 }
 
 function toIsoTimestamp(date: Date): string {
@@ -86,12 +93,605 @@ function deriveSqlColumns(rows: Record<string, unknown>[]): string[] {
     return columns;
 }
 
+function isPositiveInteger(value: unknown): value is number {
+    return typeof value === 'number' && Number.isInteger(value) && value > 0;
+}
+
+function hasUsefulColumnMetadata(metadata: SqlColumnMetadata[] | undefined): boolean {
+    if (!metadata || metadata.length === 0) {
+        return false;
+    }
+
+    return metadata.some((entry) => {
+        const name = (entry.name || '').trim().toUpperCase();
+        const label = (entry.label || '').trim().toUpperCase();
+        const typeName = (entry.typeName || '').trim();
+        const hasDisplaySize = typeof entry.displaySize === 'number' && entry.displaySize > 0;
+        return typeName.length > 0 || hasDisplaySize || (label.length > 0 && label !== name);
+    });
+}
+
+function normalizeColumnKey(value: string | undefined): string {
+    return (value ?? '').trim().toUpperCase();
+}
+
+function toOptionalNumber(value: unknown): number | undefined {
+    if (typeof value === 'number') {
+        return Number.isFinite(value) ? value : undefined;
+    }
+
+    if (typeof value === 'string') {
+        const trimmed = value.trim();
+        if (!trimmed) {
+            return undefined;
+        }
+        const parsed = Number(trimmed);
+        return Number.isFinite(parsed) ? parsed : undefined;
+    }
+
+    return undefined;
+}
+
+function toOptionalBoolean(value: unknown): boolean | undefined {
+    if (typeof value === 'boolean') {
+        return value;
+    }
+
+    if (typeof value === 'number') {
+        if (value === 1) { return true; }
+        if (value === 0) { return false; }
+        return undefined;
+    }
+
+    if (typeof value === 'string') {
+        const normalized = value.trim().toUpperCase();
+        if (!normalized) {
+            return undefined;
+        }
+        if (normalized === 'Y' || normalized === 'YES' || normalized === 'TRUE' || normalized === '1') {
+            return true;
+        }
+        if (normalized === 'N' || normalized === 'NO' || normalized === 'FALSE' || normalized === '0') {
+            return false;
+        }
+    }
+
+    return undefined;
+}
+
+function mergeColumnMetadata(
+    columns: string[],
+    primary: SqlColumnMetadata[] | undefined,
+    fallback: SqlColumnMetadata[] | undefined
+): SqlColumnMetadata[] {
+    const primaryByName = new Map((primary ?? []).map((entry) => [normalizeColumnKey(entry.name), entry]));
+    const fallbackByName = new Map((fallback ?? []).map((entry) => [normalizeColumnKey(entry.name), entry]));
+
+    return columns.map((column, index) => {
+        const primaryEntry = primaryByName.get(normalizeColumnKey(column)) ?? primary?.[index];
+        const fallbackEntry = fallbackByName.get(normalizeColumnKey(column)) ?? fallback?.[index];
+
+        const merged: SqlColumnMetadata = {
+            name: column,
+            label: primaryEntry?.label && primaryEntry.label.trim().length > 0
+                ? primaryEntry.label
+                : fallbackEntry?.label,
+            typeName: primaryEntry?.typeName && primaryEntry.typeName.trim().length > 0
+                ? primaryEntry.typeName
+                : fallbackEntry?.typeName,
+            displaySize: typeof primaryEntry?.displaySize === 'number'
+                ? primaryEntry.displaySize
+                : fallbackEntry?.displaySize,
+            scale: typeof primaryEntry?.scale === 'number'
+                ? primaryEntry.scale
+                : fallbackEntry?.scale,
+            textDescription: primaryEntry?.textDescription && primaryEntry.textDescription.trim().length > 0
+                ? primaryEntry.textDescription
+                : fallbackEntry?.textDescription,
+            ddsType: primaryEntry?.ddsType && primaryEntry.ddsType.trim().length > 0
+                ? primaryEntry.ddsType
+                : fallbackEntry?.ddsType,
+            isIdentity: typeof primaryEntry?.isIdentity === 'boolean'
+                ? primaryEntry.isIdentity
+                : fallbackEntry?.isIdentity,
+            schema: primaryEntry?.schema || fallbackEntry?.schema,
+            table: primaryEntry?.table || fallbackEntry?.table
+        };
+
+        if (!merged.label || merged.label.trim().length === 0) {
+            merged.label = column;
+        }
+
+        return merged;
+    });
+}
+
+function extractSqlColumnMetadata(raw: unknown, fallbackNames: string[]): SqlColumnMetadata[] {
+    const metadata = Array.isArray(raw)
+        ? raw
+        : raw && typeof raw === 'object'
+            ? ((raw as { metadata?: unknown }).metadata ?? (raw as { columns?: unknown }).columns ?? [])
+            : [];
+
+    if (!Array.isArray(metadata) || metadata.length === 0) {
+        return fallbackNames.map(name => ({ name, label: name }));
+    }
+
+    return metadata.map((entry, index) => {
+        const candidate = entry && typeof entry === 'object' ? entry as Record<string, unknown> : {};
+        const rawName = String(
+            candidate.name ?? candidate.COLUMN_NAME ?? candidate.columnName ?? candidate.column_name ?? candidate.NAME ?? fallbackNames[index] ?? ''
+        ).trim();
+        const rawLabel = String(
+            candidate.label ?? candidate.COLUMN_LABEL ?? candidate.columnLabel ?? candidate.column_label ?? candidate.LABEL ?? candidate.heading ?? candidate.HEADING ?? ''
+        ).trim();
+
+        const displaySize = toOptionalNumber(candidate.displaySize)
+            ?? toOptionalNumber(candidate.DISPLAY_SIZE)
+            ?? toOptionalNumber(candidate.columnSize)
+            ?? toOptionalNumber(candidate.COLUMN_SIZE)
+            ?? toOptionalNumber(candidate.precision)
+            ?? toOptionalNumber(candidate.PRECISION)
+            ?? toOptionalNumber(candidate.length)
+            ?? toOptionalNumber(candidate.LENGTH);
+
+        const typeName = candidate.typeName
+            ?? candidate.TYPE_NAME
+            ?? candidate.DATA_TYPE
+            ?? candidate.dataType
+            ?? candidate.data_type
+            ?? candidate.sqlType
+            ?? candidate.SQL_TYPE
+            ?? candidate.sql_type
+            ?? candidate.nativeType
+            ?? candidate.NATIVE_TYPE
+            ?? candidate.dbType
+            ?? candidate.DB_TYPE
+            ?? candidate.type
+            ?? candidate.TYPE
+            ?? candidate.typename
+            ?? candidate.TYPE_NAME_LONG;
+
+        return {
+            name: rawName || fallbackNames[index] || `COLUMN_${index + 1}`,
+            label: rawLabel || rawName || fallbackNames[index] || undefined,
+            typeName: typeName != null ? String(typeName) : undefined,
+            displaySize,
+            scale: toOptionalNumber(candidate.scale)
+                ?? toOptionalNumber(candidate.SCALE)
+                ?? toOptionalNumber(candidate.numericScale)
+                ?? toOptionalNumber(candidate.NUMERIC_SCALE)
+                ?? toOptionalNumber(candidate.decimalDigits)
+                ?? toOptionalNumber(candidate.DECIMAL_DIGITS),
+            textDescription: candidate.textDescription
+                ? String(candidate.textDescription)
+                : candidate.COLUMN_TEXT
+                    ? String(candidate.COLUMN_TEXT)
+                    : candidate.column_text
+                        ? String(candidate.column_text)
+                        : undefined,
+            ddsType: candidate.ddsType
+                ? String(candidate.ddsType)
+                : candidate.DDS_TYPE
+                    ? String(candidate.DDS_TYPE)
+                    : candidate.dds_type
+                        ? String(candidate.dds_type)
+                        : undefined,
+            isIdentity: toOptionalBoolean(candidate.isIdentity)
+                ?? toOptionalBoolean(candidate.IS_IDENTITY)
+                ?? toOptionalBoolean(candidate.is_identity),
+            schema: typeof candidate.schema === 'string' ? candidate.schema : undefined,
+            table: typeof candidate.table === 'string' ? candidate.table : undefined
+        };
+    }).map((entry, index) => ({
+        ...entry,
+        name: entry.name || fallbackNames[index] || `COLUMN_${index + 1}`,
+        label: entry.label || entry.name || fallbackNames[index] || undefined
+    }));
+}
+
+function inferTypeNameFromValue(value: unknown): { typeName: string } {
+    if (value === null || value === undefined) {
+        return { typeName: 'UNKNOWN' };
+    }
+
+    if (typeof value === 'number') {
+        if (Number.isInteger(value)) {
+            return { typeName: 'INTEGER' };
+        }
+        return { typeName: 'DECIMAL' };
+    }
+
+    if (typeof value === 'boolean') {
+        return { typeName: 'BOOLEAN' };
+    }
+
+    if (value instanceof Date) {
+        return { typeName: 'TIMESTAMP' };
+    }
+
+    const text = String(value).trim();
+    if (!text) {
+        return { typeName: 'VARCHAR' };
+    }
+
+    if (/^\d{4}-\d{2}-\d{2}$/.test(text)) {
+        return { typeName: 'DATE' };
+    }
+    if (/^\d{2}:\d{2}:\d{2}(\.\d+)?$/.test(text)) {
+        return { typeName: 'TIME' };
+    }
+    if (/^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}(\.\d+)?$/.test(text)) {
+        return { typeName: 'TIMESTAMP' };
+    }
+
+    return { typeName: 'VARCHAR' };
+}
+
+function inferMetadataFromRows(columns: string[], rows: Record<string, unknown>[]): SqlColumnMetadata[] {
+    return columns.map((column) => {
+        let inferred: { typeName: string } = { typeName: 'UNKNOWN' };
+        for (const row of rows) {
+            const value = row[column];
+            if (value === null || value === undefined || String(value).trim() === '') {
+                continue;
+            }
+            inferred = inferTypeNameFromValue(value);
+            break;
+        }
+
+        return {
+            name: column,
+            label: column,
+            typeName: inferred.typeName
+        };
+    });
+}
+
+function enrichMetadataWithInferredTypes(columns: string[], metadata: SqlColumnMetadata[] | undefined, rows: Record<string, unknown>[]): SqlColumnMetadata[] {
+    const inferredByName = new Map(inferMetadataFromRows(columns, rows).map(entry => [normalizeColumnKey(entry.name), entry]));
+
+    return columns.map((column, index) => {
+        const existing = metadata?.find(entry => normalizeColumnKey(entry.name) === normalizeColumnKey(column)) ?? metadata?.[index] ?? { name: column, label: column };
+        const inferred = inferredByName.get(normalizeColumnKey(column));
+        const typeName = (existing.typeName || '').trim();
+        const hasKnownType = typeName.length > 0 && typeName.toUpperCase() !== 'UNKNOWN';
+
+        return {
+            ...existing,
+            name: existing.name || column,
+            label: existing.label || column,
+            typeName: hasKnownType ? existing.typeName : inferred?.typeName || existing.typeName || 'UNKNOWN',
+            displaySize: typeof existing.displaySize === 'number' ? existing.displaySize : undefined,
+            scale: typeof existing.scale === 'number' ? existing.scale : undefined
+        };
+    });
+}
+
+function trimSqlIdentifier(value: string): string {
+    return value.trim().replace(/^"|"$/g, '').replace(/\s+/g, ' ').trim();
+}
+
+function splitSqlList(value: string): string[] {
+    const items: string[] = [];
+    let buffer = '';
+    let depth = 0;
+    let inSingleQuote = false;
+    let inDoubleQuote = false;
+
+    for (let i = 0; i < value.length; i++) {
+        const ch = value[i];
+        const next = value[i + 1];
+
+        if (inSingleQuote) {
+            buffer += ch;
+            if (ch === "'" && next === "'") {
+                buffer += next;
+                i++;
+            } else if (ch === "'") {
+                inSingleQuote = false;
+            }
+            continue;
+        }
+
+        if (inDoubleQuote) {
+            buffer += ch;
+            if (ch === '"' && next === '"') {
+                buffer += next;
+                i++;
+            } else if (ch === '"') {
+                inDoubleQuote = false;
+            }
+            continue;
+        }
+
+        if (ch === '(') {
+            depth++;
+            buffer += ch;
+            continue;
+        }
+
+        if (ch === ')') {
+            depth = Math.max(0, depth - 1);
+            buffer += ch;
+            continue;
+        }
+
+        if (ch === "'") {
+            inSingleQuote = true;
+            buffer += ch;
+            continue;
+        }
+
+        if (ch === '"') {
+            inDoubleQuote = true;
+            buffer += ch;
+            continue;
+        }
+
+        if (ch === ',' && depth === 0) {
+            items.push(buffer.trim());
+            buffer = '';
+            continue;
+        }
+
+        buffer += ch;
+    }
+
+    if (buffer.trim()) {
+        items.push(buffer.trim());
+    }
+
+    return items.filter(item => item.length > 0);
+}
+
+function parseSelectAliases(statement: string, fallbackNames: string[]): Map<string, string> {
+    const aliasMap = new Map<string, string>();
+    const match = statement.match(/\bSELECT\b([\s\S]*?)\bFROM\b/i);
+    if (!match) {
+        return aliasMap;
+    }
+
+    const selectList = match[1];
+    const items = splitSqlList(selectList);
+    items.forEach((item, index) => {
+        const normalizedName = fallbackNames[index] ?? '';
+        if (!normalizedName) {
+            return;
+        }
+
+        const aliasMatch = item.match(/(?:\bAS\b\s+|\s+)(?:"([^"]+)"|'([^']+)'|([A-Za-z0-9_#$@]+))\s*$/i);
+        const aliasValue = aliasMatch ? (aliasMatch[1] || aliasMatch[2] || aliasMatch[3] || '').trim() : '';
+        if (aliasValue) {
+            aliasMap.set(normalizedName.toUpperCase(), aliasValue);
+        }
+    });
+
+    return aliasMap;
+}
+
+function extractTableReference(statement: string): { schema?: string; table?: string } | undefined {
+    const match = statement.match(/\bFROM\b\s+((?:"[^"]+"|'[^']+'|[A-Za-z0-9_#$@]+)(?:\.(?:"[^"]+"|'[^']+'|[A-Za-z0-9_#$@]+))?)(?:\s+AS\s+|\s+|$)/i);
+    if (!match) {
+        return undefined;
+    }
+
+    const part = trimSqlIdentifier(match[1]);
+    if (!part) {
+        return undefined;
+    }
+
+    const normalized = part.replace(/\./g, '.');
+    const pieces = normalized.split('.');
+    if (pieces.length === 1) {
+        return { table: pieces[0].toUpperCase() };
+    }
+
+    return {
+        schema: pieces.slice(0, -1).join('.').toUpperCase(),
+        table: pieces[pieces.length - 1].toUpperCase()
+    };
+}
+
+async function fetchColumnMetadataFromCatalog(connection: IBMi, statement: string, fallbackNames: string[]): Promise<SqlColumnMetadata[]> {
+    if (fallbackNames.length === 0) {
+        return [];
+    }
+
+    const tableRef = extractTableReference(statement);
+    if (!tableRef?.table) {
+        return fallbackNames.map(name => ({ name, label: name }));
+    }
+    const tableName = tableRef.table;
+
+    const resolveCurrentSchema = async (): Promise<string | undefined> => {
+        try {
+            const rows = await connection.runSQL('VALUES CURRENT SCHEMA') as Record<string, unknown>[];
+            const row = rows?.[0];
+            if (!row) {
+                return undefined;
+            }
+            const value = Object.values(row)[0];
+            const schemaName = String(value ?? '').trim();
+            return schemaName ? schemaName.toUpperCase() : undefined;
+        } catch {
+            return undefined;
+        }
+    };
+
+    const parseSchemaList = (value: string): string[] => {
+        return value
+            .split(',')
+            .map(part => part.trim().replace(/^"|"$/g, ''))
+            .map(part => part.toUpperCase())
+            .filter(part => part.length > 0);
+    };
+
+    const resolveCurrentPathSchemas = async (): Promise<string[]> => {
+        try {
+            const rows = await connection.runSQL('VALUES CURRENT PATH') as Record<string, unknown>[];
+            const row = rows?.[0];
+            if (!row) {
+                return [];
+            }
+            const value = String(Object.values(row)[0] ?? '').trim();
+            if (!value) {
+                return [];
+            }
+            return parseSchemaList(value);
+        } catch {
+            return [];
+        }
+    };
+
+    const querySchema = async (schema: string): Promise<Record<string, unknown>[] | undefined> => {
+        const sql = `SELECT COLUMN_NAME, COLUMN_HEADING, COLUMN_TEXT, DATA_TYPE, LENGTH, NUMERIC_SCALE, DDS_TYPE, IS_IDENTITY, ORDINAL_POSITION
+FROM QSYS2.SYSCOLUMNS2
+WHERE TABLE_SCHEMA = '${schema.replace(/'/g, "''")}'
+    AND TABLE_NAME = '${tableName.replace(/'/g, "''")}'
+ORDER BY ORDINAL_POSITION`;
+
+        const rows = await connection.runSQL(sql) as Record<string, unknown>[];
+        return rows;
+    };
+
+    const schemaCandidates: string[] = [];
+    const addCandidate = (schema: string | undefined) => {
+        if (!schema) {
+            return;
+        }
+        const normalized = schema.trim().toUpperCase();
+        if (!normalized) {
+            return;
+        }
+        if (!schemaCandidates.includes(normalized)) {
+            schemaCandidates.push(normalized);
+        }
+    };
+
+    if (tableRef.schema) {
+        addCandidate(tableRef.schema);
+    } else {
+        addCandidate(await resolveCurrentSchema());
+        for (const pathSchema of await resolveCurrentPathSchemas()) {
+            addCandidate(pathSchema);
+        }
+    }
+
+    if (schemaCandidates.length === 0) {
+        return fallbackNames.map(name => ({ name, label: name }));
+    }
+
+    try {
+        let rows: Record<string, unknown>[] = [];
+        for (const schema of schemaCandidates) {
+            rows = await querySchema(schema) ?? [];
+            if (rows.length > 0) {
+                break;
+            }
+        }
+
+        if (!rows || rows.length === 0) {
+            return fallbackNames.map(name => ({ name, label: name }));
+        }
+
+        const byName = new Map<string, SqlColumnMetadata>();
+        for (const row of rows) {
+            const columnName = String(row.COLUMN_NAME ?? row.column_name ?? '').trim();
+            if (!columnName) {
+                continue;
+            }
+            const label = String(row.COLUMN_HEADING ?? row.column_heading ?? row.COLUMN_TEXT ?? row.column_text ?? '').trim();
+            const textDescription = String(row.COLUMN_TEXT ?? row.column_text ?? '').trim();
+            const typeName = String(row.DATA_TYPE ?? row.data_type ?? row.SYSTEM_TYPE_NAME ?? row.system_type_name ?? 'UNKNOWN').trim();
+            const lengthValue = row.LENGTH ?? row.length ?? row.CHARACTER_MAXIMUM_LENGTH ?? row.character_maximum_length;
+            const scaleValue = row.NUMERIC_SCALE ?? row.numeric_scale ?? row.SCALE ?? row.scale;
+            const ddsType = String(row.DDS_TYPE ?? row.dds_type ?? '').trim();
+            const isIdentity = toOptionalBoolean(row.IS_IDENTITY ?? row.is_identity);
+            byName.set(columnName.toUpperCase(), {
+                name: columnName,
+                label: label || columnName,
+                typeName: typeName || 'UNKNOWN',
+                displaySize: toOptionalNumber(lengthValue),
+                scale: toOptionalNumber(scaleValue),
+                textDescription: textDescription || undefined,
+                ddsType: ddsType || undefined,
+                isIdentity
+            });
+        }
+
+        const aliases = parseSelectAliases(statement, fallbackNames);
+        return fallbackNames.map((name, index) => {
+            const normalized = name.toUpperCase();
+            const aliasLabel = aliases.get(normalized);
+            const metadata = byName.get(normalized) ?? byName.get(name.toUpperCase());
+            const actualLabel = aliasLabel || metadata?.label || name;
+            return {
+                name,
+                label: actualLabel,
+                typeName: metadata?.typeName || 'UNKNOWN',
+                displaySize: metadata?.displaySize,
+                scale: metadata?.scale,
+                textDescription: metadata?.textDescription,
+                ddsType: metadata?.ddsType,
+                isIdentity: metadata?.isIdentity
+            };
+        });
+    } catch {
+        return fallbackNames.map(name => ({ name, label: name }));
+    }
+}
+
+async function tryRunSharedMapepireQuery(
+    connection: IBMi,
+    statement: string,
+    rows?: number
+): Promise<unknown | undefined> {
+    const sqlJob = (connection as any).sqlJob;
+    if (!sqlJob || typeof sqlJob.query !== 'function') {
+        return undefined;
+    }
+
+    let query: any;
+    try {
+        query = sqlJob.query(statement, { isTerseResults: false });
+        if (!query || typeof query.execute !== 'function') {
+            return undefined;
+        }
+
+        if (isPositiveInteger(rows)) {
+            try {
+                return await query.execute(rows);
+            } catch {
+                return await query.execute();
+            }
+        }
+
+        return await query.execute();
+    } catch {
+        return undefined;
+    } finally {
+        try {
+            if (query && typeof query.close === 'function') {
+                await query.close();
+            }
+        } catch {
+            // Ignore close failures on best-effort metadata path.
+        }
+    }
+}
+
 function stripTrailingSemicolon(sql: string): string {
     return sql.replace(/;\s*$/, '').trim();
 }
 
 function isPagedQueryCandidate(sql: string): boolean {
     const normalized = stripTrailingSemicolon(sql).toUpperCase();
+    // Wrapping LATERAL queries in a derived-table/OFFSET shell can break parsing
+    // on IBM i (e.g., table functions correlated to prior FROM items).
+    if (normalized.includes('LATERAL')) {
+        return false;
+    }
     return normalized.startsWith('SELECT ') || normalized.startsWith('WITH ');
 }
 
@@ -168,13 +768,33 @@ export class CommandEntryService {
         connection: IBMi,
         statement: string,
         rows?: number
-    ): Promise<Record<string, unknown>[]> {
-        if (this.jobManager) {
-            return this.jobManager.runSQL(connection, statement, { rows });
-        }
+    ): Promise<{ rows: Record<string, unknown>[]; metadata?: SqlColumnMetadata[] }> {
+        const rawResult = this.jobManager
+            ? await this.jobManager.runSQLWithDetails(connection, statement, { rows })
+            : await tryRunSharedMapepireQuery(connection, statement, rows)
+            ?? await connection.runSQL(statement, rows ? { rows } : undefined) as Record<string, unknown>[];
 
-        const result = await connection.runSQL(statement, rows ? { rows } : undefined);
-        return result as Record<string, unknown>[];
+        const detailedRawResult = rawResult
+            && typeof rawResult === 'object'
+            && 'rawResult' in (rawResult as Record<string, unknown>)
+            ? (rawResult as { rawResult?: unknown }).rawResult
+            : undefined;
+
+        const rowSource = rawResult && typeof rawResult === 'object' && 'rows' in (rawResult as Record<string, unknown>)
+            ? (rawResult as { rows: unknown }).rows
+            : rawResult;
+
+        const normalizedRows = Array.isArray(rowSource)
+            ? rowSource as Record<string, unknown>[]
+            : Array.isArray((rowSource as { data?: unknown[] }).data)
+                ? (rowSource as { data: Record<string, unknown>[] }).data
+                : Array.isArray((rowSource as { rows?: unknown[] }).rows)
+                    ? (rowSource as { rows: Record<string, unknown>[] }).rows
+                    : [];
+
+        const metadataSource = detailedRawResult ?? rawResult;
+        const metadata = extractSqlColumnMetadata(metadataSource, deriveSqlColumns(normalizedRows));
+        return { rows: normalizedRows, metadata };
     }
 
     private getBackendFetchSize(targetRows: number): number {
@@ -189,19 +809,29 @@ export class CommandEntryService {
         return targetRows;
     }
 
-    private async runDedicatedSqlWithPaging(connection: IBMi, sqlStatement: string, maxRows: number): Promise<Record<string, unknown>[]> {
+    private async runDedicatedSqlWithPaging(connection: IBMi, sqlStatement: string, maxRows: number): Promise<{ rows: Record<string, unknown>[]; metadata?: SqlColumnMetadata[] }> {
         if (!this.jobManager) {
-            return this.runSqlRows(connection, sqlStatement, maxRows === NOMAX_SENTINEL ? undefined : maxRows);
+            const result = await this.runSqlRows(connection, sqlStatement, maxRows === NOMAX_SENTINEL ? undefined : maxRows);
+            return result;
         }
 
         const statement = stripTrailingSemicolon(sqlStatement);
         if (!isPagedQueryCandidate(statement)) {
-            return maxRows === NOMAX_SENTINEL
-                ? this.jobManager.runSQL(connection, statement)
-                : this.jobManager.runSQL(connection, statement, { rows: maxRows });
+            const rawRows = maxRows === NOMAX_SENTINEL
+                ? await this.jobManager.runSQL(connection, statement)
+                : await this.jobManager.runSQL(connection, statement, { rows: maxRows });
+            const normalizedRows = Array.isArray(rawRows)
+                ? rawRows as Record<string, unknown>[]
+                : Array.isArray((rawRows as { data?: unknown[] }).data)
+                    ? (rawRows as { data: Record<string, unknown>[] }).data
+                    : Array.isArray((rawRows as { rows?: unknown[] }).rows)
+                        ? (rawRows as { rows: Record<string, unknown>[] }).rows
+                        : [];
+            return { rows: normalizedRows, metadata: extractSqlColumnMetadata(rawRows, deriveSqlColumns(normalizedRows)) };
         }
 
         const rows: Record<string, unknown>[] = [];
+        let metadata: SqlColumnMetadata[] | undefined;
         let offset = 0;
         const unlimited = maxRows === NOMAX_SENTINEL;
 
@@ -211,16 +841,26 @@ export class CommandEntryService {
                 : Math.min(DEDICATED_SQL_PAGE_SIZE, maxRows - rows.length);
             const pageSql = buildPagedSql(statement, offset, fetchRows);
             const pageRows = await this.jobManager.runSQL(connection, pageSql, { rows: fetchRows });
-            rows.push(...pageRows);
+            const normalizedPage = Array.isArray(pageRows)
+                ? pageRows as Record<string, unknown>[]
+                : Array.isArray((pageRows as { data?: unknown[] }).data)
+                    ? (pageRows as { data: Record<string, unknown>[] }).data
+                    : Array.isArray((pageRows as { rows?: unknown[] }).rows)
+                        ? (pageRows as { rows: Record<string, unknown>[] }).rows
+                        : [];
+            rows.push(...normalizedPage);
+            if (!metadata && normalizedPage.length > 0) {
+                metadata = extractSqlColumnMetadata(pageRows, deriveSqlColumns(normalizedPage));
+            }
 
-            if (pageRows.length < fetchRows) {
+            if (normalizedPage.length < fetchRows) {
                 break;
             }
 
-            offset += pageRows.length;
+            offset += normalizedPage.length;
         }
 
-        return rows;
+        return { rows, metadata };
     }
 
     private async fetchSqlPage(
@@ -228,7 +868,7 @@ export class CommandEntryService {
         sqlStatement: string,
         offset: number,
         fetchRows: number
-    ): Promise<Record<string, unknown>[]> {
+    ): Promise<{ rows: Record<string, unknown>[]; metadata?: SqlColumnMetadata[] }> {
         const pageSql = buildPagedSql(sqlStatement, offset, fetchRows);
         return this.runSqlRows(connection, pageSql, fetchRows);
     }
@@ -238,12 +878,13 @@ export class CommandEntryService {
         sqlStatement: string,
         offset: number,
         chunkRows: number
-    ): Promise<Record<string, unknown>[]> {
+    ): Promise<{ rows: Record<string, unknown>[]; metadata?: SqlColumnMetadata[] }> {
         if (chunkRows <= 0) {
-            return [];
+            return { rows: [] };
         }
 
         const rows: Record<string, unknown>[] = [];
+        let metadata: SqlColumnMetadata[] | undefined;
         let localOffset = offset;
 
         while (rows.length < chunkRows) {
@@ -253,9 +894,14 @@ export class CommandEntryService {
                 break;
             }
 
-            const pageRows = await this.fetchSqlPage(connection, sqlStatement, localOffset, backendRows);
+            const pageResult = await this.fetchSqlPage(connection, sqlStatement, localOffset, backendRows);
+            const pageRows = pageResult.rows;
             if (pageRows.length === 0) {
                 break;
+            }
+
+            if (!hasUsefulColumnMetadata(metadata) && hasUsefulColumnMetadata(pageResult.metadata)) {
+                metadata = pageResult.metadata;
             }
 
             rows.push(...pageRows);
@@ -266,23 +912,30 @@ export class CommandEntryService {
             }
         }
 
-        return rows;
+        return { rows, metadata };
     }
 
     private async detectMoreRows(connection: IBMi, sqlStatement: string, offset: number): Promise<boolean> {
-        const probeRows = await this.fetchSqlPage(connection, sqlStatement, offset, 1);
+        const probeRows = (await this.fetchSqlPage(connection, sqlStatement, offset, 1)).rows;
         return probeRows.length > 0;
     }
 
-    private buildSqlResultPayload(
+    private async buildSqlResultPayload(
+        connection: IBMi,
         statement: string,
         rows: Record<string, unknown>[],
-        options?: { sessionId?: string; hasMoreRows?: boolean; fetchSize?: number; prefetchSize?: number }
+        options?: { sessionId?: string; hasMoreRows?: boolean; fetchSize?: number; prefetchSize?: number; columnMetadata?: SqlColumnMetadata[] }
     ) {
         const columns = deriveSqlColumns(rows);
+        const catalogMetadata = await fetchColumnMetadataFromCatalog(connection, statement, columns);
+        const metadataFromSql = hasUsefulColumnMetadata(options?.columnMetadata)
+            ? mergeColumnMetadata(columns, options?.columnMetadata, catalogMetadata)
+            : catalogMetadata;
+        const finalMetadata = enrichMetadataWithInferredTypes(columns, metadataFromSql, rows);
         return {
             statement,
             columns,
+            columnMetadata: finalMetadata,
             rows,
             rowCount: rows.length,
             displayedRowCount: rows.length,
@@ -312,7 +965,11 @@ export class CommandEntryService {
         }
 
         const fetchOnce = async (effectiveFetchSize: number): Promise<number> => {
-            const pageRows = await this.fetchSqlChunk(connection, session.statement, session.nextOffset, effectiveFetchSize);
+            const pageResult = await this.fetchSqlChunk(connection, session.statement, session.nextOffset, effectiveFetchSize);
+            const pageRows = pageResult.rows;
+            if (!hasUsefulColumnMetadata(session.columnMetadata) && hasUsefulColumnMetadata(pageResult.metadata)) {
+                session.columnMetadata = pageResult.metadata;
+            }
             if (pageRows.length > 0) {
                 session.rows.push(...pageRows);
                 session.nextOffset += pageRows.length;
@@ -337,11 +994,12 @@ export class CommandEntryService {
             }
         } else {
             if (!session.hasMoreRows) {
-                const payload = this.buildSqlResultPayload(session.statement, session.rows, {
+                const payload = await this.buildSqlResultPayload(connection, session.statement, session.rows, {
                     sessionId: undefined,
                     hasMoreRows: false,
                     fetchSize: session.fetchSize,
-                    prefetchSize: session.prefetchSize
+                    prefetchSize: session.prefetchSize,
+                    columnMetadata: session.columnMetadata
                 });
                 await this.closeSqlSession(session.id);
                 return payload;
@@ -361,11 +1019,12 @@ export class CommandEntryService {
         session.lastUsedAt = Date.now();
 
         const hasMoreRows = session.hasMoreRows;
-        const payload = this.buildSqlResultPayload(session.statement, session.rows, {
+        const payload = await this.buildSqlResultPayload(connection, session.statement, session.rows, {
             sessionId: hasMoreRows ? session.id : undefined,
             hasMoreRows,
             fetchSize: session.fetchSize,
-            prefetchSize: session.prefetchSize
+            prefetchSize: session.prefetchSize,
+            columnMetadata: session.columnMetadata
         });
 
         if (!hasMoreRows) {
@@ -392,13 +1051,19 @@ export class CommandEntryService {
                 let hasMoreRows = false;
                 let sessionId: string | undefined;
 
+                let columnMetadata: SqlColumnMetadata[] | undefined;
+
                 if (!isPagedQueryCandidate(normalizedSql) || unlimited) {
-                    rows = this.jobManager
+                    const result = this.jobManager
                         ? await this.runDedicatedSqlWithPaging(connection, normalizedSql, maxRows)
-                        : (await runUserSql<Record<string, unknown>>(connection, normalizedSql)).rows;
+                        : await this.runSqlRows(connection, normalizedSql, unlimited ? undefined : maxRows);
+                    rows = result.rows;
+                    columnMetadata = result.metadata;
                 } else {
                     const prefetchSize = Math.min(maxRows, prefetchRows);
-                    rows = await this.fetchSqlChunk(connection, normalizedSql, 0, prefetchSize);
+                    const initialChunk = await this.fetchSqlChunk(connection, normalizedSql, 0, prefetchSize);
+                    rows = initialChunk.rows;
+                    columnMetadata = initialChunk.metadata;
                     if (rows.length === prefetchSize) {
                         hasMoreRows = await this.detectMoreRows(connection, normalizedSql, rows.length);
                     }
@@ -409,6 +1074,7 @@ export class CommandEntryService {
                             connectionKey: this.buildConnectionKey(connection),
                             statement: normalizedSql,
                             rows: [...rows],
+                            columnMetadata,
                             columns: deriveSqlColumns(rows),
                             nextOffset: rows.length,
                             fetchSize: maxRows,
@@ -439,8 +1105,8 @@ export class CommandEntryService {
                         text: unlimited
                             ? `${rowCount} ${rowLabel} returned (*NOMAX)`
                             : hasMoreRows
-                                ? `${rowCount} ${rowLabel} returned (prefetched ${rowCount}; load-more chunk ${maxRows})`
-                                : `${rowCount} ${rowLabel} returned (chunk ${maxRows})`,
+                                ? `${rowCount} ${rowLabel} returned (prefetched ${rowCount}; rows per fetch ${maxRows})`
+                                : `${rowCount} ${rowLabel} returned (rows per fetch ${maxRows})`,
                         sentTimestamp: toIsoTimestamp(startedDate),
                         sentFromProgram: '',
                         sentFromStmt: '',
@@ -453,11 +1119,12 @@ export class CommandEntryService {
                         secondLevelText: '',
                         kind: 'info'
                     }],
-                    sqlResult: this.buildSqlResultPayload(normalizedSql, rows, {
+                    sqlResult: await this.buildSqlResultPayload(connection, normalizedSql, rows, {
                         sessionId,
                         hasMoreRows,
                         fetchSize: unlimited ? undefined : maxRows,
-                        prefetchSize: unlimited ? undefined : Math.min(maxRows, prefetchRows)
+                        prefetchSize: unlimited ? undefined : Math.min(maxRows, prefetchRows),
+                        columnMetadata
                     })
                 };
             }

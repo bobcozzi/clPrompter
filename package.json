@@ -2,7 +2,7 @@
   "name": "clprompter",
   "displayName": "Bob Cozzi's CL Prompter and Formatter for IBM i",
   "description": "IBM i CL Prompting and Formatting: Built for modern development",
-  "version": "1.0.19",
+  "version": "1.0.21",
   "author": {
     "name": "Bob Cozzi",
     "url": "https://github.com/bobcozzi"
@@ -37,7 +37,8 @@
     "onLanguage:bnd",
     "onCommand:clPrompter.clPrompter",
     "onView:clprompter.commandEntryView",
-    "onCommand:clprompter.openCommandEntry"
+    "onCommand:clprompter.openCommandEntry",
+    "onCommand:clprompter.manageCodeSnippets"
   ],
   "contributes": {
     "commands": [
@@ -71,15 +72,110 @@
       },
       {
         "command": "clprompter.cancelCommandEntry",
-        "title": "CLPROMPTER: Request Cancel Command Entry"
+        "title": "CLPROMPTER: CANCEL Last SQL"
       },
       {
         "command": "clprompter.startNewCommandEntryJob",
-        "title": "CLPROMPTER: Start New Command Entry SQL Job"
+        "title": "CLPROMPTER: Reconnect Command Entry Server Job"
       },
       {
         "command": "clprompter.clearCommandEntry",
         "title": "CLPROMPTER: Clear Command Entry Results"
+      },
+      {
+        "command": "clprompter.exportCodeSnippets",
+        "title": "CLPROMPTER: Export Code Snippets"
+      },
+      {
+        "command": "clprompter.importCodeSnippets",
+        "title": "CLPROMPTER: Import Code Snippets"
+      },
+      {
+        "command": "clprompter.manageCodeSnippets",
+        "title": "CLPROMPTER: Manage Code Snippets"
+      },
+      {
+        "command": "clprompter.closeCodeSnippetManager",
+        "category": "Code Snippets",
+        "title": "Close",
+        "icon": "images/icon-close.svg"
+      },
+      {
+        "command": "clprompter.codeSnippet.pin",
+        "category": "Code Snippets",
+        "title": "Pin",
+        "icon": "$(pin)"
+      },
+      {
+        "command": "clprompter.codeSnippet.unpin",
+        "category": "Code Snippets",
+        "title": "Unpin",
+        "icon": "$(pinned)"
+      },
+      {
+        "command": "clprompter.codeSnippet.add",
+        "category": "Code Snippets",
+        "title": "Add",
+        "icon": "images/icon-add.svg"
+      },
+      {
+        "command": "clprompter.codeSnippet.edit",
+        "category": "Code Snippets",
+        "title": "Edit",
+        "icon": "$(edit)"
+      },
+      {
+        "command": "clprompter.codeSnippet.delete",
+        "category": "Code Snippets",
+        "title": "Delete",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "clprompter.codeSnippet.run",
+        "category": "Code Snippets",
+        "title": "Run",
+        "icon": "$(play)"
+      },
+      {
+        "command": "clprompter.codeSnippet.copy",
+        "category": "Code Snippets",
+        "title": "Copy"
+      },
+      {
+        "command": "clprompter.codeSnippet.copyToCommandEntry",
+        "category": "Code Snippets",
+        "title": "Copy to Cmd Entry"
+      },
+      {
+        "command": "clprompter.codeSnippet.moveUp",
+        "category": "Code Snippets",
+        "title": "Move Up"
+      },
+      {
+        "command": "clprompter.codeSnippet.moveDown",
+        "category": "Code Snippets",
+        "title": "Move Down"
+      },
+      {
+        "command": "clprompter.codeSnippet.import",
+        "category": "Code Snippets",
+        "title": "Import JSON"
+      },
+      {
+        "command": "clprompter.codeSnippet.export",
+        "category": "Code Snippets",
+        "title": "Export JSON"
+      },
+      {
+        "command": "clprompter.codeSnippet.openAdvancedEditor",
+        "category": "Code Snippets",
+        "title": "Open Advanced Editor"
+      },
+      {
+        "command": "clprompter.codeSnippet.refresh",
+        "category": "Code Snippets",
+        "title": "Refresh",
+        "icon": "images/icon-refresh.svg"
       }
     ],
     "keybindings": [
@@ -120,19 +216,77 @@
         "clPrompter.commandEntrySqlFetchLimitEnabled": {
           "type": "boolean",
           "default": true,
-          "description": "Enable chunked SQL row loading for CL Command Entry statements. Disable for *NOMAX behavior (fetch all rows on run)."
+          "description": "Enable incremental SQL row loading for CL Command Entry statements using `Entry Sql Fetch Limit Rows`. Uncheck this setting for a Fetch Limit of *NOMAX rows (fetch all rows on run)."
+        },
+        "clPrompter.commandEntryVerboseLogging": {
+          "type": "boolean",
+          "default": false,
+          "description": "Enable verbose diagnostic logging for CL Command Entry internals (job routing, keep-alive, and SQL execution detail)."
         },
         "clPrompter.commandEntrySqlFetchLimitRows": {
           "type": "integer",
           "default": 1000,
           "minimum": 1,
-          "description": "SQL chunk size for CL Command Entry statements when chunked loading is enabled. This is how many rows each manual 'Load more rows' request retrieves."
+          "description": "Controls the maximum number of rows per fetch request when `Entry Sql Fetch Limit` is checked. Ignored when that setting is unchecked (*NOMAX rows). Higher values can improve result set performance on fast IBM i servers."
         },
         "clPrompter.commandEntrySqlPrefetchRows": {
           "type": "integer",
           "default": 200,
           "minimum": 1,
           "description": "Initial/background SQL prefetch size for CL Command Entry statements. This is the number of rows loaded before you need to press 'Load more rows'."
+        },
+        "clPrompter.commandEntryMessageDetails": {
+          "type": "string",
+          "default": "SHOW",
+          "enum": [
+            "SHOW",
+            "HIDE"
+          ],
+          "enumDescriptions": [
+            "Expand command-level message sections by default in Command Entry results.",
+            "Collapse command-level message sections by default in Command Entry results."
+          ],
+          "description": "Controls whether each Command Entry result row is expanded or collapsed by default."
+        },
+        "clPrompter.commandEntryClearHistoryOnStartup": {
+          "type": "boolean",
+          "default": false,
+          "description": "Clear Command Entry panel history and message log when the CLPROMPTER extension starts."
+        },
+        "clPrompter.commandEntryLogSqlStatements": {
+          "type": "boolean",
+          "default": false,
+          "description": "Log SQL statements run from Command Entry to the Command Entry History Log."
+        },
+        "clPrompter.commandEntryLogSqlStatementsToCommandEntryLog": {
+          "type": "boolean",
+          "default": false,
+          "description": "Log SQL statements run from Command Entry to the Command Entry Log."
+        },
+        "clPrompter.commandEntryLogSnippets": {
+          "type": "boolean",
+          "default": false,
+          "description": "Log Snippets that are run to the Command Entry History Log."
+        },
+        "clPrompter.commandEntryLogSnippetsToCommandEntryLog": {
+          "type": "boolean",
+          "default": false,
+          "description": "Log Snippets that are run to the Command Entry Log."
+        },
+        "clPrompter.codeSnippetTreeClickAction": {
+          "type": "string",
+          "default": "Run",
+          "enum": [
+            "Run",
+            "Copy",
+            "Copy to Cmd Entry"
+          ],
+          "enumDescriptions": [
+            "Run the selected Code Snippet.",
+            "Copy the selected Code Snippet text to the clipboard.",
+            "Copy the selected Code Snippet text into CL Command Entry."
+          ],
+          "description": "Controls what single-clicking a Code Snippet in the tree view does."
         },
         "clPrompter.kwdColor": {
           "type": "string",
@@ -281,6 +435,90 @@
       }
     },
     "menus": {
+      "view/title": [
+        {
+          "command": "clprompter.codeSnippet.pin",
+          "when": "view == clprompter.codeSnippetManagerView && !clprompter.codeSnippetManagerPinned",
+          "group": "navigation@0"
+        },
+        {
+          "command": "clprompter.codeSnippet.unpin",
+          "when": "view == clprompter.codeSnippetManagerView && clprompter.codeSnippetManagerPinned",
+          "group": "navigation@0"
+        },
+        {
+          "command": "clprompter.codeSnippet.add",
+          "when": "view == clprompter.codeSnippetManagerView",
+          "group": "navigation@1"
+        },
+        {
+          "command": "clprompter.codeSnippet.edit",
+          "when": "view == clprompter.codeSnippetManagerView && clprompter.codeSnippetSelected",
+          "group": "navigation@2"
+        },
+        {
+          "command": "clprompter.codeSnippet.run",
+          "when": "view == clprompter.codeSnippetManagerView && clprompter.codeSnippetSelected",
+          "group": "navigation@3"
+        },
+        {
+          "command": "clprompter.codeSnippet.delete",
+          "when": "view == clprompter.codeSnippetManagerView && clprompter.codeSnippetSelected",
+          "group": "navigation@4"
+        },
+        {
+          "command": "clprompter.codeSnippet.refresh",
+          "when": "view == clprompter.codeSnippetManagerView",
+          "group": "navigation@5"
+        },
+        {
+          "command": "clprompter.closeCodeSnippetManager",
+          "when": "view == clprompter.codeSnippetManagerView",
+          "group": "navigation@9"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "clprompter.codeSnippet.copy",
+          "when": "view == clprompter.codeSnippetManagerView && (viewItem == codeSnippetUser || viewItem == codeSnippetBuiltIn || viewItem == codeSnippetPreviewUser || viewItem == codeSnippetPreviewBuiltIn)",
+          "group": "navigation@1"
+        },
+        {
+          "command": "clprompter.codeSnippet.copyToCommandEntry",
+          "when": "view == clprompter.codeSnippetManagerView && (viewItem == codeSnippetUser || viewItem == codeSnippetBuiltIn || viewItem == codeSnippetPreviewUser || viewItem == codeSnippetPreviewBuiltIn)",
+          "group": "navigation@2"
+        },
+        {
+          "command": "clprompter.codeSnippet.run",
+          "when": "view == clprompter.codeSnippetManagerView && (viewItem == codeSnippetUser || viewItem == codeSnippetBuiltIn || viewItem == codeSnippetPreviewUser || viewItem == codeSnippetPreviewBuiltIn)",
+          "group": "navigation@3"
+        },
+        {
+          "command": "clprompter.codeSnippet.edit",
+          "when": "view == clprompter.codeSnippetManagerView && (viewItem == codeSnippetUser || viewItem == codeSnippetBuiltIn || viewItem == codeSnippetPreviewUser || viewItem == codeSnippetPreviewBuiltIn)",
+          "group": "navigation@4"
+        },
+        {
+          "command": "clprompter.codeSnippet.delete",
+          "when": "view == clprompter.codeSnippetManagerView && (viewItem == codeSnippetUser || viewItem == codeSnippetBuiltIn || viewItem == codeSnippetPreviewUser || viewItem == codeSnippetPreviewBuiltIn)",
+          "group": "navigation@5"
+        },
+        {
+          "command": "clprompter.codeSnippet.refresh",
+          "when": "view == clprompter.codeSnippetManagerView",
+          "group": "navigation@6"
+        },
+        {
+          "command": "clprompter.codeSnippet.moveUp",
+          "when": "view == clprompter.codeSnippetManagerView && viewItem == codeSnippetUser",
+          "group": "navigation@1"
+        },
+        {
+          "command": "clprompter.codeSnippet.moveDown",
+          "when": "view == clprompter.codeSnippetManagerView && viewItem == codeSnippetUser",
+          "group": "navigation@2"
+        }
+      ],
       "editor/context": [
         {
           "command": "clPrompter.clPrompter",
@@ -309,6 +547,14 @@
       ]
     },
     "views": {
+      "ibmi-explorer": [
+        {
+          "id": "clprompter.codeSnippetManagerView",
+          "name": "Cmd Entry Snippets",
+          "icon": "images/clPrompter.png",
+          "when": "clprompter.codeSnippetManagerVisible"
+        }
+      ],
       "clprompterCommandEntry": [
         {
           "id": "clprompter.commandEntryView",

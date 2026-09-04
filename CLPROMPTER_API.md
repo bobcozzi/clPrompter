@@ -46,6 +46,62 @@ CLPrompter is mandatory for your extension to work. VS Code will prompt users to
 }
 ```
 
+## New External API: multiSqlJob
+
+In addition to CLPrompter and CLPrompterCallback, the extension now exports `multiSqlJob` for dedicated/shared SQL job orchestration used by Command Entry.
+
+### Runtime export shape
+
+- CLPrompter
+- CLPrompterCallback
+- multiSqlJob
+
+### multiSqlJob methods (v1)
+
+- apiVersion (`1.0.0`)
+- isDedicatedModeEnabled()
+- getJobState()
+- ensureDedicatedJob()
+- restartDedicatedJob()
+- cancelDedicatedJobSql()
+- runSql(statements, options)
+- executeCommandEntry(command, mode, executionId?)
+- closeSqlSession(sessionId?)
+- loadMoreSql(sessionId, fetchAll?, fetchRowsOverride?)
+- getConfiguredPrefetchRows()
+
+### Example
+
+```typescript
+import * as vscode from 'vscode';
+
+async function runSqlThroughClPrompter() {
+  const ext = vscode.extensions.getExtension('CozziResearch.clprompter');
+  if (!ext) {
+    throw new Error('CLPrompter extension not installed.');
+  }
+  if (!ext.isActive) {
+    await ext.activate();
+  }
+
+  const { multiSqlJob } = ext.exports;
+  if (!multiSqlJob) {
+    throw new Error('CLPrompter multiSqlJob API is unavailable.');
+  }
+
+  // Optional: ensure dedicated job if dedicated mode is enabled in settings.
+  await multiSqlJob.ensureDedicatedJob();
+
+  // Raw SQL execution.
+  const rows = await multiSqlJob.runSql('SELECT CURRENT_TIMESTAMP AS TS FROM SYSIBM.SYSDUMMY1');
+
+  // CL command execution through Command Entry flow.
+  const execution = await multiSqlJob.executeCommandEntry('DSPLIBL', '*RUN');
+
+  return { rows, execution };
+}
+```
+
 ## How the API Works
 
 ### Accessing CLPrompter from Your Extension

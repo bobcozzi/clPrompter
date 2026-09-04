@@ -2,12 +2,19 @@
   const state = vscode.getState() || { command: '', mode: '*RUN', filterSeverity: 0, history: [], executions: [], commandHeightPx: 0 };
   const maxExecutions = 30, maxMessages = 100;
   const noConnectionText = 'no connection';
+  const MENU_POSITION_DEBUG = true;
   const minTextareaRows = 2;
   const command = document.getElementById('command'), mode = document.getElementById('mode'), severityFilter = document.getElementById('message-severity-filter');
-  const run = document.getElementById('run'), prompt = document.getElementById('prompt'), clearCommand = document.getElementById('clear-command'), toolbarMenu = document.getElementById('toolbar-menu'), toolbarMenuList = document.getElementById('toolbar-menu-list'), menuViewLog = document.getElementById('menu-view-log'), menuClearLog = document.getElementById('menu-clear-log'), menuStartNewJob = document.getElementById('menu-start-new-job'), historyPrev = document.getElementById('history-prev'), historyNext = document.getElementById('history-next');
+  const run = document.getElementById('run'), prompt = document.getElementById('prompt'), snippets = document.getElementById('snippets'), clearCommand = document.getElementById('clear-command'), toolbarMenu = document.getElementById('toolbar-menu'), toolbarMenuList = document.getElementById('toolbar-menu-list'), menuViewLog = document.getElementById('menu-view-log'), menuClearLog = document.getElementById('menu-clear-log'), menuClearSqlLog = document.getElementById('menu-clear-sql-log'), menuToggleMessageDetails = document.getElementById('menu-toggle-message-details'), menuStartNewJob = document.getElementById('menu-start-new-job'), menuCancelSqlJob = document.getElementById('menu-cancel-sql-job'), menuClearHistory = document.getElementById('menu-clear-history'), historyPrev = document.getElementById('history-prev'), historyNext = document.getElementById('history-next'), statusJobMenu = document.getElementById('status-job-menu'), statusJobMenuCopy = document.getElementById('status-job-menu-copy'), statusJobMenuDisplayJoblog = document.getElementById('status-job-menu-display-joblog');
   const statusText = document.getElementById('status-text'), statusJobId = document.getElementById('status-jobid'), results = document.getElementById('results');
-  let historyIndex = -1, runningStartedAt, runningTimerId, historyDraft = '', sqlJobPollingId;
-  let showStartupFetchLimitStatus = true;
+  let historyIndex = -1, runningStartedAt, runningTimerId, runningStatusPrefix = 'Running…', historyDraft = '', sqlJobPollingId;
+  let statusJobSingleClickTimer;
+  let historyHoverTooltipEl;
+  let dedicatedJobEnabled = false;
+  let remoteMapepireEnabled = false;
+  let canStartNewJob = false;
+  let canCancelSqlJob = false;
+  let messageDetailsMode = 'SHOW';
   let baseMinHeightPx = 0, autoResizing = false;
   // Wrap the mode select so we can render a custom CSS tooltip with fast hover behavior.
   const modeTooltipWrap = document.createElement('span');
@@ -27,11 +34,6 @@
   const setStatusMessage = (message = '') => {
     statusText.textContent = message;
   };
-  const startupFetchLimitStatus = (value = '') => {
-    const normalized = String(value || '').trim();
-    if (!normalized) { return ''; }
-    return normalized;
-  };
   const hasRealSqlJobId = () => {
     const value = statusJobId.textContent?.trim().toLowerCase();
     return !!value && value !== noConnectionText;
@@ -40,7 +42,7 @@
     const normalized = String(sqlJobId || '').trim();
     const isConnected = normalized.length > 0;
     const statusJobLabel = isConnected
-      ? 'SQL job ID. Click to select, double-click to copy.'
+      ? 'SQL job ID. Click to copy, double-click to display joblog, right-click for menu.'
       : 'No IBM i connection job detected. Connect to an IBM i server to enabled Command Entry.';
     statusJobId.textContent = normalized || noConnectionText;
     statusJobId.classList.toggle('no-connection', !isConnected);
@@ -73,8 +75,20 @@
       requestSqlJobId();
     }, 5000);
   };
-  const selectStatusJobId = () => {
-    if (!hasRealSqlJobId()) { return; }
+  const copyStatusJobId = () => {
+    const sqlJobId = statusJobId.textContent?.trim();
+    if (!sqlJobId || sqlJobId.toLowerCase() === noConnectionText) { return; }
+    vscode.postMessage({ type: 'copySqlJobId', sqlJobId });
+  };
+
+  const displayStatusJoblog = () => {
+    const sqlJobId = statusJobId.textContent?.trim();
+    if (!sqlJobId || sqlJobId.toLowerCase() === noConnectionText) { return; }
+    vscode.postMessage({ type: 'requestDisplayJoblog', sqlJobId });
+  };
+  const selectEntireStatusJobId = () => {
+    const sqlJobId = statusJobId?.textContent?.trim();
+    if (!statusJobId || !sqlJobId || sqlJobId.toLowerCase() === noConnectionText) { return; }
     const selection = window.getSelection();
     if (!selection) { return; }
     const range = document.createRange();
@@ -97,21 +111,304 @@
   const restoreModeTooltip = () => {
     modeTooltipWrap.classList.remove('tooltip-suppressed');
   };
+
+  const hideHistoryHoverTooltip = () => {
+    if (!historyHoverTooltipEl) { return; }
+    historyHoverTooltipEl.remove();
+    historyHoverTooltipEl = undefined;
+  };
+
+  const showHistoryHoverTooltip = anchor => {
+    const tooltipText = String(anchor?.getAttribute('data-tooltip') || '').trim();
+    if (!tooltipText) {
+      hideHistoryHoverTooltip();
+      return;
+    }
+
+    hideHistoryHoverTooltip();
+
+    const tooltip = document.createElement('div');
+    tooltip.className = 'history-hover-tooltip';
+    tooltip.textContent = tooltipText;
+    document.body.appendChild(tooltip);
+
+    const margin = 8;
+    const offset = 6;
+    const anchorRect = anchor.getBoundingClientRect();
+    const tooltipRect = tooltip.getBoundingClientRect();
+
+    let left = anchorRect.left;
+    if (left + tooltipRect.width + margin > window.innerWidth) {
+      left = window.innerWidth - tooltipRect.width - margin;
+    }
+    left = Math.max(margin, left);
+
+    const spaceAbove = anchorRect.top - margin;
+    const spaceBelow = window.innerHeight - anchorRect.bottom - margin;
+    const showAbove = spaceAbove >= tooltipRect.height + offset || spaceAbove >= spaceBelow;
+
+    let top = showAbove
+      ? anchorRect.top - tooltipRect.height - offset
+      : anchorRect.bottom + offset;
+    top = Math.max(margin, Math.min(top, window.innerHeight - tooltipRect.height - margin));
+
+    tooltip.style.left = `${Math.round(left)}px`;
+    tooltip.style.top = `${Math.round(top)}px`;
+    tooltip.classList.toggle('is-below', !showAbove);
+    historyHoverTooltipEl = tooltip;
+  };
+
+  const attachHistoryHoverTooltip = element => {
+    element.addEventListener('mouseenter', () => showHistoryHoverTooltip(element));
+    element.addEventListener('mouseleave', hideHistoryHoverTooltip);
+    element.addEventListener('focus', () => showHistoryHoverTooltip(element));
+    element.addEventListener('blur', hideHistoryHoverTooltip);
+  };
   if (toolbarMenuList) {
     toolbarMenuList.classList.remove('is-open');
     toolbarMenuList.setAttribute('aria-hidden', 'true');
   }
+  if (statusJobMenu) {
+    statusJobMenu.classList.remove('is-open');
+    statusJobMenu.setAttribute('aria-hidden', 'true');
+  }
   const closeToolbarMenu = () => {
     if (!toolbarMenuList || !toolbarMenu) { return; }
     toolbarMenuList.classList.remove('is-open');
+    toolbarMenuList.classList.remove('flip-up');
+    toolbarMenuList.classList.remove('compact-grid');
+    toolbarMenuList.style.position = '';
+    toolbarMenuList.style.left = '';
+    toolbarMenuList.style.top = '';
+    toolbarMenuList.style.right = '';
+    toolbarMenuList.style.bottom = '';
+    toolbarMenuList.style.width = '';
+    toolbarMenuList.style.maxHeight = '';
+    toolbarMenuList.style.overflowY = '';
+    toolbarMenuList.style.removeProperty('--toolbar-menu-columns');
     toolbarMenuList.setAttribute('aria-hidden', 'true');
     toolbarMenu.setAttribute('aria-expanded', 'false');
+  };
+  const logMenuPlacementDebug = (phase, payload) => {
+    if (!MENU_POSITION_DEBUG) { return; }
+    console.log(`[Command Entry][MenuDebug] ${phase}`, payload);
+    vscode.postMessage({ type: 'menuDebug', phase, payload });
+  };
+  const closeStatusJobMenu = () => {
+    if (!statusJobMenu) { return; }
+    statusJobMenu.classList.remove('is-open');
+    statusJobMenu.style.position = '';
+    statusJobMenu.style.left = '';
+    statusJobMenu.style.top = '';
+    statusJobMenu.style.right = '';
+    statusJobMenu.style.bottom = '';
+    statusJobMenu.style.width = '';
+    statusJobMenu.style.maxHeight = '';
+    statusJobMenu.style.overflowY = '';
+    statusJobMenu.setAttribute('aria-hidden', 'true');
+    statusJobMenu.removeAttribute('data-jobid');
+  };
+  const openStatusJobMenu = (clientX, clientY, sqlJobId) => {
+    if (!statusJobMenu) { return; }
+    closeToolbarMenu();
+    statusJobMenu.classList.remove('flip-up');
+    statusJobMenu.classList.remove('compact-grid');
+    statusJobMenu.style.removeProperty('--toolbar-menu-columns');
+    statusJobMenu.classList.add('is-open');
+    statusJobMenu.setAttribute('aria-hidden', 'false');
+    statusJobMenu.setAttribute('data-jobid', sqlJobId);
+
+    const edgePadding = 8;
+    const viewportWidth = window.innerWidth || document.documentElement.clientWidth || 0;
+    const viewportHeight = window.innerHeight || document.documentElement.clientHeight || 0;
+    const naturalRect = statusJobMenu.getBoundingClientRect();
+    const menuWidth = Math.ceil(naturalRect.width || 180);
+    const menuHeight = Math.ceil(naturalRect.height || 64);
+
+    const left = Math.max(edgePadding, Math.min(clientX, viewportWidth - edgePadding - menuWidth));
+    const top = Math.max(edgePadding, Math.min(clientY, viewportHeight - edgePadding - menuHeight));
+
+    statusJobMenu.style.position = 'fixed';
+    statusJobMenu.style.left = `${Math.round(left)}px`;
+    statusJobMenu.style.top = `${Math.round(top)}px`;
+    statusJobMenu.style.right = 'auto';
+    statusJobMenu.style.bottom = 'auto';
+    statusJobMenuCopy?.focus();
+  };
+  const positionToolbarMenu = () => {
+    if (!toolbarMenuList || !toolbarMenu) { return; }
+
+    const viewportHeight = window.innerHeight || document.documentElement.clientHeight || 0;
+    const viewportWidth = window.innerWidth || document.documentElement.clientWidth || 0;
+    const edgePadding = 8;
+    const gap = 4;
+
+    // Reset dynamic styles to measure natural size each time.
+    toolbarMenuList.style.position = '';
+    toolbarMenuList.style.left = '';
+    toolbarMenuList.style.top = '';
+    toolbarMenuList.style.right = '';
+    toolbarMenuList.style.bottom = '';
+    toolbarMenuList.style.width = '';
+    toolbarMenuList.style.maxHeight = '';
+    toolbarMenuList.style.overflowY = '';
+    toolbarMenuList.classList.remove('flip-up');
+
+    const anchorRect = toolbarMenu.getBoundingClientRect();
+    let menuRect = toolbarMenuList.getBoundingClientRect();
+    let naturalHeight = Math.ceil(toolbarMenuList.scrollHeight || menuRect.height);
+    let naturalWidth = Math.ceil(menuRect.width || 190);
+    const spaceBelow = Math.max(0, viewportHeight - anchorRect.bottom - gap - edgePadding);
+    const spaceAbove = Math.max(0, anchorRect.top - gap - edgePadding);
+    const fitsBelow = naturalHeight <= spaceBelow;
+    const fitsAbove = naturalHeight <= spaceAbove;
+
+    // Prefer the side that fits naturally. If neither fits, prefer opening above to keep
+    // the menu away from the panel bottom as the viewport shrinks.
+    let shouldFlipUp;
+    if (fitsBelow) {
+      shouldFlipUp = false;
+    } else if (fitsAbove) {
+      shouldFlipUp = true;
+    } else {
+      shouldFlipUp = true;
+    }
+    toolbarMenuList.classList.toggle('flip-up', shouldFlipUp);
+
+    const maxViewportHeight = Math.max(24, Math.floor(viewportHeight - edgePadding * 2));
+    const constrainedFlipUp = shouldFlipUp && !fitsAbove;
+
+    // If neither side fits, switch to compact grid only when overflow is substantial.
+    // This keeps the normal one-column menu longer and avoids an early compact jump.
+    let compactGrid = false;
+    const bestSingleColumnSpace = Math.max(spaceAbove, spaceBelow);
+    const singleColumnOverflow = Math.max(0, naturalHeight - bestSingleColumnSpace);
+    const compactActivationOverflowPx = 28;
+    if (!fitsBelow && !fitsAbove && singleColumnOverflow >= compactActivationOverflowPx) {
+      toolbarMenuList.classList.add('compact-grid');
+      const itemCount = toolbarMenuList.querySelectorAll('button').length;
+      const compactRowHeight = 18;
+      const compactPaddingAndGap = 10;
+      const maxRowsThatFit = Math.max(1, Math.floor((maxViewportHeight - compactPaddingAndGap) / compactRowHeight));
+      const compactColumns = Math.max(2, Math.min(3, Math.ceil(itemCount / maxRowsThatFit)));
+      toolbarMenuList.style.setProperty('--toolbar-menu-columns', String(compactColumns));
+
+      menuRect = toolbarMenuList.getBoundingClientRect();
+      const compactHeight = Math.ceil(toolbarMenuList.scrollHeight || menuRect.height);
+      const compactWidth = Math.ceil(menuRect.width || naturalWidth);
+      compactGrid = true;
+      naturalHeight = compactHeight;
+      naturalWidth = compactWidth;
+    }
+
+    const sideAvailableHeight = Math.max(
+      24,
+      Math.floor(
+        shouldFlipUp
+          ? (constrainedFlipUp ? maxViewportHeight : spaceAbove)
+          : spaceBelow
+      )
+    );
+    const effectiveHeight = Math.max(24, Math.min(naturalHeight, sideAvailableHeight, maxViewportHeight));
+
+    // Pin to viewport so parent layout/overflow cannot clip the menu.
+    toolbarMenuList.style.position = 'fixed';
+
+    const maxUsableWidth = Math.max(120, viewportWidth - edgePadding * 2);
+    const effectiveWidth = Math.min(naturalWidth, maxUsableWidth);
+    toolbarMenuList.style.width = `${effectiveWidth}px`;
+
+    const unclampedLeft = anchorRect.right - effectiveWidth;
+    const clampedLeft = Math.max(edgePadding, Math.min(unclampedLeft, viewportWidth - edgePadding - effectiveWidth));
+    toolbarMenuList.style.left = `${Math.round(clampedLeft)}px`;
+    toolbarMenuList.style.right = 'auto';
+
+    const openTop = shouldFlipUp
+      ? ((constrainedFlipUp ? anchorRect.bottom : anchorRect.top) - gap - effectiveHeight)
+      : anchorRect.bottom + gap;
+    const clampedTop = Math.max(edgePadding, Math.min(openTop, viewportHeight - edgePadding - effectiveHeight));
+    toolbarMenuList.style.top = `${Math.round(clampedTop)}px`;
+    toolbarMenuList.style.bottom = 'auto';
+
+    if (naturalHeight > effectiveHeight) {
+      toolbarMenuList.style.maxHeight = `${effectiveHeight}px`;
+      toolbarMenuList.style.overflowY = 'auto';
+    }
+
+    // Final viewport clamp after actual layout (accounts for borders, padding, and scrollbars).
+    let finalRect = toolbarMenuList.getBoundingClientRect();
+    const viewportTopLimit = edgePadding;
+    const viewportBottomLimit = viewportHeight - edgePadding;
+
+    const overflowBottom = finalRect.bottom - viewportBottomLimit;
+    if (overflowBottom > 0) {
+      const adjustedTop = Math.max(viewportTopLimit, Math.round(clampedTop - overflowBottom));
+      toolbarMenuList.style.top = `${adjustedTop}px`;
+      finalRect = toolbarMenuList.getBoundingClientRect();
+    }
+
+    const overflowTop = viewportTopLimit - finalRect.top;
+    if (overflowTop > 0) {
+      const adjustedTop = Math.min(Math.round(viewportBottomLimit - finalRect.height), Math.round(finalRect.top + overflowTop));
+      toolbarMenuList.style.top = `${Math.max(viewportTopLimit, adjustedTop)}px`;
+      finalRect = toolbarMenuList.getBoundingClientRect();
+    }
+
+    const clipping = {
+      top: finalRect.top < 0,
+      bottom: finalRect.bottom > viewportHeight,
+      left: finalRect.left < 0,
+      right: finalRect.right > viewportWidth
+    };
+    logMenuPlacementDebug('position', {
+      viewport: { width: viewportWidth, height: viewportHeight },
+      anchor: {
+        top: Math.round(anchorRect.top),
+        bottom: Math.round(anchorRect.bottom),
+        left: Math.round(anchorRect.left),
+        right: Math.round(anchorRect.right)
+      },
+      natural: { width: naturalWidth, height: naturalHeight },
+      space: { above: Math.floor(spaceAbove), below: Math.floor(spaceBelow) },
+      fit: {
+        fitsAbove,
+        fitsBelow,
+        shouldFlipUp,
+        constrainedFlipUp,
+        compactGrid,
+        singleColumnOverflow: Math.round(singleColumnOverflow),
+        compactActivationOverflowPx,
+        sideAvailableHeight
+      },
+      applied: {
+        width: effectiveWidth,
+        height: effectiveHeight,
+        top: Math.round(clampedTop),
+        left: Math.round(clampedLeft),
+        maxHeight: toolbarMenuList.style.maxHeight || '<none>',
+        overflowY: toolbarMenuList.style.overflowY || '<none>'
+      },
+      finalRect: {
+        top: Math.round(finalRect.top),
+        bottom: Math.round(finalRect.bottom),
+        left: Math.round(finalRect.left),
+        right: Math.round(finalRect.right),
+        width: Math.round(finalRect.width),
+        height: Math.round(finalRect.height)
+      },
+      clipping
+    });
   };
   const openToolbarMenu = () => {
     if (!toolbarMenuList || !toolbarMenu) { return; }
     toolbarMenuList.classList.add('is-open');
     toolbarMenuList.setAttribute('aria-hidden', 'false');
     toolbarMenu.setAttribute('aria-expanded', 'true');
+    positionToolbarMenu();
+  };
+  const repositionToolbarMenuIfOpen = () => {
+    if (!toolbarMenuList?.classList.contains('is-open')) { return; }
+    positionToolbarMenu();
   };
   const toggleToolbarMenu = () => {
     if (!toolbarMenuList || !toolbarMenu) { return; }
@@ -124,6 +421,48 @@
   };
   const updateClearCommandState = () => {
     clearCommand.disabled = command.value.length === 0;
+  };
+  const isSqlCommandText = (value) => {
+    const text = String(value || '');
+    return /^\s*sql\s*:/i.test(text) || /^\s*(select|values)\b/i.test(text);
+  };
+  const areMessageDetailsShown = () => messageDetailsMode !== 'HIDE';
+  const updateMessageDetailsMenuLabel = () => {
+    if (!menuToggleMessageDetails) { return; }
+    const showing = areMessageDetailsShown();
+    menuToggleMessageDetails.textContent = showing ? 'Collapse Message Details' : 'Expand Message Details';
+    menuToggleMessageDetails.title = showing ? 'Collapse command-level message details' : 'Expand command-level message details';
+  };
+  const applyMessageDetailsMode = () => {
+    const expand = areMessageDetailsShown();
+    const executions = state.executions || [];
+    executions.forEach(execution => {
+      execution.collapsed = !expand;
+    });
+  };
+  const updateMenuCapabilities = () => {
+    const cancelDisabled = !canCancelSqlJob;
+    if (menuCancelSqlJob) {
+      menuCancelSqlJob.disabled = cancelDisabled;
+      const reason = cancelDisabled
+        ? (!dedicatedJobEnabled
+          ? 'Available only when dedicated SQL job mode is enabled'
+          : 'Enable Code for IBM i setting "Connect to remote Mapepire Server"')
+        : 'Cancel the last SQL request on the dedicated SQL job';
+      menuCancelSqlJob.title = reason;
+      menuCancelSqlJob.setAttribute('aria-disabled', String(cancelDisabled));
+    }
+    if (menuStartNewJob) {
+      menuStartNewJob.disabled = !canStartNewJob;
+      const reason = canStartNewJob
+        ? 'Reconnect the dedicated SQL job'
+        : (!dedicatedJobEnabled
+          ? 'Available only when dedicated SQL job mode is enabled'
+          : 'Enable Code for IBM i setting "Connect to remote Mapepire Server"');
+      menuStartNewJob.title = reason;
+      menuStartNewJob.setAttribute('aria-disabled', String(!canStartNewJob));
+    }
+    updateMessageDetailsMenuLabel();
   };
   const normalizeCommand = value => String(value || '').replace(/[\r\n]+/g, '');
   const lineCount = value => Math.max(minTextareaRows, String(value || '').split(/\r\n|\n|\r/).length);
@@ -220,14 +559,15 @@
       const commandEl = text('strong', execution.command, 'execution-command');
       commandEl.setAttribute('data-tooltip', 'Click=Recall, Double-Click=Copy');
       commandEl.tabIndex = 0;
+      attachHistoryHoverTooltip(replayMarker);
+      attachHistoryHoverTooltip(commandEl);
       let clickTimer;
       const singleClickDelayMs = 140;
       const reuseCommand = () => {
         command.value = execution.command;
-        mode.value = execution.mode;
         save();
         updateClearCommandState();
-        setStatusMessage('Loaded command from history. Edit and run when ready.');
+        setStatusMessage('Loaded command from history. Current run mode preserved.');
         command.focus();
       };
       const toggleMessages = () => {
@@ -304,14 +644,20 @@
             message.sentToProcedure
           ].some(value => String(value || '').trim().length > 0);
           if (hasFirstLevelContext) {
+            const typeValue = String(message.type || '').trim();
+            const displayType = typeValue ? (typeValue.startsWith('*') ? typeValue : `*${typeValue}`) : '*UNKNOWN';
+            const messageId = String(message.messageId || '—').trim() || '—';
+            const severityText = String(message.severity ?? '').trim() || '0';
+            const hoverMeta = `${messageId} ${severityText} ${displayType}`;
             const body = document.createElement('div');
             const toggle = document.createElement('button');
             toggle.type = 'button';
             toggle.className = 'message-toggle';
+            toggle.title = hoverMeta;
             const toggleIcon = text('span', '', 'message-toggle-icon');
             const summaryLine = document.createElement('span');
             summaryLine.className = 'message-toggle-label';
-            summaryLine.append(text('span', `${messageMeta} `, 'message-meta'), text('span', message.text || ''));
+            summaryLine.append(text('span', message.text || ''));
             toggle.append(toggleIcon, summaryLine);
             toggle.classList.toggle('is-expanded', !!message.firstLevelExpanded);
             toggle.setAttribute('aria-expanded', String(!!message.firstLevelExpanded));
@@ -354,7 +700,13 @@
 
             const toLine2Segments = [];
             if (String(message.sentToProcedure || '').trim()) toLine2Segments.push({ label: 'PROC', value: String(message.sentToProcedure).trim() });
+            const metaSegments = [
+              { label: 'MSGID:', value: messageId },
+              { label: 'Sev:', value: severityText },
+              { label: 'Type:', value: displayType }
+            ];
             body.hidden = !message.firstLevelExpanded;
+            body.append(makeContextLine(metaSegments));
             body.append(makeContextLine(fromLine1Segments));
             body.append(makeContextLine(fromLine2Segments));
             body.append(makeContextLine(toLine1Segments));
@@ -404,7 +756,7 @@
     results.scrollTop = previousScrollTop;
   }
   const text = (tag, value, className) => { const el = document.createElement(tag); el.textContent = value || ''; if (className) el.className = className; return el; };
-  function setRunning(value, startedAt) {
+  function setRunning(value, startedAt, statusMessage) {
     run.disabled = value; prompt.disabled = value; command.readOnly = value; clearCommand.disabled = value || command.value.length === 0;
     if (severityFilter) severityFilter.disabled = value;
     runningStartedAt = startedAt;
@@ -413,7 +765,8 @@
       runningTimerId = undefined;
     }
     if (value) {
-      setStatusMessage('Running…');
+      runningStatusPrefix = String(statusMessage || '').trim() || 'Running…';
+      setStatusMessage(runningStatusPrefix);
       runningTimerId = setInterval(() => {
         if (!runningStartedAt) {
           if (runningTimerId) {
@@ -422,11 +775,12 @@
           }
           return;
         }
-        setStatusMessage(`Running… ${formatElapsed(Date.now() - runningStartedAt)}`);
+        setStatusMessage(`${runningStatusPrefix} ${formatElapsed(Date.now() - runningStartedAt)}`);
       }, 250);
     }
     else {
       runningStartedAt = undefined;
+      runningStatusPrefix = 'Running…';
       setStatusMessage('');
     }
   }
@@ -490,9 +844,14 @@
       recallPrevious();
       return;
     }
-    if (event.key === 'F10' || event.key === 'f10' || event.code === 'F10') {
+    if (event.key === 'F8' || event.key === 'f8' || event.code === 'F8') {
       event.preventDefault();
       recallNext();
+      return;
+    }
+    if (event.key === 'F10' || event.key === 'f10' || event.code === 'F10') {
+      event.preventDefault();
+      vscode.postMessage({ type: 'toggleMessageDetails' });
       return;
     }
     if (!(event.key === 'ArrowUp' || event.key === 'ArrowDown')) return;
@@ -512,9 +871,25 @@
     }
   });
   run.addEventListener('click', requestRun); prompt.addEventListener('click', requestPrompt); clearCommand.addEventListener('click', clearCommandInput);
+  snippets?.addEventListener('click', event => {
+    event.preventDefault();
+    closeToolbarMenu();
+    vscode.postMessage({ type: 'openSnippetsMenu' });
+  });
   toolbarMenu?.addEventListener('click', event => {
     event.preventDefault();
+    if (event.ctrlKey || event.metaKey) {
+      openToolbarMenu();
+      menuViewLog?.focus();
+      return;
+    }
     toggleToolbarMenu();
+  });
+  toolbarMenu?.addEventListener('contextmenu', event => {
+    event.preventDefault();
+    event.stopPropagation();
+    openToolbarMenu();
+    menuViewLog?.focus();
   });
   toolbarMenu?.addEventListener('keydown', event => {
     if (event.key === 'ArrowDown' || event.key === 'Enter' || event.key === ' ') {
@@ -538,9 +913,35 @@
     vscode.postMessage({ type: 'clear' });
     command.focus();
   });
+  menuClearSqlLog?.addEventListener('click', () => {
+    closeToolbarMenu();
+    vscode.postMessage({ type: 'clearSqlHistoryAndMessages' });
+    command.focus();
+  });
+  menuToggleMessageDetails?.addEventListener('click', () => {
+    closeToolbarMenu();
+    vscode.postMessage({ type: 'toggleMessageDetails' });
+    command.focus();
+  });
   menuStartNewJob?.addEventListener('click', () => {
+    if (menuStartNewJob.disabled) {
+      return;
+    }
     closeToolbarMenu();
     vscode.postMessage({ type: 'startNewJob' });
+    command.focus();
+  });
+  menuCancelSqlJob?.addEventListener('click', () => {
+    if (menuCancelSqlJob.disabled) {
+      return;
+    }
+    closeToolbarMenu();
+    vscode.postMessage({ type: 'requestCancelSqlJob' });
+    command.focus();
+  });
+  menuClearHistory?.addEventListener('click', () => {
+    closeToolbarMenu();
+    vscode.postMessage({ type: 'clearHistoryAndMessages' });
     command.focus();
   });
   toolbarMenuList?.addEventListener('keydown', event => {
@@ -555,7 +956,8 @@
       return;
     }
 
-    const menuItems = [menuViewLog, menuClearLog, menuStartNewJob].filter(Boolean);
+    const menuItems = [menuViewLog, menuClearLog, menuClearSqlLog, menuClearHistory, menuToggleMessageDetails, menuStartNewJob, menuCancelSqlJob]
+      .filter(item => item && !item.disabled);
     if (!menuItems.length) { return; }
     event.preventDefault();
     const currentIndex = menuItems.indexOf(document.activeElement);
@@ -568,22 +970,35 @@
     menuItems[prevIndex].focus();
   });
   document.addEventListener('click', event => {
-    if (!toolbarMenuList || !toolbarMenu) { return; }
-    if (!toolbarMenuList.classList.contains('is-open')) { return; }
     const target = event.target;
     if (!(target instanceof Node)) {
       closeToolbarMenu();
+      closeStatusJobMenu();
       return;
     }
-    if (toolbarMenu.contains(target) || toolbarMenuList.contains(target)) {
-      return;
+
+    if (toolbarMenuList?.classList.contains('is-open')) {
+      if (!(toolbarMenu?.contains(target) || toolbarMenuList.contains(target))) {
+        closeToolbarMenu();
+      }
     }
-    closeToolbarMenu();
+
+    if (statusJobMenu?.classList.contains('is-open')) {
+      if (!(statusJobId?.contains(target) || statusJobMenu.contains(target))) {
+        closeStatusJobMenu();
+      }
+    }
   });
   command.addEventListener('focus', () => {
     closeToolbarMenu();
+    closeStatusJobMenu();
   });
-  window.addEventListener('blur', closeToolbarMenu);
+  window.addEventListener('resize', repositionToolbarMenuIfOpen);
+  window.addEventListener('resize', closeStatusJobMenu);
+  window.addEventListener('blur', () => {
+    closeToolbarMenu();
+    closeStatusJobMenu();
+  });
   historyPrev?.addEventListener('click', event => {
     if (event.ctrlKey || event.metaKey) {
       event.preventDefault();
@@ -602,23 +1017,97 @@
     recallNext();
     command.focus();
   });
-  statusJobId?.addEventListener('click', selectStatusJobId);
+  statusJobId?.addEventListener('click', event => {
+    event.preventDefault();
+    if (statusJobSingleClickTimer) {
+      clearTimeout(statusJobSingleClickTimer);
+      statusJobSingleClickTimer = undefined;
+    }
+    // Delay single-click copy so double-click can override it.
+    statusJobSingleClickTimer = setTimeout(() => {
+      statusJobSingleClickTimer = undefined;
+      selectEntireStatusJobId();
+      copyStatusJobId();
+    }, 220);
+  });
   statusJobId?.addEventListener('keydown', event => {
     if (event.key === 'Enter' || event.key === ' ') {
       event.preventDefault();
-      selectStatusJobId();
+      copyStatusJobId();
     }
   });
   statusJobId?.addEventListener('dblclick', event => {
     event.preventDefault();
+    if (statusJobSingleClickTimer) {
+      clearTimeout(statusJobSingleClickTimer);
+      statusJobSingleClickTimer = undefined;
+    }
+    selectEntireStatusJobId();
+    displayStatusJoblog();
+  });
+  statusJobId?.addEventListener('contextmenu', event => {
     const sqlJobId = statusJobId.textContent?.trim();
     if (!sqlJobId || sqlJobId.toLowerCase() === noConnectionText) { return; }
+    event.preventDefault();
+    openStatusJobMenu(event.clientX, event.clientY, sqlJobId);
+  });
+  statusJobMenuCopy?.addEventListener('click', () => {
+    const sqlJobId = statusJobMenu?.getAttribute('data-jobid') || '';
+    if (!sqlJobId) { return; }
+    closeStatusJobMenu();
     vscode.postMessage({ type: 'copySqlJobId', sqlJobId });
+  });
+  statusJobMenuDisplayJoblog?.addEventListener('click', () => {
+    const sqlJobId = statusJobMenu?.getAttribute('data-jobid') || '';
+    if (!sqlJobId) { return; }
+    closeStatusJobMenu();
+    vscode.postMessage({ type: 'requestDisplayJoblog', sqlJobId });
+  });
+  statusJobMenu?.addEventListener('keydown', event => {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      closeStatusJobMenu();
+      statusJobId?.focus();
+      return;
+    }
+
+    if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') {
+      return;
+    }
+
+    const items = [statusJobMenuCopy, statusJobMenuDisplayJoblog].filter(item => item && !item.disabled);
+    if (!items.length) { return; }
+    event.preventDefault();
+    const currentIndex = items.indexOf(document.activeElement);
+    if (event.key === 'ArrowDown') {
+      const nextIndex = (currentIndex + 1 + items.length) % items.length;
+      items[nextIndex].focus();
+      return;
+    }
+    const prevIndex = (currentIndex - 1 + items.length) % items.length;
+    items[prevIndex].focus();
   });
   window.addEventListener('message', event => {
     const message = event.data; switch (message.type) {
       case 'initialize':
         state.history = message.history || [];
+        if (message.clearHistoryOnStartup) {
+          state.executions = [];
+          historyDraft = '';
+          historyIndex = -1;
+          save();
+        }
+        messageDetailsMode = String(message.messageDetailsMode || 'SHOW').toUpperCase() === 'HIDE' ? 'HIDE' : 'SHOW';
+        applyMessageDetailsMode();
+        dedicatedJobEnabled = !!message.dedicatedJobEnabled;
+        remoteMapepireEnabled = !!message.remoteMapepireEnabled;
+        canStartNewJob = typeof message.canStartNewJob === 'boolean'
+          ? !!message.canStartNewJob
+          : (dedicatedJobEnabled && remoteMapepireEnabled);
+        canCancelSqlJob = typeof message.canCancelSqlJob === 'boolean'
+          ? !!message.canCancelSqlJob
+          : (dedicatedJobEnabled && remoteMapepireEnabled);
+        updateMenuCapabilities();
         if (message.clearInputOnStartup) {
           command.value = '';
           historyDraft = '';
@@ -628,52 +1117,70 @@
           resizeCommandInput();
         }
         setStatusJobId(message.sqlJobId || '');
-        if (message.running) { setRunning(true, Date.now()); }
-        if (showStartupFetchLimitStatus) {
-          const startupStatus = startupFetchLimitStatus(message.sqlFetchLimitDisplay);
-          if (startupStatus) {
-            setStatusMessage(startupStatus);
-          }
-        }
+        if (message.running) { setRunning(true, Date.now(), message.statusMessage); }
         render();
         results.scrollTop = 0;
         startSqlJobPollingIfNeeded();
         break;
       case 'running':
-        if (message.running) {
-          showStartupFetchLimitStatus = false;
-        }
         setStatusJobId(message.sqlJobId || '');
-        setRunning(message.running, message.startedAt);
+        setRunning(message.running, message.startedAt, message.statusMessage);
         startSqlJobPollingIfNeeded();
         break;
       case 'sqlJobId':
         setStatusJobId(message.sqlJobId || '');
         startSqlJobPollingIfNeeded();
         break;
+      case 'jobCapabilities':
+        dedicatedJobEnabled = !!message.dedicatedJobEnabled;
+        remoteMapepireEnabled = !!message.remoteMapepireEnabled;
+        canStartNewJob = !!message.canStartNewJob;
+        canCancelSqlJob = !!message.canCancelSqlJob;
+        updateMenuCapabilities();
+        break;
+      case 'messageDetailsPreference':
+        messageDetailsMode = String(message.mode || 'SHOW').toUpperCase() === 'HIDE' ? 'HIDE' : 'SHOW';
+        applyMessageDetailsMode();
+        save();
+        render();
+        updateMessageDetailsMenuLabel();
+        break;
       case 'sqlFetchLimitStatus': {
-        const status = startupFetchLimitStatus(message.sqlFetchLimitDisplay);
-        if (status) {
-          setStatusMessage(status);
-        }
+        // Legacy event retained for compatibility; fetch-limit info is no longer shown in status text.
         break;
       }
-      case 'cancelRequested': setStatusMessage('Cancel requested… IBM i may ignore this when no interruptible SQL statement is active.'); break; case 'cancelAccepted': setStatusJobId(message.sqlJobId || ''); setStatusMessage(`Cancel requested for job ${message.sqlJobId}. Waiting for IBM i to complete the original request.`); break; case 'cancelFailed': setStatusMessage(message.message); break; case 'execution': {
-        state.executions = [{ ...message.execution, messages: (message.execution.messages || []).slice(0, maxMessages) }, ...(state.executions || [])].slice(0, maxExecutions);
-        state.history = [{ command: message.execution.command, mode: message.execution.mode }, ...state.history.filter(item => item.command !== message.execution.command || item.mode !== message.execution.mode)].slice(0, 100);
+      case 'clearSqlResults':
+        state.executions = (state.executions || []).filter(execution => !isSqlCommandText(execution.command));
+        save();
+        render();
+        break;
+      case 'execution': {
+        const shouldAddToCommandEntryLog = message.addToCommandEntryLog !== false;
+        if (shouldAddToCommandEntryLog) {
+          state.executions = [{ ...message.execution, messages: (message.execution.messages || []).slice(0, maxMessages) }, ...(state.executions || [])].slice(0, maxExecutions);
+          applyMessageDetailsMode();
+        }
+        if (message.addToHistory !== false) {
+          state.history = [{ command: message.execution.command, mode: message.execution.mode }, ...state.history.filter(item => item.command !== message.execution.command || item.mode !== message.execution.mode)].slice(0, 100);
+        }
         command.value = '';
         historyDraft = '';
         historyIndex = -1;
         save();
         updateClearCommandState();
         resizeCommandInput();
-        render({ pinNewest: true });
+        if (shouldAddToCommandEntryLog) {
+          render({ pinNewest: true });
+        }
         break;
       }
-      case 'setCommand': command.value = message.command; save(); updateClearCommandState(); resizeCommandInput(); command.focus(); break; case 'setCommandMode': command.value = message.command; mode.value = message.mode || mode.value; updateModeTooltip(); save(); updateClearCommandState(); resizeCommandInput(); command.focus(); break; case 'clearResults': state.executions = []; save(); render(); break; case 'focusInput': command.focus(); break; case 'runCurrent': requestRun(); break; case 'promptCurrent': requestPrompt(); break; case 'notice': setStatusMessage(message.message); break;
+      case 'historyUpdated': state.history = message.history || []; historyDraft = ''; historyIndex = -1; save(); break; case 'setCommand': command.value = message.command; save(); updateClearCommandState(); resizeCommandInput(); command.focus(); break; case 'setCommandMode': command.value = message.command; mode.value = message.mode || mode.value; updateModeTooltip(); save(); updateClearCommandState(); resizeCommandInput(); command.focus(); break; case 'clearResults': state.executions = []; save(); render(); break; case 'focusInput': command.focus(); break; case 'runCurrent': requestRun(); break; case 'promptCurrent': requestPrompt(); break; case 'notice': setStatusMessage(message.message); break;
     }
   });
+  results.addEventListener('scroll', hideHistoryHoverTooltip, { passive: true });
+  window.addEventListener('resize', hideHistoryHoverTooltip);
   window.addEventListener('beforeunload', () => {
+    hideHistoryHoverTooltip();
     if (runningTimerId) {
       clearInterval(runningTimerId);
       runningTimerId = undefined;

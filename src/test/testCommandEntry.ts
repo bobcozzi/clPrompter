@@ -15,6 +15,5 @@ assert.match(CMD_RUN_SQL, /CMD_RUN\(\?, \?\)/);
 assert.strictEqual(normalizeSqlJobId('123456/myuser/qzdasoinit'), '123456/MYUSER/QZDASOINIT');
 assert.strictEqual(normalizeSqlJobId('123456/USER/NOT VALID'), undefined);
 const cancelCommand = buildCancelSqlJobCommand('123456/MYUSER/QZDASOINIT');
-assert.match(cancelCommand, /QSYS2\.CANCEL_SQL\(''123456\/MYUSER\/QZDASOINIT''\)/i);
-assert.match(cancelCommand, /RUNSQL\s+SQL\('/i);
+assert.match(cancelCommand, /^CALL\s+QSYS2\.CANCEL_SQL\('123456\/MYUSER\/QZDASOINIT'\)$/i);
 console.log('Command Entry model tests passed');

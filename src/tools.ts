@@ -16,12 +16,6 @@ export interface SqlFunctionExistsResult {
     rows: SqlFunctionInfo[];
 }
 
-export interface UserSqlResult<T = Record<string, unknown>> {
-    statement: string;
-    rowCount: number;
-    rows: T[];
-}
-
 const FIND_SQL_FUNCTION = `SELECT SPECIFIC_SCHEMA,
                                 SPECIFIC_NAME,
                                 ROUTINE_NAME,
@@ -72,26 +66,3 @@ export async function checkSqlFunctionExists(
     };
 }
 
-/**
- * Executes caller-provided SQL on the active IBM i SQL runner.
- * Optional bindings let callers parameterize values safely.
- */
-export async function runUserSql<T = Record<string, unknown>>(
-    connection: IBMi,
-    statement: string,
-    bindings?: unknown[]
-): Promise<UserSqlResult<T>> {
-    const sql = statement.trim();
-    if (!sql) {
-        throw new Error('statement is required.');
-    }
-
-    const options = bindings && bindings.length > 0 ? { bindings } : undefined;
-    const result = await connection.runSQL(sql, options) as T[];
-
-    return {
-        statement: sql,
-        rowCount: result.length,
-        rows: result
-    };
-}
