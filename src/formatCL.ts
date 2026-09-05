@@ -170,10 +170,10 @@ export function buildCLCommand(
 
   // Add command name as-is - case conversion will be handled by formatter
   cmd += cmdName;
-    const hasElemPatterns = Object.keys(values).some(key =>
-      /^.+_ELEM\d+$/.test(key) ||                 // simple
-      /^.+_ELEM\d+_(QUAL|SUB)\d+$/.test(key)      // nested QUAL/SUB
-    );
+  const hasElemPatterns = Object.keys(values).some(key =>
+    /^.+_ELEM\d+$/.test(key) ||                 // simple
+    /^.+_ELEM\d+_(QUAL|SUB)\d+$/.test(key)      // nested QUAL/SUB
+  );
 
 
   // ✅ Only process ELEM grouping if there are ELEM patterns
@@ -482,17 +482,31 @@ function deepEqual(a: any, b: any): boolean {
 }
 
 function isCLExpression(val: string): boolean {
-  // Detect common CL operators
-  const ops = ['*CAT', '*TCAT', '*BCAT', '*EQ', '*NE', '*LT', '*LE', '*GT', '*GE'];
-  const trimmed = val.trim().toUpperCase();
+  const trimmed = val.trim();
+  const upper = trimmed.toUpperCase();
 
-  if (trimmed.startsWith('(') && trimmed.endsWith(')')) return true;
-  if (ops.some(op => trimmed.includes(op))) return true;
-  // Detect any %functionName( pattern (future-proof for new CL built-ins)
-  if (/%[A-Z][A-Z0-9]*\s*\(/i.test(trimmed)) return true;
-  // Also treat any value with an ampersand variable and operator as an expression
-  if (/&[A-Z][A-Z0-9]*\s*[*%]/i.test(trimmed)) return true;
-  return false;
+  if (!trimmed) return false;
+  if (upper.startsWith('(') && upper.endsWith(')')) return true;
+
+  // Named CL operators not always surfaced as token type "operator" by simple contains checks.
+  const namedOps = [
+    '*CAT', '*TCAT', '*BCAT',
+    '*AND', '*OR', '*NOT',
+    '*EQ', '*NE', '*GT', '*GE', '*LT', '*LE', '*NG', '*NL'
+  ];
+  if (namedOps.some(op => upper.includes(op))) return true;
+
+  // Detect built-ins like %SST(...), %SUBSTRING(...), etc.
+  if (/%[A-Z][A-Z0-9]*\s*\(/i.test(upper)) return true;
+
+  // Tokenized detection catches symbolic operators across all expression families:
+  // arithmetic (+ - * /), character (|| |> |<), logical (& | ¬), relational (= > < >= <= ¬= ¬> ¬<).
+  try {
+    const tokens = tokenizeCL(trimmed);
+    return tokens.some(token => token.type === 'operator');
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -1073,12 +1087,12 @@ function writeFormatted(
 export function safeExtractKwdArg(cmd: string, kwd: string): string | null {
   const s = String(cmd ?? '');
   const kwdU = kwd.toUpperCase();
-  let inStr = false, quote: "'"|'"'|'' = '';
+  let inStr = false, quote: "'" | '"' | '' = '';
   for (let i = 0; i < s.length; i++) {
     const ch = s[i];
     if (inStr) {
       if (ch === quote) {
-        if (quote === "'" && s[i+1] === "'") { i++; continue; }
+        if (quote === "'" && s[i + 1] === "'") { i++; continue; }
         inStr = false; quote = '';
       }
       continue;
@@ -1086,7 +1100,7 @@ export function safeExtractKwdArg(cmd: string, kwd: string): string | null {
 
     if (ch.toUpperCase() === kwdU[0]) {
       let k = 0;
-      while (k < kwdU.length && s[i+k] && s[i+k].toUpperCase() === kwdU[k]) k++;
+      while (k < kwdU.length && s[i + k] && s[i + k].toUpperCase() === kwdU[k]) k++;
       if (k === kwdU.length) {
         let j = i + k;
         while (j < s.length && (s[j] === ' ' || s[j] === '\t')) j++;
@@ -1096,13 +1110,13 @@ export function safeExtractKwdArg(cmd: string, kwd: string): string | null {
             const c = s[p];
             if (inStr) {
               if (c === quote) {
-                if (quote === "'" && s[p+1] === "'") { p += 2; continue; }
+                if (quote === "'" && s[p + 1] === "'") { p += 2; continue; }
                 inStr = false; quote = '';
               }
             } else {
               if (c === "'" || c === '"') { inStr = true; quote = c as any; }
               else if (c === '(') depth++;
-              else if (c === ')') { depth--; if (depth === 0) return s.slice(j+1, p); }
+              else if (c === ')') { depth--; if (depth === 0) return s.slice(j + 1, p); }
             }
             p++;
           }

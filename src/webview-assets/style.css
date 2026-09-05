@@ -59,6 +59,7 @@ body[data-vscode-theme-kind="vscode-high-contrast"] .parm-kwd {
   color: #00AA00;
   font-family: var(--vscode-editor-font-family, 'Courier New', monospace);
 }
+
 /* CL Command Label styling */
 #cmdLabel {
   color: #00AA00;
@@ -238,8 +239,10 @@ body[data-vscode-theme-kind="vscode-high-contrast"] .keyword-highlight {
 textarea.long-text-input {
   width: 80ch;
   max-width: 80ch;
-  min-height: calc(3 * 1.4em + 10px); /* 3 rows minimum */
-  max-height: calc(20 * 1.4em + 10px); /* 20 rows maximum */
+  min-height: calc(3 * 1.4em + 10px);
+  /* 3 rows minimum */
+  max-height: calc(20 * 1.4em + 10px);
+  /* 20 rows maximum */
   resize: vertical;
   font-family: var(--vscode-editor-font-family, 'Consolas', 'Courier New', monospace);
   font-size: var(--vscode-editor-font-size, 13px);
@@ -324,6 +327,40 @@ textarea.long-text-input:focus {
   margin-bottom: 0.5em;
 }
 
+.title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.25rem;
+}
+
+.title-row .main-title {
+  margin-bottom: 0;
+}
+
+.copy-xml-btn {
+  font-family: var(--vscode-editor-font-family, 'Courier New', monospace);
+  font-size: 0.82rem;
+  line-height: 1;
+  padding: 0.2rem 0.45rem;
+  border-radius: 4px;
+  border: 1px solid var(--vscode-button-border, var(--vscode-contrastBorder, transparent));
+  background: var(--vscode-button-secondaryBackground, var(--vscode-editorWidget-background));
+  color: var(--vscode-button-secondaryForeground, var(--vscode-editor-foreground));
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.copy-xml-btn:hover:not(:disabled) {
+  background: var(--vscode-button-secondaryHoverBackground, var(--vscode-list-hoverBackground));
+}
+
+.copy-xml-btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
 .parm-multi-group {
   border: 1px dashed #bbb;
   margin-bottom: 1em;
@@ -361,6 +398,7 @@ textarea.long-text-input:focus {
   padding: 0 0.55em;
   width: auto;
 }
+
 .remove-parm-btn {
   background: pink;
   border-radius: 50%;
@@ -718,16 +756,19 @@ textarea.validation-error {
   box-sizing: border-box;
   opacity: 0.6;
 }
+
 .param-help-btn:hover {
   opacity: 1;
   color: var(--vscode-textLink-foreground, #3794ff);
   border-color: var(--vscode-textLink-foreground, #3794ff);
 }
+
 /* Custom CSS tooltip — replaces the unreliable native title attribute.
    Shows after a short hover delay; always re-appears correctly. */
 .param-help-btn[data-tooltip] {
   position: relative;
 }
+
 .param-help-btn[data-tooltip]::after {
   content: attr(data-tooltip);
   position: absolute;
@@ -747,6 +788,7 @@ textarea.validation-error {
   opacity: 0;
   transition: opacity 0.1s ease;
 }
+
 .param-help-btn[data-tooltip]:hover::after {
   opacity: 1;
   transition-delay: 0.4s;
@@ -758,7 +800,8 @@ textarea.validation-error {
   bottom: 28px;
   left: 50%;
   transform: translateX(-50%) translateY(10px);
-  z-index: 19999;  /* just below the help overlay */
+  z-index: 19999;
+  /* just below the help overlay */
   display: flex;
   align-items: center;
   gap: 8px;
@@ -768,15 +811,17 @@ textarea.validation-error {
   padding: 8px 18px;
   border-radius: 4px;
   font-size: 0.85em;
-  box-shadow: 0 4px 14px rgba(0,0,0,0.45);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.45);
   opacity: 0;
   pointer-events: none;
   transition: opacity 0.15s ease, transform 0.15s ease;
 }
+
 #clp-help-toast.visible {
   opacity: 1;
   transform: translateX(-50%) translateY(0);
 }
+
 .clp-toast-spinner {
   width: 11px;
   height: 11px;
@@ -786,8 +831,11 @@ textarea.validation-error {
   animation: clp-spin 0.7s linear infinite;
   flex-shrink: 0;
 }
+
 @keyframes clp-spin {
-  to { transform: rotate(360deg); }
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 /* Full-screen backdrop for the parameter help panel */
@@ -800,6 +848,7 @@ textarea.validation-error {
   align-items: stretch;
   justify-content: flex-end;
 }
+
 #clp-help-overlay.visible {
   display: flex;
 }
@@ -811,9 +860,10 @@ textarea.validation-error {
   color: var(--vscode-foreground, #cccccc);
   display: flex;
   flex-direction: column;
-  box-shadow: -4px 0 16px rgba(0,0,0,0.4);
+  box-shadow: -4px 0 16px rgba(0, 0, 0, 0.4);
   overflow: hidden;
 }
+
 #clp-help-header {
   display: flex;
   align-items: center;
@@ -823,6 +873,7 @@ textarea.validation-error {
   border-bottom: 1px solid var(--vscode-panel-border, #444);
   flex-shrink: 0;
 }
+
 #clp-help-title {
   font-weight: bold;
   font-size: 0.95em;
@@ -830,6 +881,7 @@ textarea.validation-error {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
 #clp-help-close {
   background: transparent;
   border: none;
@@ -840,9 +892,11 @@ textarea.validation-error {
   border-radius: 3px;
   flex-shrink: 0;
 }
+
 #clp-help-close:hover {
-  background: var(--vscode-toolbar-hoverBackground, rgba(255,255,255,0.1));
+  background: var(--vscode-toolbar-hoverBackground, rgba(255, 255, 255, 0.1));
 }
+
 #clp-help-body {
   padding: 14px;
   overflow-y: auto;
@@ -850,40 +904,69 @@ textarea.validation-error {
   font-size: 0.9em;
   line-height: 1.5;
 }
-#clp-help-body p   { margin: 0 0 0.7em; }
+
+#clp-help-body p {
+  margin: 0 0 0.7em;
+}
+
 #clp-help-body h3,
 #clp-help-body h4,
-#clp-help-body h5  { margin: 0.9em 0 0.3em; font-weight: 600; }
-#clp-help-body ul  { margin: 0 0 0.7em 1.2em; padding: 0; }
-#clp-help-body li  { margin-bottom: 0.25em; }
-#clp-help-body dl  { margin: 0 0 0.7em; }
-#clp-help-body dt  { font-weight: 600; margin-top: 0.6em; }
-#clp-help-body dd  { margin: 0.1em 0 0.4em 1.2em; }
+#clp-help-body h5 {
+  margin: 0.9em 0 0.3em;
+  font-weight: 600;
+}
+
+#clp-help-body ul {
+  margin: 0 0 0.7em 1.2em;
+  padding: 0;
+}
+
+#clp-help-body li {
+  margin-bottom: 0.25em;
+}
+
+#clp-help-body dl {
+  margin: 0 0 0.7em;
+}
+
+#clp-help-body dt {
+  font-weight: 600;
+  margin-top: 0.6em;
+}
+
+#clp-help-body dd {
+  margin: 0.1em 0 0.4em 1.2em;
+}
+
 #clp-help-body code {
   font-family: var(--vscode-editor-font-family, monospace);
   font-size: 0.92em;
-  background: var(--vscode-textCodeBlock-background, rgba(128,128,128,0.15));
+  background: var(--vscode-textCodeBlock-background, rgba(128, 128, 128, 0.15));
   padding: 0.1em 0.3em;
   border-radius: 3px;
 }
+
 #clp-help-body hr {
   border: none;
   border-top: 1px solid var(--vscode-editorWidget-border, #555);
   margin: 0.8em 0;
 }
+
 #clp-help-body table {
   border-collapse: collapse;
   width: 100%;
   margin: 0 0 0.8em;
   font-size: 0.9em;
 }
+
 #clp-help-body th,
 #clp-help-body td {
   border: 1px solid var(--vscode-editorWidget-border, #555);
   padding: 4px 8px;
   text-align: left;
 }
+
 #clp-help-body th {
-  background: var(--vscode-sideBarSectionHeader-background, rgba(128,128,128,0.2));
+  background: var(--vscode-sideBarSectionHeader-background, rgba(128, 128, 128, 0.2));
   font-weight: 600;
 }

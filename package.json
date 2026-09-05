@@ -2,7 +2,7 @@
   "name": "clprompter",
   "displayName": "Bob Cozzi's CL Prompter and Formatter for IBM i",
   "description": "IBM i CL Prompting and Formatting: Built for modern development",
-  "version": "1.0.22",
+  "version": "1.0.23",
   "author": {
     "name": "Bob Cozzi",
     "url": "https://github.com/bobcozzi"
@@ -170,11 +170,6 @@
         "command": "clprompter.codeSnippet.export",
         "category": "Code Snippets",
         "title": "Export JSON"
-      },
-      {
-        "command": "clprompter.codeSnippet.openAdvancedEditor",
-        "category": "Code Snippets",
-        "title": "Open Advanced Editor"
       },
       {
         "command": "clprompter.codeSnippet.refresh",
@@ -606,7 +601,8 @@
     "copy-assets": "cp -r src/webview-assets/* media/",
     "build": "npm run compile && npm run compile-webview && npm run copy-assets",
     "test:api": "tsc src/testAPICall.ts --outDir out --module commonjs --target es2020 --esModuleInterop --skipLibCheck && node out/testAPICall.js",
-    "test:command-entry": "tsc src/test/testCommandEntry.ts --outDir out --module commonjs --target es2020 --esModuleInterop --skipLibCheck && node out/test/testCommandEntry.js"
+    "test:command-entry": "tsc src/test/testCommandEntry.ts --outDir out --module commonjs --target es2020 --esModuleInterop --skipLibCheck && node out/test/testCommandEntry.js",
+    "test:dep-qual-default": "tsc src/test/testDepQualDefault.ts --outDir out --module commonjs --target es2020 --esModuleInterop --skipLibCheck && node out/test/testDepQualDefault.js"
   },
   "devDependencies": {
     "@types/node": "20.8.10",

@@ -4,6 +4,20 @@ All notable changes to this project are documented in this file.
 
 ## [Preview of CL Command Entry]
 
+## [1.0.23] - 2026-09-05
+
+### What's Fixed
+
+- Fixed an issue where prompting commands with complex nested lists (ELEM within ELEM), such as RTVDTAARA, could lose nested ELEM values.
+- Refined dependency validation messages between parameters to make them clearer and easier to understand.
+- Improved detection of unchanged parameters that use default values, which reduces erroneous validation messages.
+- Added support for CL symbolic concatenation operators (`||`, `|>`, and `|<`) in addition to the word-based forms. Logical operator support was also expanded. The following now prompts and formats correctly:
+```cl
+ SNDPGMMSG  MSGID(CPF9898) MSGF(QCPFMSG) +
+                          MSGDTA('Job' |> &JOBNAME |> 'was not +
+                          found in any job queue.') MSGTYPE(*COMP)
+```
+
 ## [1.0.22] - 2026-09-04
 
 ### What's New

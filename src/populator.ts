@@ -24,6 +24,7 @@
 
 
 import { DOMParser, Element as XMLElement, Node as XMLNode } from '@xmldom/xmldom';
+import { tokenizeCL } from './tokenizeCL';
 
 const POPULATOR_DEBUG_LOGS = false;
 function debugLog(...args: unknown[]): void {
@@ -45,15 +46,27 @@ export interface PopulationOptions {
  * Check if a CL value is an expression that should be treated as a single unit
  */
 function isCLExpression(val: string): boolean {
-  const ops = ['*CAT', '*TCAT', '*BCAT', '*EQ', '*NE', '*LT', '*LE', '*GT', '*GE'];
-  const trimmed = val.trim().toUpperCase();
+  const trimmed = val.trim();
+  const upper = trimmed.toUpperCase();
 
-  if (trimmed.startsWith('(') && trimmed.endsWith(')')) return true;
-  if (ops.some(op => trimmed.includes(op))) return true;
-  if (/%[A-Z][A-Z0-9]*\s*\(/i.test(trimmed)) return true;
-  if (/&[A-Z][A-Z0-9]*\s*[*%]/i.test(trimmed)) return true;
+  if (!trimmed) return false;
+  if (upper.startsWith('(') && upper.endsWith(')')) return true;
 
-  return false;
+  const namedOps = [
+    '*CAT', '*TCAT', '*BCAT',
+    '*AND', '*OR', '*NOT',
+    '*EQ', '*NE', '*GT', '*GE', '*LT', '*LE', '*NG', '*NL'
+  ];
+  if (namedOps.some(op => upper.includes(op))) return true;
+
+  if (/%[A-Z][A-Z0-9]*\s*\(/i.test(upper)) return true;
+
+  try {
+    const tokens = tokenizeCL(trimmed);
+    return tokens.some(token => token.type === 'operator');
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -151,7 +164,7 @@ function generateElemInstructions(
         // Check if this is a QUAL element (qualified name with 2 parts)
         // QUAL arrays have exactly 2 string elements (library/file or similar)
         const isQualElement = elemValue.length === 2 &&
-                              elemValue.every(v => typeof v === 'string' || v === '');
+          elemValue.every(v => typeof v === 'string' || v === '');
 
         if (isQualElement) {
           debugLog(`[generateElemInstructions] ${kwd} - Detected QUAL element, creating QUAL instructions`);

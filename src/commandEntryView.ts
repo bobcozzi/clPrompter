@@ -50,6 +50,7 @@ interface CommandEntrySqlSnippet {
     label: string;
     stmt: string;
     group: string;
+    order?: number;
     source: 'built-in' | 'user';
     createdAt?: string;
     updatedAt?: string;
@@ -60,6 +61,7 @@ export interface CodeSnippetRecord {
     label: string;
     codeTemplate: string;
     group: string;
+    order?: number;
     source: 'built-in' | 'user';
 }
 
@@ -68,11 +70,26 @@ interface CommandEntrySqlSnippetUser {
     label: string;
     stmt: string;
     group: string;
+    order?: number;
     createdAt: string;
     updatedAt: string;
 }
 
 type CodeSnippetImportMode = 'merge' | 'replace-all' | 'add-new-only';
+
+function normalizeSnippetOrder(value: unknown): number | undefined {
+    if (value === undefined || value === null || value === '') {
+        return undefined;
+    }
+
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed)) {
+        return undefined;
+    }
+
+    const whole = Math.trunc(parsed);
+    return whole >= 0 ? whole : undefined;
+}
 
 interface SnippetTemplateContext {
     sqlJobId?: string;
@@ -86,28 +103,6 @@ interface SnippetTemplateContext {
 
 
 const BUILT_IN_SQL_SNIPPETS: ReadonlyArray<CommandEntrySqlSnippet> = [
-    {
-        id: 'builtin.last-spooled-file',
-        label: 'Display Last SPOOLED File',
-        stmt: [
-            'WITH sf AS (',
-            'SELECT * FROM TABLE (qsys2.spooled_file_info(',
-            "     USER_NAME => '*CURRENT', job_name => '*ALL',",
-            "     STARTING_TIMESTAMP => current_date,",
-            "     ENDING_TIMESTAMP => current_timestamp)) SF",
-            '  ORDER BY sf.creation_timestamp DESC',
-            '  LIMIT 1',
-            ') ',
-            'SELECT sd.* FROM sf',
-            ',LATERAL (SELECT * FROM TABLE(systools.spooled_file_data(',
-            '           JOB_NAME => SF.QUALIFIED_JOB_NAME,',
-            '           SPOOLED_FILE_NAME => SF.SPOOLED_FILE_NAME,',
-            '           SPOOLED_FILE_NUMBER => SF.SPOOLED_FILE_NUMBER)) spd',
-            ') sd'
-        ].join(' '),
-        group: 'Job Info',
-        source: 'built-in'
-    },
     {
         id: 'builtin.lastest-joblog',
         label: 'Joblog: Last 200 msgs',
@@ -129,6 +124,7 @@ const BUILT_IN_SQL_SNIPPETS: ReadonlyArray<CommandEntrySqlSnippet> = [
             'ORDER BY ORDINAL_POSITION DESC FETCH FIRST 200 ROWS ONLY'
         ].join(' '),
         group: 'Job Info',
+        order: 10,
         source: 'built-in'
     },
     {
@@ -152,6 +148,7 @@ const BUILT_IN_SQL_SNIPPETS: ReadonlyArray<CommandEntrySqlSnippet> = [
             'ORDER BY ORDINAL_POSITION DESC'
         ].join(' '),
         group: 'Job Info',
+        order: 20,
         source: 'built-in'
     },
     {
@@ -159,10 +156,34 @@ const BUILT_IN_SQL_SNIPPETS: ReadonlyArray<CommandEntrySqlSnippet> = [
         label: 'Library List',
         stmt: "SELECT * FROM QSYS2.LIBRARY_LIST_INFO",
         group: 'Job Info',
+        order: 30,
         source: 'built-in'
     },
     {
-        id: 'builtin.job-info-splf',
+        id: 'builtin.last-spooled-file',
+        label: 'Display Last SPOOLED File',
+        stmt: [
+            'WITH sf AS (',
+            'SELECT * FROM TABLE (qsys2.spooled_file_info(',
+            "     USER_NAME => '*CURRENT', job_name => '*ALL',",
+            "     STARTING_TIMESTAMP => current_date,",
+            "     ENDING_TIMESTAMP => current_timestamp)) SF",
+            '  ORDER BY sf.creation_timestamp DESC',
+            '  LIMIT 1',
+            ') ',
+            'SELECT sd.* FROM sf',
+            ',LATERAL (SELECT * FROM TABLE(systools.spooled_file_data(',
+            '           JOB_NAME => SF.QUALIFIED_JOB_NAME,',
+            '           SPOOLED_FILE_NAME => SF.SPOOLED_FILE_NAME,',
+            '           SPOOLED_FILE_NUMBER => SF.SPOOLED_FILE_NUMBER)) spd',
+            ') sd'
+        ].join(' '),
+        group: 'Job Info',
+        order: 90,
+        source: 'built-in'
+    },
+    {
+        id: 'builtin.job-splf-list',
         label: 'SPOOLED Files (Job)',
         stmt: [
             'SELECT SPOOLED_FILE_NAME AS SPLFNAME, SPOOLED_FILE_NUMBER AS SPLNBR, STATUS,',
@@ -175,6 +196,7 @@ const BUILT_IN_SQL_SNIPPETS: ReadonlyArray<CommandEntrySqlSnippet> = [
             'ORDER BY CREATION_TIMESTAMP'
         ].join(' '),
         group: 'Job Info',
+        order: 100,
         source: 'built-in'
     },
     {
@@ -188,6 +210,7 @@ const BUILT_IN_SQL_SNIPPETS: ReadonlyArray<CommandEntrySqlSnippet> = [
             'ORDER BY ORDINAL_POSITION'
         ].join(' '),
         group: 'Admin',
+        order: 10,
         source: 'built-in'
     },
     {
@@ -200,6 +223,7 @@ const BUILT_IN_SQL_SNIPPETS: ReadonlyArray<CommandEntrySqlSnippet> = [
             'ORDER BY ORDINAL_POSITION'
         ].join(' '),
         group: 'Admin',
+        order: 20,
         source: 'built-in'
     },
     {
@@ -212,6 +236,7 @@ const BUILT_IN_SQL_SNIPPETS: ReadonlyArray<CommandEntrySqlSnippet> = [
             'ORDER BY ORDINAL_POSITION'
         ].join(' '),
         group: 'Admin',
+        order: 30,
         source: 'built-in'
     },
     {
@@ -224,22 +249,7 @@ const BUILT_IN_SQL_SNIPPETS: ReadonlyArray<CommandEntrySqlSnippet> = [
             'ORDER BY ORDINAL_POSITION'
         ].join(' '),
         group: 'Admin',
-        source: 'built-in'
-    },
-    {
-        id: 'builtin.spooled-files-job',
-        label: 'SPOOLED Files (Job)',
-        stmt: [
-            'SELECT SPOOLED_FILE_NAME AS SPLFNAME, SPOOLED_FILE_NUMBER AS SPLNBR, STATUS,',
-            '       QUALIFIED_JOB_NAME AS JOB, OUTPUT_PRIORITY AS OUTPTY, TOTAL_PAGES AS PAGES,',
-            '       COPIES, CREATION_TIMESTAMP AS CREATED, USER_DATA, FILE_AVAILABLE AS FILE_AVAIL,',
-            '       SIZE, FORM_TYPE, OUTPUT_QUEUE_LIBRARY AS OUTQ_LIB, OUTPUT_QUEUE AS OUTQ_NAME,',
-            '       ASP_NUMBER, SYSTEM',
-            "FROM TABLE(QSYS2.SPOOLED_FILE_INFO(JOB_NAME => '${sqlJobId}' ))",
-            "WHERE SPOOLED_FILE_NAME <> 'QPRINT' AND JOB_NAME <> 'MAPEPIRE'",
-            'ORDER BY CREATION_TIMESTAMP'
-        ].join(' '),
-        group: 'SPOOLED Files',
+        order: 40,
         source: 'built-in'
     },
     {
@@ -256,6 +266,7 @@ const BUILT_IN_SQL_SNIPPETS: ReadonlyArray<CommandEntrySqlSnippet> = [
             'ORDER BY CREATION_TIMESTAMP'
         ].join(' '),
         group: 'SPOOLED Files',
+        order: 20,
         source: 'built-in'
     }
 ];
@@ -294,7 +305,6 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
     private clearInputOnFirstReady = true;
     private clearHistoryOnFirstReady = true;
     private lastPostedSqlJobId: string | undefined;
-    private snippetManagerPanel: vscode.WebviewPanel | undefined;
     private readonly output: vscode.OutputChannel;
     private readonly jobManager: CommandEntryJobManager;
     private readonly service: CommandEntryService;
@@ -406,14 +416,15 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
             label: snippet.label,
             codeTemplate: snippet.stmt,
             group: snippet.group,
+            order: snippet.order,
             source: snippet.source
         }));
     }
-    async createCodeSnippet(label: string, codeTemplate: string, group = 'Admin'): Promise<void> {
-        await this.addUserSqlSnippet(label, codeTemplate, group);
+    async createCodeSnippet(label: string, codeTemplate: string, group = 'Admin', order?: number): Promise<void> {
+        await this.addUserSqlSnippet(label, codeTemplate, group, order);
     }
-    async updateCodeSnippet(id: string, label: string, codeTemplate: string, group?: string): Promise<void> {
-        await this.updateUserSqlSnippet(id, label, codeTemplate, group);
+    async updateCodeSnippet(id: string, label: string, codeTemplate: string, group?: string, order?: number): Promise<void> {
+        await this.updateUserSqlSnippet(id, label, codeTemplate, group, order);
     }
     async deleteCodeSnippet(id: string): Promise<void> {
         await this.deleteSqlSnippet(id);
@@ -424,9 +435,6 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
     async reorderCodeSnippets(orderedIds: string[]): Promise<void> {
         await this.persistMergedSnippetOrder(orderedIds);
         this.notifyCodeSnippetsChanged();
-    }
-    openAdvancedCodeSnippetEditor(): void {
-        this.showSnippetManagerPanel();
     }
     requestExportCodeSnippets(): void {
         void this.exportCodeSnippetsToJson().catch((error) => {
@@ -448,8 +456,6 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
     async dispose(): Promise<void> {
         await this.service.closeSqlSession();
         setSqlResultPanelRequestHandler(undefined);
-        this.snippetManagerPanel?.dispose();
-        this.snippetManagerPanel = undefined;
         this.onDidChangeCodeSnippetsEmitter.dispose();
         await this.jobManager.dispose();
         this.output.dispose();
@@ -992,6 +998,7 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
             const label = String(record.label || '').trim();
             const stmt = String(record.stmt ?? record.sqlTemplate ?? '').trim();
             const group = String(record.group || 'Admin').trim();
+            const order = normalizeSnippetOrder((record as { order?: unknown; sequence?: unknown }).order ?? (record as { sequence?: unknown }).sequence);
             if (!id || !label || !stmt) {
                 continue;
             }
@@ -1000,6 +1007,7 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
                 label,
                 stmt,
                 group,
+                order,
                 createdAt: String(record.createdAt || new Date().toISOString()),
                 updatedAt: String(record.updatedAt || new Date().toISOString())
             });
@@ -1098,7 +1106,10 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
         }
 
         const existingOrder = this.getSqlSnippetOrder().filter((id) => !builtInIds.has(id));
-        const refreshedOrder = [...BUILT_IN_SQL_SNIPPETS.map((snippet) => snippet.id), ...existingOrder];
+        const refreshedOrder = [
+            ...this.sortSnippetsForDefaultOrder(BUILT_IN_SQL_SNIPPETS).map((snippet) => snippet.id),
+            ...existingOrder
+        ];
         await this.setSqlSnippetOrder(refreshedOrder);
 
         const currentVersion = this.currentExtensionVersion();
@@ -1121,12 +1132,13 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
             label: snippet.label,
             stmt: snippet.stmt,
             group: snippet.group,
+            order: snippet.order,
             source: 'user',
             createdAt: snippet.createdAt,
             updatedAt: snippet.updatedAt
         }));
 
-        const all = [...builtInSnippets, ...userSnippets];
+        const all = this.sortSnippetsForDefaultOrder([...builtInSnippets, ...userSnippets]);
         const byId = new Map(all.map((item) => [item.id, item]));
         const ordered: CommandEntrySqlSnippet[] = [];
         const order = this.getSqlSnippetOrder();
@@ -1137,8 +1149,52 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
                 byId.delete(id);
             }
         }
-        ordered.push(...byId.values());
+        for (const snippet of all) {
+            if (byId.has(snippet.id)) {
+                ordered.push(snippet);
+                byId.delete(snippet.id);
+            }
+        }
         return ordered;
+    }
+
+    private sortSnippetsForDefaultOrder(snippets: ReadonlyArray<CommandEntrySqlSnippet>): CommandEntrySqlSnippet[] {
+        const groupOrder = new Map<string, number>();
+        DEFAULT_CODE_SNIPPET_GROUPS.forEach((groupName, index) => {
+            groupOrder.set(groupName, index);
+        });
+
+        const withIndex = snippets.map((snippet, index) => ({ snippet, index }));
+        withIndex.sort((left, right) => {
+            const leftGroupRank = groupOrder.get(left.snippet.group) ?? Number.MAX_SAFE_INTEGER;
+            const rightGroupRank = groupOrder.get(right.snippet.group) ?? Number.MAX_SAFE_INTEGER;
+            if (leftGroupRank !== rightGroupRank) {
+                return leftGroupRank - rightGroupRank;
+            }
+
+            if (left.snippet.group !== right.snippet.group) {
+                return left.snippet.group.localeCompare(right.snippet.group, undefined, { sensitivity: 'base' });
+            }
+
+            const leftOrder = normalizeSnippetOrder(left.snippet.order);
+            const rightOrder = normalizeSnippetOrder(right.snippet.order);
+            if (leftOrder !== undefined || rightOrder !== undefined) {
+                const leftValue = leftOrder ?? Number.MAX_SAFE_INTEGER;
+                const rightValue = rightOrder ?? Number.MAX_SAFE_INTEGER;
+                if (leftValue !== rightValue) {
+                    return leftValue - rightValue;
+                }
+            }
+
+            const labelCompare = left.snippet.label.localeCompare(right.snippet.label, undefined, { sensitivity: 'base' });
+            if (labelCompare !== 0) {
+                return labelCompare;
+            }
+
+            return left.index - right.index;
+        });
+
+        return withIndex.map((entry) => entry.snippet);
     }
 
     private async persistMergedSnippetOrder(orderedSnippetIds: string[]): Promise<void> {
@@ -1156,12 +1212,12 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
         return label.trim().length > 0;
     }
 
-    private normalizeImportedSnippets(raw: unknown): Array<{ label: string; stmt: string; group: string }> {
+    private normalizeImportedSnippets(raw: unknown): Array<{ label: string; stmt: string; group: string; order?: number }> {
         const sourceArray = Array.isArray(raw)
             ? raw
             : (raw && typeof raw === 'object' && Array.isArray((raw as any).snippets) ? (raw as any).snippets : []);
 
-        const normalized: Array<{ label: string; stmt: string; group: string }> = [];
+        const normalized: Array<{ label: string; stmt: string; group: string; order?: number }> = [];
         const seenLabels = new Set<string>();
         for (const item of sourceArray) {
             if (!item || typeof item !== 'object') {
@@ -1172,6 +1228,7 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
             const label = String(record.label ?? record.name ?? '').trim();
             const stmt = String(record.stmt ?? record.sqlTemplate ?? record.codeTemplate ?? record.snippetText ?? record.text ?? record.command ?? '').trim();
             const group = String(record.group ?? record.category ?? 'Admin').trim() || 'Admin';
+            const order = normalizeSnippetOrder((record as { order?: unknown; sequence?: unknown }).order ?? (record as { sequence?: unknown }).sequence);
             if (!this.isValidSnippetLabel(label) || !stmt) {
                 continue;
             }
@@ -1181,22 +1238,15 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
                 continue;
             }
             seenLabels.add(key);
-            normalized.push({ label, stmt, group });
+            normalized.push({ label, stmt, group, order });
         }
 
         return normalized.slice(0, SQL_SNIPPETS_MAX);
     }
 
     private postCodeSnippetsUpdated(selectedId?: string): void {
+        void selectedId;
         this.notifyCodeSnippetsChanged();
-        if (!this.snippetManagerPanel) {
-            return;
-        }
-        this.snippetManagerPanel.webview.postMessage({
-            type: 'snippetsData',
-            snippets: this.getMergedSqlSnippets(),
-            selectedId
-        });
     }
 
     private async exportCodeSnippetsToJson(): Promise<void> {
@@ -1221,6 +1271,7 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
                     label: snippet.label,
                     codeTemplate: snippet.stmt,
                     group: snippet.group,
+                    order: snippet.order,
                     createdAt: snippet.createdAt,
                     updatedAt: snippet.updatedAt
                 }))
@@ -1297,6 +1348,7 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
                     label: item.label,
                     stmt: item.stmt,
                     group: item.group,
+                    order: item.order,
                     createdAt: now,
                     updatedAt: now
                 }));
@@ -1317,6 +1369,7 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
                             label: item.label,
                             stmt: item.stmt,
                             group: item.group,
+                            order: item.order,
                             createdAt: now,
                             updatedAt: now
                         };
@@ -1330,6 +1383,7 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
                         existingMatch.label = item.label;
                         existingMatch.stmt = item.stmt;
                         existingMatch.group = item.group;
+                        existingMatch.order = item.order;
                         existingMatch.updatedAt = now;
                         updated += 1;
                     } else {
@@ -1444,10 +1498,11 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
         }
     }
 
-    private async addUserSqlSnippet(label: string, stmt: string, group = 'Admin'): Promise<void> {
+    private async addUserSqlSnippet(label: string, stmt: string, group = 'Admin', order?: number): Promise<void> {
         const trimmedLabel = label.trim();
         const trimmedStmt = stmt.trim();
         const trimmedGroup = group.trim() || 'Admin';
+        const normalizedOrder = normalizeSnippetOrder(order);
         if (!trimmedLabel || !trimmedStmt) {
             throw new Error('Label and snippet text are required.');
         }
@@ -1460,19 +1515,20 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
         const now = new Date().toISOString();
         const id = this.createUserSnippetId();
         const userSnippets = this.getUserSqlSnippets();
-        userSnippets.push({ id, label: trimmedLabel, stmt: trimmedStmt, group: trimmedGroup, createdAt: now, updatedAt: now });
+        userSnippets.push({ id, label: trimmedLabel, stmt: trimmedStmt, group: trimmedGroup, order: normalizedOrder, createdAt: now, updatedAt: now });
         await this.setUserSqlSnippets(userSnippets);
 
-        const order = this.getSqlSnippetOrder();
-        order.push(id);
-        await this.setSqlSnippetOrder(order);
+        const snippetOrder = this.getSqlSnippetOrder();
+        snippetOrder.push(id);
+        await this.setSqlSnippetOrder(snippetOrder);
         this.notifyCodeSnippetsChanged();
     }
 
-    private async updateUserSqlSnippet(id: string, label: string, stmt: string, group?: string): Promise<void> {
+    private async updateUserSqlSnippet(id: string, label: string, stmt: string, group?: string, order?: number): Promise<void> {
         const trimmedLabel = label.trim();
         const trimmedStmt = stmt.trim();
         const trimmedGroup = group?.trim();
+        const normalizedOrder = normalizeSnippetOrder(order);
         if (!trimmedLabel || !trimmedStmt) {
             throw new Error('Label and snippet text are required.');
         }
@@ -1496,6 +1552,7 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
                 label: trimmedLabel,
                 stmt: trimmedStmt,
                 group: trimmedGroup || builtIn.group || 'Admin',
+                order: normalizedOrder,
                 createdAt: now,
                 updatedAt: now
             });
@@ -1509,6 +1566,7 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
             label: trimmedLabel,
             stmt: trimmedStmt,
             group: trimmedGroup || userSnippets[index].group || 'Admin',
+            order: normalizedOrder,
             updatedAt: new Date().toISOString()
         };
         await this.setUserSqlSnippets(userSnippets);
@@ -1563,609 +1621,6 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
 
     private notifyCodeSnippetsChanged(): void {
         this.onDidChangeCodeSnippetsEmitter.fire();
-    }
-
-    private showSnippetManagerPanel(options?: { createNew?: boolean }): void {
-        if (this.snippetManagerPanel) {
-            this.snippetManagerPanel.reveal(vscode.ViewColumn.Active);
-            this.snippetManagerPanel.webview.postMessage({ type: 'snippetsData', snippets: this.getMergedSqlSnippets(), createNew: !!options?.createNew });
-            return;
-        }
-
-        const panel = vscode.window.createWebviewPanel(
-            'clprompter.sqlSnippetManager',
-            'CLPROMPTER Code Snippets',
-            vscode.ViewColumn.Active,
-            { enableScripts: true }
-        );
-        this.snippetManagerPanel = panel;
-
-        panel.onDidDispose(() => {
-            if (this.snippetManagerPanel === panel) {
-                this.snippetManagerPanel = undefined;
-            }
-        });
-
-        panel.webview.onDidReceiveMessage(async (message: any) => {
-            try {
-                switch (message?.type) {
-                    case 'ready':
-                        panel.webview.postMessage({ type: 'snippetsData', snippets: this.getMergedSqlSnippets(), createNew: !!options?.createNew });
-                        break;
-                    case 'create':
-                        await this.addUserSqlSnippet(String(message.label || ''), String(message.stmt ?? message.sqlTemplate ?? ''));
-                        panel.webview.postMessage({ type: 'snippetsData', snippets: this.getMergedSqlSnippets() });
-                        this.post({ type: 'notice', message: 'Code Snippet created.' });
-                        break;
-                    case 'update':
-                        await this.updateUserSqlSnippet(String(message.id || ''), String(message.label || ''), String(message.stmt ?? message.sqlTemplate ?? ''));
-                        panel.webview.postMessage({ type: 'snippetsData', snippets: this.getMergedSqlSnippets(), selectedId: String(message.id || '') });
-                        this.post({ type: 'notice', message: 'Code Snippet updated.' });
-                        break;
-                    case 'delete':
-                        await this.deleteSqlSnippet(String(message.id || ''));
-                        panel.webview.postMessage({ type: 'snippetsData', snippets: this.getMergedSqlSnippets() });
-                        this.post({ type: 'notice', message: 'Code Snippet deleted.' });
-                        break;
-                    case 'moveUp':
-                        await this.moveSnippet(String(message.id || ''), 'up');
-                        panel.webview.postMessage({ type: 'snippetsData', snippets: this.getMergedSqlSnippets(), selectedId: String(message.id || '') });
-                        break;
-                    case 'moveDown':
-                        await this.moveSnippet(String(message.id || ''), 'down');
-                        panel.webview.postMessage({ type: 'snippetsData', snippets: this.getMergedSqlSnippets(), selectedId: String(message.id || '') });
-                        break;
-                    case 'run':
-                        await this.executeSnippet(String(message.id || ''));
-                        break;
-                }
-            } catch (error) {
-                const messageText = error instanceof Error ? error.message : String(error);
-                panel.webview.postMessage({ type: 'error', message: messageText });
-            }
-        });
-
-        panel.webview.html = this.snippetManagerHtml(panel.webview);
-    }
-
-    private snippetManagerHtml(webview: vscode.Webview): string {
-        const nonce = Array.from({ length: 32 }, () => 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789'.charAt(Math.floor(Math.random() * 62))).join('');
-        return `<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource}; script-src 'nonce-${nonce}';" />
-    <style>
-        :root {
-            --radius: 10px;
-            --gap: 16px;
-            --panel-border: var(--vscode-panel-border, var(--vscode-editorWidget-border));
-            --panel-bg: color-mix(in srgb, var(--vscode-editor-background) 92%, var(--vscode-input-background) 8%);
-            --muted: var(--vscode-descriptionForeground);
-            --chip-bg: color-mix(in srgb, var(--vscode-button-secondaryBackground, var(--vscode-input-background)) 88%, var(--vscode-foreground) 12%);
-            --chip-border: color-mix(in srgb, var(--vscode-foreground) 16%, transparent);
-            --accent: var(--vscode-focusBorder);
-        }
-        * { box-sizing: border-box; }
-        body {
-            font-family: var(--vscode-font-family);
-            color: var(--vscode-foreground);
-            background:
-                radial-gradient(1200px 420px at 10% -10%, color-mix(in srgb, var(--accent) 15%, transparent), transparent),
-                var(--vscode-editor-background);
-            margin: 0;
-            padding: 18px;
-        }
-        h2 {
-            margin: 0;
-            font-size: 15px;
-            line-height: 1.2;
-            letter-spacing: .2px;
-        }
-        .subtle {
-            margin-top: 4px;
-            font-size: 11px;
-            color: var(--muted);
-        }
-        .shell {
-            border: 1px solid var(--panel-border);
-            border-radius: 12px;
-            padding: 16px;
-            background: var(--panel-bg);
-            backdrop-filter: blur(3px);
-        }
-        .layout {
-            margin-top: 12px;
-            display: grid;
-            gap: var(--gap);
-            grid-template-columns: minmax(260px, 1fr) minmax(420px, 2fr);
-            align-items: start;
-        }
-        .panel {
-            border: 1px solid var(--panel-border);
-            border-radius: var(--radius);
-            background: var(--vscode-editor-background);
-            padding: 12px;
-        }
-        .panel-title {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            gap: 8px;
-            margin-bottom: 8px;
-            font-size: 12px;
-            color: var(--muted);
-        }
-        .count {
-            border: 1px solid var(--chip-border);
-            border-radius: 999px;
-            padding: 2px 8px;
-            font-size: 10px;
-            color: var(--muted);
-            background: var(--chip-bg);
-        }
-        select,
-        input,
-        textarea,
-        button {
-            font: inherit;
-            color: var(--vscode-input-foreground);
-            background: var(--vscode-input-background);
-            border: 1px solid var(--vscode-input-border, transparent);
-            border-radius: 8px;
-        }
-        input,
-        textarea {
-            width: 100%;
-            padding: 8px;
-            outline: none;
-        }
-        input:focus,
-        textarea:focus,
-        select:focus {
-            border-color: var(--accent);
-            box-shadow: 0 0 0 1px var(--accent);
-        }
-        .search-wrap {
-            margin-bottom: 8px;
-        }
-        #snippet-search {
-            font-size: 12px;
-            min-height: 30px;
-        }
-        #snippet-list {
-            width: 100%;
-            min-height: 320px;
-            padding: 4px;
-            background: var(--vscode-sideBar-background, var(--vscode-editor-background));
-        }
-        .label {
-            margin: 10px 0 6px;
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            gap: 10px;
-            font-size: 11px;
-            color: var(--muted);
-            text-transform: uppercase;
-            letter-spacing: .5px;
-        }
-        .kind-pill {
-            border: 1px solid var(--chip-border);
-            background: var(--chip-bg);
-            border-radius: 999px;
-            padding: 2px 8px;
-            font-size: 10px;
-            text-transform: none;
-            color: var(--vscode-foreground, var(--vscode-foreground));
-            cursor: pointer;
-            user-select: none;
-            box-shadow: 0 1px 0 color-mix(in srgb, var(--accent) 25%, transparent);
-            transition: transform .08s ease, border-color .12s ease, box-shadow .12s ease;
-        }
-        #snippet-sql {
-            min-height: 280px;
-            resize: vertical;
-            font-family: var(--vscode-editor-font-family, var(--vscode-font-family));
-            line-height: 1.35;
-        }
-        .row {
-            display: flex;
-            gap: 10px;
-            flex-wrap: wrap;
-            margin-top: 12px;
-        }
-        button {
-            padding: 6px 10px;
-            min-height: 30px;
-            cursor: pointer;
-            color: var(--vscode-button-secondaryForeground, var(--vscode-foreground));
-            background: var(--vscode-button-secondaryBackground, var(--vscode-input-background));
-            border-color: color-mix(in srgb, var(--vscode-foreground) 18%, transparent);
-        }
-        button:hover {
-            background: var(--vscode-button-secondaryHoverBackground, color-mix(in srgb, var(--vscode-input-background) 86%, var(--vscode-foreground) 14%));
-        }
-        button.primary {
-            color: var(--vscode-button-foreground);
-            background: var(--vscode-button-background);
-            border-color: color-mix(in srgb, var(--vscode-button-background) 78%, #000 22%);
-        }
-        button.primary:hover {
-            background: var(--vscode-button-hoverBackground);
-        }
-        button.warn {
-            color: var(--vscode-errorForeground, #f14c4c);
-        }
-        button:disabled {
-            opacity: .55;
-            cursor: default;
-        }
-        .hint {
-            margin-top: 8px;
-            font-size: 11px;
-            color: var(--muted);
-            line-height: 1.35;
-        }
-        .readonly {
-            margin-top: 10px;
-            padding: 8px;
-            border-radius: 8px;
-            border: 1px dashed var(--chip-border);
-            background: color-mix(in srgb, var(--chip-bg) 76%, transparent);
-            color: var(--muted);
-            min-height: 34px;
-            display: flex;
-            align-items: center;
-        }
-        .vars {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 8px;
-            margin-top: 8px;
-        }
-        .var-chip {
-            appearance: none;
-            border: 1px solid color-mix(in srgb, var(--accent) 42%, var(--chip-border));
-            border-radius: 999px;
-            padding: 5px 10px;
-            font-size: 11px;
-            font-weight: 600;
-            color: var(--vscode-button-foreground, var(--vscode-foreground));
-            background: color-mix(in srgb, var(--vscode-button-background, var(--chip-bg)) 70%, var(--chip-bg) 30%);
-            cursor: pointer;
-            user-select: none;
-            box-shadow: 0 1px 0 color-mix(in srgb, var(--accent) 25%, transparent);
-            transition: transform .08s ease, border-color .12s ease, box-shadow .12s ease;
-        }
-        .var-chip:hover {
-            border-color: var(--accent);
-            box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 65%, transparent);
-            transform: translateY(-1px);
-        }
-        .var-chip:active {
-            transform: translateY(0);
-        }
-        .var-chip:focus-visible {
-            outline: 1px solid var(--accent);
-            outline-offset: 1px;
-        }
-        .error {
-            margin-top: 10px;
-            min-height: 20px;
-            color: var(--vscode-errorForeground, #f14c4c);
-            font-size: 12px;
-        }
-        .footer {
-            margin-top: 8px;
-            font-size: 11px;
-            color: var(--muted);
-        }
-        @media (max-width: 860px) {
-            .layout {
-                grid-template-columns: 1fr;
-            }
-            #snippet-list {
-                min-height: 220px;
-            }
-        }
-    </style>
-</head>
-<body>
-    <div class="shell">
-        <h2>Code Snippet Manager</h2>
-        <div class="subtle">Build reusable CL and SQL Code Snippets. Search, run, and manage in one place.</div>
-
-        <div class="layout">
-            <div class="panel">
-                <div class="panel-title">
-                    <span>Library</span>
-                    <span id="snippet-count" class="count">0</span>
-                </div>
-                <div class="search-wrap">
-                    <input id="snippet-search" type="text" placeholder="Search Code Snippets..." aria-label="Search Code Snippets" />
-                </div>
-                <select id="snippet-list" size="14" aria-label="Code Snippet list"></select>
-                <div class="row">
-                    <button id="move-up" type="button">Move Up</button>
-                    <button id="move-down" type="button">Move Down</button>
-                    <button id="run-snippet" class="primary" type="button">Run</button>
-                </div>
-            </div>
-
-            <div class="panel">
-                <div class="label">
-                    <span>Snippet Name</span>
-                    <span id="snippet-kind" class="kind-pill">Type: -</span>
-                </div>
-                <input id="snippet-label" type="text" maxlength="120" placeholder="Example: List active jobs" />
-
-                <div class="label"><span>Snippet Text</span></div>
-                <textarea id="snippet-sql" placeholder="Type a CL command or SQL statement..."></textarea>
-
-                <div class="hint">SQL Code Snippets can use SQL: prefix, or start with SELECT or VALUES.</div>
-                <div class="vars" id="vars">
-                    <button class="var-chip" data-token="\${sqlJobId}" type="button" title="Insert \${sqlJobId}">+ \${sqlJobId}</button>
-                    <button class="var-chip" data-token="\${sqlJobName}" type="button" title="Insert \${sqlJobName}">+ \${sqlJobName}</button>
-                    <button class="var-chip" data-token="\${sqlJobNumber}" type="button" title="Insert \${sqlJobNumber}">+ \${sqlJobNumber}</button>
-                    <button class="var-chip" data-token="\${currentUser}" type="button" title="Insert \${currentUser}">+ \${currentUser}</button>
-                    <button class="var-chip" data-token="\${currentLibrary}" type="button" title="Insert \${currentLibrary}">+ \${currentLibrary}</button>
-                </div>
-
-                <div class="row">
-                    <button id="new-snippet" type="button">New</button>
-                    <button id="save-snippet" class="primary" type="button">Save</button>
-                    <button id="delete-snippet" class="warn" type="button">Delete</button>
-                </div>
-
-                <div id="readonly-hint" class="readonly"></div>
-                <div id="error" class="error"></div>
-                <div class="footer">Shortcuts: Cmd/Ctrl+S to save, Cmd/Ctrl+Enter to run selected Code Snippet.</div>
-            </div>
-        </div>
-    </div>
-
-    <script nonce="${nonce}">
-        const vscode = acquireVsCodeApi();
-        const list = document.getElementById('snippet-list');
-        const search = document.getElementById('snippet-search');
-        const snippetCount = document.getElementById('snippet-count');
-        const kindPill = document.getElementById('snippet-kind');
-        const label = document.getElementById('snippet-label');
-        const sql = document.getElementById('snippet-sql');
-        const vars = document.getElementById('vars');
-        const errorEl = document.getElementById('error');
-        const readonlyHint = document.getElementById('readonly-hint');
-        const moveUp = document.getElementById('move-up');
-        const moveDown = document.getElementById('move-down');
-        const runBtn = document.getElementById('run-snippet');
-        const newBtn = document.getElementById('new-snippet');
-        const saveBtn = document.getElementById('save-snippet');
-        const deleteBtn = document.getElementById('delete-snippet');
-        let snippets = [];
-        let selectedId = '';
-
-        function clearError() { errorEl.textContent = ''; }
-        function setError(message) { errorEl.textContent = message || ''; }
-        function findSelected() { return snippets.find(s => s.id === selectedId); }
-
-        function inferKind(text) {
-            const value = String(text || '').trim();
-            if (!value) return '-';
-            if (/^SQL\s*:/i.test(value)) return 'SQL';
-            if (/^(SELECT|VALUES)\b/i.test(value)) return 'SQL';
-            return 'CL';
-        }
-
-        function updateKindPill() {
-            kindPill.textContent = 'Type: ' + inferKind(sql.value);
-        }
-
-        function filteredSnippets() {
-            const query = String(search.value || '').trim().toLowerCase();
-            if (!query) return snippets;
-            return snippets.filter((snippet) => {
-                const sourceText = String(snippet.source || '');
-                const labelText = String(snippet.label || '');
-                const templateText = String(snippet.stmt || '');
-                return sourceText.toLowerCase().includes(query)
-                    || labelText.toLowerCase().includes(query)
-                    || templateText.toLowerCase().includes(query);
-            });
-        }
-
-        function renderList() {
-            const visible = filteredSnippets();
-            list.replaceChildren();
-
-            visible.forEach((snippet) => {
-                const option = document.createElement('option');
-                option.value = snippet.id;
-                const sourceTag = snippet.source === 'built-in' ? 'BI' : 'USR';
-                option.textContent = '[' + sourceTag + '] ' + snippet.label;
-                list.append(option);
-            });
-
-            snippetCount.textContent = String(visible.length) + ' of ' + String(snippets.length);
-
-            const visibleIds = new Set(visible.map((item) => item.id));
-            if (selectedId && visibleIds.has(selectedId)) {
-                list.value = selectedId;
-                return;
-            }
-
-            if (visible.length > 0) {
-                selectedId = visible[0].id;
-                list.value = selectedId;
-            } else {
-                selectedId = '';
-            }
-        }
-
-        function renderForm() {
-            const selected = findSelected();
-            if (!selected) {
-                label.value = '';
-                sql.value = '';
-                label.readOnly = false;
-                sql.readOnly = false;
-                deleteBtn.disabled = true;
-                runBtn.disabled = true;
-                moveUp.disabled = true;
-                moveDown.disabled = true;
-                saveBtn.textContent = 'Save';
-                readonlyHint.textContent = 'Create a new Code Snippet, then Save.';
-                updateKindPill();
-                return;
-            }
-
-            label.value = selected.label || '';
-            sql.value = selected.stmt || '';
-            const isBuiltIn = selected.source === 'built-in';
-            label.readOnly = isBuiltIn;
-            sql.readOnly = isBuiltIn;
-            deleteBtn.disabled = isBuiltIn;
-            runBtn.disabled = false;
-            moveUp.disabled = false;
-            moveDown.disabled = false;
-            saveBtn.textContent = isBuiltIn ? 'Save as New' : 'Save';
-            readonlyHint.textContent = isBuiltIn
-                ? 'Built-in Code Snippet is read-only. Use Save as New to create your own copy.'
-                : 'User Code Snippet. You can edit, reorder, run, or delete it.';
-            updateKindPill();
-        }
-
-        function selectSnippet(id) {
-            selectedId = id || '';
-            renderList();
-            renderForm();
-            clearError();
-        }
-
-        function insertToken(token) {
-            if (!token || sql.readOnly) return;
-            sql.focus();
-            const currentText = String(sql.value || '');
-            const start = Number(sql.selectionStart ?? currentText.length);
-            const end = Number(sql.selectionEnd ?? start);
-            sql.setSelectionRange(start, end);
-
-            let inserted = false;
-            try {
-                inserted = document.execCommand('insertText', false, token);
-            } catch {
-                inserted = false;
-            }
-
-            if (!inserted) {
-                sql.setRangeText(token, start, end, 'end');
-                sql.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: token }));
-            }
-            updateKindPill();
-        }
-
-        list.addEventListener('change', () => selectSnippet(list.value));
-        search.addEventListener('input', () => {
-            renderList();
-            renderForm();
-            clearError();
-        });
-
-        label.addEventListener('input', clearError);
-        sql.addEventListener('input', () => {
-            clearError();
-            updateKindPill();
-        });
-
-        vars.addEventListener('click', (event) => {
-            const target = event.target;
-            if (!(target instanceof HTMLElement)) return;
-            const token = target.dataset?.token;
-            if (!token) return;
-            insertToken(token);
-        });
-
-        newBtn.addEventListener('click', () => {
-            selectedId = '';
-            label.value = '';
-            sql.value = '';
-            renderList();
-            renderForm();
-            label.focus();
-            clearError();
-        });
-
-        saveBtn.addEventListener('click', () => {
-            clearError();
-            const selected = findSelected();
-            const payload = { label: label.value || '', stmt: sql.value || '' };
-            if (selected && selected.source === 'user') {
-                vscode.postMessage({ type: 'update', id: selected.id, ...payload });
-            } else {
-                vscode.postMessage({ type: 'create', ...payload });
-            }
-        });
-
-        deleteBtn.addEventListener('click', () => {
-            clearError();
-            const selected = findSelected();
-            if (!selected || selected.source !== 'user') return;
-            const confirmed = confirm('Delete Code Snippet "' + selected.label + '"?');
-            if (!confirmed) return;
-            vscode.postMessage({ type: 'delete', id: selected.id });
-        });
-
-        moveUp.addEventListener('click', () => {
-            const selected = findSelected();
-            if (selected) vscode.postMessage({ type: 'moveUp', id: selected.id });
-        });
-        moveDown.addEventListener('click', () => {
-            const selected = findSelected();
-            if (selected) vscode.postMessage({ type: 'moveDown', id: selected.id });
-        });
-        runBtn.addEventListener('click', () => {
-            const selected = findSelected();
-            if (selected) vscode.postMessage({ type: 'run', id: selected.id });
-        });
-
-        window.addEventListener('keydown', (event) => {
-            if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 's') {
-                event.preventDefault();
-                saveBtn.click();
-                return;
-            }
-            if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
-                event.preventDefault();
-                runBtn.click();
-            }
-        });
-
-        window.addEventListener('message', (event) => {
-            const message = event.data || {};
-            if (message.type === 'snippetsData') {
-                snippets = Array.isArray(message.snippets) ? message.snippets : [];
-                const preferred = message.selectedId || (message.createNew ? '' : selectedId) || snippets[0]?.id || '';
-                selectedId = preferred;
-                renderList();
-                renderForm();
-                clearError();
-                if (message.createNew) {
-                    selectedId = '';
-                    renderList();
-                    renderForm();
-                    label.focus();
-                }
-            }
-            if (message.type === 'error') {
-                setError(message.message || 'Unexpected error.');
-            }
-        });
-
-        vscode.postMessage({ type: 'ready' });
-    </script>
-</body>
-</html>`;
     }
 
     private failed(command: string, mode: CommandExecutionMode, failure: string) {
@@ -2415,7 +1870,6 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
                         <div class="toolbar-menu-wrap">
                             <button id="snippets" type="button" aria-label="Toggle code snippets tree view" data-tooltip="Toggle Code Snippets Tree View" aria-haspopup="menu" aria-expanded="false">{ }</button>
                             <div id="snippets-menu-list" class="toolbar-menu-list" role="menu" aria-hidden="true">
-                                <button id="snippets-menu-manage" type="button" role="menuitem">Manage Code Snippets</button>
                                 <button id="snippets-menu-toggle" type="button" role="menuitem">Toggle Code Snippets Tree View</button>
                                 <button id="snippets-menu-refresh" type="button" role="menuitem">Refresh Code Snippets</button>
                                 <button id="snippets-menu-import" type="button" role="menuitem">Import Code Snippets...</button>

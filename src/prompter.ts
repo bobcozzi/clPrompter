@@ -33,6 +33,7 @@ import {
   parseElemValues,
   parseParenthesizedContent,
   getLengthClass,
+  isSpecifiedFromChildDefault,
   isValidDataType,
   isContainerType
 } from './promptHelpers.js';
@@ -111,6 +112,29 @@ let pendingHelpKwd: string | null = null;
 
 // ── Loading toast for IBM i round-trip delay ──────────────────────────────
 let _helpToastTimer: ReturnType<typeof setTimeout> | null = null;
+let currentCommandXml = '';
+
+function updateCopyXmlButtonState(): void {
+  const copyBtn = document.getElementById('copyXmlBtn') as HTMLButtonElement | null;
+  if (!copyBtn) { return; }
+  const hasXml = currentCommandXml.trim().length > 0;
+  copyBtn.disabled = !hasXml;
+  copyBtn.title = hasXml
+    ? 'Copy command XML to clipboard'
+    : 'Command XML is not available for this prompt';
+}
+
+function requestCopyCommandXml(): void {
+  if (!currentCommandXml.trim()) {
+    return;
+  }
+  vscode?.postMessage({
+    type: 'copyPromptXml',
+    cmdName: state.cmdName,
+    xml: currentCommandXml
+  });
+}
+
 function showHelpToast(): void {
   const toast = document.getElementById('clp-help-toast');
   if (!toast) { return; }
@@ -4109,6 +4133,7 @@ function assembleCurrentParmMap(): ParmMap {
 
         // Assemble single-instance ELEM parameter
         debugLog(`[assembleCommand] ${kwd}: Starting ELEM assembly, elemParts.length=${elemParts.length}`);
+        const parentInOriginal = wasInOriginalCommand(kwd);
         const elemVals: string[] = [];
         let lastNonDefaultIndex = -1;
 
@@ -4155,8 +4180,9 @@ function assembleCurrentParmMap(): ParmMap {
                   anySubTouched = true;
                 }
               });
-              // If any sub field was touched, include this nested ELEM group
-              if (anySubTouched) {
+              // Preserve nested values from the original command even when untouched.
+              const hasNonEmptyValues = subVals.some(v => v.length > 0);
+              if (anySubTouched || (parentInOriginal && hasNonEmptyValues)) {
                 const trimmedSubs = subVals.filter(v => v.length > 0);
                 const joined = '(' + trimmedSubs.join(' ') + ')';
                 elemVals.push(joined);
@@ -4186,7 +4212,6 @@ function assembleCurrentParmMap(): ParmMap {
         });
 
         // Only include ELEMs if any were touched OR parent parameter was in original command
-        const parentInOriginal = wasInOriginalCommand(kwd);
         debugLog(`[assembleCommand] ${kwd}: lastNonDefaultIndex=${lastNonDefaultIndex}, parentInOriginal=${parentInOriginal}, elemVals=`, elemVals);
         if (lastNonDefaultIndex >= 0) {
           // Usual case: user touched something, include up to last touched
@@ -4463,14 +4488,26 @@ function isFieldSpecified(kwd: string): boolean {
       // pre-fill themselves with their own Elem-level defaults even when the parent was
       // never touched — so we can't distinguish user input from a pre-fill; treat as
       // not specified.
-      // QUAL parameters (sub-inputs named KWORD_QUAL0 / KWORD_QUAL1) are NOT like this:
-      // getFieldRawValue() already returned their QUAL0 value, which is user-supplied.
-      // We only suppress "specified" for true ELEM parameters, detected by the presence
+      // QUAL parameters can also have defaults defined on QUAL0 (e.g. *NONE), while the
+      // parent <Parm> has no Dft. Treat untouched QUAL0 defaults as NOT specified.
+      // We suppress "specified" for true ELEM parameters, detected by the presence
       // of a KWORD_INST0_ELEM0 sub-input (and confirmed by absence of KWORD_QUAL0).
       // IMPORTANT: Multi-instance simple parameters (e.g. OBJTYPE with Max>1, Rstd=YES)
       // also live in a parm-multi-group, but their inputs ARE named directly by kwd.
       // Do NOT use parm-multi-group presence as a proxy for ELEM-like behaviour —
       // only the actual _INST0_ELEM0 sub-inputs signal a true ELEM parameter.
+      const qual0Input = document.querySelector<HTMLInputElement | HTMLTextAreaElement>(
+        `input[name="${kwd}_QUAL0"], textarea[name="${kwd}_QUAL0"]`
+      );
+
+      if (qual0Input) {
+        // If the command originally specified this parm, keep it specified.
+        const wasInOriginalCommand = !!(state.originalParmMap && kwd in state.originalParmMap);
+        const qual0Dft = qual0Input.dataset.default;
+        const qual0Val = qual0Input.value;
+        return isSpecifiedFromChildDefault(qual0Val, qual0Dft, wasInOriginalCommand);
+      }
+
       const hasElemChildren =
         document.querySelector(`input[name="${kwd}_INST0_ELEM0"], textarea[name="${kwd}_INST0_ELEM0"]`) !== null &&
         document.querySelector(`input[name="${kwd}_QUAL0"]`) === null;
@@ -4721,8 +4758,87 @@ function buildDepErrorMessage(constraint: DepConstraint, trueCount: number): str
     GT: '>', GE: '>=', NL: '>=', LT: '<', LE: '<=', NG: '<=', EQ: '=', NE: '<>'
   };
 
+  const isHexBlankLiteral = (val?: string): boolean => {
+    if (!val) return false;
+    const match = val.match(/^X'([0-9A-Fa-f]+)'$/);
+    if (!match) return false;
+    const hex = match[1].toUpperCase();
+    if (hex.length === 0 || hex.length % 2 !== 0) return false;
+    // IBM i blank padding is represented as repeating EBCDIC space (0x40).
+    for (let i = 0; i < hex.length; i += 2) {
+      if (hex.slice(i, i + 2) !== '40') return false;
+    }
+    return true;
+  };
+
+  const internalToDisplay = (kwd: string, internalVal?: string): string => {
+    if (!internalVal) return '';
+    if (isHexBlankLiteral(internalVal)) return 'blank';
+
+    const kwdMap = state.valToMapToMap[kwd];
+    if (kwdMap) {
+      for (const [display, internal] of Object.entries(kwdMap)) {
+        if (internal === internalVal) return display;
+      }
+    }
+    return internalVal;
+  };
+
+  const describeDepParm = (dp: DepParmEntry): string => {
+    if (dp.rel === 'SPCFD') {
+      return `${dp.kwd} is specified`;
+    }
+
+    if (dp.cmpVal !== undefined) {
+      if (isHexBlankLiteral(dp.cmpVal)) {
+        if (dp.rel === 'EQ') return `${dp.kwd} is blank`;
+        if (dp.rel === 'NE') return `${dp.kwd} cannot be blank`;
+      }
+      const sym = opSymbols[dp.rel] || dp.rel;
+      const displayVal = internalToDisplay(dp.kwd, dp.cmpVal);
+      return `${dp.kwd} ${sym} ${displayVal}`;
+    }
+
+    if (dp.cmpKwd) {
+      const sym = opSymbols[dp.rel] || dp.rel;
+      const cmpKwdRaw = getFieldRawValue(dp.cmpKwd);
+      return `${dp.kwd} ${sym} ${dp.cmpKwd}${cmpKwdRaw ? ` (${cmpKwdRaw})` : ''}`;
+    }
+
+    return `${dp.kwd} must be specified`;
+  };
+
+  const findReciprocalBlankPairMessage = (): string | null => {
+    if (!constraint.ctlKwd || constraint.depParms.length !== 1) return null;
+    const dp = constraint.depParms[0];
+    if (!dp.cmpVal) return null;
+    if (!isHexBlankLiteral(constraint.cmpVal) || !isHexBlankLiteral(dp.cmpVal)) return null;
+    if (!((constraint.ctlKwdRel === 'EQ' && dp.rel === 'NE') || (constraint.ctlKwdRel === 'NE' && dp.rel === 'EQ'))) {
+      return null;
+    }
+
+    const companion = state.depConstraints.find(other => {
+      if (other === constraint) return false;
+      if (other.msgId !== constraint.msgId) return false;
+      if (other.ctlKwd !== constraint.ctlKwd) return false;
+      if (other.depParms.length !== 1) return false;
+      const otherDp = other.depParms[0];
+      if (otherDp.kwd !== dp.kwd) return false;
+      if (!isHexBlankLiteral(other.cmpVal) || !isHexBlankLiteral(otherDp.cmpVal)) return false;
+      return (other.ctlKwdRel === 'EQ' && otherDp.rel === 'NE') || (other.ctlKwdRel === 'NE' && otherDp.rel === 'EQ');
+    });
+
+    if (!companion) return null;
+    return `${constraint.ctlKwd} or ${dp.kwd} are required but not both.`;
+  };
+
   const kwds = [...new Set(constraint.depParms.map(dp => dp.kwd))];
   const kwdList = kwds.join(', ');
+
+  const reciprocalBlankPairMessage = findReciprocalBlankPairMessage();
+  if (reciprocalBlankPairMessage) {
+    return reciprocalBlankPairMessage;
+  }
 
   // Describe requirements
   const total = constraint.depParms.length;
@@ -4744,9 +4860,36 @@ function buildDepErrorMessage(constraint: DepConstraint, trueCount: number): str
   // Pattern: ALWAYS, 3 DepParms, NbrTrueRel=GT NbrTrue=0 with 2 CmpVal=0/escape + 1 CmpKwd ordering
   const cmpKwdEntry = constraint.depParms.find(dp => dp.cmpKwd);
   if (constraint.ctlKwdRel === 'ALWAYS' && cmpKwdEntry && constraint.nbrTrueRel === 'GT' && constraint.nbrTrue === 0) {
-    const sym = opSymbols[cmpKwdEntry.rel] || cmpKwdEntry.rel;
-    const cmpKwdRaw = getFieldRawValue(cmpKwdEntry.cmpKwd!);
-    return `${cmpKwdEntry.kwd} must be ${sym} ${cmpKwdEntry.cmpKwd}${cmpKwdRaw ? ` (${cmpKwdRaw})` : ''}`;
+    return describeDepParm(cmpKwdEntry);
+  }
+
+  // Pattern: EXACTLY one of two parameters must be specified.
+  if (
+    constraint.ctlKwdRel === 'ALWAYS' &&
+    constraint.nbrTrueRel === 'EQ' &&
+    constraint.nbrTrue === 1 &&
+    constraint.depParms.length === 2 &&
+    constraint.depParms.every(dp => dp.rel === 'SPCFD')
+  ) {
+    return `${constraint.depParms[0].kwd} or ${constraint.depParms[1].kwd} are required but not both.`;
+  }
+
+  // Pattern: At least one of two parameters must be specified.
+  if (
+    constraint.ctlKwdRel === 'ALWAYS' &&
+    constraint.nbrTrueRel === 'GT' &&
+    constraint.nbrTrue === 0 &&
+    constraint.depParms.length === 2 &&
+    constraint.depParms.every(dp => dp.rel === 'SPCFD')
+  ) {
+    return `At least one of ${constraint.depParms[0].kwd} or ${constraint.depParms[1].kwd} is required.`;
+  }
+
+  // Pattern: one parameter is blank implies another must not be blank.
+  const blankEq = constraint.depParms.find(dp => dp.rel === 'EQ' && isHexBlankLiteral(dp.cmpVal));
+  const notBlankNe = constraint.depParms.find(dp => dp.rel === 'NE' && isHexBlankLiteral(dp.cmpVal));
+  if (constraint.ctlKwdRel === 'ALWAYS' && blankEq && notBlankNe) {
+    return `${blankEq.kwd} is blank, ${notBlankNe.kwd} cannot be blank.`;
   }
 
   // Pattern: conditional EQ/NE/SPCFD on control keyword
@@ -4756,36 +4899,24 @@ function buildDepErrorMessage(constraint: DepConstraint, trueCount: number): str
     // Reverse-lookup cmpVal internal value → display value (e.g. 'N' → '*OUTFILE')
     const ctlCmpDisplay = (() => {
       if (!constraint.cmpVal) return getFieldRawValue(constraint.ctlKwd!) || constraint.ctlKwd!;
-      const kwdMap = state.valToMapToMap[constraint.ctlKwd!];
-      if (kwdMap) {
-        for (const [display, internal] of Object.entries(kwdMap)) {
-          if (internal === constraint.cmpVal) return display;
-        }
-      }
-      return constraint.cmpVal;
+      return internalToDisplay(constraint.ctlKwd!, constraint.cmpVal);
     })();
+    const ctlCmpIsBlank = isHexBlankLiteral(constraint.cmpVal);
     const ctlCondStr = constraint.ctlKwdRel === 'SPCFD'
       ? `${constraint.ctlKwd} is specified`
-      : `${constraint.ctlKwd} ${ctlOp} ${ctlCmpDisplay}`;
+      : ctlCmpIsBlank && constraint.ctlKwdRel === 'EQ'
+        ? `${constraint.ctlKwd} is blank`
+        : ctlCmpIsBlank && constraint.ctlKwdRel === 'NE'
+          ? `${constraint.ctlKwd} is not blank`
+          : `${constraint.ctlKwd} ${ctlOp} ${ctlCmpDisplay}`;
     if (constraint.nbrTrueRel === 'EQ' && constraint.nbrTrue === total) {
       // All must be true
-      const conditions = constraint.depParms.map(dp => {
-        if (dp.cmpVal !== undefined) {
-          const sym = opSymbols[dp.rel] || dp.rel;
-          const resolved = resolveHexLiteral(dp.cmpVal);
-          const isBlank = resolved.trim() === '';
-          return isBlank ? `${dp.kwd} must be specified` : `${dp.kwd} ${sym} ${dp.cmpVal}`;
-        }
-        return `${dp.kwd} must be specified`;
-      }).join(' and ');
+      const conditions = constraint.depParms.map(dp => describeDepParm(dp)).join(' and ');
       return `When ${ctlCondStr}: ${conditions}`;
     }
     if (constraint.nbrTrueRel === 'GT' && constraint.nbrTrue === 0) {
       // At least one must be true — OR between them
-      const conditions = constraint.depParms.map(dp => {
-        const sym = opSymbols[dp.rel] || dp.rel;
-        return `${dp.kwd} ${sym} ${dp.cmpVal ?? dp.cmpKwd ?? ''}`;
-      }).join(' or ');
+      const conditions = constraint.depParms.map(dp => describeDepParm(dp)).join(' or ');
       return `When ${ctlCondStr}: ${conditions}`;
     }
   }
@@ -5041,6 +5172,15 @@ function wirePrompterControls(): void {
   const cancelBtn = document.getElementById('cancelBtn');
   const labelInput = document.getElementById('cmdLabel') as HTMLInputElement;
   const commentInput = document.getElementById('cmdComment') as HTMLTextAreaElement;
+  const copyXmlBtn = document.getElementById('copyXmlBtn') as HTMLButtonElement | null;
+
+  if (copyXmlBtn) {
+    copyXmlBtn.addEventListener('click', (e) => {
+      e.preventDefault();
+      requestCopyCommandXml();
+    });
+    updateCopyXmlButtonState();
+  }
 
   // Wire up label input
   if (labelInput) {
@@ -5231,6 +5371,8 @@ window.addEventListener('message', event => {
     state.pmtCtlMap = (message as any).pmtCtlMap || {};
     state.showAllParms = false;
     state.cmdName = message.cmdName || '';
+    currentCommandXml = message.xml || '';
+    updateCopyXmlButtonState();
 
     // Update main title with command name and prompt
     const cmdPrompt = (message as any).cmdPrompt || '';
@@ -5400,6 +5542,8 @@ window.addEventListener('message', event => {
     if (!state.hasProcessedFormData) {
       debugLog('[clPrompter] Label-only prompter detected, wiring controls');
       state.hasProcessedFormData = true;
+      currentCommandXml = '';
+      updateCopyXmlButtonState();
       wirePrompterControls();
       document.documentElement.style.visibility = 'visible';
       document.body.style.opacity = '1';
@@ -5435,6 +5579,8 @@ window.addEventListener('message', event => {
     state.hasBeenRevealed = false;
     state.controlsWired = false;
     state.touchedFields.clear();
+    currentCommandXml = '';
+    updateCopyXmlButtonState();
     const form = document.getElementById('clForm');
     if (form) { form.innerHTML = ''; }
     const mainTitle = document.getElementById('mainTitle');

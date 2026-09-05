@@ -130,6 +130,49 @@ function debugLog(message: string): void {
     }
 }
 
+const ENABLE_F4_ACTION = 'Enable F4 Prompt';
+const OPEN_F4_SETTING_ACTION = 'Open F4 Setting';
+
+async function enableF4PromptSetting(): Promise<void> {
+    const config = vscode.workspace.getConfiguration('clPrompter');
+    const setting = config.inspect<boolean>('enableF4Key');
+
+    // Prefer updating the scope where the false value is currently defined.
+    if (setting?.workspaceFolderValue === false) {
+        await config.update('enableF4Key', true, vscode.ConfigurationTarget.WorkspaceFolder);
+        return;
+    }
+    if (setting?.workspaceValue === false) {
+        await config.update('enableF4Key', true, vscode.ConfigurationTarget.Workspace);
+        return;
+    }
+
+    await config.update('enableF4Key', true, vscode.ConfigurationTarget.Global);
+}
+
+async function showF4DisabledPrompt(source: 'startup' | 'invoke'): Promise<void> {
+    const settingId = 'clPrompter.enableF4Key';
+    const message = source === 'startup'
+        ? 'CL Prompter F4 prompting is currently disabled.'
+        : 'F4 prompting is currently disabled.';
+
+    const choice = await vscode.window.showWarningMessage(
+        message,
+        ENABLE_F4_ACTION,
+        OPEN_F4_SETTING_ACTION
+    );
+
+    if (choice === ENABLE_F4_ACTION) {
+        await enableF4PromptSetting();
+        vscode.window.showInformationMessage('CL Prompter F4 prompting has been enabled.');
+        return;
+    }
+
+    if (choice === OPEN_F4_SETTING_ACTION) {
+        await vscode.commands.executeCommand('workbench.action.openSettings', settingId);
+    }
+}
+
 /** Returns the currently in-flight external SQL on the shared Mapepire SQLJob,
  *  or undefined if nothing external is running right now. */
 export function getPendingExternalSQL(): { sql: string; t0: number } | undefined {
@@ -666,11 +709,17 @@ export async function activate(context: vscode.ExtensionContext) {
     }
     try {
         console.log('CL Prompter extension activated');
+
+        const startupConfig = vscode.workspace.getConfiguration('clPrompter');
+        if (!startupConfig.get<boolean>('enableF4Key', true)) {
+            void showF4DisabledPrompt('startup');
+        }
+
         context.subscriptions.push(
             vscode.commands.registerCommand('clPrompter.clPrompter', async () => {
                 const config = vscode.workspace.getConfiguration('clPrompter');
                 if (!config.get('enableF4Key')) {
-                    vscode.window.showInformationMessage('Fn key for CL Prompter is disabled in settings.');
+                    await showF4DisabledPrompt('invoke');
                     return;
                 }
                 await ClPromptPanel.createOrShow(context.extensionUri);
@@ -1652,6 +1701,24 @@ export class ClPromptPanel {
                                 error: `Error retrieving help: ${err instanceof Error ? err.message : String(err)}`
                             });
                         }
+                        break;
+                    }
+                    case 'copyPromptXml': {
+                        const xml = typeof message.xml === 'string' && message.xml.length > 0
+                            ? message.xml
+                            : this._xml;
+                        if (!xml || !xml.trim()) {
+                            vscode.window.showWarningMessage('No command XML is available to copy.');
+                            break;
+                        }
+                        await vscode.env.clipboard.writeText(xml);
+                        const cmdName = typeof message.cmdName === 'string' && message.cmdName.trim().length > 0
+                            ? message.cmdName.trim().toUpperCase()
+                            : (this._cmdName || '').toUpperCase();
+                        vscode.window.setStatusBarMessage(
+                            cmdName ? `Copied ${cmdName} command XML to clipboard.` : 'Copied command XML to clipboard.',
+                            2500
+                        );
                         break;
                     }
                 }

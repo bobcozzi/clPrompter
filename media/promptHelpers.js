@@ -233,6 +233,24 @@ export function parseSpaceSeparatedValues(str) {
     return values;
 }
 /**
+ * Determine whether a parameter should be treated as specified when the default
+ * is defined on a child field (e.g. QUAL0) rather than the parent <Parm>.
+ */
+export function isSpecifiedFromChildDefault(rawValue, childDefault, wasInOriginalCommand) {
+    if (wasInOriginalCommand) {
+        return true;
+    }
+    const val = (rawValue || '').trim();
+    const dft = (childDefault || '').trim();
+    if (!val) {
+        return false;
+    }
+    if (dft && val === dft) {
+        return false;
+    }
+    return true;
+}
+/**
  * Parse ELEM values, respecting parentheses and quotes.
  * For simple values like "0 0 *SECLVL", splits on spaces.
  * For nested values like "(*BEFORE 'text') (*AFTER 'text')", preserves groups.

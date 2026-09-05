@@ -299,11 +299,14 @@ class CodeSnippetEditorPanel {
                             panel.webview.postMessage({ type: 'error', message: 'Label and Code Snippet text are required.' });
                             return;
                         }
+                        const parsedOrder = Number.isFinite(Number(message.order))
+                            ? Math.max(0, Math.trunc(Number(message.order)))
+                            : undefined;
 
                         if (snippet && snippet.source === 'user') {
-                            await commandEntry.updateCodeSnippet(snippet.id, label, codeTemplate, group);
+                            await commandEntry.updateCodeSnippet(snippet.id, label, codeTemplate, group, parsedOrder);
                         } else {
-                            await commandEntry.createCodeSnippet(label, codeTemplate, group);
+                            await commandEntry.createCodeSnippet(label, codeTemplate, group, parsedOrder);
                         }
                         panel.dispose();
                         break;
@@ -316,12 +319,15 @@ class CodeSnippetEditorPanel {
                             panel.webview.postMessage({ type: 'error', message: 'Label and Code Snippet text are required.' });
                             return;
                         }
+                        const parsedOrder = Number.isFinite(Number(message.order))
+                            ? Math.max(0, Math.trunc(Number(message.order)))
+                            : undefined;
 
                         if (snippet && snippet.source === 'user') {
-                            await commandEntry.updateCodeSnippet(snippet.id, label, codeTemplate, group);
+                            await commandEntry.updateCodeSnippet(snippet.id, label, codeTemplate, group, parsedOrder);
                             await commandEntry.executeCodeSnippetById(snippet.id);
                         } else {
-                            await commandEntry.createCodeSnippet(label, codeTemplate, group);
+                            await commandEntry.createCodeSnippet(label, codeTemplate, group, parsedOrder);
                             const created = commandEntry.listCodeSnippets().find((entry) => entry.label.toUpperCase() === label.toUpperCase() && entry.source === 'user');
                             if (created) {
                                 await commandEntry.executeCodeSnippetById(created.id);
@@ -357,10 +363,11 @@ class CodeSnippetEditorPanel {
         .form-table { border-collapse: separate; border-spacing: 0 10px; min-width: 1120px; width: 100%; }
         .form-table th { width: 220px; text-align: left; vertical-align: top; font-size: 12px; color: var(--vscode-descriptionForeground); padding: 10px 8px 0 0; letter-spacing: 0.02em; font-weight: 600; white-space: nowrap; }
         .form-table td { min-width: 860px; }
-        input, textarea { width: 100%; font: inherit; color: var(--vscode-input-foreground); background: var(--vscode-input-background); border: 1px solid var(--vscode-input-border, transparent); border-radius: 8px; padding: 9px 10px; }
+        input, textarea { font: inherit; color: var(--vscode-input-foreground); background: var(--vscode-input-background); border: 1px solid var(--vscode-input-border, transparent); border-radius: 8px; padding: 9px 10px; }
         input { height: 38px; }
+        input { width: 100%; }
         input:focus, textarea:focus { outline: 1px solid var(--vscode-focusBorder); outline-offset: 0; }
-        textarea { min-height: 560px; resize: vertical; line-height: 1.4; font-family: var(--vscode-editor-font-family, var(--vscode-font-family)); }
+        textarea { width: min(100%, 80ch); min-height: calc(12 * 1.4em + 18px); resize: both; line-height: 1.4; font-family: var(--vscode-editor-font-family, var(--vscode-font-family)); }
         .vars { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
         button { height: 34px; border-radius: 8px; border: 1px solid var(--vscode-button-border, transparent); padding: 0 14px; font: inherit; font-weight: 600; letter-spacing: 0.01em; cursor: pointer; transition: background-color 120ms ease, transform 120ms ease; background: var(--vscode-button-secondaryBackground, var(--vscode-button-background)); color: var(--vscode-button-secondaryForeground, var(--vscode-button-foreground)); box-shadow: 0 1px 0 rgba(0, 0, 0, 0.2); }
         button:hover { background: var(--vscode-button-secondaryHoverBackground, var(--vscode-button-hoverBackground)); transform: translateY(-1px); }
@@ -394,9 +401,15 @@ class CodeSnippetEditorPanel {
                     </td>
                 </tr>
                 <tr>
+                    <th><label for="snippet-order">Sequence</label></th>
+                    <td>
+                        <input id="snippet-order" type="number" min="0" step="1" placeholder="Optional sequence (lower appears first)" />
+                    </td>
+                </tr>
+                <tr>
                     <th><label for="snippet-code">Code Snippet Text</label></th>
                     <td>
-                        <textarea id="snippet-code"></textarea>
+                        <textarea id="snippet-code" rows="12" cols="80" style="resize: both;"></textarea>
                         <div class="vars" id="vars">
                             <button type="button" data-token="\${sqlJobId}">+ \${sqlJobId}</button>
                             <button type="button" data-token="\${sqlJobName}">+ \${sqlJobName}</button>
@@ -430,6 +443,7 @@ class CodeSnippetEditorPanel {
     const vscode = acquireVsCodeApi();
     const label = document.getElementById('snippet-label');
     const group = document.getElementById('snippet-group');
+    const order = document.getElementById('snippet-order');
     const groupOptions = document.getElementById('group-options');
     const code = document.getElementById('snippet-code');
     const vars = document.getElementById('vars');
@@ -470,12 +484,12 @@ class CodeSnippetEditorPanel {
 
     save.addEventListener('click', () => {
       clearError();
-      vscode.postMessage({ type: 'save', label: label.value, group: group.value, codeTemplate: code.value });
+            vscode.postMessage({ type: 'save', label: label.value, group: group.value, order: order.value, codeTemplate: code.value });
     });
 
     saveRun.addEventListener('click', () => {
       clearError();
-      vscode.postMessage({ type: 'saveRun', label: label.value, group: group.value, codeTemplate: code.value });
+            vscode.postMessage({ type: 'saveRun', label: label.value, group: group.value, order: order.value, codeTemplate: code.value });
     });
 
     cancel.addEventListener('click', () => vscode.postMessage({ type: 'cancel' }));
@@ -487,6 +501,7 @@ class CodeSnippetEditorPanel {
         label.value = currentSnippet?.label || '';
         code.value = currentSnippet?.codeTemplate || '';
         group.value = currentSnippet?.group || 'Admin';
+        order.value = Number.isFinite(Number(currentSnippet?.order)) ? String(Math.trunc(Number(currentSnippet.order))) : '';
 
         groupOptions.replaceChildren();
         const groups = Array.isArray(message.availableGroups) ? message.availableGroups : [];
@@ -700,8 +715,7 @@ export function registerCodeSnippetManagerView(
             }
         }),
         vscode.commands.registerCommand('clprompter.codeSnippet.import', () => commandEntry.requestImportCodeSnippets()),
-        vscode.commands.registerCommand('clprompter.codeSnippet.export', () => commandEntry.requestExportCodeSnippets()),
-        vscode.commands.registerCommand('clprompter.codeSnippet.openAdvancedEditor', () => commandEntry.openAdvancedCodeSnippetEditor())
+        vscode.commands.registerCommand('clprompter.codeSnippet.export', () => commandEntry.requestExportCodeSnippets())
     ];
 
     void (async () => {
