@@ -74,12 +74,40 @@ if [ -z "${VSCE_PAT:-}" ]; then
   echo "Run: export VSCE_PAT=<your-personal-access-token>"
   exit 1
 fi
-vsce publish -p "$VSCE_PAT" || {
-  echo "❌ Marketplace publish failed. Rolling back tag..."
+
+MAX_PUBLISH_ATTEMPTS=3
+PUBLISH_RETRY_DELAY_SECONDS=20
+PUBLISH_LOG_FILE=$(mktemp)
+PUBLISH_SUCCESS=false
+
+for ATTEMPT in $(seq 1 "$MAX_PUBLISH_ATTEMPTS"); do
+  echo "📡 Marketplace publish attempt ${ATTEMPT}/${MAX_PUBLISH_ATTEMPTS}..."
+
+  if vsce publish -p "$VSCE_PAT" >"$PUBLISH_LOG_FILE" 2>&1; then
+    cat "$PUBLISH_LOG_FILE"
+    PUBLISH_SUCCESS=true
+    break
+  fi
+
+  cat "$PUBLISH_LOG_FILE"
+
+  if [ "$ATTEMPT" -lt "$MAX_PUBLISH_ATTEMPTS" ] && grep -Eiq "request timeout|etimedout|econnreset|temporar|socket hang up|_apis/gallery" "$PUBLISH_LOG_FILE"; then
+    echo "⚠️  Marketplace publish attempt ${ATTEMPT} failed with a transient network/service error. Retrying in ${PUBLISH_RETRY_DELAY_SECONDS}s..."
+    sleep "$PUBLISH_RETRY_DELAY_SECONDS"
+    continue
+  fi
+
+  break
+done
+
+rm -f "$PUBLISH_LOG_FILE"
+
+if [ "$PUBLISH_SUCCESS" != true ]; then
+  echo "❌ Marketplace publish failed after ${MAX_PUBLISH_ATTEMPTS} attempt(s). Rolling back tag..."
   git tag -d "$TAG"
   git push --delete origin "$TAG"
   exit 1
-}
+fi
 
 # Publish to Open VSX
 echo "📤 Publishing to Open VSX..."
