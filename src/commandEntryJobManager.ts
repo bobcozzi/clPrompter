@@ -21,6 +21,17 @@ function normalizeSqlJobId(jobId: string | undefined): string | undefined {
         : undefined;
 }
 
+function sharedSqlJobIdForDisplay(connection?: IBMi): string | undefined {
+    if (!connection) {
+        return undefined;
+    }
+    const raw = String(connection.getSqlJobId?.() ?? '').trim();
+    if (!raw) {
+        return undefined;
+    }
+    return normalizeSqlJobId(raw) ?? raw;
+}
+
 /** Escape a value for safe insertion into SQL string (for bindings not supported by Mapepire). */
 function escapeSqlValue(value: unknown): string {
     if (value === null || value === undefined) {
@@ -51,6 +62,24 @@ function substituteBindings(sql: string, bindings?: unknown[]): string {
 
 function isPositiveInteger(value: unknown): value is number {
     return typeof value === 'number' && Number.isInteger(value) && value > 0;
+}
+
+function isTruthyConfigFlag(value: unknown): boolean {
+    if (value === true) {
+        return true;
+    }
+    if (typeof value === 'number') {
+        return value !== 0;
+    }
+    if (typeof value === 'string') {
+        const normalized = value.trim().toLowerCase();
+        return normalized === 'true'
+            || normalized === '1'
+            || normalized === 'yes'
+            || normalized === 'on'
+            || normalized === 'enabled';
+    }
+    return false;
 }
 
 const CANCEL_SQL_STATEMENT = 'CALL QSYS2.CANCEL_SQL(?)';
@@ -126,7 +155,16 @@ export class CommandEntryJobManager {
     }
 
     private canUseDedicatedForConnection(connection?: IBMi): boolean {
-        return this.isDedicatedEnabled();
+        if (!this.isDedicatedEnabled()) {
+            return false;
+        }
+
+        // In single-mode Mapepire, force shared SQL job usage.
+        return this.isRemoteMapepireServerEnabled(connection);
+    }
+
+    isDedicatedUsable(connection?: IBMi): boolean {
+        return this.canUseDedicatedForConnection(connection);
     }
 
     private logRouteSnapshot(
@@ -191,7 +229,7 @@ export class CommandEntryJobManager {
 
     getState(connection?: IBMi): DedicatedJobState {
         if (!this.isDedicatedEnabled()) {
-            const sharedJobId = this.getObservedSharedJobId(connection) ?? normalizeSqlJobId(connection?.getSqlJobId());
+            const sharedJobId = this.getObservedSharedJobId(connection) ?? sharedSqlJobIdForDisplay(connection);
             return { enabled: false, jobId: sharedJobId, status: 'ready' };
         }
 
@@ -199,8 +237,8 @@ export class CommandEntryJobManager {
             if (connection) {
                 this.logRouteSnapshot('getState.shared.serverDisabled', connection);
             }
-            const sharedJobId = this.getObservedSharedJobId(connection) ?? normalizeSqlJobId(connection?.getSqlJobId());
-            return { enabled: true, jobId: sharedJobId, status: 'ready' };
+            const sharedJobId = this.getObservedSharedJobId(connection) ?? sharedSqlJobIdForDisplay(connection);
+            return { enabled: false, jobId: sharedJobId, status: 'ready' };
         }
 
         return {
@@ -211,7 +249,14 @@ export class CommandEntryJobManager {
     }
 
     getDisplayJobId(connection?: IBMi): string | undefined {
-        return this.getState(connection).jobId;
+        const state = this.getState(connection);
+        if (state.jobId) {
+            return state.jobId;
+        }
+
+        // Dedicated job can be active before a readable dedicated job ID is resolved.
+        // Fall back to shared SQL job ID so UI never regresses to "no connection".
+        return this.getObservedSharedJobId(connection) ?? sharedSqlJobIdForDisplay(connection);
     }
 
     private rowsFromExecutionResult(result: unknown): Record<string, unknown>[] {
@@ -459,7 +504,10 @@ export class CommandEntryJobManager {
         if (!connection) {
             return false;
         }
-        return (connection as any).getConfig?.().mapepireUseServer === true;
+        const config = (connection as any).getConfig?.() ?? {};
+        return isTruthyConfigFlag(config.mapepireUseServer)
+            || isTruthyConfigFlag(config.mapepireServerMode)
+            || isTruthyConfigFlag(config.connectToRemoteMapepireServer);
     }
 
     private async ensureJob(connection: IBMi): Promise<void> {
@@ -566,7 +614,8 @@ export class CommandEntryJobManager {
             for (const query of sqlQueries) {
                 try {
                     this.debugLog(`[Command Entry] Trying SQL query: ${query}`);
-                    const rows = await this.job.execute(query);
+                    const rawResult = await this.job.execute(query);
+                    const rows = this.rowsFromExecutionResult(rawResult);
                     const row = rows?.[0];
                     if (row) {
                         const value = row.JOB_ID ?? row.JOB_NAME ?? Object.values(row)[0];

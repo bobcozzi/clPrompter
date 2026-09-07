@@ -2,7 +2,7 @@
   "name": "clprompter",
   "displayName": "Bob Cozzi's CL Prompter and Formatter for IBM i",
   "description": "IBM i CL Prompting and Formatting: Built for modern development",
-  "version": "1.0.23",
+  "version": "1.0.24",
   "author": {
     "name": "Bob Cozzi",
     "url": "https://github.com/bobcozzi"
@@ -210,8 +210,8 @@
         "clPrompter.cmdEntryUseSharedSQLJob": {
           "order": 101,
           "type": "boolean",
-          "default": false,
-          "description": "Use the shared Code for IBM i SQL job for Command Entry CL and SQL. Set this to false to use a different/new SQL job for Command Entry requests. Recommend: `false`"
+          "default": true,
+          "description": "Use the shared Code for IBM i SQL job for Command Entry CL and SQL. Set this to false to use a dedicated/new SQL job for Command Entry requests. Default is shared mode for safer startup behavior with Mapepire single mode."
         },
         "clPrompter.cmdEntryLimitSqlFetch": {
           "order": 102,

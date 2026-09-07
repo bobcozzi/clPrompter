@@ -4,6 +4,11 @@ All notable changes to this project are documented in this file.
 
 ## [Preview of CL Command Entry]
 
+## [1.0.24] - 2026-09-07
+- Corrected a connection timing issue when in Mapapire is in non-Server mode and the "Shared SQL Job" setting for Command Entry is unchecked. It now ignores that setting in non-server mode and shares the vscode-ibmi sql job only.
+
+### What's Fixed
+
 ## [1.0.23] - 2026-09-05
 
 ### What's Fixed

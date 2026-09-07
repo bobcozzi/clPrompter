@@ -511,10 +511,10 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
                     history: clearHistoryOnStartup ? [] : this.history(),
                     running: this.running,
                     sqlJobId: this.lastPostedSqlJobId,
-                    dedicatedJobEnabled: this.jobManager.isDedicatedEnabled(),
+                    dedicatedJobEnabled: this.jobManager.isDedicatedUsable(this.getConnection()),
                     remoteMapepireEnabled: this.jobManager.isRemoteMapepireServerEnabled(this.getConnection()),
-                    canStartNewJob: this.jobManager.isDedicatedEnabled(),
-                    canCancelSqlJob: this.jobManager.isDedicatedEnabled(),
+                    canStartNewJob: this.jobManager.isDedicatedUsable(this.getConnection()),
+                    canCancelSqlJob: this.jobManager.isDedicatedUsable(this.getConnection()),
                     messageDetailsMode: this.messageDetailsMode(),
                     logSqlStatementsToCommandLog: this.logSqlStatementsToCommandLogEnabled(),
                     commandTextColor: this.commandEntryCommandTextColor(),
@@ -530,8 +530,11 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
                     this.pendingCommandText = undefined;
                 }
 
-                // Automatically initialize dedicated job if enabled and not already initialized
-                this.initializeDedicatedJobIfNeeded();
+                // Auto-initialize only when dedicated mode is actually usable.
+                // This keeps single-mode forced-shared while allowing server-mode
+                // dedicated sessions to start their own job as soon as Command Entry
+                // is live.
+                void this.initializeDedicatedJobIfNeeded();
                 break;
             case 'clear':
                 this.post({ type: 'clearResults' });
@@ -820,8 +823,7 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
         this.activeExecutionId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
         const sqlJobId = this.currentSqlJobId(connection);
         const dedicatedState = this.jobManager.getState(connection);
-        const showDedicatedStartupMessage = this.jobManager.isDedicatedEnabled()
-            && !this.jobManager.isRemoteMapepireServerEnabled(connection)
+        const showDedicatedStartupMessage = this.jobManager.isDedicatedUsable(connection)
             && dedicatedState.status === 'ended';
         const statusMessage = showDedicatedStartupMessage
             ? 'Starting new mapepire job...'
@@ -875,8 +877,8 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
             return;
         }
 
-        if (!this.jobManager.isDedicatedEnabled()) {
-            this.post({ type: 'notice', message: 'Dedicated SQL job mode is disabled. Set clPrompter.cmdEntryUseSharedSQLJob=false to use Reconnect Server Job.' });
+        if (!this.jobManager.isDedicatedUsable(connection)) {
+            this.post({ type: 'notice', message: 'Reconnect Server Job is only available when using Mapepire server mode and dedicated SQL job mode.' });
             return;
         }
 
@@ -899,7 +901,7 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
             return;
         }
 
-        if (!this.jobManager.isDedicatedEnabled()) {
+        if (!this.jobManager.isDedicatedUsable(connection)) {
             this.post({ type: 'notice', message: 'Cancel SQL Job is only available in dedicated SQL job mode.' });
             this.postJobCapabilities();
             return;
@@ -1683,8 +1685,9 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
     }
 
     private postJobCapabilities(): void {
-        const dedicatedJobEnabled = this.jobManager.isDedicatedEnabled();
-        const remoteMapepireEnabled = this.jobManager.isRemoteMapepireServerEnabled(this.getConnection());
+        const connection = this.getConnection();
+        const dedicatedJobEnabled = this.jobManager.isDedicatedUsable(connection);
+        const remoteMapepireEnabled = this.jobManager.isRemoteMapepireServerEnabled(connection);
         const dedicatedReady = dedicatedJobEnabled;
         this.post({
             type: 'jobCapabilities',
@@ -1731,11 +1734,11 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
     }
 
     private async initializeDedicatedJobIfNeeded(): Promise<void> {
-        if (!this.jobManager.isDedicatedEnabled()) {
+        const connection = this.getConnection();
+        if (!this.jobManager.isDedicatedUsable(connection)) {
             return; // Not enabled, skip
         }
 
-        const connection = this.getConnection();
         if (!connection || !connection.sqlRunnerAvailable()) {
             return; // No connection available
         }
@@ -1759,10 +1762,16 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
         }
     }
 
-    public async handleConnectionAvailable(connection = this.getConnection()): Promise<void> {
+    public async handleConnectionAvailable(
+        connection = this.getConnection(),
+        options: { autoInitializeDedicatedJob?: boolean } = {}
+    ): Promise<void> {
+        const { autoInitializeDedicatedJob = true } = options;
         this.refreshSqlJobId(connection);
         this.postJobCapabilities();
-        await this.initializeDedicatedJobIfNeeded();
+        if (autoInitializeDedicatedJob) {
+            await this.initializeDedicatedJobIfNeeded();
+        }
         this.refreshSqlJobId(connection);
     }
 

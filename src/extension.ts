@@ -422,6 +422,7 @@ export async function activate(context: vscode.ExtensionContext) {
         vscode.commands.registerCommand('clprompter.openCommandEntry', async () => {
             await context.workspaceState.update('clprompter.commandEntryTouchedThisSession', true);
             await setCommandEntryAvailable(true);
+            void commandEntry.handleConnectionAvailable(code4i?.instance?.getConnection(), { autoInitializeDedicatedJob: true });
             await revealCommandEntryContainer();
             await vscode.commands.executeCommand('clprompter.codeSnippet.resolvePinnedVisibility');
             commandEntry.focus();
@@ -639,7 +640,7 @@ export async function activate(context: vscode.ExtensionContext) {
 
         code4i.instance.subscribe(context, 'connected', 'clPrompter-connected-context', () => {
             void vscode.commands.executeCommand('setContext', 'clprompter.connected', true);
-            void commandEntry.handleConnectionAvailable(code4i?.instance?.getConnection());
+            void commandEntry.handleConnectionAvailable(code4i?.instance?.getConnection(), { autoInitializeDedicatedJob: false });
         });
         code4i.instance.subscribe(context, 'connected', 'clPrompter-mapepire-dump', () => {
             const conn = code4i?.instance?.getConnection();
@@ -684,7 +685,7 @@ export async function activate(context: vscode.ExtensionContext) {
         if (code4i.instance.getConnection()) {
             const initialConnection = code4i.instance.getConnection() as any;
             void vscode.commands.executeCommand('setContext', 'clprompter.connected', true);
-            void commandEntry.handleConnectionAvailable(initialConnection);
+            void commandEntry.handleConnectionAvailable(initialConnection, { autoInitializeDedicatedJob: false });
             void applyCommandEntryStartupVisibility();
             patchRunSQL(initialConnection);
             logMapepireConnectionDump(initialConnection, 'activate-existing-connection');

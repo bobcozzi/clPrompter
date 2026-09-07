@@ -556,12 +556,12 @@
   };
   const updateMenuCapabilities = () => {
     const cancelDisabled = !canCancelSqlJob;
+    const disabledDedicatedReason =
+      'Available only when both dedicated SQL job mode is enabled (set clPrompter.cmdEntryUseSharedSQLJob=false) and Code for IBM i setting "Connect to remote Mapepire Server" is enabled';
     if (menuCancelSqlJob) {
       menuCancelSqlJob.disabled = cancelDisabled;
       const reason = cancelDisabled
-        ? (!dedicatedJobEnabled
-          ? 'Available only when shared SQL job mode is disabled (set clPrompter.cmdEntryUseSharedSQLJob=false)'
-          : 'Enable Code for IBM i setting "Connect to remote Mapepire Server"')
+        ? disabledDedicatedReason
         : 'Cancel the last SQL request on the dedicated SQL job';
       menuCancelSqlJob.title = reason;
       menuCancelSqlJob.setAttribute('aria-disabled', String(cancelDisabled));
@@ -570,9 +570,7 @@
       menuStartNewJob.disabled = !canStartNewJob;
       const reason = canStartNewJob
         ? 'Reconnect the dedicated SQL job'
-        : (!dedicatedJobEnabled
-          ? 'Available only when shared SQL job mode is disabled (set clPrompter.cmdEntryUseSharedSQLJob=false)'
-          : 'Enable Code for IBM i setting "Connect to remote Mapepire Server"');
+        : disabledDedicatedReason;
       menuStartNewJob.title = reason;
       menuStartNewJob.setAttribute('aria-disabled', String(!canStartNewJob));
     }

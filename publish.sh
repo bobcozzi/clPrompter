@@ -38,7 +38,7 @@ fi
 
 # Compile
 echo "🔨 Compiling..."
-npm run compile || exit 1
+npm run build || exit 1
 
 # Package
 echo "📦 Packaging..."
