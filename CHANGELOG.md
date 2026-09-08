@@ -4,6 +4,24 @@ All notable changes to this project are documented in this file.
 
 ## [Preview of CL Command Entry]
 
+## [1.0.25] - 2026-09-08
+
+### What's New
+
+- **Shared SQL Job (definition)**: "Shared SQL Job" means Command Entry uses the same existing SQL job that Code for IBM i is already using on the host, instead of starting its own private SQL job.
+- **Connection-scoped SQL job mode**: Command Entry now saves **Use Shared SQL Job** vs **Use Private SQL Job** per IBM i connection and retains that choice on future reconnects.
+- **Simpler mode switching from menu**: The easiest switching path is now the Command Entry `...` menu options:
+  - `Use Shared SQL Job`
+  - `Use Private SQL Job`
+- **Shared-SQL Job mode** visual cue in status: The status SQL job ID now shows a trailing `*` when Command Entry is using the shared SQL job.
+
+### What's Fixed
+
+- **Private mode switch persistence failure**: Fixed a method-binding issue that could fail with `Cannot read properties of undefined (reading 'getConnectionSettings')` when switching SQL job mode.
+- **Mode-switch job ID refresh**: Switching between shared/private now updates the displayed SQL job ID immediately, matching the same refresh path used after command execution.
+- **Fallback behavior clarification and enforcement**: When Mapepire Server Mode is disabled, Command Entry correctly uses only the shared SQL job even if private mode was previously selected.
+- **Command Entry logging prefix consistency**: Standardized Command Entry logs to the single prefix style `[Cmd Entry]`. Note that CL Prompter continues to use `[CLPROMPTER]` log entries.
+
 ## [1.0.24] - 2026-09-07
 - Corrected a connection timing issue when in Mapapire is in non-Server mode and the "Shared SQL Job" setting for Command Entry is unchecked. It now ignores that setting in non-server mode and shares the vscode-ibmi sql job only.
 

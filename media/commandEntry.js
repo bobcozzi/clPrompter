@@ -5,13 +5,14 @@
   const MENU_POSITION_DEBUG = true;
   const minTextareaRows = 2;
   const command = document.getElementById('command'), mode = document.getElementById('mode'), severityFilter = document.getElementById('message-severity-filter');
-  const run = document.getElementById('run'), prompt = document.getElementById('prompt'), snippets = document.getElementById('snippets'), cmdEntrySettings = document.getElementById('cmdentry-settings'), snippetsMenuList = document.getElementById('snippets-menu-list'), snippetsMenuToggle = document.getElementById('snippets-menu-toggle'), snippetsMenuRefresh = document.getElementById('snippets-menu-refresh'), snippetsMenuImport = document.getElementById('snippets-menu-import'), snippetsMenuExport = document.getElementById('snippets-menu-export'), snippetsMenuAdd = document.getElementById('snippets-menu-add'), clearCommand = document.getElementById('clear-command'), toolbarMenu = document.getElementById('toolbar-menu'), toolbarMenuList = document.getElementById('toolbar-menu-list'), menuViewLog = document.getElementById('menu-view-log'), menuClearLog = document.getElementById('menu-clear-log'), menuClearSqlLog = document.getElementById('menu-clear-sql-log'), menuToggleSqlLog = document.getElementById('menu-toggle-sql-log'), menuToggleMessageDetails = document.getElementById('menu-toggle-message-details'), menuStartNewJob = document.getElementById('menu-start-new-job'), menuCancelSqlJob = document.getElementById('menu-cancel-sql-job'), menuClearHistory = document.getElementById('menu-clear-history'), historyPrev = document.getElementById('history-prev'), historyNext = document.getElementById('history-next'), statusJobMenu = document.getElementById('status-job-menu'), statusJobMenuCopy = document.getElementById('status-job-menu-copy'), statusJobMenuDisplayJoblog = document.getElementById('status-job-menu-display-joblog');
+  const run = document.getElementById('run'), prompt = document.getElementById('prompt'), snippets = document.getElementById('snippets'), cmdEntrySettings = document.getElementById('cmdentry-settings'), snippetsMenuList = document.getElementById('snippets-menu-list'), snippetsMenuManage = document.getElementById('snippets-menu-manage'), snippetsMenuToggle = document.getElementById('snippets-menu-toggle'), snippetsMenuRefresh = document.getElementById('snippets-menu-refresh'), snippetsMenuImport = document.getElementById('snippets-menu-import'), snippetsMenuExport = document.getElementById('snippets-menu-export'), snippetsMenuAdd = document.getElementById('snippets-menu-add'), clearCommand = document.getElementById('clear-command'), toolbarMenu = document.getElementById('toolbar-menu'), toolbarMenuList = document.getElementById('toolbar-menu-list'), menuViewLog = document.getElementById('menu-view-log'), menuClearLog = document.getElementById('menu-clear-log'), menuClearSqlLog = document.getElementById('menu-clear-sql-log'), menuToggleSqlLog = document.getElementById('menu-toggle-sql-log'), menuToggleMessageDetails = document.getElementById('menu-toggle-message-details'), menuUseSharedSqlJob = document.getElementById('menu-use-shared-sql-job'), menuUsePrivateSqlJob = document.getElementById('menu-use-private-sql-job'), menuStartNewJob = document.getElementById('menu-start-new-job'), menuCancelSqlJob = document.getElementById('menu-cancel-sql-job'), menuClearHistory = document.getElementById('menu-clear-history'), historyPrev = document.getElementById('history-prev'), historyNext = document.getElementById('history-next'), statusJobMenu = document.getElementById('status-job-menu'), statusJobMenuCopy = document.getElementById('status-job-menu-copy'), statusJobMenuDisplayJoblog = document.getElementById('status-job-menu-display-joblog');
   const statusText = document.getElementById('status-text'), statusJobId = document.getElementById('status-jobid'), results = document.getElementById('results');
   let historyIndex = -1, runningStartedAt, runningTimerId, runningStatusPrefix = 'Running…', historyDraft = '', sqlJobPollingId;
   let statusJobSingleClickTimer;
   let historyHoverTooltipEl;
   let dedicatedJobEnabled = false;
   let remoteMapepireEnabled = false;
+  let useSharedSqlJob = true;
   let canStartNewJob = false;
   let canCancelSqlJob = false;
   let messageDetailsMode = 'SHOW';
@@ -44,16 +45,20 @@
     statusText.textContent = message;
   };
   const hasRealSqlJobId = () => {
-    const value = statusJobId.textContent?.trim().toLowerCase();
+    const value = (statusJobId.getAttribute('data-jobid-raw') || statusJobId.textContent || '').trim().toLowerCase();
     return !!value && value !== noConnectionText;
   };
+  const getStatusJobIdRaw = () => (statusJobId.getAttribute('data-jobid-raw') || '').trim();
   const setStatusJobId = (sqlJobId = '') => {
     const normalized = String(sqlJobId || '').trim();
     const isConnected = normalized.length > 0;
+    const displayJobId = isConnected && useSharedSqlJob ? `${normalized}*` : normalized;
     const statusJobLabel = isConnected
-      ? 'SQL job ID. Click to copy, double-click to display joblog, right-click for menu.'
+      ? `SQL job ID${useSharedSqlJob ? ' (shared job; trailing * marker shown)' : ''}. Click to copy, double-click to display joblog, right-click for menu.`
       : 'No IBM i connection job detected. Connect to an IBM i server to enabled Command Entry.';
-    statusJobId.textContent = normalized || noConnectionText;
+    console.log('[Cmd Entry][WebviewJobId] setStatusJobId', { sqlJobId: normalized, displayJobId, isConnected, useSharedSqlJob });
+    statusJobId.setAttribute('data-jobid-raw', normalized);
+    statusJobId.textContent = displayJobId || noConnectionText;
     statusJobId.classList.toggle('no-connection', !isConnected);
     statusJobId.title = statusJobLabel;
     statusJobId.setAttribute('data-tooltip', statusJobLabel);
@@ -85,18 +90,18 @@
     }, 5000);
   };
   const copyStatusJobId = () => {
-    const sqlJobId = statusJobId.textContent?.trim();
+    const sqlJobId = getStatusJobIdRaw();
     if (!sqlJobId || sqlJobId.toLowerCase() === noConnectionText) { return; }
     vscode.postMessage({ type: 'copySqlJobId', sqlJobId });
   };
 
   const displayStatusJoblog = () => {
-    const sqlJobId = statusJobId.textContent?.trim();
+    const sqlJobId = getStatusJobIdRaw();
     if (!sqlJobId || sqlJobId.toLowerCase() === noConnectionText) { return; }
     vscode.postMessage({ type: 'requestDisplayJoblog', sqlJobId });
   };
   const selectEntireStatusJobId = () => {
-    const sqlJobId = statusJobId?.textContent?.trim();
+    const sqlJobId = getStatusJobIdRaw();
     if (!statusJobId || !sqlJobId || sqlJobId.toLowerCase() === noConnectionText) { return; }
     const selection = window.getSelection();
     if (!selection) { return; }
@@ -221,7 +226,7 @@
   };
   const logMenuPlacementDebug = (phase, payload) => {
     if (!MENU_POSITION_DEBUG) { return; }
-    console.log(`[Command Entry][MenuDebug] ${phase}`, payload);
+    console.log(`[Cmd Entry][MenuDebug] ${phase}`, payload);
     vscode.postMessage({ type: 'menuDebug', phase, payload });
   };
   const closeStatusJobMenu = () => {
@@ -556,12 +561,13 @@
   };
   const updateMenuCapabilities = () => {
     const cancelDisabled = !canCancelSqlJob;
-    const disabledDedicatedReason =
-      'Available only when both dedicated SQL job mode is enabled (set clPrompter.cmdEntryUseSharedSQLJob=false) and Code for IBM i setting "Connect to remote Mapepire Server" is enabled';
+    const dedicatedRequiredReason =
+      'Available only when Command Entry is using Private SQL Job and Code for IBM i Mapepire Server Mode is enabled';
+    const serverModeReason = 'Available only when Code for IBM i Mapepire Server Mode is enabled';
     if (menuCancelSqlJob) {
       menuCancelSqlJob.disabled = cancelDisabled;
       const reason = cancelDisabled
-        ? disabledDedicatedReason
+        ? dedicatedRequiredReason
         : 'Cancel the last SQL request on the dedicated SQL job';
       menuCancelSqlJob.title = reason;
       menuCancelSqlJob.setAttribute('aria-disabled', String(cancelDisabled));
@@ -570,9 +576,27 @@
       menuStartNewJob.disabled = !canStartNewJob;
       const reason = canStartNewJob
         ? 'Reconnect the dedicated SQL job'
-        : disabledDedicatedReason;
+        : dedicatedRequiredReason;
       menuStartNewJob.title = reason;
       menuStartNewJob.setAttribute('aria-disabled', String(!canStartNewJob));
+    }
+    if (menuUseSharedSqlJob) {
+      menuUseSharedSqlJob.hidden = !remoteMapepireEnabled;
+      menuUseSharedSqlJob.disabled = !remoteMapepireEnabled || useSharedSqlJob;
+      menuUseSharedSqlJob.textContent = `${useSharedSqlJob ? '✓ ' : ''}Use Shared SQL Job`;
+      menuUseSharedSqlJob.title = remoteMapepireEnabled
+        ? 'Route CL/SQL through the Code for IBM i shared SQL job'
+        : serverModeReason;
+      menuUseSharedSqlJob.setAttribute('aria-disabled', String(menuUseSharedSqlJob.disabled));
+    }
+    if (menuUsePrivateSqlJob) {
+      menuUsePrivateSqlJob.hidden = !remoteMapepireEnabled;
+      menuUsePrivateSqlJob.disabled = !remoteMapepireEnabled || !useSharedSqlJob;
+      menuUsePrivateSqlJob.textContent = `${!useSharedSqlJob ? '✓ ' : ''}Use Private SQL Job`;
+      menuUsePrivateSqlJob.title = remoteMapepireEnabled
+        ? 'Use a dedicated/private SQL job for Command Entry'
+        : serverModeReason;
+      menuUsePrivateSqlJob.setAttribute('aria-disabled', String(menuUsePrivateSqlJob.disabled));
     }
     updateMessageDetailsMenuLabel();
   };
@@ -1079,6 +1103,22 @@
     vscode.postMessage({ type: 'toggleSqlStatementsToCommandLog' });
     command.focus();
   });
+  menuUseSharedSqlJob?.addEventListener('click', () => {
+    if (menuUseSharedSqlJob.disabled) {
+      return;
+    }
+    closeToolbarMenu();
+    vscode.postMessage({ type: 'useSharedSqlJob' });
+    command.focus();
+  });
+  menuUsePrivateSqlJob?.addEventListener('click', () => {
+    if (menuUsePrivateSqlJob.disabled) {
+      return;
+    }
+    closeToolbarMenu();
+    vscode.postMessage({ type: 'usePrivateSqlJob' });
+    command.focus();
+  });
   menuStartNewJob?.addEventListener('click', () => {
     if (menuStartNewJob.disabled) {
       return;
@@ -1137,7 +1177,7 @@
       return;
     }
 
-    const menuItems = [menuViewLog, menuClearLog, menuClearSqlLog, menuClearHistory, menuToggleSqlLog, menuToggleMessageDetails, menuStartNewJob, menuCancelSqlJob]
+    const menuItems = [menuViewLog, menuClearLog, menuClearSqlLog, menuClearHistory, menuToggleSqlLog, menuToggleMessageDetails, menuUseSharedSqlJob, menuUsePrivateSqlJob, menuStartNewJob, menuCancelSqlJob]
       .filter(item => item && !item.disabled);
     if (!menuItems.length) { return; }
     event.preventDefault();
@@ -1259,7 +1299,7 @@
     displayStatusJoblog();
   });
   statusJobId?.addEventListener('contextmenu', event => {
-    const sqlJobId = statusJobId.textContent?.trim();
+    const sqlJobId = getStatusJobIdRaw();
     if (!sqlJobId || sqlJobId.toLowerCase() === noConnectionText) { return; }
     event.preventDefault();
     openStatusJobMenu(event.clientX, event.clientY, sqlJobId);
@@ -1316,6 +1356,7 @@
         applyAppearancePreferences(message.commandTextColor);
         dedicatedJobEnabled = !!message.dedicatedJobEnabled;
         remoteMapepireEnabled = !!message.remoteMapepireEnabled;
+        useSharedSqlJob = typeof message.useSharedSqlJob === 'boolean' ? !!message.useSharedSqlJob : true;
         canStartNewJob = typeof message.canStartNewJob === 'boolean'
           ? !!message.canStartNewJob
           : (dedicatedJobEnabled && remoteMapepireEnabled);
@@ -1350,9 +1391,12 @@
       case 'jobCapabilities':
         dedicatedJobEnabled = !!message.dedicatedJobEnabled;
         remoteMapepireEnabled = !!message.remoteMapepireEnabled;
+        useSharedSqlJob = typeof message.useSharedSqlJob === 'boolean' ? !!message.useSharedSqlJob : useSharedSqlJob;
         canStartNewJob = !!message.canStartNewJob;
         canCancelSqlJob = !!message.canCancelSqlJob;
         updateMenuCapabilities();
+        // Re-render the status text marker when mode changes (shared mode shows trailing *).
+        setStatusJobId(getStatusJobIdRaw());
         break;
       case 'messageDetailsPreference':
         messageDetailsMode = String(message.mode || 'SHOW').toUpperCase() === 'HIDE' ? 'HIDE' : 'SHOW';

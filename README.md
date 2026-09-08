@@ -78,18 +78,26 @@ The `CL Command Entry Panel` is intended for **non-interactive CL commands** suc
 
 ### Dedicated SQL Job Reconnect (Optional)
 
-If you use dedicated Command Entry job mode, these settings and steps ensure your IBM i job environment is reset correctly:
+If you use private Command Entry job mode, these settings and steps ensure your IBM i job environment is reset correctly:
 
-1. Set `clPrompter.cmdEntryUseSharedSQLJob=false`.
-2. In Code for IBM i connection settings, enable `mapepireUseServer=true` (Connect to remote Mapepire Server).
-3. Connect to IBM i and open Command Entry.
-4. CLPROMPTER now performs a one-time startup reconnect cycle for the dedicated SQL job in server mode so stale job environment settings (for example prior library-list changes) are not carried over between VS Code sessions.
-5. Any time you need a clean dedicated job manually, use Command Entry menu `...` -> `Reconnect Server Job`.
+1. In Code for IBM i connection settings, under **HTTP Server* enable the `mapepireUseServer=true` (Connect to remote Mapepire Server) option.
+2. Connect to IBM i and open Command Entry.
+3. Open the Command Entry `...` button to expose the options menu and choose one of these options:
+  - **Use Shared SQL Job**
+  - **Use Private SQL Job**
+4. Your choice is saved in that IBM i connection's settings and is reused the next time you connect to the same host/connection.
+5. CLPROMPTER performs a one-time startup reconnect cycle for private SQL job mode in server mode so stale job environment settings (for example prior library-list changes) are not carried over between VS Code sessions.
+6. Any time you need a clean up/reset your private SQL job, use Command Entry menu `...` -> `Reconnect Server Job`.
+
+Important behavior:
+
+- Shared/Private switching is only available when Mapepire Server Mode is enabled.
+- If Mapepire Server Mode is not enabled, CLPROMPTER uses the shared SQL job even if private mode was previously selected.
 
 Notes:
 
-- On IBM i disconnect, CLPROMPTER now closes its dedicated SQL job/session state.
-- On VS Code extension deactivation, CLPROMPTER performs dedicated job cleanup again as a safety net.
+- On IBM i disconnect, CLPROMPTER now closes its private SQL job/session state.
+- On VS Code extension deactivation, CLPROMPTER performs private job cleanup again as a safety net.
 
 ### Limitations and Behavior Notes
 
@@ -102,7 +110,7 @@ Notes:
   - `clPrompter.cmdEntrySqlFirstPageRowsToFetch` is the first-page row count (default `200`) used only when the SQL statement is first run.
   - After the first page, manual **Load more rows** uses `clPrompter.cmdEntrySqlFetchRowLimit`.
   - When incremental loading is disabled (`false`), behavior is equivalent to `*NOMAX` (fetch all available rows on run).
-  - Dedicated-job mode (when `clPrompter.cmdEntryUseSharedSQLJob=false`) still uses backend sub-fetches as needed, and the SQL Results panel appends rows dynamically.
+  - private-job mode (when `clPrompter.cmdEntryUseSharedSQLJob=false`) still uses backend sub-fetches as needed, and the SQL Results panel appends rows dynamically.
   - If `SQL:` is omitted, statements beginning with `SELECT` or `VALUES` are automatically treated as SQL.
 - **Code Snippet templating** — Code Snippets support runtime substitution variables:
   - `${sqlJobId}` (`nnnnnn/user/job`)

@@ -5,6 +5,7 @@ import { getUDTFLibrary } from './components/hostFunctions';
 import { CommandEntryJobManager } from './commandEntryJobManager';
 import { detectCommandEntryPrefix } from './commandEntryPrefixes';
 import { buildCancelSqlJobCommand, CMD_RUN_SQL, normalizeSqlJobId } from './commandEntrySqlHelpers';
+import { getConnectionSqlSettings } from './commandEntrySqlSettings';
 
 export { buildCancelSqlJobCommand, CMD_RUN_SQL, normalizeSqlJobId };
 
@@ -689,16 +690,20 @@ function buildPagedSql(sql: string, offset: number, fetchRows: number): string {
     return `SELECT * FROM (${baseSql}) CLPROMPTER_PAGE OFFSET ${offset} ROWS FETCH NEXT ${fetchRows} ROWS ONLY`;
 }
 
-function resolveConfiguredSqlFetchLimit(): number {
+function resolveConfiguredSqlFetchLimit(connection?: IBMi, context?: vscode.ExtensionContext): number {
     const config = vscode.workspace.getConfiguration('clPrompter');
-    const enabled = config.get<boolean | undefined>('cmdEntryLimitSqlFetch')
+    const connectionSettings = connection && context ? getConnectionSqlSettings(context, connection) : undefined;
+    const enabled = connectionSettings?.limitFetch
+        ?? config.get<boolean | undefined>('cmdEntrySQLLimitFetch')
+        ?? config.get<boolean | undefined>('cmdEntryLimitSqlFetch')
         ?? config.get<boolean | undefined>('cmdEntrySqlFetchLimitEnabled')
         ?? config.get<boolean>('commandEntrySqlFetchLimitEnabled', true);
     if (!enabled) {
         return NOMAX_SENTINEL;
     }
 
-    const configuredRows = config.get<number | undefined>('cmdEntrySqlFetchRowLimit')
+    const configuredRows = connectionSettings?.fetchRowLimit
+        ?? config.get<number | undefined>('cmdEntrySqlFetchRowLimit')
         ?? config.get<number | undefined>('cmdEntrySqlFetchLimitRows')
         ?? config.get<number>('commandEntrySqlFetchLimitRows', DEFAULT_SQL_RESULT_ROWS);
     if (Number.isInteger(configuredRows) && configuredRows > 0) {
@@ -717,9 +722,11 @@ function resolveConfiguredSqlFetchLimit(): number {
     return DEFAULT_SQL_RESULT_ROWS;
 }
 
-function resolveConfiguredSqlPrefetchRows(): number {
+function resolveConfiguredSqlPrefetchRows(connection?: IBMi, context?: vscode.ExtensionContext): number {
     const config = vscode.workspace.getConfiguration('clPrompter');
-    const configuredRows = config.get<number | undefined>('cmdEntrySqlFirstPageRowsToFetch')
+    const connectionSettings = connection && context ? getConnectionSqlSettings(context, connection) : undefined;
+    const configuredRows = connectionSettings?.firstPageRowsToFetch
+        ?? config.get<number | undefined>('cmdEntrySqlFirstPageRowsToFetch')
         ?? config.get<number | undefined>('cmdEntrySqlPrefetchRows')
         ?? config.get<number>('commandEntrySqlPrefetchRows', SCROLL_PREFETCH_ROWS);
     if (Number.isInteger(configuredRows) && configuredRows > 0) {
@@ -733,10 +740,13 @@ function resolveConfiguredSqlPrefetchRows(): number {
 export class CommandEntryService {
     private activeSqlSession: SqlPagingSession | undefined;
 
-    constructor(private readonly jobManager?: CommandEntryJobManager) { }
+    constructor(
+        private readonly jobManager?: CommandEntryJobManager,
+        private readonly context?: vscode.ExtensionContext
+    ) { }
 
-    getConfiguredPrefetchRows(): number {
-        return resolveConfiguredSqlPrefetchRows();
+    getConfiguredPrefetchRows(connection?: IBMi): number {
+        return resolveConfiguredSqlPrefetchRows(connection, this.context);
     }
 
     async closeSqlSession(sessionId?: string): Promise<void> {
@@ -1038,8 +1048,8 @@ export class CommandEntryService {
             if (sqlStatement) {
                 await this.closeSqlSession();
 
-                const maxRows = resolveConfiguredSqlFetchLimit();
-                const prefetchRows = resolveConfiguredSqlPrefetchRows();
+                const maxRows = resolveConfiguredSqlFetchLimit(connection, this.context);
+                const prefetchRows = resolveConfiguredSqlPrefetchRows(connection, this.context);
                 const unlimited = maxRows === NOMAX_SENTINEL;
                 const normalizedSql = stripTrailingSemicolon(sqlStatement);
                 let rows: Record<string, unknown>[];

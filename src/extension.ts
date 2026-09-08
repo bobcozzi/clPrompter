@@ -354,8 +354,8 @@ export async function activate(context: vscode.ExtensionContext) {
         }
     };
 
-    const sharedJobManager = new CommandEntryJobManager(commandEntryOutput);
-    const sharedCommandService = new CommandEntryService(sharedJobManager);
+    const sharedJobManager = new CommandEntryJobManager(commandEntryOutput, context);
+    const sharedCommandService = new CommandEntryService(sharedJobManager, context);
     sharedCommandEntryJobManager = sharedJobManager;
     sharedCommandEntryService = sharedCommandService;
     const multiSqlJob = createMultiSqlJobApi(
@@ -386,7 +386,7 @@ export async function activate(context: vscode.ExtensionContext) {
             return;
         }
         if (!conn) {
-            commandEntryDebugLog(`[Command Entry][MapepireDump] ${reason} no active connection`);
+            commandEntryDebugLog(`[Cmd Entry][MapepireDump] ${reason} no active connection`);
             return;
         }
 
@@ -404,10 +404,10 @@ export async function activate(context: vscode.ExtensionContext) {
         const connectionName = String(conn.currentConnectionName ?? '<unknown-connection>');
 
         commandEntryDebugLog(
-            `[Command Entry][MapepireDump] ${reason} connection=${connectionName} user=${user} host=${host} sqlRunnerAvailable=${sqlRunnerAvailable} sharedJobStatus=${sharedJobStatus} sharedJobId=${sharedJobId}`
+            `[Cmd Entry][MapepireDump] ${reason} connection=${connectionName} user=${user} host=${host} sqlRunnerAvailable=${sqlRunnerAvailable} sharedJobStatus=${sharedJobStatus} sharedJobId=${sharedJobId}`
         );
         commandEntryDebugLog(
-            `[Command Entry][MapepireDump] ${reason} config ${configPairs.length > 0 ? configPairs.join(', ') : '<no mapepire keys in connection config>'}`
+            `[Cmd Entry][MapepireDump] ${reason} config ${configPairs.length > 0 ? configPairs.join(', ') : '<no mapepire keys in connection config>'}`
         );
     };
 
@@ -434,6 +434,8 @@ export async function activate(context: vscode.ExtensionContext) {
         vscode.commands.registerCommand('clprompter.promptCommandEntry', () => commandEntry.requestPrompt()),
         vscode.commands.registerCommand('clprompter.cancelCommandEntry', () => commandEntry.requestCancel()),
         vscode.commands.registerCommand('clprompter.startNewCommandEntryJob', () => commandEntry.requestStartNewJob()),
+        vscode.commands.registerCommand('clprompter.useSharedCommandEntrySqlJob', () => commandEntry.requestUseSharedSqlJob()),
+        vscode.commands.registerCommand('clprompter.usePrivateCommandEntrySqlJob', () => commandEntry.requestUsePrivateSqlJob()),
         vscode.commands.registerCommand('clprompter.clearCommandEntry', () => commandEntry.clear()),
         vscode.commands.registerCommand('clprompter.exportCodeSnippets', () => commandEntry.requestExportCodeSnippets()),
         vscode.commands.registerCommand('clprompter.importCodeSnippets', () => commandEntry.requestImportCodeSnippets())
@@ -544,13 +546,13 @@ export async function activate(context: vscode.ExtensionContext) {
                 const beforeJobIdRaw = String((conn as any).getSqlJobId?.() ?? '<none>');
                 const beforeStatus = (conn as any).sqlJob?.getStatus?.() ?? '<unknown>';
                 const beforeSqlJobObject = getExtensionObjectId((conn as any).sqlJob) ?? '<none>';
-                commandEntryDebugLog(`[Command Entry][KeepAlive] tick before sharedSqlJobObj=${beforeSqlJobObject} status=${beforeStatus} sharedJobId=${beforeJobId} sharedJobIdRaw=${beforeJobIdRaw}`);
+                commandEntryDebugLog(`[Cmd Entry][KeepAlive] tick before sharedSqlJobObj=${beforeSqlJobObject} status=${beforeStatus} sharedJobId=${beforeJobId} sharedJobIdRaw=${beforeJobIdRaw}`);
 
                 // Skip the ping if the SQLJob is already busy — another query is in-flight,
                 // which itself proves the connection is alive.  No need to queue behind it.
                 const jobStatus: string | undefined = (conn as any).sqlJob?.getStatus?.();
                 if (jobStatus === 'busy') {
-                    commandEntryDebugLog('[Command Entry][KeepAlive] skip ping because shared SQL job status is busy.');
+                    commandEntryDebugLog('[Cmd Entry][KeepAlive] skip ping because shared SQL job status is busy.');
                     return;
                 }
                 try {
@@ -563,7 +565,7 @@ export async function activate(context: vscode.ExtensionContext) {
                     const afterJobIdRaw = String((conn as any).getSqlJobId?.() ?? '<none>');
                     const afterStatus = (conn as any).sqlJob?.getStatus?.() ?? '<unknown>';
                     const afterSqlJobObject = getExtensionObjectId((conn as any).sqlJob) ?? '<none>';
-                    commandEntryDebugLog(`[Command Entry][KeepAlive] ping OK after sharedSqlJobObj=${afterSqlJobObject} status=${afterStatus} sharedJobId=${afterJobId} sharedJobIdRaw=${afterJobIdRaw}`);
+                    commandEntryDebugLog(`[Cmd Entry][KeepAlive] ping OK after sharedSqlJobObj=${afterSqlJobObject} status=${afterStatus} sharedJobId=${afterJobId} sharedJobIdRaw=${afterJobIdRaw}`);
                     commandEntry.refreshSqlJobId(conn as any);
                 } catch (err: any) {
                     // The keep-alive failed.  The most common cause is that the Mapepire
@@ -588,14 +590,14 @@ export async function activate(context: vscode.ExtensionContext) {
                     //       && this.sqlJob.getStatus() !== JobStatus.ENDED;
                     const deadJobMsg = ['not yet setup', 'ended', 'not started'];
                     const isDeadJob = deadJobMsg.some(s => err?.message?.toLowerCase().includes(s));
-                    commandEntryOutput.appendLine(`[Command Entry][KeepAlive] ping failed message=${err?.message ?? String(err)} deadJobDetected=${isDeadJob}`);
+                    commandEntryOutput.appendLine(`[Cmd Entry][KeepAlive] ping failed message=${err?.message ?? String(err)} deadJobDetected=${isDeadJob}`);
                     commandEntry.refreshSqlJobId(conn as any);
                     if (!isDeadJob) { return; } // unrelated error — leave it
 
                     // Do not manually create/restart SQL jobs here. Let Code for IBM i own
                     // shared SQL job lifecycle so status-bar state stays authoritative.
                     console.warn('[clPrompter] keep-alive: SQLJob appears dead; manual restart is disabled.');
-                    commandEntryOutput.appendLine('[Command Entry][KeepAlive] shared SQL job appears dead; manual restart is disabled (owned by Code for IBM i).');
+                    commandEntryOutput.appendLine('[Cmd Entry][KeepAlive] shared SQL job appears dead; manual restart is disabled (owned by Code for IBM i).');
                 }
             }, 60_000);
         };
@@ -673,9 +675,9 @@ export async function activate(context: vscode.ExtensionContext) {
                     await sharedCommandService.closeSqlSession();
                     await sharedJobManager.dispose();
                     commandEntry.refreshSqlJobId();
-                    commandEntryOutput.appendLine('[Command Entry] Disconnected: dedicated SQL job and SQL session state cleaned up.');
+                    commandEntryOutput.appendLine('[Cmd Entry] Disconnected: dedicated SQL job and SQL session state cleaned up.');
                 } catch (error) {
-                    commandEntryOutput.appendLine(`[Command Entry] Disconnected cleanup warning: ${error instanceof Error ? error.message : String(error)}`);
+                    commandEntryOutput.appendLine(`[Cmd Entry] Disconnected cleanup warning: ${error instanceof Error ? error.message : String(error)}`);
                 }
             })();
         });

@@ -55,21 +55,21 @@ export function createMultiSqlJobApi(
         async ensureDedicatedJob(): Promise<string | undefined> {
             const connection = requireConnection();
             const jobId = await jobManager.ensureDedicatedJob(connection);
-            output?.appendLine(`[Command Entry API] ensureDedicatedJob -> ${jobId || '<none>'}`);
+            output?.appendLine(`[Cmd Entry][API] ensureDedicatedJob -> ${jobId || '<none>'}`);
             return jobId;
         },
 
         async restartDedicatedJob(): Promise<string | undefined> {
             const connection = requireConnection();
             const jobId = await jobManager.restartJob(connection);
-            output?.appendLine(`[Command Entry API] restartDedicatedJob -> ${jobId || '<none>'}`);
+            output?.appendLine(`[Cmd Entry][API] restartDedicatedJob -> ${jobId || '<none>'}`);
             return jobId;
         },
 
         async cancelDedicatedJobSql(): Promise<void> {
             const connection = requireConnection();
             await jobManager.cancelActive(connection);
-            output?.appendLine('[Command Entry API] cancelDedicatedJobSql requested.');
+            output?.appendLine('[Cmd Entry][API] cancelDedicatedJobSql requested.');
         },
 
         async runSql(

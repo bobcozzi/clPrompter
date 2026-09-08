@@ -5,6 +5,7 @@ import { CommandEntryHistory, CommandExecutionMode } from './commandEntryModel';
 import { CommandEntryService } from './commandEntryService';
 import { detectCommandEntryPrefix } from './commandEntryPrefixes';
 import { CommandEntryJobManager } from './commandEntryJobManager';
+import { updateConnectionSqlSettings } from './commandEntrySqlSettings';
 import { configureSqlResultPanelAssets, notifySqlResultSessionClosed, setSqlResultPanelRequestHandler, showSqlResultPanel } from './sqlResultPanel';
 
 const HISTORY_KEY = 'commandEntry.history';
@@ -38,6 +39,8 @@ type CommandEntryRequest =
     | { type: 'menuDebug'; phase: string; payload?: unknown }
     | { type: 'toggleMessageDetails' }
     | { type: 'toggleSqlStatementsToCommandLog' }
+    | { type: 'useSharedSqlJob' }
+    | { type: 'usePrivateSqlJob' }
     | { type: 'startNewJob' }
     | { type: 'clearSqlHistoryAndMessages' }
     | { type: 'clearHistoryAndMessages' }
@@ -328,7 +331,9 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
         setSqlResultPanelRequestHandler((request) => this.handleSqlResultPanelRequest(request));
 
         this.context.subscriptions.push(vscode.workspace.onDidChangeConfiguration(event => {
-            const sqlFetchConfigChanged = event.affectsConfiguration('clPrompter.cmdEntryLimitSqlFetch')
+            const connectionSettingsChanged = event.affectsConfiguration('code-for-ibmi.connectionSettings');
+            const sqlFetchConfigChanged = event.affectsConfiguration('clPrompter.cmdEntrySQLLimitFetch')
+                || event.affectsConfiguration('clPrompter.cmdEntryLimitSqlFetch')
                 || event.affectsConfiguration('clPrompter.cmdEntrySqlFetchLimitEnabled')
                 || event.affectsConfiguration('clPrompter.cmdEntrySqlFetchRowLimit')
                 || event.affectsConfiguration('clPrompter.cmdEntrySqlFetchLimitRows')
@@ -343,18 +348,20 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
             const appearanceChanged = event.affectsConfiguration('clPrompter.cmdEntryCommandTextColor')
                 || event.affectsConfiguration('clPrompter.commandEntryCommandTextColor');
             if (!sqlFetchConfigChanged
+                && !event.affectsConfiguration('clPrompter.cmdEntrySQLUseSharedJob')
                 && !event.affectsConfiguration('clPrompter.cmdEntryUseSharedSQLJob')
                 && !event.affectsConfiguration('clPrompter.cmdEntryUseDedicatedJob')
                 && !event.affectsConfiguration('clPrompter.commandEntryUseDedicatedJob')
                 && !event.affectsConfiguration('clPrompter.cmdEntryMessageDetails')
                 && !event.affectsConfiguration('clPrompter.commandEntryMessageDetails')
                 && !sqlLogPreferenceChanged
-                && !appearanceChanged) {
+                && !appearanceChanged
+                && !connectionSettingsChanged) {
                 return;
             }
 
             if (sqlFetchConfigChanged) {
-                this.output.appendLine(`[Command Entry] ${this.sqlFetchLimitDisplay()}`);
+                this.output.appendLine(`[Cmd Entry] ${this.sqlFetchLimitDisplay()}`);
             }
             this.post({
                 type: 'messageDetailsPreference',
@@ -364,6 +371,9 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
             this.postJobCapabilities();
             if (appearanceChanged) {
                 this.postAppearancePreferences();
+            }
+            if (connectionSettingsChanged) {
+                void this.applyConnectionSqlJobModeFromSettings('connectionSettingsChanged');
             }
         }));
     }
@@ -403,6 +413,8 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
     }
     requestCancel(): void { void this.requestCancelSqlJob(); }
     requestStartNewJob(): void { void this.startNewJob(); }
+    requestUseSharedSqlJob(): void { void this.setSharedSqlJobMode(true, 'command'); }
+    requestUsePrivateSqlJob(): void { void this.setSharedSqlJobMode(false, 'command'); }
     async executeCodeSnippetById(id: string): Promise<void> { await this.executeSnippet(id); }
     resolveSnippetTemplateText(template: string): { resolved: string; missing: string[] } {
         const connection = this.getConnection();
@@ -513,6 +525,7 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
                     sqlJobId: this.lastPostedSqlJobId,
                     dedicatedJobEnabled: this.jobManager.isDedicatedUsable(this.getConnection()),
                     remoteMapepireEnabled: this.jobManager.isRemoteMapepireServerEnabled(this.getConnection()),
+                    useSharedSqlJob: !this.jobManager.isDedicatedEnabled(this.getConnection()),
                     canStartNewJob: this.jobManager.isDedicatedUsable(this.getConnection()),
                     canCancelSqlJob: this.jobManager.isDedicatedUsable(this.getConnection()),
                     messageDetailsMode: this.messageDetailsMode(),
@@ -601,7 +614,7 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
                         payloadText = ' <payload-unserializable>';
                     }
                 }
-                this.output.appendLine(`[Command Entry][MenuDebug] ${message.phase}${payloadText}`);
+                this.output.appendLine(`[Cmd Entry][MenuDebug] ${message.phase}${payloadText}`);
                 break;
             }
             case 'toggleMessageDetails':
@@ -610,12 +623,109 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
             case 'toggleSqlStatementsToCommandLog':
                 await this.toggleSqlStatementsToCommandLogPreference();
                 break;
+            case 'useSharedSqlJob':
+                await this.setSharedSqlJobMode(true, 'menu');
+                break;
+            case 'usePrivateSqlJob':
+                await this.setSharedSqlJobMode(false, 'menu');
+                break;
             case 'startNewJob':
                 await this.startNewJob();
                 break;
             case 'run':
                 await this.run(message.command, message.mode);
                 break;
+        }
+    }
+
+    private async setSharedSqlJobMode(useSharedJob: boolean, source: 'menu' | 'command'): Promise<void> {
+        const connection = this.getConnection();
+        if (!connection || !connection.sqlRunnerAvailable()) {
+            this.post({ type: 'notice', message: 'Not connected to IBM i, or the SQL runner is unavailable.' });
+            return;
+        }
+
+        if (this.running) {
+            this.post({ type: 'notice', message: 'A command is currently running. Wait for it to finish before switching SQL job mode.' });
+            return;
+        }
+
+        if (!this.jobManager.isRemoteMapepireServerEnabled(connection)) {
+            this.post({ type: 'notice', message: 'Shared/Private SQL job switching is available only when Code for IBM i Mapepire Server Mode is enabled.' });
+            this.postJobCapabilities();
+            return;
+        }
+
+        const currentlyShared = !this.jobManager.isDedicatedEnabled(connection);
+        if (currentlyShared === useSharedJob) {
+            this.post({
+                type: 'notice',
+                message: useSharedJob
+                    ? 'Command Entry is already using the shared SQL job.'
+                    : 'Command Entry is already using a private SQL job.'
+            });
+            this.postJobCapabilities();
+            this.refreshSqlJobId(connection);
+            return;
+        }
+
+        try {
+            await this.service.closeSqlSession();
+            await updateConnectionSqlSettings(this.context, connection, { useSharedJob });
+
+            // The job manager resolves the correct display ID for either mode based on the
+            // updated connection setting. In shared mode, this intentionally clears the
+            // dedicated job and falls back to the connection's shared SQL job; in private
+            // mode it creates/restarts the dedicated job and returns that ID.
+            const resolvedSqlJobId = await this.jobManager.restartJob(connection);
+
+            console.log('[Cmd Entry][SqlJobModeSwitch] resolved display SQL job ID', {
+                useSharedJob,
+                resolvedSqlJobId,
+                connection: connection.currentConnectionName ?? '<unknown>',
+                currentSqlJobId: this.currentSqlJobId(connection) ?? '<none>'
+            });
+
+            const displaySqlJobId = resolvedSqlJobId ?? this.currentSqlJobId(connection) ?? '';
+            this.output.appendLine(`[Cmd Entry] SQL job mode switch => useSharedJob=${useSharedJob} resolvedSqlJobId=${displaySqlJobId || '<none>'} currentSqlJobId=${this.currentSqlJobId(connection) || '<none>'}`);
+            this.lastPostedSqlJobId = undefined;
+            this.post({ type: 'sqlJobId', sqlJobId: displaySqlJobId });
+            this.postJobCapabilities();
+            this.refreshSqlJobId(connection);
+            this.post({
+                type: 'notice',
+                message: useSharedJob
+                    ? `Switched to shared SQL job mode${source === 'command' ? ' for this connection' : ''}.`
+                    : `Switched to private SQL job mode${source === 'command' ? ' for this connection' : ''}${displaySqlJobId ? ` (${displaySqlJobId}).` : '.'}`
+            });
+        } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            this.output.appendLine(`[Cmd Entry] Failed to switch SQL job mode: ${message}`);
+            this.post({ type: 'notice', message: `Failed to switch SQL job mode: ${message}` });
+            this.postJobCapabilities();
+            this.refreshSqlJobId(connection);
+        }
+    }
+
+    private async applyConnectionSqlJobModeFromSettings(reason: string): Promise<void> {
+        const connection = this.getConnection();
+        if (!connection || !connection.sqlRunnerAvailable()) {
+            return;
+        }
+
+        if (this.running) {
+            this.output.appendLine(`[Cmd Entry] Deferred SQL job mode apply (${reason}) because a command is still running.`);
+            return;
+        }
+
+        try {
+            await this.service.closeSqlSession();
+            await this.jobManager.ensureDedicatedJob(connection);
+        } catch (error) {
+            this.output.appendLine(`[Cmd Entry] Failed to apply SQL job mode from connection settings (${reason}): ${error instanceof Error ? error.message : String(error)}`);
+        } finally {
+            this.postJobCapabilities();
+            this.refreshSqlJobId(connection);
         }
     }
 
@@ -679,7 +789,7 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
         const command = `SQL: ${resolution.resolved}`;
         const execution = await this.service.execute(connection, command, '*RUN');
         if (execution.failure) {
-            this.output.appendLine(`[Command Entry] Display Joblog failed for ${qualifiedJob}: ${execution.failure}`);
+            this.output.appendLine(`[Cmd Entry] Display Joblog failed for ${qualifiedJob}: ${execution.failure}`);
             this.post({ type: 'notice', message: `Display Joblog failed: ${execution.failure}` });
             return;
         }
@@ -781,7 +891,7 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
             const result = await CLPrompter(this.context.extensionUri, command);
             if (result && result !== command) { this.post({ type: 'setCommand', command: result }); }
         } catch (error) {
-            this.output.appendLine(`[Command Entry] Prompt failed: ${String(error)}`);
+            this.output.appendLine(`[Cmd Entry] Prompt failed: ${String(error)}`);
             this.post({ type: 'notice', message: 'Unable to open the CL prompter. See CLPROMPTER Output for details.' });
         } finally {
             this.post({ type: 'focusInput' });
@@ -845,7 +955,7 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
             if (shouldAddToHistory) {
                 this.remember({ command: commandForRecall, mode, isSql });
             }
-            if (execution.failure) { this.output.appendLine(`[Command Entry] CMD_RUN failed: ${execution.failure}`); }
+            if (execution.failure) { this.output.appendLine(`[Cmd Entry] CMD_RUN failed: ${execution.failure}`); }
             if (executionForPost.sqlResult) {
                 showSqlResultPanel(executionForPost.sqlResult);
             }
@@ -889,7 +999,7 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
             this.post({ type: 'notice', message: sqlJobId ? `Reconnected dedicated SQL job ${sqlJobId}.` : 'Reconnected dedicated SQL job.' });
         } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
-            this.output.appendLine(`[Command Entry] Reconnect Server Job failed: ${message}`);
+            this.output.appendLine(`[Cmd Entry] Reconnect Server Job failed: ${message}`);
             this.post({ type: 'notice', message: `Reconnect Server Job failed: ${message}` });
         }
     }
@@ -916,11 +1026,11 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
 
         try {
             await this.jobManager.cancelActive(connection);
-            this.output.appendLine(`[Command Entry] Manual cancel requested for dedicated SQL job ${sqlJobId}.`);
+            this.output.appendLine(`[Cmd Entry] Manual cancel requested for dedicated SQL job ${sqlJobId}.`);
             this.post({ type: 'notice', message: `Cancel SQL requested for job ${sqlJobId}. IBM i may ignore this when no interruptible SQL is active.` });
         } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
-            this.output.appendLine(`[Command Entry] Manual cancel request failed: ${message}`);
+            this.output.appendLine(`[Cmd Entry] Manual cancel request failed: ${message}`);
             this.post({ type: 'notice', message: `Cancel SQL request failed: ${message}` });
         } finally {
             this.postJobCapabilities();
@@ -1689,10 +1799,12 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
         const dedicatedJobEnabled = this.jobManager.isDedicatedUsable(connection);
         const remoteMapepireEnabled = this.jobManager.isRemoteMapepireServerEnabled(connection);
         const dedicatedReady = dedicatedJobEnabled;
+        const useSharedSqlJob = !this.jobManager.isDedicatedEnabled(connection);
         this.post({
             type: 'jobCapabilities',
             dedicatedJobEnabled,
             remoteMapepireEnabled,
+            useSharedSqlJob,
             canStartNewJob: dedicatedReady,
             canCancelSqlJob: dedicatedReady
         });
@@ -1714,7 +1826,8 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
 
     private sqlFetchLimitDisplay(): string {
         const config = vscode.workspace.getConfiguration('clPrompter');
-        const limitEnabled = config.get<boolean | undefined>('cmdEntryLimitSqlFetch')
+        const limitEnabled = config.get<boolean | undefined>('cmdEntrySQLLimitFetch')
+            ?? config.get<boolean | undefined>('cmdEntryLimitSqlFetch')
             ?? config.get<boolean | undefined>('cmdEntrySqlFetchLimitEnabled')
             ?? config.get<boolean>('commandEntrySqlFetchLimitEnabled', true);
         const prefetchRows = config.get<number | undefined>('cmdEntrySqlFirstPageRowsToFetch')
@@ -1750,15 +1863,15 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
 
         // Create the dedicated job automatically
         try {
-            this.output.appendLine(`[Command Entry] Auto-initializing dedicated SQL job on panel startup...`);
+            this.output.appendLine(`[Cmd Entry] Auto-initializing dedicated SQL job on panel startup...`);
             const sqlJobId = await this.jobManager.restartJob(connection);
             this.refreshSqlJobId(connection);
             if (sqlJobId) {
-                this.output.appendLine(`[Command Entry] Auto-initialized dedicated SQL job: ${sqlJobId}`);
+                this.output.appendLine(`[Cmd Entry] Auto-initialized dedicated SQL job: ${sqlJobId}`);
             }
         } catch (error) {
             this.refreshSqlJobId(connection);
-            this.output.appendLine(`[Command Entry] Auto-initialization failed: ${error instanceof Error ? error.message : String(error)}`);
+            this.output.appendLine(`[Cmd Entry] Auto-initialization failed: ${error instanceof Error ? error.message : String(error)}`);
         }
     }
 
@@ -1778,9 +1891,15 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
     public refreshSqlJobId(connection = this.getConnection()): void {
         const sqlJobId = this.currentSqlJobId(connection);
         if (sqlJobId !== this.lastPostedSqlJobId) {
-            this.output.appendLine(`[Command Entry] SQL job display ID changed: ${this.lastPostedSqlJobId || '<none>'} -> ${sqlJobId || '<none>'}`);
+            this.output.appendLine(`[Cmd Entry] SQL job display ID changed: ${this.lastPostedSqlJobId || '<none>'} -> ${sqlJobId || '<none>'}`);
         }
         this.lastPostedSqlJobId = sqlJobId;
+        console.log('[Cmd Entry][SqlJobDisplayRefresh] posting sqlJobId', {
+            sqlJobId: sqlJobId ?? '<none>',
+            connection: connection?.currentConnectionName ?? '<unknown>',
+            dedicatedEnabled: this.jobManager.isDedicatedEnabled(connection),
+            sharedJobId: connection?.getSqlJobId?.() ?? '<none>'
+        });
         this.post({ type: 'sqlJobId', sqlJobId });
     }
 
@@ -1865,6 +1984,8 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
                                 <button id="menu-clear-sql-log" type="button" role="menuitem">Clear SQL Stmt History</button>
                                 <button id="menu-toggle-sql-log" type="button" role="menuitem">Log SQL Statements</button>
                                 <button id="menu-clear-log" type="button" role="menuitem">Clear Log Messages</button>
+                                <button id="menu-use-shared-sql-job" type="button" role="menuitem">Use Shared SQL Job</button>
+                                <button id="menu-use-private-sql-job" type="button" role="menuitem">Use Private SQL Job</button>
                                 <button id="menu-start-new-job" type="button" role="menuitem">Reconnect Server Job</button>
                                 <button id="menu-cancel-sql-job" type="button" role="menuitem">Cancel Last SQL stmt</button>
                             </div>
