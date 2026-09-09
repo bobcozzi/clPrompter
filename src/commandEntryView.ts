@@ -10,6 +10,7 @@ import { configureSqlResultPanelAssets, notifySqlResultSessionClosed, setSqlResu
 
 const HISTORY_KEY = 'commandEntry.history';
 const MAX_HISTORY = 100;
+const SKIP_HISTORY_CLEAR_ON_NEXT_READY_KEY = 'clprompter.skipHistoryClearOnNextReady';
 const SQL_SNIPPETS_USER_KEY = 'commandEntry.sqlSnippets.user';
 const SQL_SNIPPETS_ORDER_KEY = 'commandEntry.sqlSnippets.order';
 const SQL_SNIPPETS_HIDDEN_BUILTINS_KEY = 'commandEntry.sqlSnippets.hiddenBuiltins';
@@ -111,10 +112,6 @@ const BUILT_IN_SQL_SNIPPETS: ReadonlyArray<CommandEntrySqlSnippet> = [
         label: 'Joblog: Last 200 msgs',
         stmt: [
             'SELECT ORDINAL_POSITION as SEQNBR,',
-            "   TRIM(from_library) CONCAT '/' CONCAT TRIM(from_program) CONCAT '(' CONCAT TRIM(from_instruction) CONCAT ')'",
-            '      AS "FROM_PGM(Stmt)",',
-            "   TRIM(to_library) CONCAT '/' CONCAT TRIM(to_program) CONCAT '(' CONCAT TRIM(to_instruction) CONCAT ')'",
-            '      AS "TO_PGM(Stmt)",',
             '       MESSAGE_ID as MSGID, SEVERITY as SEV, ',
             "       CASE UPPER(TRIM(MESSAGE_TYPE)) WHEN 'COMMAND' THEN '*CMD' WHEN 'COMPLETION' THEN '*COMP'",
             "       WHEN 'DIAGNOSTIC' THEN '*DIAG' WHEN 'ESCAPE' THEN '*ESCAPE' WHEN 'INFORMATIONAL' THEN '*INFO'",
@@ -122,6 +119,10 @@ const BUILT_IN_SQL_SNIPPETS: ReadonlyArray<CommandEntrySqlSnippet> = [
             "       WHEN 'REQUEST' THEN '*RQS' WHEN 'SCOPE' THEN '*SCOPE' WHEN 'SENDER' THEN '*SENDER'",
             '       ELSE MESSAGE_TYPE END AS MSGTYPE,',
             '       MESSAGE_TEXT, MESSAGE_SECOND_LEVEL_TEXT as MSG_SECOND_LVL,',
+            "   TRIM(from_library) CONCAT '/' CONCAT TRIM(from_program) CONCAT '(' CONCAT TRIM(from_instruction) CONCAT ')'",
+            '      AS "FROM_PGM(Stmt)",',
+            "   TRIM(to_library) CONCAT '/' CONCAT TRIM(to_program) CONCAT '(' CONCAT TRIM(to_instruction) CONCAT ')'",
+            '      AS "TO_PGM(Stmt)",',
             '       QUALIFIED_JOB_NAME as JOB, MESSAGE_TIMESTAMP',
             "FROM TABLE(QSYS2.JOBLOG_INFO('${sqlJobId}'))",
             'ORDER BY ORDINAL_POSITION DESC FETCH FIRST 200 ROWS ONLY'
@@ -135,10 +136,6 @@ const BUILT_IN_SQL_SNIPPETS: ReadonlyArray<CommandEntrySqlSnippet> = [
         label: 'Joblog: Full',
         stmt: [
             'SELECT ORDINAL_POSITION as SEQNBR,',
-            "   TRIM(from_library) CONCAT '/' CONCAT TRIM(from_program) CONCAT '(' CONCAT TRIM(from_instruction) CONCAT ')'",
-            '      AS "FROM_PGM(Stmt)",',
-            "   TRIM(to_library) CONCAT '/' CONCAT TRIM(to_program) CONCAT '(' CONCAT TRIM(to_instruction) CONCAT ')'",
-            '      AS "TO_PGM(Stmt)",',
             '       MESSAGE_ID as MSGID, SEVERITY as SEV, ',
             "       CASE UPPER(TRIM(MESSAGE_TYPE)) WHEN 'COMMAND' THEN '*CMD' WHEN 'COMPLETION' THEN '*COMP'",
             "       WHEN 'DIAGNOSTIC' THEN '*DIAG' WHEN 'ESCAPE' THEN '*ESCAPE' WHEN 'INFORMATIONAL' THEN '*INFO'",
@@ -146,6 +143,10 @@ const BUILT_IN_SQL_SNIPPETS: ReadonlyArray<CommandEntrySqlSnippet> = [
             "       WHEN 'REQUEST' THEN '*RQS' WHEN 'SCOPE' THEN '*SCOPE' WHEN 'SENDER' THEN '*SENDER'",
             '       ELSE MESSAGE_TYPE END AS MSGTYPE,',
             '       MESSAGE_TEXT, MESSAGE_SECOND_LEVEL_TEXT as MSG_SECOND_LVL,',
+            "   TRIM(from_library) CONCAT '/' CONCAT TRIM(from_program) CONCAT '(' CONCAT TRIM(from_instruction) CONCAT ')'",
+            '      AS "FROM_PGM(Stmt)",',
+            "   TRIM(to_library) CONCAT '/' CONCAT TRIM(to_program) CONCAT '(' CONCAT TRIM(to_instruction) CONCAT ')'",
+            '      AS "TO_PGM(Stmt)",',
             '       QUALIFIED_JOB_NAME as JOB, MESSAGE_TIMESTAMP',
             "FROM TABLE(QSYS2.JOBLOG_INFO('${sqlJobId}'))",
             'ORDER BY ORDINAL_POSITION DESC'
@@ -343,10 +344,11 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
                 || event.affectsConfiguration('clPrompter.commandEntrySqlFetchLimitRows')
                 || event.affectsConfiguration('clPrompter.commandEntrySqlPrefetchRows')
                 || event.affectsConfiguration('clPrompter.commandEntrySqlFetchLimit');
-            const sqlLogPreferenceChanged = event.affectsConfiguration('clPrompter.cmdEntryLogSqlStatementsToCommandLog')
-                || event.affectsConfiguration('clPrompter.commandEntryLogSqlStatementsToCommandEntryLog');
+            const sqlLogPreferenceChanged = event.affectsConfiguration('clPrompter.cmdEntryRecordSqlStmtsToLog');
+            const historyScopeChanged = event.affectsConfiguration('clPrompter.cmdEntryHistoryConnectionScoped');
             const appearanceChanged = event.affectsConfiguration('clPrompter.cmdEntryCommandTextColor')
-                || event.affectsConfiguration('clPrompter.commandEntryCommandTextColor');
+                || event.affectsConfiguration('clPrompter.commandEntryCommandTextColor')
+                || event.affectsConfiguration('clPrompter.cmdEntrySqlStmtColor');
             if (!sqlFetchConfigChanged
                 && !event.affectsConfiguration('clPrompter.cmdEntrySQLUseSharedJob')
                 && !event.affectsConfiguration('clPrompter.cmdEntryUseSharedSQLJob')
@@ -355,6 +357,7 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
                 && !event.affectsConfiguration('clPrompter.cmdEntryMessageDetails')
                 && !event.affectsConfiguration('clPrompter.commandEntryMessageDetails')
                 && !sqlLogPreferenceChanged
+                && !historyScopeChanged
                 && !appearanceChanged
                 && !connectionSettingsChanged) {
                 return;
@@ -371,6 +374,15 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
             this.postJobCapabilities();
             if (appearanceChanged) {
                 this.postAppearancePreferences();
+            }
+            if (historyScopeChanged) {
+                this.post({ type: 'historyUpdated', history: this.history() });
+                this.post({
+                    type: 'notice',
+                    message: this.historyIsConnectionScoped()
+                        ? vscode.l10n.t('Command Entry history retrieval is now scoped to the active connection.')
+                        : vscode.l10n.t('Command Entry history retrieval is now shared across connections.')
+                });
             }
             if (connectionSettingsChanged) {
                 void this.applyConnectionSqlJobModeFromSettings('connectionSettingsChanged');
@@ -451,13 +463,13 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
     requestExportCodeSnippets(): void {
         void this.exportCodeSnippetsToJson().catch((error) => {
             const message = error instanceof Error ? error.message : String(error);
-            this.post({ type: 'notice', message: `Export Code Snippets failed: ${message}` });
+            this.post({ type: 'notice', message: vscode.l10n.t('Export Code Snippets failed: {message}', { message }) });
         });
     }
     requestImportCodeSnippets(): void {
         void this.importCodeSnippetsFromJson().catch((error) => {
             const message = error instanceof Error ? error.message : String(error);
-            this.post({ type: 'notice', message: `Import Code Snippets failed: ${message}` });
+            this.post({ type: 'notice', message: vscode.l10n.t('Import Code Snippets failed: {message}', { message }) });
         });
     }
     clear(): void {
@@ -513,13 +525,18 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
             case 'ready':
                 await this.context.workspaceState.update('clprompter.commandEntryTouchedThisSession', true);
                 await vscode.commands.executeCommand('clprompter.codeSnippet.resolvePinnedVisibility');
-                const clearHistoryOnStartup = this.clearHistoryOnFirstReady && this.clearHistoryOnStartupEnabled();
+                await this.applyDefaultSnippetMergeOnVersionUpdateIfNeeded();
+                const skipStartupClearForVsCodeUpdate = this.clearHistoryOnFirstReady && await this.consumeSkipHistoryClearOnNextReady();
+                const clearHistoryOnStartup = this.clearHistoryOnFirstReady
+                    && this.clearHistoryOnStartupEnabled()
+                    && !skipStartupClearForVsCodeUpdate;
                 if (clearHistoryOnStartup) {
-                    await this.context.globalState.update(HISTORY_KEY, []);
+                    await this.setHistory([]);
                 }
                 this.lastPostedSqlJobId = this.currentSqlJobId();
                 this.post({
                     type: 'initialize',
+                    connectionScopeKey: this.buildHistoryConnectionKey(),
                     history: clearHistoryOnStartup ? [] : this.history(),
                     running: this.running,
                     sqlJobId: this.lastPostedSqlJobId,
@@ -531,6 +548,7 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
                     messageDetailsMode: this.messageDetailsMode(),
                     logSqlStatementsToCommandLog: this.logSqlStatementsToCommandLogEnabled(),
                     commandTextColor: this.commandEntryCommandTextColor(),
+                    sqlStatementColor: this.commandEntrySqlStatementColor(),
                     clearInputOnStartup: this.clearInputOnFirstReady,
                     clearHistoryOnStartup
                 });
@@ -641,17 +659,17 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
     private async setSharedSqlJobMode(useSharedJob: boolean, source: 'menu' | 'command'): Promise<void> {
         const connection = this.getConnection();
         if (!connection || !connection.sqlRunnerAvailable()) {
-            this.post({ type: 'notice', message: 'Not connected to IBM i, or the SQL runner is unavailable.' });
+            this.post({ type: 'notice', message: vscode.l10n.t('Not connected to IBM i, or the SQL runner is unavailable.') });
             return;
         }
 
         if (this.running) {
-            this.post({ type: 'notice', message: 'A command is currently running. Wait for it to finish before switching SQL job mode.' });
+            this.post({ type: 'notice', message: vscode.l10n.t('A command is currently running. Wait for it to finish before switching SQL job mode.') });
             return;
         }
 
         if (!this.jobManager.isRemoteMapepireServerEnabled(connection)) {
-            this.post({ type: 'notice', message: 'Shared/Private SQL job switching is available only when Code for IBM i Mapepire Server Mode is enabled.' });
+            this.post({ type: 'notice', message: vscode.l10n.t('Shared/Private SQL job switching is available only when Code for IBM i Mapepire Server Mode is enabled.') });
             this.postJobCapabilities();
             return;
         }
@@ -661,8 +679,8 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
             this.post({
                 type: 'notice',
                 message: useSharedJob
-                    ? 'Command Entry is already using the shared SQL job.'
-                    : 'Command Entry is already using a private SQL job.'
+                    ? vscode.l10n.t('Command Entry is already using the shared SQL job.')
+                    : vscode.l10n.t('Command Entry is already using a private SQL job.')
             });
             this.postJobCapabilities();
             this.refreshSqlJobId(connection);
@@ -695,13 +713,13 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
             this.post({
                 type: 'notice',
                 message: useSharedJob
-                    ? `Switched to shared SQL job mode${source === 'command' ? ' for this connection' : ''}.`
-                    : `Switched to private SQL job mode${source === 'command' ? ' for this connection' : ''}${displaySqlJobId ? ` (${displaySqlJobId}).` : '.'}`
+                    ? vscode.l10n.t(source === 'command' ? 'Switched to shared SQL job mode for this connection.' : 'Switched to shared SQL job mode.')
+                    : vscode.l10n.t(source === 'command' ? 'Switched to private SQL job mode for this connection.' : 'Switched to private SQL job mode.')
             });
         } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
             this.output.appendLine(`[Cmd Entry] Failed to switch SQL job mode: ${message}`);
-            this.post({ type: 'notice', message: `Failed to switch SQL job mode: ${message}` });
+            this.post({ type: 'notice', message: vscode.l10n.t('Failed to switch SQL job mode: {message}', { message }) });
             this.postJobCapabilities();
             this.refreshSqlJobId(connection);
         }
@@ -732,44 +750,44 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
     private async copyCommandToClipboard(command: string): Promise<void> {
         const trimmed = command.trim();
         if (!trimmed) {
-            this.post({ type: 'notice', message: 'Nothing to copy from this history entry.' });
+            this.post({ type: 'notice', message: vscode.l10n.t('Nothing to copy from this history entry.') });
             return;
         }
         await vscode.env.clipboard.writeText(command);
-        this.post({ type: 'notice', message: 'Copied command to clipboard.' });
+        this.post({ type: 'notice', message: vscode.l10n.t('Copied command to clipboard.') });
     }
 
     private async copySqlJobIdToClipboard(sqlJobId: string): Promise<void> {
         const trimmed = sqlJobId.trim();
         if (!trimmed) {
-            this.post({ type: 'notice', message: 'No SQL job ID is available to copy.' });
+            this.post({ type: 'notice', message: vscode.l10n.t('No SQL job ID is available to copy.') });
             return;
         }
         await vscode.env.clipboard.writeText(trimmed);
-        this.post({ type: 'notice', message: `Copied SQL job ID ${trimmed} to clipboard.` });
+        this.post({ type: 'notice', message: vscode.l10n.t('Copied SQL job ID {jobId} to clipboard.', { jobId: trimmed }) });
     }
 
     private async displayJoblogForSqlJob(sqlJobId: string): Promise<void> {
         const qualifiedJob = sqlJobId.trim();
         if (!qualifiedJob) {
-            this.post({ type: 'notice', message: 'No SQL job ID is available.' });
+            this.post({ type: 'notice', message: vscode.l10n.t('No SQL job ID is available.') });
             return;
         }
 
         const connection = this.getConnection();
         if (!connection || !connection.sqlRunnerAvailable()) {
-            this.post({ type: 'notice', message: 'Not connected to IBM i, or the SQL runner is unavailable.' });
+            this.post({ type: 'notice', message: vscode.l10n.t('Not connected to IBM i, or the SQL runner is unavailable.') });
             return;
         }
 
         if (this.running) {
-            this.post({ type: 'notice', message: 'A command is currently running. Try Display Joblog again in a moment.' });
+            this.post({ type: 'notice', message: vscode.l10n.t('A command is currently running. Try Display Joblog again in a moment.') });
             return;
         }
 
         const fullJoblogSnippet = BUILT_IN_SQL_SNIPPETS.find((snippet) => snippet.id === 'builtin.full-joblog');
         if (!fullJoblogSnippet) {
-            this.post({ type: 'notice', message: 'Built-in full joblog snippet is unavailable.' });
+            this.post({ type: 'notice', message: vscode.l10n.t('Built-in full joblog snippet is unavailable.') });
             return;
         }
 
@@ -781,7 +799,9 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
         if (resolution.missing.length > 0) {
             this.post({
                 type: 'notice',
-                message: `Unable to resolve full joblog SQL template values: ${resolution.missing.map((name) => `\${${name}}`).join(', ')}`
+                message: vscode.l10n.t('Unable to resolve full joblog SQL template values: {values}', {
+                    values: resolution.missing.map((name) => `\${${name}}`).join(', ')
+                })
             });
             return;
         }
@@ -790,20 +810,20 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
         const execution = await this.service.execute(connection, command, '*RUN');
         if (execution.failure) {
             this.output.appendLine(`[Cmd Entry] Display Joblog failed for ${qualifiedJob}: ${execution.failure}`);
-            this.post({ type: 'notice', message: `Display Joblog failed: ${execution.failure}` });
+            this.post({ type: 'notice', message: vscode.l10n.t('Display Joblog failed: {failure}', { failure: execution.failure }) });
             return;
         }
 
         if (execution.sqlResult) {
             showSqlResultPanel(execution.sqlResult);
         }
-        this.post({ type: 'notice', message: `Displayed joblog for ${qualifiedJob}.` });
+        this.post({ type: 'notice', message: vscode.l10n.t('Displayed joblog for {job}.', { job: qualifiedJob }) });
     }
 
     private async showHistoryPicker(): Promise<void> {
         const history = this.history();
         if (history.length === 0) {
-            this.post({ type: 'notice', message: 'No command history is available yet.' });
+            this.post({ type: 'notice', message: vscode.l10n.t('No command history is available yet.') });
             return;
         }
 
@@ -815,7 +835,7 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
         }));
 
         const selected = await vscode.window.showQuickPick(items, {
-            placeHolder: 'Select a CL command from history',
+            placeHolder: vscode.l10n.t('Select a CL command from history'),
             matchOnDescription: true,
             ignoreFocusOut: false
         });
@@ -828,10 +848,10 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
 
     private async clearHistoryAndMessagesWithConfirmation(): Promise<void> {
         const choice = await vscode.window.showWarningMessage(
-            'Clear all CL command history and associated messages?',
+            vscode.l10n.t('Clear all CL command history and associated messages?'),
             {
                 modal: true,
-                detail: 'This action cannot be undone.'
+                detail: vscode.l10n.t('This action cannot be undone.')
             },
             'Yes',
             'No'
@@ -841,10 +861,10 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
             return;
         }
 
-        await this.context.globalState.update(HISTORY_KEY, []);
+        await this.setHistory([]);
         this.post({ type: 'clearResults' });
         this.post({ type: 'historyUpdated', history: [] });
-        this.post({ type: 'notice', message: 'CL command history and messages cleared.' });
+        this.post({ type: 'notice', message: vscode.l10n.t('CL command history and messages cleared.') });
     }
 
     private async clearSqlHistoryAndMessagesWithConfirmation(): Promise<void> {
@@ -853,10 +873,10 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
         const sqlCount = sqlHistory.length;
 
         const choice = await vscode.window.showWarningMessage(
-            'Clear SQL history log entries and associated SQL messages?',
+            vscode.l10n.t('Clear SQL History entries and associated SQL messages?'),
             {
                 modal: true,
-                detail: 'Only SQL-tagged entries are removed. CL command history and CL messages remain intact.'
+                detail: vscode.l10n.t('Only SQL-tagged entries are removed. CL command history and CL messages remain intact.')
             },
             'Yes',
             'No'
@@ -870,21 +890,21 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
         notifySqlResultSessionClosed('SQL result session was closed because SQL history was cleared.');
 
         const keptHistory = history.filter(entry => !isSqlCommandText(entry.command));
-        await this.context.globalState.update(HISTORY_KEY, keptHistory);
+        await this.setHistory(keptHistory);
         this.post({ type: 'clearSqlResults' });
         this.post({ type: 'historyUpdated', history: keptHistory });
         this.post({
             type: 'notice',
             message: sqlCount > 0
-                ? `Cleared ${sqlCount} SQL history entr${sqlCount === 1 ? 'y' : 'ies'} and SQL log messages.`
-                : 'No SQL history entries were found. SQL log messages were cleared.'
+                ? vscode.l10n.t('Cleared {count} SQL history entries and SQL log messages.', { count: sqlCount })
+                : vscode.l10n.t('No SQL history entries were found. SQL log messages were cleared.')
         });
     }
 
     private async prompt(command: string): Promise<void> {
-        if (!command.trim()) { this.post({ type: 'notice', message: 'Enter a CL command to prompt.' }); return; }
+        if (!command.trim()) { this.post({ type: 'notice', message: vscode.l10n.t('Enter a CL command to prompt.') }); return; }
         if (isSqlCommandText(command)) {
-            this.post({ type: 'notice', message: 'Prompt is only available for CL commands. Run SQL statements directly.' });
+            this.post({ type: 'notice', message: vscode.l10n.t('Prompt is only available for CL commands. Run SQL statements directly.') });
             return;
         }
         try {
@@ -892,7 +912,7 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
             if (result && result !== command) { this.post({ type: 'setCommand', command: result }); }
         } catch (error) {
             this.output.appendLine(`[Cmd Entry] Prompt failed: ${String(error)}`);
-            this.post({ type: 'notice', message: 'Unable to open the CL prompter. See CLPROMPTER Output for details.' });
+            this.post({ type: 'notice', message: vscode.l10n.t('Unable to open the CL prompter. See CLPROMPTER Output for details.') });
         } finally {
             this.post({ type: 'focusInput' });
             // Webview focus can race panel disposal, so retry once.
@@ -906,7 +926,7 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
         options: { sourceType?: 'user' | 'snippet'; logToHistory?: boolean; logToCommandEntryLog?: boolean } = {}
     ): Promise<void> {
         if (this.running) { return; }
-        if (!command.trim()) { this.post({ type: 'notice', message: 'Enter a CL command to run.' }); return; }
+        if (!command.trim()) { this.post({ type: 'notice', message: vscode.l10n.t('Enter a CL command to run.') }); return; }
 
         const sourceType = options.sourceType ?? 'user';
         const isSql = isSqlCommandText(command);
@@ -966,7 +986,7 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
                 addToCommandEntryLog: shouldAddToCommandEntryLog
             });
             if (isSql && !shouldAddToCommandEntryLog) {
-                this.post({ type: 'notice', message: 'SQL execution was run, but logging to Command Entry Log is disabled by settings.' });
+                this.post({ type: 'notice', message: vscode.l10n.t('SQL execution was run, but logging to Command Entry Log is disabled by settings.') });
             }
         } finally {
             this.running = false;
@@ -983,12 +1003,12 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
 
         const connection = this.getConnection();
         if (!connection || !connection.sqlRunnerAvailable()) {
-            this.post({ type: 'notice', message: 'Not connected to IBM i, or the SQL runner is unavailable.' });
+            this.post({ type: 'notice', message: vscode.l10n.t('Not connected to IBM i, or the SQL runner is unavailable.') });
             return;
         }
 
         if (!this.jobManager.isDedicatedUsable(connection)) {
-            this.post({ type: 'notice', message: 'Reconnect Server Job is only available when using Mapepire server mode and dedicated SQL job mode.' });
+            this.post({ type: 'notice', message: vscode.l10n.t('Reconnect Server Job is only available when using Mapepire server mode and dedicated SQL job mode.') });
             return;
         }
 
@@ -996,30 +1016,30 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
             const sqlJobId = await this.jobManager.restartJob(connection);
             this.refreshSqlJobId(connection);
             this.postJobCapabilities();
-            this.post({ type: 'notice', message: sqlJobId ? `Reconnected dedicated SQL job ${sqlJobId}.` : 'Reconnected dedicated SQL job.' });
+            this.post({ type: 'notice', message: sqlJobId ? vscode.l10n.t('Reconnected dedicated SQL job {jobId}.', { jobId: sqlJobId }) : vscode.l10n.t('Reconnected dedicated SQL job.') });
         } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
             this.output.appendLine(`[Cmd Entry] Reconnect Server Job failed: ${message}`);
-            this.post({ type: 'notice', message: `Reconnect Server Job failed: ${message}` });
+            this.post({ type: 'notice', message: vscode.l10n.t('Reconnect Server Job failed: {message}', { message }) });
         }
     }
 
     private async requestCancelSqlJob(): Promise<void> {
         const connection = this.getConnection();
         if (!connection || !connection.sqlRunnerAvailable()) {
-            this.post({ type: 'notice', message: 'Not connected to IBM i, or the SQL runner is unavailable.' });
+            this.post({ type: 'notice', message: vscode.l10n.t('Not connected to IBM i, or the SQL runner is unavailable.') });
             return;
         }
 
         if (!this.jobManager.isDedicatedUsable(connection)) {
-            this.post({ type: 'notice', message: 'Cancel SQL Job is only available in dedicated SQL job mode.' });
+            this.post({ type: 'notice', message: vscode.l10n.t('Cancel SQL Job is only available in dedicated SQL job mode.') });
             this.postJobCapabilities();
             return;
         }
 
         const sqlJobId = this.currentSqlJobId(connection);
         if (!sqlJobId) {
-            this.post({ type: 'notice', message: 'No dedicated SQL job ID is available to cancel.' });
+            this.post({ type: 'notice', message: vscode.l10n.t('No dedicated SQL job ID is available to cancel.') });
             this.postJobCapabilities();
             return;
         }
@@ -1027,11 +1047,11 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
         try {
             await this.jobManager.cancelActive(connection);
             this.output.appendLine(`[Cmd Entry] Manual cancel requested for dedicated SQL job ${sqlJobId}.`);
-            this.post({ type: 'notice', message: `Cancel SQL requested for job ${sqlJobId}. IBM i may ignore this when no interruptible SQL is active.` });
+            this.post({ type: 'notice', message: vscode.l10n.t('Cancel SQL requested for job {jobId}. IBM i may ignore this when no interruptible SQL is active.', { jobId: sqlJobId }) });
         } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
             this.output.appendLine(`[Cmd Entry] Manual cancel request failed: ${message}`);
-            this.post({ type: 'notice', message: `Cancel SQL request failed: ${message}` });
+            this.post({ type: 'notice', message: vscode.l10n.t('Cancel SQL request failed: {message}', { message }) });
         } finally {
             this.postJobCapabilities();
         }
@@ -1044,19 +1064,19 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
         const pickerItems: Array<vscode.QuickPickItem & { snippetId?: string; action?: 'add' | 'toggleTreeView' | 'import' | 'export' | 'refreshDefaults' }> = [
             ...snippets.map((snippet) => ({
                 label: snippet.label,
-                description: snippet.source === 'user' ? 'User' : undefined,
-                detail: `${snippet.group}${snippet.source === 'user' ? ' · User' : ''}`,
+                description: snippet.source === 'user' ? vscode.l10n.t('User') : undefined,
+                detail: `${snippet.group}${snippet.source === 'user' ? ` · ${vscode.l10n.t('User')}` : ''}`,
                 snippetId: snippet.id
             })),
-            { label: '$(add) Add more...', action: 'add', description: 'Create a new Code Snippet' },
-            { label: '$(list-tree) Toggle Code Snippets in Tree View', action: 'toggleTreeView', description: 'Show or hide the Code Snippets tree view' },
-            { label: '$(arrow-down) Import Code Snippets...', action: 'import', description: 'Load Code Snippets from a JSON file' },
-            { label: '$(arrow-up) Export Code Snippets...', action: 'export', description: 'Save user Code Snippets to a JSON file' },
-            { label: '$(refresh) Refresh default snippets', action: 'refreshDefaults', description: 'Restore shipped defaults and pick up latest built-in snippets' }
+            { label: '$(add) ' + vscode.l10n.t('Add more...'), action: 'add', description: vscode.l10n.t('Create a new Code Snippet') },
+            { label: '$(list-tree) ' + vscode.l10n.t('Toggle Code Snippets in Tree View'), action: 'toggleTreeView', description: vscode.l10n.t('Show or hide the Code Snippets tree view') },
+            { label: '$(arrow-down) ' + vscode.l10n.t('Import Code Snippets...'), action: 'import', description: vscode.l10n.t('Load Code Snippets from a JSON file') },
+            { label: '$(arrow-up) ' + vscode.l10n.t('Export Code Snippets...'), action: 'export', description: vscode.l10n.t('Save user Code Snippets to a JSON file') },
+            { label: '$(refresh) ' + vscode.l10n.t('Refresh default snippets'), action: 'refreshDefaults', description: vscode.l10n.t('Restore shipped defaults and pick up latest built-in snippets') }
         ];
 
         const selected = await vscode.window.showQuickPick(pickerItems, {
-            placeHolder: 'Select a Code Snippet to run',
+            placeHolder: vscode.l10n.t('Select a Code Snippet to run'),
             matchOnDescription: true,
             matchOnDetail: true,
             ignoreFocusOut: false
@@ -1198,7 +1218,7 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
         await this.context.globalState.update(SQL_SNIPPETS_DEFAULTS_MERGED_VERSION_KEY, currentVersion);
         this.notifyCodeSnippetsChanged();
 
-        this.post({ type: 'notice', message: `Code Snippet defaults merged for CLPROMPTER ${currentVersion}.` });
+        this.post({ type: 'notice', message: vscode.l10n.t('Code Snippet defaults merged for CLPROMPTER {version}.', { version: currentVersion }) });
     }
 
     private async refreshDefaultSnippets(): Promise<void> {
@@ -1208,13 +1228,6 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
 
         if (hiddenCount > 0) {
             await this.setHiddenBuiltInSnippetIds(new Set<string>());
-        }
-
-        const userSnippets = this.getUserSqlSnippets();
-        const keptUserSnippets = userSnippets.filter((snippet) => !builtInIds.has(snippet.id));
-        const removedOverrides = userSnippets.length - keptUserSnippets.length;
-        if (removedOverrides > 0) {
-            await this.setUserSqlSnippets(keptUserSnippets);
         }
 
         const existingOrder = this.getSqlSnippetOrder().filter((id) => !builtInIds.has(id));
@@ -1232,7 +1245,9 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
         this.notifyCodeSnippetsChanged();
         this.post({
             type: 'notice',
-            message: `Default Code Snippets refreshed. Restored: ${hiddenCount}, Removed custom starter overrides: ${removedOverrides}.`
+            message: vscode.l10n.t('Shipped Code Snippets refreshed. Restored: {restored}.', {
+                restored: hiddenCount
+            })
         });
     }
 
@@ -1366,8 +1381,8 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
             const userSnippets = this.getUserSqlSnippets();
             const workspaceUri = vscode.workspace.workspaceFolders?.[0]?.uri;
             const saveUri = await vscode.window.showSaveDialog({
-                title: 'Export Code Snippets',
-                saveLabel: 'Export Code Snippets',
+                title: vscode.l10n.t('Export Code Snippets'),
+                saveLabel: vscode.l10n.t('Export Code Snippets'),
                 defaultUri: workspaceUri ? vscode.Uri.joinPath(workspaceUri, 'clprompter-code-snippets.json') : undefined,
                 filters: { 'JSON Files': ['json'] }
             });
@@ -1391,21 +1406,21 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
 
             const bytes = new TextEncoder().encode(JSON.stringify(payload, null, 2));
             await vscode.workspace.fs.writeFile(saveUri, bytes);
-            this.post({ type: 'notice', message: `Exported ${userSnippets.length} Code Snippet(s) to ${saveUri.fsPath}.` });
+            this.post({ type: 'notice', message: vscode.l10n.t('Exported {count} Code Snippet(s) to {path}.', { count: userSnippets.length, path: saveUri.fsPath }) });
         } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
-            this.post({ type: 'notice', message: `Export Code Snippets failed: ${message}` });
+            this.post({ type: 'notice', message: vscode.l10n.t('Export Code Snippets failed: {message}', { message }) });
         }
     }
 
     private async promptCodeSnippetImportMode(): Promise<CodeSnippetImportMode | undefined> {
         const choice = await vscode.window.showQuickPick([
-            { label: 'Merge', mode: 'merge' as const, description: 'Add new and update existing Code Snippets by name' },
-            { label: 'Replace All', mode: 'replace-all' as const, description: 'Replace all user Code Snippets with imported Code Snippets' },
-            { label: 'Add New Only', mode: 'add-new-only' as const, description: 'Import only Code Snippets that do not already exist by name' }
+            { label: vscode.l10n.t('Merge'), mode: 'merge' as const, description: vscode.l10n.t('Add new and update existing Code Snippets by name') },
+            { label: vscode.l10n.t('Replace All'), mode: 'replace-all' as const, description: vscode.l10n.t('Replace all user Code Snippets with imported Code Snippets') },
+            { label: vscode.l10n.t('Add New Only'), mode: 'add-new-only' as const, description: vscode.l10n.t('Import only Code Snippets that do not already exist by name') }
         ], {
-            title: 'Import Code Snippets',
-            placeHolder: 'Choose how to apply imported Code Snippets',
+            title: vscode.l10n.t('Import Code Snippets'),
+            placeHolder: vscode.l10n.t('Choose how to apply imported Code Snippets'),
             ignoreFocusOut: true
         });
         return choice?.mode;
@@ -1414,11 +1429,11 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
     private async importCodeSnippetsFromJson(): Promise<void> {
         try {
             const openUris = await vscode.window.showOpenDialog({
-                title: 'Import Code Snippets',
+                title: vscode.l10n.t('Import Code Snippets'),
                 canSelectFiles: true,
                 canSelectFolders: false,
                 canSelectMany: false,
-                openLabel: 'Import Code Snippets',
+                openLabel: vscode.l10n.t('Import Code Snippets'),
                 filters: { 'JSON Files': ['json'] }
             });
             const sourceUri = openUris?.[0];
@@ -1436,13 +1451,13 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
             try {
                 parsed = JSON.parse(Buffer.from(bytes).toString('utf8'));
             } catch {
-                this.post({ type: 'notice', message: 'Import failed: selected file is not valid JSON.' });
+                this.post({ type: 'notice', message: vscode.l10n.t('Import failed: selected file is not valid JSON.') });
                 return;
             }
 
             const imported = this.normalizeImportedSnippets(parsed);
             if (imported.length === 0) {
-                this.post({ type: 'notice', message: 'Import failed: no valid Code Snippets were found in the JSON file.' });
+                this.post({ type: 'notice', message: vscode.l10n.t('Import failed: no valid Code Snippets were found in the JSON file.') });
                 return;
             }
 
@@ -1510,11 +1525,16 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
             this.postCodeSnippetsUpdated();
             this.post({
                 type: 'notice',
-                message: `Imported Code Snippets from ${sourceUri.fsPath}. Added: ${created}, Updated: ${updated}, Skipped: ${skipped}.`
+                message: vscode.l10n.t('Imported Code Snippets from {path}. Added: {added}, Updated: {updated}, Skipped: {skipped}.', {
+                    path: sourceUri.fsPath,
+                    added: created,
+                    updated,
+                    skipped
+                })
             });
         } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
-            this.post({ type: 'notice', message: `Import Code Snippets failed: ${message}` });
+            this.post({ type: 'notice', message: vscode.l10n.t('Import Code Snippets failed: {message}', { message }) });
         }
     }
 
@@ -1577,13 +1597,13 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
         try {
             const snippet = this.getMergedSqlSnippets().find((item) => item.id === snippetId);
             if (!snippet) {
-                this.post({ type: 'notice', message: 'The selected snippet is no longer available.' });
+                this.post({ type: 'notice', message: vscode.l10n.t('The selected snippet is no longer available.') });
                 return;
             }
 
             const connection = this.getConnection();
             if (!connection) {
-                this.post({ type: 'notice', message: 'Not connected to IBM i.' });
+                this.post({ type: 'notice', message: vscode.l10n.t('Not connected to IBM i.') });
                 return;
             }
 
@@ -1591,7 +1611,10 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
             if (resolution.missing.length > 0) {
                 this.post({
                     type: 'notice',
-                    message: `Snippet '${snippet.label}' requires unavailable value(s): ${resolution.missing.map((name) => `\${${name}}`).join(', ')}`
+                    message: vscode.l10n.t("Snippet '{label}' requires unavailable value(s): {missing}", {
+                        label: snippet.label,
+                        missing: resolution.missing.map((name) => `\${${name}}`).join(', ')
+                    })
                 });
                 return;
             }
@@ -1606,7 +1629,7 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
         } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
             this.output.appendLine(`[CLPROMPTER][Snippet] Failed id=${snippetId}: ${message}`);
-            this.post({ type: 'notice', message: `Code Snippet failed: ${message}` });
+            this.post({ type: 'notice', message: vscode.l10n.t('Code Snippet failed: {message}', { message }) });
         }
     }
 
@@ -1759,19 +1782,26 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
             ?? config.get<boolean>('commandEntryClearHistoryOnStartup', false);
     }
 
+    private async consumeSkipHistoryClearOnNextReady(): Promise<boolean> {
+        const shouldSkip = this.context.globalState.get<boolean>(SKIP_HISTORY_CLEAR_ON_NEXT_READY_KEY, false);
+        if (shouldSkip) {
+            await this.context.globalState.update(SKIP_HISTORY_CLEAR_ON_NEXT_READY_KEY, false);
+        }
+        return shouldSkip;
+    }
+
     private async toggleMessageDetailsPreference(): Promise<void> {
         const config = vscode.workspace.getConfiguration('clPrompter');
         const current = this.messageDetailsMode();
         const next: MessageDetailsMode = current === 'SHOW' ? 'HIDE' : 'SHOW';
         await config.update('cmdEntryMessageDetails', next, vscode.ConfigurationTarget.Global);
         this.post({ type: 'messageDetailsPreference', mode: next });
-        this.post({ type: 'notice', message: next === 'SHOW' ? 'Command message sections expanded.' : 'Command message sections collapsed.' });
+        this.post({ type: 'notice', message: next === 'SHOW' ? vscode.l10n.t('Command message sections expanded.') : vscode.l10n.t('Command message sections collapsed.') });
     }
 
     private logSqlStatementsToCommandLogEnabled(): boolean {
         const config = vscode.workspace.getConfiguration('clPrompter');
-        return config.get<boolean | undefined>('cmdEntryLogSqlStatementsToCommandLog')
-            ?? config.get<boolean>('commandEntryLogSqlStatementsToCommandEntryLog', false);
+        return config.get<boolean>('cmdEntryRecordSqlStmtsToLog', false);
     }
 
     private postSqlLoggingPreference(): void {
@@ -1784,13 +1814,13 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
     private async toggleSqlStatementsToCommandLogPreference(): Promise<void> {
         const config = vscode.workspace.getConfiguration('clPrompter');
         const next = !this.logSqlStatementsToCommandLogEnabled();
-        await config.update('cmdEntryLogSqlStatementsToCommandLog', next, vscode.ConfigurationTarget.Global);
+        await config.update('cmdEntryRecordSqlStmtsToLog', next, vscode.ConfigurationTarget.Global);
         this.postSqlLoggingPreference();
         this.post({
             type: 'notice',
             message: next
-                ? 'SQL statement logging to Command Entry Log is enabled.'
-                : 'SQL statement logging to Command Entry Log is disabled.'
+                ? vscode.l10n.t('SQL statement logging to Command Entry Log is enabled.')
+                : vscode.l10n.t('SQL statement logging to Command Entry Log is disabled.')
         });
     }
 
@@ -1813,7 +1843,8 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
     private postAppearancePreferences(): void {
         this.post({
             type: 'appearancePreferences',
-            commandTextColor: this.commandEntryCommandTextColor()
+            commandTextColor: this.commandEntryCommandTextColor(),
+            sqlStatementColor: this.commandEntrySqlStatementColor()
         });
     }
 
@@ -1822,6 +1853,12 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
         const value = config.get<string | undefined>('cmdEntryCommandTextColor')
             ?? config.get<string>('commandEntryCommandTextColor', '#569CD6');
         return String(value || '#569CD6').trim() || '#569CD6';
+    }
+
+    private commandEntrySqlStatementColor(): string {
+        const config = vscode.workspace.getConfiguration('clPrompter');
+        const value = config.get<string>('cmdEntrySqlStmtColor', '#3794FF');
+        return String(value || '#3794FF').trim() || '#3794FF';
     }
 
     private sqlFetchLimitDisplay(): string {
@@ -1882,6 +1919,8 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
         const { autoInitializeDedicatedJob = true } = options;
         this.refreshSqlJobId(connection);
         this.postJobCapabilities();
+        this.post({ type: 'connectionScope', connectionScopeKey: this.buildHistoryConnectionKey(connection) });
+        this.post({ type: 'historyUpdated', history: this.history(connection) });
         if (autoInitializeDedicatedJob) {
             await this.initializeDedicatedJobIfNeeded();
         }
@@ -1903,38 +1942,77 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
         this.post({ type: 'sqlJobId', sqlJobId });
     }
 
-    private history(): CommandEntryHistory[] { return this.context.globalState.get<CommandEntryHistory[]>(HISTORY_KEY, []); }
+    private buildHistoryConnectionKey(connection = this.getConnection()): string {
+        if (!connection) {
+            return 'disconnected';
+        }
+
+        const host = String(connection.currentHost ?? (connection as any).host ?? '').trim().toLowerCase();
+        const user = String(connection.currentUser ?? (connection as any).username ?? '').trim().toLowerCase();
+        const name = String(connection.currentConnectionName ?? (connection as any).name ?? '').trim().toLowerCase();
+        const port = String(connection.currentPort ?? (connection as any).port ?? '').trim();
+        const key = `${host}|${user}|${name}|${port}`;
+
+        return key.length > 0 ? key : 'disconnected';
+    }
+
+    private historyIsConnectionScoped(): boolean {
+        const config = vscode.workspace.getConfiguration('clPrompter');
+        return config.get<boolean>('cmdEntryHistoryConnectionScoped', false);
+    }
+
+    private historyStorageKey(connection = this.getConnection()): string {
+        if (!this.historyIsConnectionScoped()) {
+            return HISTORY_KEY;
+        }
+        return `${HISTORY_KEY}.${this.buildHistoryConnectionKey(connection)}`;
+    }
+
+    private history(connection = this.getConnection()): CommandEntryHistory[] {
+        const scopedKey = this.historyStorageKey(connection);
+        const scopedHistory = this.context.globalState.get<CommandEntryHistory[] | undefined>(scopedKey);
+        if (Array.isArray(scopedHistory)) {
+            return scopedHistory;
+        }
+
+        // One-time compatibility fallback for pre-connection-scoped history.
+        const legacyHistory = this.context.globalState.get<CommandEntryHistory[]>(HISTORY_KEY, []);
+        if (legacyHistory.length > 0 && this.historyIsConnectionScoped()) {
+            void this.context.globalState.update(scopedKey, legacyHistory.slice(0, MAX_HISTORY));
+        }
+        return legacyHistory;
+    }
+
+    private async setHistory(history: CommandEntryHistory[], connection = this.getConnection()): Promise<void> {
+        await this.context.globalState.update(this.historyStorageKey(connection), history.slice(0, MAX_HISTORY));
+    }
     private shouldAddToHistory(sourceType: 'user' | 'snippet' = 'user', isSql: boolean = false): boolean {
         const config = vscode.workspace.getConfiguration('clPrompter');
 
         if (sourceType === 'snippet') {
-            return config.get<boolean | undefined>('cmdEntryLogSnippets')
-                ?? config.get<boolean>('commandEntryLogSnippets', false);
+            return config.get<boolean>('cmdEntryRecordSnippetsToHistory', false);
         }
         if (isSql) {
-            return config.get<boolean | undefined>('cmdEntryLogSqlStatements')
-                ?? config.get<boolean>('commandEntryLogSqlStatements', false);
+            return config.get<boolean>('cmdEntryRecordSqlStmtsToHistory', false);
         }
-        return true;
+        return config.get<boolean>('cmdEntryRecordClCmdsToHistory', true);
     }
 
     private shouldAddToCommandEntryLog(sourceType: 'user' | 'snippet' = 'user', isSql: boolean = false): boolean {
         const config = vscode.workspace.getConfiguration('clPrompter');
 
         if (sourceType === 'snippet') {
-            return config.get<boolean | undefined>('cmdEntryLogSnippetsToCommandLog')
-                ?? config.get<boolean>('commandEntryLogSnippetsToCommandEntryLog', false);
+            return config.get<boolean>('cmdEntryRecordSnippetsToLog', false);
         }
         if (isSql) {
-            return config.get<boolean | undefined>('cmdEntryLogSqlStatementsToCommandLog')
-                ?? config.get<boolean>('commandEntryLogSqlStatementsToCommandEntryLog', false);
+            return config.get<boolean>('cmdEntryRecordSqlStmtsToLog', false);
         }
         return true;
     }
 
     private remember(entry: CommandEntryHistory): void {
         const history = this.history().filter(item => item.command !== entry.command || item.mode !== entry.mode);
-        void this.context.globalState.update(HISTORY_KEY, [entry, ...history].slice(0, MAX_HISTORY));
+        void this.setHistory([entry, ...history]);
     }
     private post(message: unknown): void { void this.view?.webview.postMessage(message); }
 
@@ -1990,8 +2068,8 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
                                 <button id="menu-cancel-sql-job" type="button" role="menuitem">Cancel Last SQL stmt</button>
                             </div>
                         </div>
-                        <button id="history-prev" type="button" aria-label="Recall prior command (F9)" data-tooltip="F8=Retrieve Next CL Cmd">↑</button>
-                        <button id="history-next" type="button" aria-label="Recall next command (F8)" data-tooltip="F9=Retrieve Prior CL Cmd">↓</button>
+                        <button id="history-next" type="button" aria-label="Recall next command (F8)" data-tooltip="F8=Retrieve Next CL Cmd">↓</button>
+                        <button id="history-prev" type="button" aria-label="Recall prior command (F9)" data-tooltip="F9=Retrieve Prior CL Cmd">↑</button>
                         <select id="mode" aria-label="Run mode" title="Run CL Command">
                             <option value="*RUN" title="Run CL Command">Run</option>
                             <option value="*LIMIT" title="Run as Limited USRPRF">Limit</option>

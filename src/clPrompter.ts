@@ -201,7 +201,7 @@ export async function CLPrompter(
                 xml = await getCMDXML(cmdName);
             } catch (error) {
                 console.error('[CLPrompter] Failed to get command XML:', error);
-                vscode.window.showErrorMessage(`Failed to get command definition for ${cmdName}`);
+                vscode.window.showErrorMessage(vscode.l10n.t('Failed to get command definition for {cmdName}', { cmdName }));
                 resolve(command); // Return original command on error
                 return;
             }
@@ -285,7 +285,7 @@ export async function CLPrompter(
 
         } catch (error) {
             console.error('[CLPrompter] Unexpected error:', error);
-            vscode.window.showErrorMessage(`CL Prompter error: ${error}`);
+            vscode.window.showErrorMessage(vscode.l10n.t('CL Prompter error: {error}', { error: String(error) }));
             resolve(command); // Return original command on error
         }
     });

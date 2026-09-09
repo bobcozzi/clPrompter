@@ -7,3 +7,4 @@ out/
 .DS_Store
 bfg-*.jar
 cmdDefn.xml
+/package.nls*.json

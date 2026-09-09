@@ -172,7 +172,7 @@ class CodeSnippetDragAndDropController implements vscode.TreeDragAndDropControll
         }
 
         if (snippetItems.some((item) => item.snippet.source === 'built-in')) {
-            void vscode.window.showInformationMessage('Only user-provided snippets can be reordered by dragging.');
+            void vscode.window.showInformationMessage(vscode.l10n.t('Only user-provided snippets can be reordered by dragging.'));
             return;
         }
 
@@ -296,7 +296,7 @@ class CodeSnippetEditorPanel {
                         const codeTemplate = String(message.codeTemplate || '').trim();
                         const group = String(message.group || '').trim() || 'Admin';
                         if (!label || !codeTemplate) {
-                            panel.webview.postMessage({ type: 'error', message: 'Label and Code Snippet text are required.' });
+                            panel.webview.postMessage({ type: 'error', message: vscode.l10n.t('Label and Code Snippet text are required.') });
                             return;
                         }
                         const parsedOrder = Number.isFinite(Number(message.order))
@@ -316,7 +316,7 @@ class CodeSnippetEditorPanel {
                         const codeTemplate = String(message.codeTemplate || '').trim();
                         const group = String(message.group || '').trim() || 'Admin';
                         if (!label || !codeTemplate) {
-                            panel.webview.postMessage({ type: 'error', message: 'Label and Code Snippet text are required.' });
+                            panel.webview.postMessage({ type: 'error', message: vscode.l10n.t('Label and Code Snippet text are required.') });
                             return;
                         }
                         const parsedOrder = Number.isFinite(Number(message.order))
@@ -645,7 +645,7 @@ export function registerCodeSnippetManagerView(
             if (!snippet) {
                 return;
             }
-            const choice = await vscode.window.showWarningMessage(`Delete Code Snippet '${snippet.label}'?`, { modal: true }, 'Delete');
+            const choice = await vscode.window.showWarningMessage(vscode.l10n.t("Delete Code Snippet '{label}'?", { label: snippet.label }), { modal: true }, 'Delete');
             if (choice === 'Delete') {
                 await commandEntry.deleteCodeSnippet(snippet.id);
             }
@@ -664,7 +664,10 @@ export function registerCodeSnippetManagerView(
 
             const resolution = commandEntry.resolveSnippetTemplateText(snippet.codeTemplate);
             if (resolution.missing.length > 0) {
-                void vscode.window.showWarningMessage(`Snippet '${snippet.label}' requires unavailable value(s): ${resolution.missing.map((name) => `\${${name}}`).join(', ')}`);
+                void vscode.window.showWarningMessage(vscode.l10n.t("Snippet '{label}' requires unavailable value(s): {missing}", {
+                    label: snippet.label,
+                    missing: resolution.missing.map((name) => `\${${name}}`).join(', ')
+                }));
                 return;
             }
 
@@ -682,11 +685,14 @@ export function registerCodeSnippetManagerView(
             }
             const resolution = commandEntry.resolveSnippetTemplateText(snippet.codeTemplate);
             if (resolution.missing.length > 0) {
-                void vscode.window.showWarningMessage(`Snippet '${snippet.label}' requires unavailable value(s): ${resolution.missing.map((name) => `\${${name}}`).join(', ')}`);
+                void vscode.window.showWarningMessage(vscode.l10n.t("Snippet '{label}' requires unavailable value(s): {missing}", {
+                    label: snippet.label,
+                    missing: resolution.missing.map((name) => `\${${name}}`).join(', ')
+                }));
                 return;
             }
             await vscode.env.clipboard.writeText(resolution.resolved);
-            void vscode.window.showInformationMessage(`Copied Code Snippet text: ${snippet.label}`);
+            void vscode.window.showInformationMessage(vscode.l10n.t('Copied Code Snippet text: {label}', { label: snippet.label }));
         }),
         vscode.commands.registerCommand('clprompter.codeSnippet.copyToCommandEntry', async (item?: CodeSnippetTreeItem | CodeSnippetPreviewTreeItem | CodeSnippetRecord) => {
             const snippet = resolveSnippet(item);
@@ -695,12 +701,15 @@ export function registerCodeSnippetManagerView(
             }
             const resolution = commandEntry.resolveSnippetTemplateText(snippet.codeTemplate);
             if (resolution.missing.length > 0) {
-                void vscode.window.showWarningMessage(`Snippet '${snippet.label}' requires unavailable value(s): ${resolution.missing.map((name) => `\${${name}}`).join(', ')}`);
+                void vscode.window.showWarningMessage(vscode.l10n.t("Snippet '{label}' requires unavailable value(s): {missing}", {
+                    label: snippet.label,
+                    missing: resolution.missing.map((name) => `\${${name}}`).join(', ')
+                }));
                 return;
             }
             await vscode.commands.executeCommand('clprompter.openCommandEntry');
             commandEntry.setCommandText(resolution.resolved);
-            void vscode.window.showInformationMessage(`Copied to CL Command Entry: ${snippet.label}`);
+            void vscode.window.showInformationMessage(vscode.l10n.t('Copied to CL Command Entry: {label}', { label: snippet.label }));
         }),
         vscode.commands.registerCommand('clprompter.codeSnippet.moveUp', async (item?: CodeSnippetTreeItem | CodeSnippetPreviewTreeItem | CodeSnippetRecord) => {
             const snippet = resolveSnippet(item);

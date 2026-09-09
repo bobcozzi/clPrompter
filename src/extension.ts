@@ -68,6 +68,8 @@ import {
 let baseExtension: Extension<CodeForIBMi> | undefined;
 let sharedCommandEntryService: CommandEntryService | undefined;
 let sharedCommandEntryJobManager: CommandEntryJobManager | undefined;
+const LAST_SEEN_VSCODE_VERSION_KEY = 'clprompter.lastSeenVsCodeVersion';
+const SKIP_HISTORY_CLEAR_ON_NEXT_READY_KEY = 'clprompter.skipHistoryClearOnNextReady';
 
 /**
  * Helptext cache populated by the PASE-based prefetch.
@@ -153,8 +155,8 @@ async function enableF4PromptSetting(): Promise<void> {
 async function showF4DisabledPrompt(source: 'startup' | 'invoke'): Promise<void> {
     const settingId = 'clPrompter.enableF4Key';
     const message = source === 'startup'
-        ? 'CL Prompter F4 prompting is currently disabled.'
-        : 'F4 prompting is currently disabled.';
+        ? vscode.l10n.t('CL Prompter F4 prompting is currently disabled.')
+        : vscode.l10n.t('F4 prompting is currently disabled.');
 
     const choice = await vscode.window.showWarningMessage(
         message,
@@ -164,7 +166,7 @@ async function showF4DisabledPrompt(source: 'startup' | 'invoke'): Promise<void>
 
     if (choice === ENABLE_F4_ACTION) {
         await enableF4PromptSetting();
-        vscode.window.showInformationMessage('CL Prompter F4 prompting has been enabled.');
+        vscode.window.showInformationMessage(vscode.l10n.t('CL Prompter F4 prompting has been enabled.'));
         return;
     }
 
@@ -311,6 +313,13 @@ export async function activate(context: vscode.ExtensionContext) {
     };
 
     await context.workspaceState.update('clprompter.commandEntryTouchedThisSession', false);
+    const previousVsCodeVersion = context.globalState.get<string | undefined>(LAST_SEEN_VSCODE_VERSION_KEY);
+    const currentVsCodeVersion = vscode.version;
+    const vscodeWasUpdated = typeof previousVsCodeVersion === 'string' && previousVsCodeVersion !== currentVsCodeVersion;
+    if (vscodeWasUpdated) {
+        await context.globalState.update(SKIP_HISTORY_CLEAR_ON_NEXT_READY_KEY, true);
+    }
+    await context.globalState.update(LAST_SEEN_VSCODE_VERSION_KEY, currentVsCodeVersion);
     await vscode.commands.executeCommand('setContext', 'clprompter.ibmiLoaded', false);
     await vscode.commands.executeCommand('setContext', 'clprompter.connected', false);
     await setCommandEntryAvailable(false);
@@ -708,7 +717,7 @@ export async function activate(context: vscode.ExtensionContext) {
     } else {
         await vscode.commands.executeCommand('setContext', 'clprompter.ibmiLoaded', false);
         await vscode.commands.executeCommand('setContext', 'clprompter.connected', false);
-        vscode.window.showErrorMessage("Code for IBM i extension is not installed or not found.");
+        vscode.window.showErrorMessage(vscode.l10n.t('Code for IBM i extension is not installed or not found.'));
     }
     try {
         console.log('CL Prompter extension activated');
@@ -734,7 +743,7 @@ export async function activate(context: vscode.ExtensionContext) {
             vscode.commands.registerCommand('clPrompter.formatCurrentCommand', async () => {
                 const editor = vscode.window.activeTextEditor;
                 if (!editor) {
-                    vscode.window.showInformationMessage('No active editor');
+                    vscode.window.showInformationMessage(vscode.l10n.t('No active editor'));
                     return;
                 }
 
@@ -743,14 +752,14 @@ export async function activate(context: vscode.ExtensionContext) {
                 // Only activate for supported languages
                 const supportedLangs = ['clle', 'clp', 'cl', 'cmd', 'bnd'];
                 if (!supportedLangs.includes(document.languageId)) {
-                    vscode.window.showInformationMessage('CL Prompter: Not a supported IBM i source type.');
+                    vscode.window.showInformationMessage(vscode.l10n.t('CL Prompter: Not a supported IBM i source type.'));
                     return;
                 }
 
                 // Extract the current command range
                 const commandInfo = collectCLCmd(editor);
                 if (!commandInfo || !commandInfo.command) {
-                    vscode.window.showInformationMessage('No CL command found at cursor');
+                    vscode.window.showInformationMessage(vscode.l10n.t('No CL command found at cursor'));
                     return;
                 }
 
@@ -783,7 +792,7 @@ export async function activate(context: vscode.ExtensionContext) {
                     editBuilder.replace(range, formatted.join('\n'));
                 });
 
-                vscode.window.showInformationMessage('CL command formatted');
+                vscode.window.showInformationMessage(vscode.l10n.t('CL command formatted'));
             })
         );
 
@@ -792,7 +801,7 @@ export async function activate(context: vscode.ExtensionContext) {
             vscode.commands.registerCommand('clPrompter.formatEntireFile', async () => {
                 const editor = vscode.window.activeTextEditor;
                 if (!editor) {
-                    vscode.window.showInformationMessage('No active editor');
+                    vscode.window.showInformationMessage(vscode.l10n.t('No active editor'));
                     return;
                 }
 
@@ -801,7 +810,7 @@ export async function activate(context: vscode.ExtensionContext) {
                 // Only activate for supported languages
                 const supportedLangs = ['clle', 'clp', 'cl', 'bnd'];
                 if (!supportedLangs.includes(document.languageId)) {
-                    vscode.window.showInformationMessage('CL Prompter: Not a supported IBM i source type.');
+                    vscode.window.showInformationMessage(vscode.l10n.t('CL Prompter: Not a supported IBM i source type.'));
                     return;
                 }
 
@@ -834,14 +843,14 @@ export async function activate(context: vscode.ExtensionContext) {
                     editBuilder.replace(range, formatted.join('\n'));
                 });
 
-                vscode.window.showInformationMessage('CL file formatted');
+                vscode.window.showInformationMessage(vscode.l10n.t('CL file formatted'));
             })
         );
 
 
     } catch (error) {
         console.error('[clPrompter] Activation error:', error);
-        vscode.window.showErrorMessage(`Activation failed: ${error}`);
+        vscode.window.showErrorMessage(vscode.l10n.t('Activation failed: {error}', { error: String(error) }));
     }
 
     // Initialize the standalone CLPrompter API for external extensions
@@ -1345,7 +1354,7 @@ export class ClPromptPanel {
                                             editBuilder.replace(this._selection!, formattedWithEOL);
                                         }).then(success => {
                                             if (!success) {
-                                                vscode.window.showWarningMessage('Failed to insert label. Try again.');
+                                                vscode.window.showWarningMessage(vscode.l10n.t('Failed to insert label. Try again.'));
                                             }
                                             // Transfer focus back to editor before closing
                                             vscode.window.showTextDocument(doc, { preview: false, preserveFocus: false }).then(() => {
@@ -1356,10 +1365,10 @@ export class ClPromptPanel {
                                 });
                             } else {
                                 vscode.window.showWarningMessage(
-                                    'Could not insert label: original editor is no longer open.'
+                                    vscode.l10n.t('Could not insert label: original editor is no longer open.')
                                 );
                                 vscode.env.clipboard.writeText(formatted);
-                                vscode.window.showInformationMessage('Label copied to clipboard.');
+                                vscode.window.showInformationMessage(vscode.l10n.t('Label copied to clipboard.'));
                                 this.onUserClose();
                             }
                             break;
@@ -1438,7 +1447,7 @@ export class ClPromptPanel {
                                         editBuilder.replace(this._selection!, formattedWithEOL);
                                     }).then(success => {
                                         if (!success) {
-                                            vscode.window.showWarningMessage('Failed to insert CL command. Try again.');
+                                            vscode.window.showWarningMessage(vscode.l10n.t('Failed to insert CL command. Try again.'));
                                         }
                                         // Transfer focus back to editor before disposing
                                         vscode.window.showTextDocument(doc, { preview: false, preserveFocus: false }).then(() => {
@@ -1449,21 +1458,21 @@ export class ClPromptPanel {
                             });
                         } else {
                             vscode.window.showWarningMessage(
-                                'Could not insert command: original editor is no longer open.'
+                                vscode.l10n.t('Could not insert command: original editor is no longer open.')
                             );
                             vscode.env.clipboard.writeText(formatted);
-                            vscode.window.showInformationMessage('CL command copied to clipboard.');
+                            vscode.window.showInformationMessage(vscode.l10n.t('CL command copied to clipboard.'));
                             this.onUserClose();
                         }
                         break;
                     }
                     case 'cancel': {
                         if (message.cancelMode === 'f3') {
-                            vscode.window.setStatusBarMessage('CL Command prompting ended with F3=Cancel', 3000);
+                            vscode.window.setStatusBarMessage(vscode.l10n.t('CL Command prompting ended with F3=Cancel'), 3000);
                         } else if (message.cancelMode === 'escape') {
-                            vscode.window.setStatusBarMessage('CL Command prompting ended with ESC=Cancel', 3000);
+                            vscode.window.setStatusBarMessage(vscode.l10n.t('CL Command prompting ended with ESC=Cancel'), 3000);
                         } else if (message.cancelMode === 'button') {
-                            vscode.window.setStatusBarMessage('CL Command prompting ended with Cancel', 3000);
+                            vscode.window.setStatusBarMessage(vscode.l10n.t('CL Command prompting ended with Cancel'), 3000);
                         }
 
                         // If this is a nested prompter, resolve with null
@@ -1711,7 +1720,7 @@ export class ClPromptPanel {
                             ? message.xml
                             : this._xml;
                         if (!xml || !xml.trim()) {
-                            vscode.window.showWarningMessage('No command XML is available to copy.');
+                            vscode.window.showWarningMessage(vscode.l10n.t('No command XML is available to copy.'));
                             break;
                         }
                         await vscode.env.clipboard.writeText(xml);
@@ -2116,7 +2125,7 @@ export async function downloadStreamfile(
             }
         }
     } catch (err) {
-        vscode.window.showErrorMessage(`Failed to download streamfile: ${err}`);
+        vscode.window.showErrorMessage(vscode.l10n.t('Failed to download streamfile: {error}', { error: String(err) }));
         return undefined;
     }
 }

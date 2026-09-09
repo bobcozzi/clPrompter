@@ -165,14 +165,14 @@ export async function warmXmlCache(cmd: string): Promise<void> {
 // Utility: Fetch or return XML for a command
 export async function getCMDXML(cmdString: string): Promise<string> {
     if (!code4i) {
-        vscode.window.showErrorMessage("Code for IBM i (CodeForIBMi) extension is not found and is required.");
+        vscode.window.showErrorMessage(vscode.l10n.t('Code for IBM i (CodeForIBMi) extension is not found and is required.'));
         return '';
     }
     // Check if connection was good, if not inform the end-user
     // that they must be connected to IBM i host or prompting is unavailable.
     const connection = code4i.instance.getConnection();
     if (!connection) {
-        vscode.window.showErrorMessage("Not connected to IBM i host. CL prompting not available.");
+        vscode.window.showErrorMessage(vscode.l10n.t('Not connected to IBM i host. CL prompting not available.'));
         return '';
     }
     const c4iConfig = connection.getConfig();
@@ -280,7 +280,10 @@ export async function getCMDXML(cmdString: string): Promise<string> {
                     xml = cmdxml.getText();
                 }
             } else {
-                vscode.window.showWarningMessage(`Cannot prompt '${cmdString.trim().toUpperCase()}': ${result.stderr || result.stdout}`);
+                vscode.window.showWarningMessage(vscode.l10n.t("Cannot prompt '{command}': {details}", {
+                    command: cmdString.trim().toUpperCase(),
+                    details: result.stderr || result.stdout
+                }));
             }
         }
 

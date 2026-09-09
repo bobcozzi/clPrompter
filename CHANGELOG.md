@@ -3,12 +3,29 @@
 All notable changes to this project are documented in this file.
 
 ## [Preview of CL Command Entry]
+## [1.0.27] - 2026-09-09
+
+### What's New
+- Shipped Code Snippets are now refreshed on first use after an extension update. This means that the built-in snippets are refreshed without disturbing user-created snippets.
+- Added VS Code NLS support for the CL Prompter text that ships with the extension, so the built-in labels, prompts, and messages now live in locale files instead of being hard-coded in the source.
+- The default English text is now kept in a single bundle, which makes it easier to swap in translated text later without changing the command logic.
+
+## [1.0.26] - 2026-09-09
+
+### What's New
+- Readme.md documentation updates for the Command Entry panel.
+- New colors for CL and SQL statement logging
+- New setting option names for most `cmdEntry` settings. Therefore your custom changes may revert after updating
+- CL commands recording to the Command History now has an option that allows you to turn that feature off
+- SQL and Code Snippets recording to the history and log now have options for controlling that recording behavior
+- Clearing Command Entry Log at startup is not connection-centric.
 
 ## [1.0.25] - 2026-09-08
 
 ### What's New
 
 - **Shared SQL Job (definition)**: "Shared SQL Job" means Command Entry uses the same existing SQL job that Code for IBM i is already using on the host, instead of starting its own private SQL job.
+- **Private SQL Job (definition)**: "Private SQL Job" means Command Entry uses its own host SQL job and not the one Code for IBM i is using. In this mode of operations, users can run CL commands independent of the Code for IBM i job so things like CHGLIBL, ADDLIBLE, OVRDBF etc, can be run without impacting the original Code for IBM i job. It also means the `Reconnect to server` menu option is enabled and is similar to that option in IBM ACS--it reinitalizes the current job or starts a new one if the current job cannot be easily reinitialized.
 - **Connection-scoped SQL job mode**: Command Entry now saves **Use Shared SQL Job** vs **Use Private SQL Job** per IBM i connection and retains that choice on future reconnects.
 - **Simpler mode switching from menu**: The easiest switching path is now the Command Entry `...` menu options:
   - `Use Shared SQL Job`

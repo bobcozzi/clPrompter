@@ -5,6 +5,7 @@ node_modules/**
 .vscode/
 src/
 src/test/
+nls/
 test/
 backup/
 -install/
@@ -13,6 +14,8 @@ backup/
 .git/
 .gitignore
 .vscodeignore
+.npm-cache/
+**/.npm-cache/**
 tsconfig.json
 xpackage.json
 .DS_Store

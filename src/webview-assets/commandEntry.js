@@ -1,6 +1,7 @@
 (() => {
   const state = vscode.getState() || { command: '', mode: '*RUN', filterSeverity: 0, history: [], executions: [], commandHeightPx: 0 };
   const maxExecutions = 30, maxMessages = 100;
+  const defaultConnectionScopeKey = 'disconnected';
   const noConnectionText = 'no connection';
   const MENU_POSITION_DEBUG = true;
   const minTextareaRows = 2;
@@ -18,13 +19,60 @@
   let messageDetailsMode = 'SHOW';
   let logSqlStatementsToCommandLog = false;
   let baseMinHeightPx = 0, autoResizing = false;
-  const applyAppearancePreferences = commandTextColor => {
+  const normalizeConnectionScopeKey = value => {
+    const key = String(value || '').trim().toLowerCase();
+    return key || defaultConnectionScopeKey;
+  };
+  const ensureExecutionBuckets = () => {
+    if (!state.executionsByConnection || typeof state.executionsByConnection !== 'object' || Array.isArray(state.executionsByConnection)) {
+      state.executionsByConnection = {};
+    }
+
+    state.activeConnectionScopeKey = normalizeConnectionScopeKey(state.activeConnectionScopeKey);
+
+    const activeKey = state.activeConnectionScopeKey;
+    if (!Array.isArray(state.executionsByConnection[activeKey])) {
+      state.executionsByConnection[activeKey] = [];
+    }
+
+    // One-time migration for sessions that still only have a flat executions array.
+    if (Array.isArray(state.executions) && state.executions.length > 0 && state.executionsByConnection[activeKey].length === 0) {
+      state.executionsByConnection[activeKey] = state.executions.slice(0, maxExecutions);
+    }
+
+    return state.executionsByConnection;
+  };
+  const getActiveExecutions = () => {
+    const buckets = ensureExecutionBuckets();
+    const activeKey = state.activeConnectionScopeKey;
+    const executions = buckets[activeKey];
+    if (Array.isArray(executions)) {
+      return executions;
+    }
+    buckets[activeKey] = [];
+    return buckets[activeKey];
+  };
+  const setActiveConnectionScope = key => {
+    state.activeConnectionScopeKey = normalizeConnectionScopeKey(key);
+    const buckets = ensureExecutionBuckets();
+    if (!Array.isArray(buckets[state.activeConnectionScopeKey])) {
+      buckets[state.activeConnectionScopeKey] = [];
+    }
+  };
+  const applyAppearancePreferences = (commandTextColor, sqlStatementColor) => {
     const value = String(commandTextColor || '').trim();
     if (value) {
       document.documentElement.style.setProperty('--clp-command-log-color', value);
+    } else {
+      document.documentElement.style.removeProperty('--clp-command-log-color');
+    }
+
+    const sqlValue = String(sqlStatementColor || '').trim();
+    if (sqlValue) {
+      document.documentElement.style.setProperty('--clp-sql-log-color', sqlValue);
       return;
     }
-    document.documentElement.style.removeProperty('--clp-command-log-color');
+    document.documentElement.style.removeProperty('--clp-sql-log-color');
   };
   // Wrap the mode select so we can render a custom CSS tooltip with fast hover behavior.
   const modeTooltipWrap = document.createElement('span');
@@ -32,11 +80,12 @@
   mode.parentNode?.insertBefore(modeTooltipWrap, mode);
   modeTooltipWrap.appendChild(mode);
   const save = () => {
+    ensureExecutionBuckets();
     state.command = command.value;
     state.mode = mode.value;
     state.filterSeverity = Number(severityFilter?.value || 0);
     state.history = state.history || [];
-    state.executions = state.executions || [];
+    state.executions = [];
     state.commandHeightPx = Number(state.commandHeightPx || 0);
     vscode.setState(state);
   };
@@ -554,9 +603,11 @@
   };
   const applyMessageDetailsMode = () => {
     const expand = areMessageDetailsShown();
-    const executions = state.executions || [];
-    executions.forEach(execution => {
-      execution.collapsed = !expand;
+    const buckets = ensureExecutionBuckets();
+    Object.values(buckets).forEach(executions => {
+      executions.forEach(execution => {
+        execution.collapsed = !expand;
+      });
     });
   };
   const updateMenuCapabilities = () => {
@@ -683,7 +734,8 @@
     const previousScrollTop = results.scrollTop;
     results.replaceChildren();
     const minSeverity = Number(state.filterSeverity || 0);
-    state.executions.forEach((execution, index) => {
+    const executions = getActiveExecutions();
+    executions.forEach((execution, index) => {
       const isLatest = index === 0;
       const article = document.createElement('article');
       article.className = `execution${isLatest ? ' latest' : ''}`;
@@ -693,14 +745,18 @@
       const replayMarker = text('span', execution.collapsed ? '▶' : '▼', 'execution-replay');
       replayMarker.tabIndex = 0;
       const commandEl = text('span', execution.command, 'execution-command');
+      const executionIsSql = !!execution.sqlResult
+        || (execution.messages || []).some(message => String(message.messageId || '').trim().toUpperCase() === 'SQL0000')
+        || isSqlCommandText(execution.command);
+      if (executionIsSql) {
+        commandEl.classList.add('execution-command-sql');
+      }
       commandEl.setAttribute('data-tooltip', 'Click=Recall, Double-Click=Copy');
       commandEl.tabIndex = 0;
       attachHistoryHoverTooltip(commandEl);
       let clickTimer;
       const singleClickDelayMs = 140;
       const reuseCommand = () => {
-        const executionIsSql = !!execution.sqlResult
-          || (execution.messages || []).some(message => String(message.messageId || '').trim().toUpperCase() === 'SQL0000');
         command.value = applySqlPrefixForRecall(execution.command, executionIsSql);
         save();
         updateClearCommandState();
@@ -1343,9 +1399,11 @@
   window.addEventListener('message', event => {
     const message = event.data; switch (message.type) {
       case 'initialize':
+        setActiveConnectionScope(message.connectionScopeKey);
         state.history = message.history || [];
         if (message.clearHistoryOnStartup) {
-          state.executions = [];
+          const buckets = ensureExecutionBuckets();
+          buckets[state.activeConnectionScopeKey] = [];
           historyDraft = '';
           historyIndex = -1;
           save();
@@ -1353,7 +1411,7 @@
         messageDetailsMode = String(message.messageDetailsMode || 'SHOW').toUpperCase() === 'HIDE' ? 'HIDE' : 'SHOW';
         logSqlStatementsToCommandLog = !!message.logSqlStatementsToCommandLog;
         applyMessageDetailsMode();
-        applyAppearancePreferences(message.commandTextColor);
+        applyAppearancePreferences(message.commandTextColor, message.sqlStatementColor);
         dedicatedJobEnabled = !!message.dedicatedJobEnabled;
         remoteMapepireEnabled = !!message.remoteMapepireEnabled;
         useSharedSqlJob = typeof message.useSharedSqlJob === 'boolean' ? !!message.useSharedSqlJob : true;
@@ -1410,21 +1468,28 @@
         updateSqlLoggingMenuLabel();
         break;
       case 'appearancePreferences':
-        applyAppearancePreferences(message.commandTextColor);
+        applyAppearancePreferences(message.commandTextColor, message.sqlStatementColor);
         break;
       case 'sqlFetchLimitStatus': {
         // Legacy event retained for compatibility; fetch-limit info is no longer shown in status text.
         break;
       }
       case 'clearSqlResults':
-        state.executions = (state.executions || []).filter(execution => !isSqlCommandText(execution.command));
+        {
+          const buckets = ensureExecutionBuckets();
+          buckets[state.activeConnectionScopeKey] = getActiveExecutions().filter(execution => !isSqlCommandText(execution.command));
+        }
         save();
         render();
         break;
       case 'execution': {
         const shouldAddToCommandEntryLog = message.addToCommandEntryLog !== false;
         if (shouldAddToCommandEntryLog) {
-          state.executions = [{ ...message.execution, messages: (message.execution.messages || []).slice(0, maxMessages) }, ...(state.executions || [])].slice(0, maxExecutions);
+          const buckets = ensureExecutionBuckets();
+          buckets[state.activeConnectionScopeKey] = [
+            { ...message.execution, messages: (message.execution.messages || []).slice(0, maxMessages) },
+            ...getActiveExecutions()
+          ].slice(0, maxExecutions);
           applyMessageDetailsMode();
         }
         if (message.addToHistory !== false) {
@@ -1444,7 +1509,53 @@
         }
         break;
       }
-      case 'historyUpdated': state.history = message.history || []; historyDraft = ''; historyIndex = -1; save(); break; case 'setCommand': command.value = message.command; save(); updateClearCommandState(); resizeCommandInput(); command.focus(); break; case 'setCommandMode': command.value = message.command; mode.value = message.mode || mode.value; updateModeTooltip(); save(); updateClearCommandState(); resizeCommandInput(); command.focus(); break; case 'clearResults': state.executions = []; save(); render(); break; case 'focusInput': command.focus(); break; case 'runCurrent': requestRun(); break; case 'promptCurrent': requestPrompt(); break; case 'notice': setStatusMessage(message.message); break;
+      case 'connectionScope':
+        setActiveConnectionScope(message.connectionScopeKey);
+        save();
+        render();
+        break;
+      case 'historyUpdated':
+        state.history = message.history || [];
+        historyDraft = '';
+        historyIndex = -1;
+        save();
+        break;
+      case 'setCommand':
+        command.value = message.command;
+        save();
+        updateClearCommandState();
+        resizeCommandInput();
+        command.focus();
+        break;
+      case 'setCommandMode':
+        command.value = message.command;
+        mode.value = message.mode || mode.value;
+        updateModeTooltip();
+        save();
+        updateClearCommandState();
+        resizeCommandInput();
+        command.focus();
+        break;
+      case 'clearResults':
+        {
+          const buckets = ensureExecutionBuckets();
+          buckets[state.activeConnectionScopeKey] = [];
+        }
+        save();
+        render();
+        break;
+      case 'focusInput':
+        command.focus();
+        break;
+      case 'runCurrent':
+        requestRun();
+        break;
+      case 'promptCurrent':
+        requestPrompt();
+        break;
+      case 'notice':
+        setStatusMessage(message.message);
+        break;
     }
   });
   results.addEventListener('scroll', hideHistoryHoverTooltip, { passive: true });

@@ -414,6 +414,10 @@ header {
     position: relative;
 }
 
+.execution-command.execution-command-sql {
+    color: var(--clp-sql-log-color, #3794FF);
+}
+
 .execution-replay {
     position: relative;
 }

@@ -24,7 +24,6 @@ In **VS Code Settings** (`Ctrl+,` or `Cmd+,`) search for `clPrompter` or specifi
 
 This setting controls when the CL Command Entry panel opens automatically:
 
-- `At Start Up`
 - `After IBM i Connection`
 - `No` (on demand only)
 

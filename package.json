@@ -1,8 +1,8 @@
 {
   "name": "clprompter",
-  "displayName": "Bob Cozzi's CL Prompter and Formatter for IBM i",
-  "description": "IBM i CL Prompting and Formatting: Built for modern development",
-  "version": "1.0.25",
+  "displayName": "%displayName%",
+  "description": "%description%",
+  "version": "1.0.27",
   "author": {
     "name": "Bob Cozzi",
     "url": "https://github.com/bobcozzi"
@@ -44,145 +44,145 @@
     "commands": [
       {
         "command": "clPrompter.clPrompter",
-        "title": "CL Prompter"
+        "title": "%contributes.commands.0.title%"
       },
       {
         "command": "clPrompter.formatCurrentCommand",
-        "title": "Format CL (current line)"
+        "title": "%contributes.commands.1.title%"
       },
       {
         "command": "clPrompter.formatEntireFile",
-        "title": "Format CL (file)"
+        "title": "%contributes.commands.2.title%"
       },
       {
         "command": "clprompter.openCommandEntry",
-        "title": "CLPROMPTER: Open CL Command Entry"
+        "title": "%contributes.commands.3.title%"
       },
       {
         "command": "clprompter.closeCommandEntry",
-        "title": "CLPROMPTER: Close CL Command Entry"
+        "title": "%contributes.commands.4.title%"
       },
       {
         "command": "clprompter.runCommandEntry",
-        "title": "CLPROMPTER: Run Command Entry"
+        "title": "%contributes.commands.5.title%"
       },
       {
         "command": "clprompter.promptCommandEntry",
-        "title": "CLPROMPTER: Prompt Command Entry"
+        "title": "%contributes.commands.6.title%"
       },
       {
         "command": "clprompter.cancelCommandEntry",
-        "title": "CLPROMPTER: CANCEL Last SQL"
+        "title": "%contributes.commands.7.title%"
       },
       {
         "command": "clprompter.startNewCommandEntryJob",
-        "title": "CLPROMPTER: Reconnect Command Entry Server Job"
+        "title": "%contributes.commands.8.title%"
       },
       {
         "command": "clprompter.useSharedCommandEntrySqlJob",
-        "title": "CLPROMPTER: Use Shared SQL Job (Command Entry)"
+        "title": "%contributes.commands.9.title%"
       },
       {
         "command": "clprompter.usePrivateCommandEntrySqlJob",
-        "title": "CLPROMPTER: Use Private SQL Job (Command Entry)"
+        "title": "%contributes.commands.10.title%"
       },
       {
         "command": "clprompter.clearCommandEntry",
-        "title": "CLPROMPTER: Clear Command Entry Results"
+        "title": "%contributes.commands.11.title%"
       },
       {
         "command": "clprompter.exportCodeSnippets",
-        "title": "CLPROMPTER: Export Code Snippets"
+        "title": "%contributes.commands.12.title%"
       },
       {
         "command": "clprompter.importCodeSnippets",
-        "title": "CLPROMPTER: Import Code Snippets"
+        "title": "%contributes.commands.13.title%"
       },
       {
         "command": "clprompter.manageCodeSnippets",
-        "title": "CLPROMPTER: Manage Code Snippets"
+        "title": "%contributes.commands.14.title%"
       },
       {
         "command": "clprompter.closeCodeSnippetManager",
-        "category": "Code Snippets",
-        "title": "Close",
+        "category": "%contributes.commands.15.category%",
+        "title": "%contributes.commands.15.title%",
         "icon": "images/icon-close.svg"
       },
       {
         "command": "clprompter.codeSnippet.pin",
-        "category": "Code Snippets",
-        "title": "Pin",
+        "category": "%contributes.commands.16.category%",
+        "title": "%contributes.commands.16.title%",
         "icon": "$(pin)"
       },
       {
         "command": "clprompter.codeSnippet.unpin",
-        "category": "Code Snippets",
-        "title": "Unpin",
+        "category": "%contributes.commands.17.category%",
+        "title": "%contributes.commands.17.title%",
         "icon": "$(pinned)"
       },
       {
         "command": "clprompter.codeSnippet.add",
-        "category": "Code Snippets",
-        "title": "Add",
+        "category": "%contributes.commands.18.category%",
+        "title": "%contributes.commands.18.title%",
         "icon": "images/icon-add.svg"
       },
       {
         "command": "clprompter.codeSnippet.edit",
-        "category": "Code Snippets",
-        "title": "Edit",
+        "category": "%contributes.commands.19.category%",
+        "title": "%contributes.commands.19.title%",
         "icon": "$(edit)"
       },
       {
         "command": "clprompter.codeSnippet.delete",
-        "category": "Code Snippets",
-        "title": "Delete",
+        "category": "%contributes.commands.20.category%",
+        "title": "%contributes.commands.20.title%",
         "icon": "$(trash)"
       },
       {
         "command": "clprompter.codeSnippet.run",
-        "category": "Code Snippets",
-        "title": "Run",
+        "category": "%contributes.commands.21.category%",
+        "title": "%contributes.commands.21.title%",
         "icon": "$(play)"
       },
       {
         "command": "clprompter.codeSnippet.viewFullStatement",
-        "category": "Code Snippets",
-        "title": "View full statement"
+        "category": "%contributes.commands.22.category%",
+        "title": "%contributes.commands.22.title%"
       },
       {
         "command": "clprompter.codeSnippet.copy",
-        "category": "Code Snippets",
-        "title": "Copy"
+        "category": "%contributes.commands.23.category%",
+        "title": "%contributes.commands.23.title%"
       },
       {
         "command": "clprompter.codeSnippet.copyToCommandEntry",
-        "category": "Code Snippets",
-        "title": "Copy to Cmd Entry"
+        "category": "%contributes.commands.24.category%",
+        "title": "%contributes.commands.24.title%"
       },
       {
         "command": "clprompter.codeSnippet.moveUp",
-        "category": "Code Snippets",
-        "title": "Move Up"
+        "category": "%contributes.commands.25.category%",
+        "title": "%contributes.commands.25.title%"
       },
       {
         "command": "clprompter.codeSnippet.moveDown",
-        "category": "Code Snippets",
-        "title": "Move Down"
+        "category": "%contributes.commands.26.category%",
+        "title": "%contributes.commands.26.title%"
       },
       {
         "command": "clprompter.codeSnippet.import",
-        "category": "Code Snippets",
-        "title": "Import JSON"
+        "category": "%contributes.commands.27.category%",
+        "title": "%contributes.commands.27.title%"
       },
       {
         "command": "clprompter.codeSnippet.export",
-        "category": "Code Snippets",
-        "title": "Export JSON"
+        "category": "%contributes.commands.28.category%",
+        "title": "%contributes.commands.28.title%"
       },
       {
         "command": "clprompter.codeSnippet.refresh",
-        "category": "Code Snippets",
-        "title": "Refresh",
+        "category": "%contributes.commands.29.category%",
+        "title": "%contributes.commands.29.title%",
         "icon": "images/icon-refresh.svg"
       }
     ],
@@ -194,12 +194,12 @@
       }
     ],
     "configuration": {
-      "title": "CL Prompter for IBM i",
+      "title": "%contributes.configuration.title%",
       "properties": {
         "clPrompter.enableF4Key": {
           "type": "boolean",
           "default": true,
-          "description": "Enable F4=Prompt for CL commands"
+          "description": "%contributes.configuration.properties.clPrompter.enableF4Key.description%"
         },
         "clPrompter.cmdEntryShow": {
           "order": 100,
@@ -210,42 +210,42 @@
             "On Demand"
           ],
           "enumDescriptions": [
-            "Show CL Command Entry after an IBM i connection is established.",
-            "On demand only: do not auto-show CL Command Entry. Open it manually with CLPROMPTER: Open CL Command Entry when needed."
+            "%contributes.configuration.properties.clPrompter.cmdEntryShow.enumDescriptions.0%",
+            "%contributes.configuration.properties.clPrompter.cmdEntryShow.enumDescriptions.1%"
           ],
-          "description": "Controls when the CL Command Entry panel is auto-shown. The On Demand option means manual open only, not never available."
+          "description": "%contributes.configuration.properties.clPrompter.cmdEntryShow.description%"
         },
         "clPrompter.cmdEntrySQLUseSharedJob": {
           "order": 101,
           "type": "boolean",
           "default": true,
-          "description": "Default SQL job mode for Command Entry when a connection does not yet have its own saved cmdEntry.sharedSQLJob value. True = Use Shared SQL Job, false = Use Private SQL Job. After you switch mode from the Command Entry menu, that per-connection setting is saved and takes precedence over this default."
+          "description": "%contributes.configuration.properties.clPrompter.cmdEntrySQLUseSharedJob.description%"
         },
         "clPrompter.cmdEntrySQLLimitFetch": {
           "order": 102,
           "type": "boolean",
           "default": true,
-          "description": "Enable incremental SQL row loading for CL Command Entry statements using `Cmd Entry SQL Fetch Row Limit`. Uncheck this setting for a Fetch Limit of *NOMAX rows (fetch all rows on run)."
+          "description": "%contributes.configuration.properties.clPrompter.cmdEntrySQLLimitFetch.description%"
         },
         "clPrompter.cmdEntrySqlFetchRowLimit": {
           "order": 104,
           "type": "integer",
           "default": 1000,
           "minimum": 1,
-          "description": "Controls the maximum number of rows per fetch request when `cmdEntryLimitSqlFetch` is checked. Ignored when that setting is unchecked (*NOMAX rows). Higher values can improve result set performance on fast IBM i servers."
+          "description": "%contributes.configuration.properties.clPrompter.cmdEntrySqlFetchRowLimit.description%"
         },
         "clPrompter.cmdEntrySqlFirstPageRowsToFetch": {
           "order": 103,
           "type": "integer",
           "default": 200,
           "minimum": 1,
-          "description": "Rows fetched for the first page only when a SQL statement is run from Command Entry. After first-page display, additional loads use cmdEntrySqlFetchRowLimit."
+          "description": "%contributes.configuration.properties.clPrompter.cmdEntrySqlFirstPageRowsToFetch.description%"
         },
         "clPrompter.cmdEntryDebugLogging": {
           "order": 105,
           "type": "boolean",
           "default": false,
-          "description": "Enable debug diagnostic logging for CL Command Entry internals (job routing, keep-alive, and SQL execution detail)."
+          "description": "%contributes.configuration.properties.clPrompter.cmdEntryDebugLogging.description%"
         },
         "clPrompter.cmdEntryMessageDetails": {
           "order": 106,
@@ -256,48 +256,68 @@
             "HIDE"
           ],
           "enumDescriptions": [
-            "Expand command-level message sections by default in Command Entry log.",
-            "Collapse command-level message sections by default in Command Entry log."
+            "%contributes.configuration.properties.clPrompter.cmdEntryMessageDetails.enumDescriptions.0%",
+            "%contributes.configuration.properties.clPrompter.cmdEntryMessageDetails.enumDescriptions.1%"
           ],
-          "description": "Controls whether Command Entry log entries are expanded or collapsed. Use F10 to toggle anytime."
+          "description": "%contributes.configuration.properties.clPrompter.cmdEntryMessageDetails.description%"
         },
         "clPrompter.cmdEntryCommandTextColor": {
           "order": 107,
           "type": "string",
           "format": "color",
-          "default": "#569CD6",
-          "description": "Color of CL command text shown in the Command Entry log/history rows. Use CSS color values like #3794ff, blue, or rgb(52, 120, 246).",
+          "default": "rgb(95,162,44)",
+          "description": "%contributes.configuration.properties.clPrompter.cmdEntryCommandTextColor.description%",
+          "pattern": "^(#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{3}|[a-zA-Z]+|rgb\\(\\d+,\\s*\\d+,\\s*\\d+\\)|rgba\\(\\d+,\\s*\\d+,\\s*\\d+,\\s*[0-9.]+\\))$"
+        },
+        "clPrompter.cmdEntrySqlStmtColor": {
+          "order": 107.5,
+          "type": "string",
+          "format": "color",
+          "default": "rgb(77, 77, 255)",
+          "description": "%contributes.configuration.properties.clPrompter.cmdEntrySqlStmtColor.description%",
           "pattern": "^(#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{3}|[a-zA-Z]+|rgb\\(\\d+,\\s*\\d+,\\s*\\d+\\)|rgba\\(\\d+,\\s*\\d+,\\s*\\d+,\\s*[0-9.]+\\))$"
         },
         "clPrompter.cmdEntryClearHistoryOnStartup": {
           "order": 108,
           "type": "boolean",
           "default": false,
-          "description": "Clear Command Entry panel history and message log when the CLPROMPTER extension starts."
+          "description": "%contributes.configuration.properties.clPrompter.cmdEntryClearHistoryOnStartup.description%"
         },
-        "clPrompter.cmdEntryLogSqlStatements": {
+        "clPrompter.cmdEntryHistoryConnectionScoped": {
+          "order": 108.5,
+          "type": "boolean",
+          "default": false,
+          "description": "%contributes.configuration.properties.clPrompter.cmdEntryHistoryConnectionScoped.description%"
+        },
+        "clPrompter.cmdEntryRecordClCmdsToHistory": {
           "order": 109,
           "type": "boolean",
-          "default": false,
-          "description": "Log SQL statements run from Command Entry to the Command Entry History Log."
+          "default": true,
+          "description": "%contributes.configuration.properties.clPrompter.cmdEntryRecordClCmdsToHistory.description%"
         },
-        "clPrompter.cmdEntryLogSqlStatementsToCommandLog": {
+        "clPrompter.cmdEntryRecordSqlStmtsToHistory": {
           "order": 110,
           "type": "boolean",
-          "default": false,
-          "description": "Log SQL statements run from Command Entry to the Command Entry Log."
+          "default": true,
+          "description": "%contributes.configuration.properties.clPrompter.cmdEntryRecordSqlStmtsToHistory.description%"
         },
-        "clPrompter.cmdEntryLogSnippets": {
+        "clPrompter.cmdEntryRecordSqlStmtsToLog": {
           "order": 111,
           "type": "boolean",
           "default": false,
-          "description": "Log Snippets that are run to the Command Entry History Log."
+          "description": "%contributes.configuration.properties.clPrompter.cmdEntryRecordSqlStmtsToLog.description%"
         },
-        "clPrompter.cmdEntryLogSnippetsToCommandLog": {
+        "clPrompter.cmdEntryRecordSnippetsToHistory": {
           "order": 112,
           "type": "boolean",
           "default": false,
-          "description": "Log Snippets that are run to the Command Entry Log."
+          "description": "%contributes.configuration.properties.clPrompter.cmdEntryRecordSnippetsToHistory.description%"
+        },
+        "clPrompter.cmdEntryRecordSnippetsToLog": {
+          "order": 113,
+          "type": "boolean",
+          "default": false,
+          "description": "%contributes.configuration.properties.clPrompter.cmdEntryRecordSnippetsToLog.description%"
         },
         "clPrompter.cmdEntryCodeSnippetTreeClickAction": {
           "order": 113,
@@ -309,71 +329,71 @@
             "No-op"
           ],
           "enumDescriptions": [
-            "Run the selected Code Snippet.",
-            "Open the fully resolved Code Snippet text in an editor tab.",
-            "Do nothing when a Code Snippet node is clicked."
+            "%contributes.configuration.properties.clPrompter.cmdEntryCodeSnippetTreeClickAction.enumDescriptions.0%",
+            "%contributes.configuration.properties.clPrompter.cmdEntryCodeSnippetTreeClickAction.enumDescriptions.1%",
+            "%contributes.configuration.properties.clPrompter.cmdEntryCodeSnippetTreeClickAction.enumDescriptions.2%"
           ],
-          "description": "Controls what happens when you click a Code Snippet in the tree view (setting key: clPrompter.cmdEntryCodeSnippetTreeClickAction)."
+          "description": "%contributes.configuration.properties.clPrompter.cmdEntryCodeSnippetTreeClickAction.description%"
         },
         "clPrompter.kwdColor": {
           "type": "string",
           "format": "color",
           "default": "#ffb300",
-          "description": "PARM keyword color in prompter.  Use CSS color values like ##1a237e, blue, or rgb(34,170,34).",
+          "description": "%contributes.configuration.properties.clPrompter.kwdColor.description%",
           "pattern": "^(#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{3}|[a-zA-Z]+|rgb\\(\\d+,\\s*\\d+,\\s*\\d+\\)|rgba\\(\\d+,\\s*\\d+,\\s*\\d+,\\s*[0-9.]+\\))$"
         },
         "clPrompter.kwdValueColor": {
           "type": "string",
           "format": "color",
           "default": "#1a237e",
-          "description": "PARM value color in prompter.  Use CSS color values like ##1a237e, blue, or rgb(34,170,34).",
+          "description": "%contributes.configuration.properties.clPrompter.kwdValueColor.description%",
           "pattern": "^(#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{3}|[a-zA-Z]+|rgb\\(\\d+,\\s*\\d+,\\s*\\d+\\)|rgba\\(\\d+,\\s*\\d+,\\s*\\d+,\\s*[0-9.]+\\))$"
         },
         "clPrompter.kwdColorAutoAdjust": {
           "type": "boolean",
           "default": true,
-          "description": "PARM keyword color Auto-adjust for best contrast in dark/light/high-contrast themes. If false, uses your color exactly as specified."
+          "description": "%contributes.configuration.properties.clPrompter.kwdColorAutoAdjust.description%"
         },
         "clPrompter.saveCmdXMLToFile": {
           "type": "boolean",
           "default": false,
           "order": 10,
-          "description": "Write prompted command XML to clp_cmdDefn_<cmdName>.xml. Useful for troubleshooting but not recommended for normal use."
+          "description": "%contributes.configuration.properties.clPrompter.saveCmdXMLToFile.description%"
         },
         "clPrompter.saveCmdXMLFileLocation": {
           "type": "string",
           "default": "*USERHOME",
           "order": 11,
-          "description": "Directory where clp_cmdDefn_<cmdName>.xml is written when clPrompter.saveCmdXMLToFile is enabled. Enter *TMPDIR, *USERHOME, *WORKSPACE, or an absolute path."
+          "description": "%contributes.configuration.properties.clPrompter.saveCmdXMLFileLocation.description%"
         },
         "clPrompter.saveCmdPrompterHTMLToFile": {
           "type": "boolean",
           "default": false,
           "order": 12,
-          "description": "Save prompter HTML to clp_cmdPrompt_<cmdName>.html for diagnostic purposes. This file can be sent to support for troubleshooting issues with the prompter."
+          "description": "%contributes.configuration.properties.clPrompter.saveCmdPrompterHTMLToFile.description%"
         },
         "clPrompter.saveCmdPrompterHTMLFileLocation": {
           "type": "string",
           "default": "*USERHOME",
           "order": 13,
-          "description": "Directory where clp_cmdPrompt_<cmdName>.html is written when clPrompter.saveCmdPrompterHTMLToFile is enabled. Enter *TMPDIR, *USERHOME, *WORKSPACE, or an absolute path."
+          "description": "%contributes.configuration.properties.clPrompter.saveCmdPrompterHTMLFileLocation.description%"
         },
         "clPrompter.saveCmdHelpTextToFile": {
           "type": "boolean",
           "default": false,
           "order": 14,
-          "description": "Save command parameter helptext to clp_cmdHelpText_<cmdName>_<parmName>.html for diagnostic purposes when reporting issues."
+          "description": "%contributes.configuration.properties.clPrompter.saveCmdHelpTextToFile.description%"
         },
         "clPrompter.saveCmdHelpTextFileLocation": {
           "type": "string",
           "default": "*USERHOME",
           "order": 15,
-          "description": "Directory where clp_cmdHelpText_<cmdName>_<parmName>.html is written when clPrompter.saveCmdHelpTextToFile is enabled. Enter *TMPDIR, *USERHOME, *WORKSPACE, or an absolute path."
+          "description": "%contributes.configuration.properties.clPrompter.saveCmdHelpTextFileLocation.description%"
         },
         "clPrompter.convertParmValueToUpperCase": {
           "type": "boolean",
           "default": true,
-          "description": "Convert CL variables, operators (*BCAT, *TCAT, etc.), and built-in functions (%SUBST, %TRIM, etc.) within PARM values to uppercase. When true, text like '&pickles *bcat %trim(&x)' becomes '&PICKLES *BCAT %TRIM(&X)'. When false, preserves original case. Applies when returning from the prompter."
+          "description": "%contributes.configuration.properties.clPrompter.convertParmValueToUpperCase.description%"
         },
         "clPrompter.convertCmdAndParmNameCase": {
           "type": "string",
@@ -383,7 +403,7 @@
             "*LOWER",
             "*NONE"
           ],
-          "description": "Case conversion for CL command names and PARM keywords. *UPPER = uppercase (CHGVAR VAR(...)), *LOWER = lowercase (chgvar var(...)), *NONE = no change. Applies when returning from the prompter and when formatting CL source."
+          "description": "%contributes.configuration.properties.clPrompter.convertCmdAndParmNameCase.description%"
         },
         "clPrompter.formatIndentComments": {
           "type": "string",
@@ -392,59 +412,59 @@
             "*YES",
             "*NO"
           ],
-          "description": "Indent comments. *YES = indent comments, *NO = leave at column 1."
+          "description": "%contributes.configuration.properties.clPrompter.formatIndentComments.description%"
         },
         "clPrompter.formatLabelPosition": {
           "type": "number",
           "default": 2,
           "minimum": 1,
-          "description": "Position of the optional command label (1-10 characters followed by colon). Default: 2."
+          "description": "%contributes.configuration.properties.clPrompter.formatLabelPosition.description%"
         },
         "clPrompter.formatCmdPosition": {
           "type": "number",
           "default": 14,
           "minimum": 1,
-          "description": "Position where the CL command name starts. Must be at least 1 space after the label. Default: 14."
+          "description": "%contributes.configuration.properties.clPrompter.formatCmdPosition.description%"
         },
         "clPrompter.formatKwdPosition": {
           "type": "number",
           "default": 25,
           "minimum": 0,
-          "description": "Position where the first PARM/keyword starts. Use 0 for one space after command name. Default: 25."
+          "description": "%contributes.configuration.properties.clPrompter.formatKwdPosition.description%"
         },
         "clPrompter.formatContinuePosition": {
           "type": "number",
           "default": 27,
           "minimum": 1,
-          "description": "Position where continuation lines start. Normally 2 positions after formatKwdPosition. Default: 27."
+          "description": "%contributes.configuration.properties.clPrompter.formatContinuePosition.description%"
         },
         "clPrompter.formatRightMargin": {
           "type": "number",
           "default": 70,
           "minimum": 40,
-          "description": "Last position where data or continuation symbols (+ or -) may appear. Default: 72."
+          "description": "%contributes.configuration.properties.clPrompter.formatRightMargin.description%"
         },
         "clPrompter.parmExpansionMax": {
           "type": "number",
           "default": 5000,
           "minimum": 16,
-          "description": "Maximum number of characters a prompted input field can be expanded to by entering & and leaving the field. Default: 5000."
+          "description": "%contributes.configuration.properties.clPrompter.parmExpansionMax.description%"
         },
         "clPrompter.parmExpansionSize": {
           "type": "number",
           "default": 16,
           "minimum": 1,
-          "description": "Number of characters added to a prompted input field each time the user enters & and leaves the field. Default: 16."
+          "description": "%contributes.configuration.properties.clPrompter.parmExpansionSize.description%"
         },
         "clPrompter.prefetchCommands": {
           "type": "string",
           "default": "PGM, DCL, MONMSG, CPYF, CHGVAR, SNDPGMMSG",
-          "description": "Comma- or space-delimited list of CL command names to pre-load when a connection to IBM i is established. For each command, both the Prompter and helptext are prefetched. Leave blank to disable."
+          "description": "%contributes.configuration.properties.clPrompter.prefetchCommands.description%"
         },
         "clPrompter.udtfSupportLibrary": {
           "type": "string",
           "default": "*TEMPLIB",
-          "description": "Library on IBM i where clPrompter UDTFs such as CHECK_SYNTAX and CMD_HELP are installed. *TEMPLIB = use Code for IBM i's configured temporary library. Recommended SQLTOOLS or SYSTOOLS. Or enter any user library name. Default: *TEMPLIB."
+          "description": "%contributes.configuration.properties.clPrompter.udtfSupportLibrary.description%"
         },
         "clPrompter.parmHelpText": {
           "type": "string",
@@ -454,10 +474,10 @@
             "GENCMDDOC"
           ],
           "enumDescriptions": [
-            "Fast SQL-based helptext via the CMD_HELP UDTF (once installed on IBM i). Requires the CMD_HELP UDTF in the library specified by clPrompter.helpLibrary.",
-            "Legacy Helptext generated via the GENCMDDOC CL command. (slow)."
+            "%contributes.configuration.properties.clPrompter.parmHelpText.enumDescriptions.0%",
+            "%contributes.configuration.properties.clPrompter.parmHelpText.enumDescriptions.1%"
           ],
-          "description": "Interface to use to retrieve CL command parameter helptext when the ? button is clicked in the prompter."
+          "description": "%contributes.configuration.properties.clPrompter.parmHelpText.description%"
         }
       }
     },
@@ -573,7 +593,7 @@
       "panel": [
         {
           "id": "clprompterCommandEntryMain",
-          "title": "CL Command Entry",
+          "title": "%contributes.viewsContainers.panel.0.title%",
           "icon": "images/clPrompter.png"
         }
       ]
@@ -582,7 +602,7 @@
       "ibmi-explorer": [
         {
           "id": "clprompter.codeSnippetManagerView",
-          "name": "Cmd Entry Snippets",
+          "name": "%contributes.views.ibmi-explorer.0.name%",
           "icon": "images/clPrompter.png",
           "when": "clprompter.codeSnippetManagerVisible"
         }
@@ -590,7 +610,7 @@
       "clprompterCommandEntryMain": [
         {
           "id": "clprompter.commandEntryView.main",
-          "name": "CL Command Entry",
+          "name": "%contributes.views.clprompterCommandEntryMain.0.name%",
           "type": "webview",
           "icon": "images/clPrompter.png",
           "when": "clprompter.commandEntryAvailable"
@@ -600,14 +620,15 @@
   },
   "scripts": {
     "compile-webview": "tsc -p tsconfig.webview.json",
-    "vscode:prepublish": "npm run compile",
+    "vscode:prepublish": "npm run build",
     "compile": "tsc -p ./",
     "lint:css": "stylelint \"src/webview-assets/**/*.css\"",
     "lint": "eslint",
     "lint:all": "npm run lint && npm run lint:css",
     "watch": "tsc -w -p ./",
     "copy-assets": "cp -r src/webview-assets/* media/",
-    "build": "npm run compile && npm run compile-webview && npm run copy-assets",
+    "copy-nls": "cp nls/package.nls*.json ./",
+    "build": "npm run compile && npm run compile-webview && npm run copy-assets && npm run copy-nls",
     "test:api": "tsc src/testAPICall.ts --outDir out --module commonjs --target es2020 --esModuleInterop --skipLibCheck && node out/testAPICall.js",
     "test:command-entry": "tsc src/test/testCommandEntry.ts --outDir out --module commonjs --target es2020 --esModuleInterop --skipLibCheck && node out/test/testCommandEntry.js",
     "test:dep-qual-default": "tsc src/test/testDepQualDefault.ts --outDir out --module commonjs --target es2020 --esModuleInterop --skipLibCheck && node out/test/testDepQualDefault.js"

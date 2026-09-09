@@ -15,7 +15,7 @@ This extension provides three complementary capabilities for IBM i CL developmen
 
 **CL Formatting** — Professional formatting for CL source, with support for individual statements or entire files. The formatter understands CL syntax, preserves comments, properly handles qualified names, and respects your formatting preferences.
 
-**CL Command Entry** — A dedicated VS Code side-panel workspace for entering and running non-interactive IBM i CL commands such as `CPYF` and `CHGJOB`, with CL Prompting support and detailed message output from the command's execution.
+**CL Command Entry** — A dedicated VS Code side-panel workspace for entering and running non-interactive IBM i CL commands such as `CPYF` and `CHGJOB`, with CL Prompting support and detailed message output from the command's execution. In addition, SQL statements may be run using the `SQL:` prefix, for example: `SQL: update orders set cost = 1.00 where ITMNBR = 'A3742'`
 
 **CL Syntax Checking** — Full CL syntax checking was originally created for this extension; it has now been merged with the **IBM** `vscode-clle` extension, where it is shipped and installed. It is no longer provided by this extension.
 
@@ -27,6 +27,7 @@ When the extension is first activated, it checks your IBM i host for the SQL UDT
 
 - The function is not currently installed on the host.
 - The function is installed, but the version shipped with this extension is newer than the version on the host.
+- **You must have the IBM i C/C++ Compilers installed** in order for these functions to be uploaded and compiled or they will not install on your IBM i host.
 
 The extension currently manages these SQL UDTFs (this list may grow over time):
 
@@ -56,9 +57,9 @@ The formatter intelligently handles CL syntax, preserves trailing comments, and 
 
 ## CL Command Entry Panel
 
-The CL Command Entry panel provides a dedicated command-entry workspace in the VS Code side panel for running and prompting IBM i CL commands without leaving your editor context.
+The CL Command Entry panel provides a dedicated command-entry workspace in the VS Code side panel for running and prompting IBM i CL commands without leaving your editor context. The CL Command Entry panel will appear after you connect to an IBM i server or on demand depending on your `settings`.
 
-![CL Command Entry Panel](images/clCmdEntry.png)
+![CL Command Entry Panel](images/cmdEntry_FullPanel.png)
 
 The `CL Command Entry Panel` is intended for **non-interactive CL commands** such as `CPYF`, `CHGJOB`, and similar commands that can execute without a green-screen display.
 
@@ -74,7 +75,10 @@ The `CL Command Entry Panel` is intended for **non-interactive CL commands** suc
 - **Panel visibility control** — `Command Entry` visibility can be on demand, at start up, or after a connection. For on-demand visibility, use either of the following new VSCODE commands (Cmd+Shift+P/Ctrl+Shift+P):
   - **CLPROMPTER: Open CL Command Entry**
   - **CLPROMPTER: Close CL Command Entry**
-- **Flexible menu launch on `...`** — The Command Entry menu opens with click, right-click, and Ctrl/Cmd+click on the `...` toolbar button.
+- **Flexible menu launch on `...`** — The Command Entry menu opens with click (or right-click) on the `...` toolbar button.
+
+![CL Command Entry Menu](images/cmdEntryMenu.png)
+
 
 ### Dedicated SQL Job Reconnect (Optional)
 
@@ -102,7 +106,7 @@ Notes:
 ### Limitations and Behavior Notes
 
 - **Interactive CL commands are not supported in the Command Entry panel** — Commands like `WRKOBJ`, `WRKACTJOB`, and `DSPLIBL OUTPUT(*)` do not display the 5250 style interactive UI and therefore are not support. Unpredictable results may occur.
-- **Cancel Request is disabled** — The cancel action feature was implemented via `QSYS2.CANCEL_SQL` but that did not accomplish a valid cancel of the commands. We were going for a `SysReq Option 2` style end-request options, which this interface cannot currently perform. We continue to research other options and solutions to cancel a running CL command, and will implement it when one is designed that works for this situation.
+- **Cancel Request is disabled in Shared Job mode** — The cancel action feature is implemented when the Shared CODE for IBM i SQL job is used. In private SQL Job mode, the cancel request is attempted to cancel a long-running SQL statement but is not guaranteed to cancel the request.
 - **Prompt does not auto-run** — After prompting a CL command, the command string is returned to the input command line but not automatically run. To run the command, press `Enter` or the **Run** button. Note that this is purposely different from the classic IBM i 52520 Command Entry screen's behavior.
 - **SQL fetch window is configurable** — CL Command Entry SQL statements (`sql: ...`) use these settings:
   - `clPrompter.cmdEntryLimitSqlFetch` controls whether SQL rows are loaded incrementally.
@@ -125,9 +129,13 @@ Notes:
   - Import options are `Merge`, `Replace All`, and `Add New Only`.
 - **Optional startup history clear** — Set `clPrompter.cmdEntryClearHistoryOnStartup=true` to clear Command Entry command history and message log when CLPROMPTER starts.
 
-## Features
+#### Command Entry Code Snippets
 
-### CL Prompter Features
+Included with Command Entry is an executable Code Snippet view that allows you to do typical Command Entry stuff, such as view your library list, look at the last SPOOLED file you created, view your joblog, etc. It is located on the right tree view panel below your CODE for IBM i Filters. The shipped features will likely be refined and updated over the coming months as more usage is logged. Adding user-written code snippets is planned for an upcoming release.
+![CL Command Entry Code Snippets](images/cmdEntry_SnippetTreeView.png)
+
+
+## CL Prompter Features
 
 - **Visual Focus Indicator** — Clear arrow (▶) indicator shows which input field currently has focus, making it easy to navigate through complex command parameters.
 - **Tab Navigation** — Press TAB to move seamlessly between input fields, just like traditional 5250 prompting.
