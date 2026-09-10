@@ -19,6 +19,7 @@ interface SqlPagingSession {
     id: string;
     connectionKey: string;
     statement: string;
+    resultTitle?: string;
     rows: Record<string, unknown>[];
     columnMetadata?: SqlColumnMetadata[];
     columns: string[];
@@ -929,7 +930,14 @@ export class CommandEntryService {
         connection: IBMi,
         statement: string,
         rows: Record<string, unknown>[],
-        options?: { sessionId?: string; hasMoreRows?: boolean; fetchSize?: number; prefetchSize?: number; columnMetadata?: SqlColumnMetadata[] }
+        options?: {
+            sessionId?: string;
+            hasMoreRows?: boolean;
+            fetchSize?: number;
+            prefetchSize?: number;
+            columnMetadata?: SqlColumnMetadata[];
+            resultTitle?: string;
+        }
     ) {
         const columns = deriveSqlColumns(rows);
         const catalogMetadata = await fetchColumnMetadataFromCatalog(connection, statement, columns);
@@ -939,6 +947,7 @@ export class CommandEntryService {
         const finalMetadata = enrichMetadataWithInferredTypes(columns, metadataFromSql, rows);
         return {
             statement,
+            resultTitle: options?.resultTitle,
             columns,
             columnMetadata: finalMetadata,
             rows,
@@ -1004,7 +1013,8 @@ export class CommandEntryService {
                     hasMoreRows: false,
                     fetchSize: session.fetchSize,
                     prefetchSize: session.prefetchSize,
-                    columnMetadata: session.columnMetadata
+                    columnMetadata: session.columnMetadata,
+                    resultTitle: session.resultTitle
                 });
                 await this.closeSqlSession(session.id);
                 return payload;
@@ -1029,7 +1039,8 @@ export class CommandEntryService {
             hasMoreRows,
             fetchSize: session.fetchSize,
             prefetchSize: session.prefetchSize,
-            columnMetadata: session.columnMetadata
+            columnMetadata: session.columnMetadata,
+            resultTitle: session.resultTitle
         });
 
         if (!hasMoreRows) {
@@ -1039,7 +1050,13 @@ export class CommandEntryService {
         return payload;
     }
 
-    async execute(connection: IBMi, command: string, mode: CommandExecutionMode, id?: string): Promise<CommandExecution> {
+    async execute(
+        connection: IBMi,
+        command: string,
+        mode: CommandExecutionMode,
+        id?: string,
+        options?: { resultTitle?: string }
+    ): Promise<CommandExecution> {
         const started = Date.now();
         const startedDate = new Date(started);
         const startedAt = startedDate.toISOString();
@@ -1078,6 +1095,7 @@ export class CommandEntryService {
                             id: this.createSessionId(),
                             connectionKey: this.buildConnectionKey(connection),
                             statement: normalizedSql,
+                            resultTitle: options?.resultTitle,
                             rows: [...rows],
                             columnMetadata,
                             columns: deriveSqlColumns(rows),
@@ -1129,7 +1147,8 @@ export class CommandEntryService {
                         hasMoreRows,
                         fetchSize: unlimited ? undefined : maxRows,
                         prefetchSize: unlimited ? undefined : Math.min(maxRows, prefetchRows),
-                        columnMetadata
+                        columnMetadata,
+                        resultTitle: options?.resultTitle
                     })
                 };
             }

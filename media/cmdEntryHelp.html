@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Content-Security-Policy"
+        content="default-src 'none'; img-src {{CSP_SOURCE}} data:; style-src {{CSP_SOURCE}} 'unsafe-inline';">
+    <title>{{HELP_TITLE}}</title>
+    <style>
+        :root {
+            color-scheme: light dark;
+            --bg: var(--vscode-editor-background);
+            --fg: var(--vscode-editor-foreground);
+            --muted: var(--vscode-descriptionForeground);
+            --border: var(--vscode-panel-border);
+            --heading: var(--vscode-titleBar-activeForeground, var(--fg));
+            --accent: var(--vscode-textLink-foreground, var(--fg));
+            --card: color-mix(in srgb, var(--bg) 94%, var(--fg) 6%);
+        }
+
+        body {
+            margin: 0;
+            padding: 16px;
+            background: var(--bg);
+            color: var(--fg);
+            font: 13px/1.5 var(--vscode-font-family);
+        }
+
+        main {
+            max-width: 980px;
+            margin: 0 auto;
+        }
+
+        h1 {
+            margin: 0 0 6px;
+            font-size: 22px;
+            line-height: 1.25;
+            color: var(--heading);
+        }
+
+        .summary {
+            margin: 0 0 16px;
+            color: var(--muted);
+        }
+
+        nav {
+            margin: 0 0 18px;
+            padding: 10px 12px;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            background: var(--card);
+        }
+
+        nav a {
+            color: var(--accent);
+            text-decoration: none;
+            margin-right: 12px;
+            white-space: nowrap;
+        }
+
+        nav a:hover {
+            text-decoration: underline;
+        }
+
+        section {
+            margin: 0 0 20px;
+            padding: 12px;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            background: var(--card);
+        }
+
+        h2 {
+            margin: 0 0 8px;
+            font-size: 16px;
+            line-height: 1.3;
+            color: var(--heading);
+        }
+
+        ul {
+            margin: 0;
+            padding-left: 18px;
+        }
+
+        li {
+            margin: 0 0 5px;
+        }
+
+        figure {
+            margin: 0;
+        }
+
+        figcaption {
+            margin-top: 6px;
+            color: var(--muted);
+            font-size: 12px;
+        }
+
+        img {
+            display: block;
+            max-width: 100%;
+            height: auto;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            background: var(--bg);
+        }
+
+        code {
+            font-family: var(--vscode-editor-font-family, monospace);
+        }
+    </style>
+</head>
+
+<body>
+    <main>
+        <h1>CL Command Entry Reference</h1>
+        <p class="summary">Use this page as an operational reference for CL Command Entry and Code Snippets.</p>
+
+        <nav aria-label="Section index">
+            <a href="#panel-overview">Panel Overview</a>
+            <a href="#command-input">Command Input</a>
+            <a href="#results-log">Results and Message Log</a>
+            <a href="#sql-results">SQL Results Window</a>
+            <a href="#snippets">Code Snippets</a>
+            <a href="#job-controls">SQL Job Controls</a>
+        </nav>
+
+        <section id="panel-overview">
+            <h2>Panel Overview</h2>
+            <figure>
+                <img src="{{IMG_CMDENTRY_FULL_PANEL}}" alt="CL Command Entry full panel layout">
+                <figcaption>CL Command Entry with command input, action controls, message log, and status area.
+                </figcaption>
+            </figure>
+        </section>
+
+        <section id="command-input">
+            <h2>Command Input</h2>
+            <ul>
+                <li>Enter a CL command in the command input area and use Run to execute it.</li>
+                <li>Use Prompt or F4 to open the prompter.</li>
+                <li>You can also invoke prompting by placing <code>?</code> before the command name.</li>
+                <li>Use F9 and F8 to step backward and forward through command history.</li>
+                <li>The clear button in the input field clears only the current input text.</li>
+            </ul>
+        </section>
+
+        <section id="results-log">
+            <h2>Results and Message Log</h2>
+            <ul>
+                <li>Each command execution is added to the log with timestamp and elapsed time.</li>
+                <li>Messages are grouped by execution and can be collapsed or expanded.</li>
+                <li>The SEV selector filters displayed messages by minimum severity.</li>
+                <li>Use the toolbar menu to clear log content or clear stored history entries.</li>
+            </ul>
+        </section>
+
+        <section id="sql-results">
+            <h2>SQL Results Window</h2>
+            <ul>
+                <li>SQL statements open in a dedicated results window with sortable columns.</li>
+                <li>Use page controls to navigate loaded rows and fetch additional rows when available.</li>
+                <li>Use View SQL Stmt to display or hide the executed SQL statement.</li>
+                <li>Use Refresh in the results window to rerun the current SQL statement.</li>
+            </ul>
+        </section>
+
+        <section id="snippets">
+            <h2>Code Snippets</h2>
+            <ul>
+                <li>Code Snippets provide reusable SQL statements for common tasks.</li>
+                <li>Built-in snippets are grouped by category and can be run directly.</li>
+                <li>User snippets can be created, edited, reordered, imported, and exported.</li>
+                <li>Snippet execution behavior for history and log retention follows Command Entry settings.</li>
+                <li>The Snippets tree view can be toggled from the Command Entry panel.</li>
+            </ul>
+        </section>
+
+        <section id="job-controls">
+            <h2>SQL Job Controls</h2>
+            <ul>
+                <li>The status area displays the current SQL job identifier.</li>
+                <li>Use the SQL job menu to copy the job ID or display joblog for that job.</li>
+                <li>Where supported, you can switch between shared and private SQL job modes.</li>
+                <li>Reconnect Server Job starts a new dedicated SQL server job for Command Entry.</li>
+            </ul>
+        </section>
+    </main>
+</body>
+
+</html>

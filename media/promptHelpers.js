@@ -84,6 +84,78 @@ export function getTypeCategory(type) {
         return 'UNKNOWN';
     }
 }
+// CL variable name pattern: &NAME or &NAME_QUALIFIER
+// Max: 22 chars total (& + up to 21)
+export const CL_VARIABLE_PATTERN = /^&[A-Z][A-Z0-9_]{0,21}$/i;
+// Shared validator for NAME-like values used by both formatter and prompter.
+// Supports IBM i name subtypes: NAME, SNAME, and CNAME.
+export function isValidNameValue(val, maxLen, nameType) {
+    const trimmed = (val || '').trim();
+    if (!trimmed) {
+        return false;
+    }
+    if (trimmed.startsWith('&')) {
+        return CL_VARIABLE_PATTERN.test(trimmed);
+    }
+    const effectiveMax = Number.isFinite(maxLen) && maxLen > 0
+        ? Math.max(1, maxLen)
+        : 10;
+    const normalizedType = String(nameType || 'NAME').toUpperCase().replace('*', '');
+    const isSName = normalizedType === 'SNAME';
+    const isCName = normalizedType === 'CNAME';
+    let unquotedCharClass = 'A-Z0-9$#@_.';
+    if (isSName) {
+        unquotedCharClass = 'A-Z0-9$#@_';
+    }
+    else if (isCName) {
+        unquotedCharClass = 'A-Z0-9$#@';
+    }
+    const plainNamePattern = new RegExp(`^[A-Z$#@][${unquotedCharClass}]{0,${effectiveMax - 1}}$`, 'i');
+    // Quoted *NAME form: must use double quotes.
+    if (trimmed.length >= 2 && trimmed.startsWith('"') && trimmed.endsWith('"')) {
+        const inner = trimmed.slice(1, -1);
+        if (inner.length < 1) {
+            return false;
+        }
+        // IBM nuance: if the quoted value is a valid unquoted basic name,
+        // quotes are effectively removed ("ABC" == ABC), so normal max applies.
+        if (plainNamePattern.test(inner)) {
+            return inner.length <= effectiveMax;
+        }
+        // For true quoted/graphic names, IBM supplied commands allow up to 8 chars.
+        // For custom commands (Len > 10), quoted maximum is typically 2 less.
+        const quotedMax = effectiveMax > 10 ? Math.max(1, effectiveMax - 2) : 8;
+        if (inner.length > quotedMax) {
+            return false;
+        }
+        // IBM docs: quoted names can contain graphic characters but exclude
+        // blanks/comma/asterisk/question/single-quote/double-quote/slash.
+        // In JS we approximate control-code checks with Unicode control chars;
+        // this keeps IBM examples such as "AA%abc" valid.
+        // SNAME/CNAME add subtype restrictions for period/underscore.
+        for (let i = 0; i < inner.length; i++) {
+            const ch = inner[i];
+            const code = inner.charCodeAt(i);
+            if (ch === ' ' ||
+                ch === ',' ||
+                ch === '*' ||
+                ch === '?' ||
+                ch === "'" ||
+                ch === '"' ||
+                ch === '/' ||
+                (isSName && ch === '.') ||
+                (isCName && (ch === '.' || ch === '_')) ||
+                code <= 0x1f ||
+                code === 0x7f ||
+                code === 0xff) {
+                return false;
+            }
+        }
+        return true;
+    }
+    // Unquoted basic name form.
+    return plainNamePattern.test(trimmed);
+}
 export function splitUnquotedSlash(str) {
     const result = [];
     let current = '';

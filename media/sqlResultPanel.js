@@ -50,6 +50,7 @@
     var rerunBtn = document.getElementById('rerun-sql');
     var fetchStatus = document.getElementById('fetch-status');
     var resultMeta = document.getElementById('result-meta');
+    var resultTitleNode = document.getElementById('result-title');
     var toggleSqlStmtBtn = document.getElementById('toggle-sql-stmt');
     var sqlStatement = document.getElementById('sql-statement');
     var tableWrap = document.querySelector('.table-wrap');
@@ -82,9 +83,23 @@
     }
 
     var sessionId = initialPayload.sessionId || '';
+    var resultTitle = String(initialPayload.resultTitle || '').trim();
     var hasMoreRows = !!initialPayload.hasMoreRows;
     var fetchSize = Number(initialPayload.fetchSize || 0);
     var rows = Array.isArray(initialPayload.rowCells) ? initialPayload.rowCells.slice() : [];
+
+    function renderResultTitle() {
+        if (!resultTitleNode) {
+            return;
+        }
+        if (resultTitle) {
+            resultTitleNode.textContent = resultTitle;
+            resultTitleNode.classList.remove('is-hidden');
+        } else {
+            resultTitleNode.textContent = '';
+            resultTitleNode.classList.add('is-hidden');
+        }
+    }
 
     var sortColumnIndex = -1;
     var sortDirection = 'asc';
@@ -760,7 +775,7 @@
             setRerunBusy(true);
             setStatus('Rerunning SQL statement...');
             if (vscode.postMessage) {
-                vscode.postMessage({ type: 'rerunSql', statement: statement });
+                vscode.postMessage({ type: 'rerunSql', statement: statement, resultTitle: resultTitle });
             }
         });
     }
@@ -795,9 +810,11 @@
         rerunInFlight = false;
         var payload = message.payload;
         rows = (payload.rowCells && Array.isArray(payload.rowCells)) ? payload.rowCells.slice() : [];
+        resultTitle = String(payload.resultTitle || '').trim();
         sessionId = payload.sessionId || '';
         hasMoreRows = !!payload.hasMoreRows;
         fetchSize = Number(payload.fetchSize || 0);
+        renderResultTitle();
 
         if (sortColumnIndex >= 0) {
             applyActiveSort();
@@ -820,6 +837,7 @@
         attachSortHandlers();
         attachResizeHandlers();
         applyWidths();
+        renderResultTitle();
         renderRows({ scrollToTop: true });
         updateSortIndicators();
         updateLoadButtons();

@@ -3,6 +3,15 @@
 All notable changes to this project are documented in this file.
 
 ## [Preview of CL Command Entry]
+
+## [1.0.28] - 2026-09-10
+
+### What's Fixed
+- nls updates and improvements.
+- Added French to nls support.
+- Added Italian to nls support.
+- Made the phrasing of the `private sql job` to be more consistent.
+
 ## [1.0.27] - 2026-09-09
 
 ### What's New

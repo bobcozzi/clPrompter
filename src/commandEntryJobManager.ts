@@ -304,7 +304,7 @@ export class CommandEntryJobManager {
             if (resolved) {
                 this.dedicatedJobId = resolved;
                 this.status = 'ready';
-                this.debugLog(`[Cmd Entry] Dedicated SQL job ID resolved on attempt ${attempt}: ${resolved}`);
+                this.debugLog(`[Cmd Entry] Private SQL job ID resolved on attempt ${attempt}: ${resolved}`);
                 this.output?.appendLine(`[Cmd Entry][JobIdDebug] resolveDisplayJobId resolved => ${resolved}`);
                 return resolved;
             }
@@ -550,7 +550,7 @@ export class CommandEntryJobManager {
             return;
         }
 
-        this.output?.appendLine(`[Cmd Entry] Requesting cancel for dedicated SQL job ${sqlJobId}.`);
+        this.output?.appendLine(`[Cmd Entry] Requesting cancel for private SQL job ${sqlJobId}.`);
         await connection.runSQL(CANCEL_SQL_STATEMENT, { bindings: [sqlJobId] });
         this.output?.appendLine(`[Cmd Entry] Dedicated cancel SQL request submitted for ${sqlJobId}.`);
     }
@@ -572,12 +572,12 @@ export class CommandEntryJobManager {
     private async ensureJob(connection: IBMi): Promise<void> {
         const key = this.buildConnectionKey(connection);
         if (this.job && this.connectionKey === key) {
-            this.debugLog('[Cmd Entry] Reusing existing dedicated SQL job');
+            this.debugLog('[Cmd Entry] Reusing existing private SQL job');
             this.status = 'ready';
             return;
         }
 
-        this.debugLog('[Cmd Entry] Creating new dedicated SQL job...');
+        this.debugLog('[Cmd Entry] Creating new private SQL job...');
         await this.endDedicatedJob();
         await this.createDedicatedJob(connection, key);
 
@@ -600,9 +600,9 @@ export class CommandEntryJobManager {
         this.connectionKey = key;
         this.status = 'ready';
 
-        this.debugLog('[Cmd Entry] Reading dedicated SQL job ID...');
+        this.debugLog('[Cmd Entry] Reading private SQL job ID...');
         this.dedicatedJobId = await this.readDedicatedJobId(connection);
-        this.output?.appendLine(`[Cmd Entry] Started dedicated SQL job ${this.dedicatedJobId || '<unknown>'}.`);
+        this.output?.appendLine(`[Cmd Entry] Started private SQL job ${this.dedicatedJobId || '<unknown>'}.`);
     }
 
     private async maybeForceStartupReconnect(connection: IBMi, key: string): Promise<void> {
@@ -615,7 +615,7 @@ export class CommandEntryJobManager {
         }
 
         this.startupReconnectCompleted.add(key);
-        this.output?.appendLine('[Cmd Entry] Performing startup reconnect cycle for dedicated SQL job to reset host job environment.');
+        this.output?.appendLine('[Cmd Entry] Performing startup reconnect cycle for private SQL job to reset host job environment.');
 
         try {
             await this.cancelActive(connection);
@@ -625,7 +625,7 @@ export class CommandEntryJobManager {
 
         await this.endDedicatedJob();
         await this.createDedicatedJob(connection, key);
-        this.output?.appendLine('[Cmd Entry] Startup reconnect cycle complete. Dedicated SQL job environment reset.');
+        this.output?.appendLine('[Cmd Entry] Startup reconnect cycle complete. Private SQL job environment reset.');
     }
 
     private async readDedicatedJobId(connection: IBMi): Promise<string | undefined> {
@@ -644,7 +644,7 @@ export class CommandEntryJobManager {
                     if (typeof value === 'string') {
                         const normalized = normalizeSqlJobId(value);
                         if (normalized) {
-                            this.debugLog(`[Cmd Entry] Dedicated SQL job ID from Job.${prop}: ${normalized}`);
+                            this.debugLog(`[Cmd Entry] Private SQL job ID from Job.${prop}: ${normalized}`);
                             return normalized;
                         }
                     } else if (typeof value === 'function') {
@@ -653,7 +653,7 @@ export class CommandEntryJobManager {
                             this.debugLog(`[Cmd Entry] Job.${prop}() returned: ${typeof result === 'string' ? result : JSON.stringify(result)}`);
                             const normalized = normalizeSqlJobId(result);
                             if (normalized) {
-                                this.debugLog(`[Cmd Entry] Dedicated SQL job ID from Job.${prop}(): ${normalized}`);
+                                this.debugLog(`[Cmd Entry] Private SQL job ID from Job.${prop}(): ${normalized}`);
                                 return normalized;
                             }
                         } catch (e) {
@@ -681,7 +681,7 @@ export class CommandEntryJobManager {
                         this.debugLog(`[Cmd Entry] Query returned: ${typeof value === 'string' ? value : JSON.stringify(value)}`);
                         const normalized = normalizeSqlJobId(value == null ? undefined : String(value));
                         if (normalized) {
-                            this.debugLog(`[Cmd Entry] Dedicated SQL job ID from SQL: ${normalized}`);
+                            this.debugLog(`[Cmd Entry] Private SQL job ID from SQL: ${normalized}`);
                             return normalized;
                         }
                     } else {
@@ -692,10 +692,10 @@ export class CommandEntryJobManager {
                 }
             }
 
-            this.debugLog('[Cmd Entry] All attempts to retrieve dedicated SQL job ID failed');
+            this.debugLog('[Cmd Entry] All attempts to retrieve private SQL job ID failed');
             return undefined;
         } catch (error) {
-            this.output?.appendLine(`[Cmd Entry] Unexpected error reading dedicated SQL job ID: ${error instanceof Error ? error.message : String(error)}`);
+            this.output?.appendLine(`[Cmd Entry] Unexpected error reading private SQL job ID: ${error instanceof Error ? error.message : String(error)}`);
             return undefined;
         }
     }
@@ -727,11 +727,14 @@ export class CommandEntryJobManager {
                 await jobToClose.dispose();
             }
         } catch (error) {
-            this.output?.appendLine(`[Cmd Entry] Failed to close dedicated SQL job cleanly: ${error instanceof Error ? error.message : String(error)}`);
+            this.output?.appendLine(`[Cmd Entry] Failed to close private SQL job cleanly: ${error instanceof Error ? error.message : String(error)}`);
         }
     }
 
     private buildConnectionKey(connection: IBMi): string {
-        return `${connection.currentConnectionName}|${connection.currentUser}|${connection.currentHost}|${connection.currentPort}`;
+        const host = String(connection.currentHost ?? (connection as any).host ?? '').trim().toLowerCase();
+        const user = String(connection.currentUser ?? (connection as any).username ?? '').trim().toLowerCase();
+        const port = String(connection.currentPort ?? (connection as any).port ?? '').trim();
+        return `${host}|${user}|${port}`;
     }
 }

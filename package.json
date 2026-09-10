@@ -2,7 +2,7 @@
   "name": "clprompter",
   "displayName": "%displayName%",
   "description": "%description%",
-  "version": "1.0.27",
+  "version": "1.0.28",
   "author": {
     "name": "Bob Cozzi",
     "url": "https://github.com/bobcozzi"
@@ -629,6 +629,7 @@
     "copy-assets": "cp -r src/webview-assets/* media/",
     "copy-nls": "cp nls/package.nls*.json ./",
     "build": "npm run compile && npm run compile-webview && npm run copy-assets && npm run copy-nls",
+    "test:name-validation": "tsc src/test/testNameTypeValidation.ts --outDir out --module commonjs --target es2020 --esModuleInterop --skipLibCheck && node out/test/testNameTypeValidation.js",
     "test:api": "tsc src/testAPICall.ts --outDir out --module commonjs --target es2020 --esModuleInterop --skipLibCheck && node out/testAPICall.js",
     "test:command-entry": "tsc src/test/testCommandEntry.ts --outDir out --module commonjs --target es2020 --esModuleInterop --skipLibCheck && node out/test/testCommandEntry.js",
     "test:dep-qual-default": "tsc src/test/testDepQualDefault.ts --outDir out --module commonjs --target es2020 --esModuleInterop --skipLibCheck && node out/test/testDepQualDefault.js"

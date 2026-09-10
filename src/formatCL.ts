@@ -30,6 +30,7 @@ import { ParmMeta } from './types';
 import { tokenizeCL, parseCL, CL_VARIABLE_PATTERN } from './tokenizeCL';
 import { collectCLCmdFromLine } from './extractor';
 import { formatCLCommand_v2 } from './tokenLayoutFormatter';
+import { isValidNameValue } from './promptHelpers';
 
 // Type aliases must be declared before use
 type AllowedValsMap = Record<string, string[]>; // e.g. { OBJTYPE: ["*ALL", "*FILE", ...], ... }
@@ -667,7 +668,7 @@ export function quoteIfNeeded(val: string, allowedVals: string[] = [], parmType:
   }
 
   // 8. If type hints at NAME-like field and it's valid
-  if (["NAME", "PNAME", "CNAME"].includes(type) && isValidName(trimmed)) {
+  if (["NAME", "PNAME", "SNAME", "CNAME"].includes(type) && isValidName(trimmed, type)) {
     return trimmed;
   }
 
@@ -698,18 +699,8 @@ export function quoteIfNeeded(val: string, allowedVals: string[] = [], parmType:
 }
 
 
-export function isValidName(val: string): boolean {
-  const trimmed = val.trim();
-  if (trimmed.startsWith("&")) {
-    return CL_VARIABLE_PATTERN.test(trimmed);
-  }
-  if (
-    (trimmed.startsWith("'") && trimmed.endsWith("'")) ||
-    (trimmed.startsWith('"') && trimmed.endsWith('"'))
-  ) {
-    return true;
-  }
-  return /^[A-Z$#@][A-Z0-9$#@_.]{0,10}$/i.test(trimmed);
+export function isValidName(val: string, nameType: string = 'NAME'): boolean {
+  return isValidNameValue(val, undefined, nameType);
 }
 
 

@@ -8,7 +8,7 @@ type SqlResultPanelRequest =
     | { type: 'loadMore'; sessionId: string }
     | { type: 'loadAll'; sessionId: string }
     | { type: 'prefetch'; sessionId: string }
-    | { type: 'rerunSql'; statement: string }
+    | { type: 'rerunSql'; statement: string; resultTitle?: string }
     | { type: 'closeSession'; sessionId: string };
 
 type SqlResultPanelRequestHandler = (request: SqlResultPanelRequest) => Promise<SqlResultPayload | undefined>;
@@ -17,6 +17,7 @@ class SqlResultPanel {
     private panel: vscode.WebviewPanel | undefined;
     private requestHandler: SqlResultPanelRequestHandler | undefined;
     private activeSessionId: string | undefined;
+    private activeResultTitle: string | undefined;
 
     setRequestHandler(handler: SqlResultPanelRequestHandler | undefined): void {
         this.requestHandler = handler;
@@ -45,12 +46,14 @@ class SqlResultPanel {
                 }
                 this.panel = undefined;
                 this.activeSessionId = undefined;
+                this.activeResultTitle = undefined;
             });
         } else {
             this.panel.reveal(vscode.ViewColumn.Beside, true);
         }
 
         this.activeSessionId = result.sessionId;
+        this.activeResultTitle = result.resultTitle;
         this.panel.title = `${PANEL_TITLE} (${result.rowCount})`;
         const extensionUri = sqlResultPanelExtensionUri;
         const scriptUri = extensionUri
@@ -65,6 +68,7 @@ class SqlResultPanel {
         }
 
         this.activeSessionId = result.sessionId;
+        this.activeResultTitle = result.resultTitle;
         this.panel.title = `${PANEL_TITLE} (${result.rowCount})`;
         const payload = buildClientPayload(result);
         void this.panel.webview.postMessage({ type: 'sqlResultReplace', payload });
@@ -77,6 +81,7 @@ class SqlResultPanel {
 
         const sessionId = this.activeSessionId;
         this.activeSessionId = undefined;
+        this.activeResultTitle = undefined;
         void this.panel.webview.postMessage({
             type: 'sqlSessionClosed',
             sessionId,
@@ -89,7 +94,7 @@ class SqlResultPanel {
             return;
         }
 
-        const request = message as { type?: string; sessionId?: string; statement?: string };
+        const request = message as { type?: string; sessionId?: string; statement?: string; resultTitle?: string };
         if (!request.type) {
             return;
         }
@@ -100,7 +105,11 @@ class SqlResultPanel {
                 throw new Error('No SQL statement was provided to rerun.');
             }
 
-            const updated = await this.requestHandler({ type: 'rerunSql', statement });
+            const updated = await this.requestHandler({
+                type: 'rerunSql',
+                statement,
+                resultTitle: request.resultTitle ?? this.activeResultTitle
+            });
             if (updated) {
                 this.update(updated);
             }
@@ -223,6 +232,7 @@ function renderSqlResultHtml(result: SqlResultPayload, cspSource: string, script
       --fg: var(--vscode-editor-foreground);
       --muted: var(--vscode-descriptionForeground);
       --border: var(--vscode-panel-border);
+            --col-separator: color-mix(in srgb, var(--fg) 14%, transparent);
       --header-bg: color-mix(in srgb, var(--bg) 82%, var(--fg) 18%);
       --row-even: color-mix(in srgb, var(--bg) 90%, var(--fg) 10%);
       --row-odd: color-mix(in srgb, var(--bg) 96%, var(--fg) 4%);
@@ -251,8 +261,17 @@ function renderSqlResultHtml(result: SqlResultPayload, cspSource: string, script
       margin: 0 0 10px;
       color: var(--muted);
     }
+        .result-title {
+            margin: 0 0 8px;
+            font-size: 14px;
+            font-weight: 600;
+            line-height: 1.3;
+        }
+        .result-title.is-hidden {
+            display: none;
+        }
     .table-wrap {
-      border: 1px solid var(--border);
+            border: none;
       border-radius: 6px;
       overflow: auto;
       max-height: calc(100vh - 170px);
@@ -336,8 +355,7 @@ function renderSqlResultHtml(result: SqlResultPayload, cspSource: string, script
       text-align: left;
       font-weight: 600;
       padding: 7px 8px;
-      border-bottom: 1px solid var(--border);
-      border-right: 1px solid var(--border);
+            border: none;
       white-space: nowrap;
             vertical-align: bottom;
             position: sticky;
@@ -378,13 +396,16 @@ function renderSqlResultHtml(result: SqlResultPayload, cspSource: string, script
         }
     tbody td {
       padding: 6px 8px;
-      border-bottom: 1px solid var(--border);
-      border-right: 1px solid var(--border);
+            border: none;
       vertical-align: top;
       white-space: pre-wrap;
       word-break: break-word;
       max-width: 440px;
     }
+        thead th:not(:last-child),
+        tbody td:not(:last-child) {
+            box-shadow: inset -1px 0 0 var(--col-separator);
+        }
     th.align-right,
     td.align-right {
       text-align: right;
@@ -410,6 +431,7 @@ function renderSqlResultHtml(result: SqlResultPayload, cspSource: string, script
   </style>
 </head>
 <body>
+        <h3 class="result-title${result.resultTitle ? '' : ' is-hidden'}" id="result-title">${result.resultTitle ? escapeHtml(result.resultTitle) : ''}</h3>
     <pre class="sql" id="sql-statement">${escapeHtml(result.statement)}</pre>
     <pre id="sql-results-bootstrap" style="display:none">${escapeHtml(bootstrapPayloadJson)}</pre>
   ${tableHtml}
@@ -437,6 +459,7 @@ function buildClientPayload(result: SqlResultPayload) {
 
     return {
         rowCells,
+        resultTitle: result.resultTitle ?? '',
         rowCount: result.rowCount,
         displayedRowCount: result.displayedRowCount,
         sessionId: result.sessionId ?? '',

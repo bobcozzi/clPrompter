@@ -684,7 +684,7 @@ export async function activate(context: vscode.ExtensionContext) {
                     await sharedCommandService.closeSqlSession();
                     await sharedJobManager.dispose();
                     commandEntry.refreshSqlJobId();
-                    commandEntryOutput.appendLine('[Cmd Entry] Disconnected: dedicated SQL job and SQL session state cleaned up.');
+                    commandEntryOutput.appendLine('[Cmd Entry] Disconnected: private SQL job and SQL session state cleaned up.');
                 } catch (error) {
                     commandEntryOutput.appendLine(`[Cmd Entry] Disconnected cleanup warning: ${error instanceof Error ? error.message : String(error)}`);
                 }

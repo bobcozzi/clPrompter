@@ -13,6 +13,7 @@ const PRIMARY_CONNECTION_SETTINGS_KEY = 'cmdEntry';
 
 type CLCommandSettings = {
     sharedSQLJob?: boolean;
+    sharedSqlJob?: boolean;
 };
 
 function buildConnectionKey(connection?: IBMi): string | undefined {
@@ -52,6 +53,39 @@ function readConnectionCommandSettings(connection?: IBMi): CLCommandSettings | u
     if (primary && typeof primary === 'object') {
         return primary as CLCommandSettings;
     }
+
+    const extensionScoped = config.clPrompter;
+    if (extensionScoped && typeof extensionScoped === 'object') {
+        const nested = (extensionScoped as Record<string, unknown>)[PRIMARY_CONNECTION_SETTINGS_KEY];
+        if (nested && typeof nested === 'object') {
+            return nested as CLCommandSettings;
+        }
+    }
+
+    const extensionScopedLower = config.clprompter;
+    if (extensionScopedLower && typeof extensionScopedLower === 'object') {
+        const nested = (extensionScopedLower as Record<string, unknown>)[PRIMARY_CONNECTION_SETTINGS_KEY];
+        if (nested && typeof nested === 'object') {
+            return nested as CLCommandSettings;
+        }
+    }
+
+    return undefined;
+}
+
+function readBooleanSetting(value: unknown): boolean | undefined {
+    if (typeof value === 'boolean') {
+        return value;
+    }
+    if (typeof value === 'string') {
+        const normalized = value.trim().toLowerCase();
+        if (normalized === 'true') {
+            return true;
+        }
+        if (normalized === 'false') {
+            return false;
+        }
+    }
     return undefined;
 }
 
@@ -77,9 +111,11 @@ export function getDefaultConnectionSqlSettings(): ConnectionSqlSettings {
 export function getConnectionSqlSettings(_context: vscode.ExtensionContext, connection?: IBMi): ConnectionSqlSettings {
     const defaults = getDefaultConnectionSqlSettings();
     const commandSettings = readConnectionCommandSettings(connection);
+    const useSharedOverride = readBooleanSetting(commandSettings?.sharedSQLJob)
+        ?? readBooleanSetting(commandSettings?.sharedSqlJob);
 
     return {
-        useSharedJob: typeof commandSettings?.sharedSQLJob === 'boolean' ? commandSettings.sharedSQLJob : defaults.useSharedJob,
+        useSharedJob: useSharedOverride ?? defaults.useSharedJob,
         limitFetch: defaults.limitFetch,
         fetchRowLimit: defaults.fetchRowLimit,
         firstPageRowsToFetch: defaults.firstPageRowsToFetch,
@@ -96,7 +132,7 @@ export async function updateConnectionSqlSettings(
         const existing = readConnectionCommandSettings(connection) ?? {};
         const next: CLCommandSettings = {
             ...existing,
-            ...(typeof partial.useSharedJob === 'boolean' ? { sharedSQLJob: partial.useSharedJob } : {}),
+            ...(typeof partial.useSharedJob === 'boolean' ? { sharedSQLJob: partial.useSharedJob, sharedSqlJob: partial.useSharedJob } : {}),
         };
 
         const nextConfig = { ...config, [PRIMARY_CONNECTION_SETTINGS_KEY]: next } as Record<string, unknown>;
@@ -117,6 +153,7 @@ export async function clearConnectionSqlSettings(_context: vscode.ExtensionConte
         if (raw && typeof raw === 'object') {
             const nextCommandSettings = { ...(raw as CLCommandSettings) };
             delete nextCommandSettings.sharedSQLJob;
+            delete nextCommandSettings.sharedSqlJob;
 
             if (Object.keys(nextCommandSettings).length === 0) {
                 delete nextConfig[PRIMARY_CONNECTION_SETTINGS_KEY];

@@ -89,14 +89,16 @@ if [ -z "${VSCE_PAT:-}" ]; then
 fi
 
 MAX_PUBLISH_ATTEMPTS=3
-PUBLISH_RETRY_DELAY_SECONDS=20
+BASE_RETRY_DELAY_SECONDS=30
+JITTER_MAX_SECONDS=20
 PUBLISH_LOG_FILE=$(mktemp)
 PUBLISH_SUCCESS=false
 
 for ATTEMPT in $(seq 1 "$MAX_PUBLISH_ATTEMPTS"); do
   echo "📡 Marketplace publish attempt ${ATTEMPT}/${MAX_PUBLISH_ATTEMPTS}..."
 
-  if vsce publish -p "$VSCE_PAT" >"$PUBLISH_LOG_FILE" 2>&1; then
+  # Publish the already-validated VSIX to avoid re-packaging drift between attempts.
+  if vsce publish --packagePath "$VSIX_FILE" -p "$VSCE_PAT" >"$PUBLISH_LOG_FILE" 2>&1; then
     cat "$PUBLISH_LOG_FILE"
     PUBLISH_SUCCESS=true
     break
@@ -104,9 +106,10 @@ for ATTEMPT in $(seq 1 "$MAX_PUBLISH_ATTEMPTS"); do
 
   cat "$PUBLISH_LOG_FILE"
 
-  if [ "$ATTEMPT" -lt "$MAX_PUBLISH_ATTEMPTS" ] && grep -Eiq "request timeout|etimedout|econnreset|temporar|socket hang up|_apis/gallery" "$PUBLISH_LOG_FILE"; then
-    echo "⚠️  Marketplace publish attempt ${ATTEMPT} failed with a transient network/service error. Retrying in ${PUBLISH_RETRY_DELAY_SECONDS}s..."
-    sleep "$PUBLISH_RETRY_DELAY_SECONDS"
+  if [ "$ATTEMPT" -lt "$MAX_PUBLISH_ATTEMPTS" ] && grep -Eiq "request timeout|timed out|etimedout|econnreset|eai_again|socket hang up|temporar|service unavailable|too many requests|http[[:space:]]*429|http[[:space:]]*500|http[[:space:]]*502|http[[:space:]]*503|http[[:space:]]*504|_apis/gallery" "$PUBLISH_LOG_FILE"; then
+    RETRY_DELAY_SECONDS=$(( BASE_RETRY_DELAY_SECONDS * (2 ** (ATTEMPT - 1)) + (RANDOM % JITTER_MAX_SECONDS) ))
+    echo "⚠️  Marketplace publish attempt ${ATTEMPT} failed with a transient network/service error. Retrying in ${RETRY_DELAY_SECONDS}s..."
+    sleep "$RETRY_DELAY_SECONDS"
     continue
   fi
 
