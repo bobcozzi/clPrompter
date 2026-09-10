@@ -4,6 +4,11 @@ All notable changes to this project are documented in this file.
 
 ## [Preview of CL Command Entry]
 
+## [1.0.29] - 2026-09-10
+
+### What's Fixed
+- Minor syntax fixes and improvements to the shipped Code Snippets
+
 ## [1.0.28] - 2026-09-10
 
 ### What's Fixed

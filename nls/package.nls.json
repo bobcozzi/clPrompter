@@ -68,6 +68,7 @@
     "contributes.configuration.properties.clPrompter.cmdEntryRecordSqlStmtsToLog.description": "Record SQL statements run from Command Entry into Log.",
     "contributes.configuration.properties.clPrompter.cmdEntryRecordSnippetsToHistory.description": "Record Snippets run from Command Entry into History.",
     "contributes.configuration.properties.clPrompter.cmdEntryRecordSnippetsToLog.description": "Record Snippets run from Command Entry into Log.",
+    "contributes.configuration.properties.clPrompter.cmdEntrySnippetsACTSBS.description": "Subsystem list used by Active Jobs (Faster) code snippet. Enter one or more subsystem names separated by blanks, commas, colons, or semicolons (for example: qinter;qbatch, qhttpsvr: QSYSWRK). Names are converted to uppercase and passed as a comma-separated list. Leave blank, or enter *ALL or *NONE, to pass an empty filter string.",
     "contributes.configuration.properties.clPrompter.cmdEntryCodeSnippetTreeClickAction.enumDescriptions.0": "Run the selected Code Snippet.",
     "contributes.configuration.properties.clPrompter.cmdEntryCodeSnippetTreeClickAction.enumDescriptions.1": "Open the fully resolved Code Snippet text in an editor tab.",
     "contributes.configuration.properties.clPrompter.cmdEntryCodeSnippetTreeClickAction.enumDescriptions.2": "Do nothing when a Code Snippet node is clicked.",

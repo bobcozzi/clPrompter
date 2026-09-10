@@ -2,7 +2,7 @@
   "name": "clprompter",
   "displayName": "%displayName%",
   "description": "%description%",
-  "version": "1.0.28",
+  "version": "1.0.29",
   "author": {
     "name": "Bob Cozzi",
     "url": "https://github.com/bobcozzi"
@@ -318,6 +318,12 @@
           "type": "boolean",
           "default": false,
           "description": "%contributes.configuration.properties.clPrompter.cmdEntryRecordSnippetsToLog.description%"
+        },
+        "clPrompter.cmdEntrySnippetsACTSBS": {
+          "order": 113.5,
+          "type": "string",
+          "default": "QINTER, QBATCH, QUSRWRK",
+          "description": "%contributes.configuration.properties.clPrompter.cmdEntrySnippetsACTSBS.description%"
         },
         "clPrompter.cmdEntryCodeSnippetTreeClickAction": {
           "order": 113,

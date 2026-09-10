@@ -104,6 +104,7 @@ interface SnippetTemplateContext {
     sqlJobNumber?: string;
     currentUser?: string;
     currentLibrary?: string;
+    userSBSList?: string;
 }
 
 
@@ -201,7 +202,7 @@ const BUILT_IN_SQL_SNIPPETS: ReadonlyArray<CommandEntrySqlSnippet> = [
             '       SIZE, FORM_TYPE, OUTPUT_QUEUE_LIBRARY AS OUTQ_LIB, OUTPUT_QUEUE AS OUTQ_NAME,',
             '       ASP_NUMBER, SYSTEM',
             "FROM TABLE(QSYS2.SPOOLED_FILE_INFO(JOB_NAME => '${sqlJobId}' ))",
-            "WHERE SPOOLED_FILE_NAME <> 'QPRINT' AND JOB_NAME <> 'MAPEPIRE'",
+            "WHERE (SPOOLED_FILE_NAME <> 'QPRINT' AND JOB_NAME <> 'MAPEPIRE')",
             'ORDER BY CREATION_TIMESTAMP'
         ].join(' '),
         group: 'Job Info',
@@ -209,13 +210,14 @@ const BUILT_IN_SQL_SNIPPETS: ReadonlyArray<CommandEntrySqlSnippet> = [
         source: 'built-in'
     },
     {
-        id: 'builtin.current-library-objects',
+        id: 'builtin.active-jobs-slow',
         label: 'Active Jobs (Slow: All Info)',
         stmt: [
             'SELECT JOB_NAME, SUBSYSTEM, AUTHORIZATION_NAME as USER_NAME, FUNCTION_TYPE, "FUNCTION",',
             '       JOB_STATUS, MEMORY_POOL, TEMPORARY_STORAGE, CPU_TIME, TOTAL_DISK_IO_COUNT,',
             '       OUTPUT_QUEUE, JOB_USER_IDENTITY, PAGE_FAULTS, DATABASE_LOCK_WAITS, OPEN_FILES',
             "FROM TABLE(QSYS2.ACTIVE_JOB_INFO(DETAILED_INFO => 'ALL'))",
+            "WHERE '${userSBSList}' = '' OR LOCATE(',' CONCAT UPPER(TRIM(SUBSYSTEM)) CONCAT ',', ',' CONCAT '${userSBSList}' CONCAT ',') > 0",
             'ORDER BY ORDINAL_POSITION'
         ].join(' '),
         group: 'Admin',
@@ -223,12 +225,12 @@ const BUILT_IN_SQL_SNIPPETS: ReadonlyArray<CommandEntrySqlSnippet> = [
         source: 'built-in'
     },
     {
-        id: 'builtin.active-jobs-all',
+        id: 'builtin.active-jobs-usersbs',
         label: 'Active Jobs (Faster)',
         stmt: [
             'SELECT JOB_NAME, SUBSYSTEM, AUTHORIZATION_NAME as USER_NAME, FUNCTION_TYPE, "FUNCTION",',
             '       JOB_STATUS, MEMORY_POOL, TEMPORARY_STORAGE, CPU_TIME, TOTAL_DISK_IO_COUNT',
-            'FROM TABLE(QSYS2.ACTIVE_JOB_INFO())',
+            "FROM TABLE(QSYS2.ACTIVE_JOB_INFO(SUBSYSTEM_LIST_FILTER => '${userSBSList}'))",
             'ORDER BY ORDINAL_POSITION'
         ].join(' '),
         group: 'Admin',
@@ -249,7 +251,7 @@ const BUILT_IN_SQL_SNIPPETS: ReadonlyArray<CommandEntrySqlSnippet> = [
         source: 'built-in'
     },
     {
-        id: 'builtin.active-jobs-qinter',
+        id: 'builtin.active-jobs-qusrwrk',
         label: 'Active Jobs (QUSRWRK)',
         stmt: [
             'SELECT JOB_NAME, SUBSYSTEM, AUTHORIZATION_NAME as USER_NAME, FUNCTION_TYPE, "FUNCTION",',
@@ -391,6 +393,28 @@ function applyUserCommandLabel(command: string, labelPrefix?: string): string {
 function hasLeadingLabelOrPrefix(command: string): boolean {
     const trimmed = String(command ?? '').trimStart();
     return /^(?:cl|sql)\s*:/i.test(trimmed) || /^[^:\s][^:]*\s*:/.test(trimmed);
+}
+
+function normalizeSnippetSubsystemList(rawValue: unknown): string {
+    const raw = String(rawValue ?? '').trim();
+    if (!raw) {
+        return '';
+    }
+
+    const tokens = raw
+        .split(/[\s,;:]+/)
+        .map((token) => token.trim().toUpperCase())
+        .filter((token) => token.length > 0);
+
+    if (tokens.length === 0) {
+        return '';
+    }
+
+    if (tokens.length === 1 && (tokens[0] === '*ALL' || tokens[0] === '*NONE')) {
+        return '';
+    }
+
+    return tokens.join(',');
 }
 
 /** Persistent panel webview. It deliberately does not own an IBM i connection. */
@@ -1722,12 +1746,15 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
         const sqlJobId = this.currentSqlJobId(connection) || connection?.getSqlJobId?.();
         const parts = this.parseSqlJobParts(sqlJobId);
         const config = connection?.getConfig?.();
+        const extensionConfig = vscode.workspace.getConfiguration('clPrompter');
+        const userSBSList = normalizeSnippetSubsystemList(extensionConfig.get<string>('cmdEntrySnippetsACTSBS', ''));
         return {
             sqlJobId: parts.sqlJobId,
             sqlJobName: parts.sqlJobName,
             sqlJobNumber: parts.sqlJobNumber,
             currentUser: connection?.currentUser,
-            currentLibrary: typeof config?.currentLibrary === 'string' ? config.currentLibrary : undefined
+            currentLibrary: typeof config?.currentLibrary === 'string' ? config.currentLibrary : undefined,
+            userSBSList
         };
     }
 
@@ -1737,7 +1764,8 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
             sqlJobName: context.sqlJobName,
             sqlJobNumber: context.sqlJobNumber,
             currentUser: context.currentUser,
-            currentLibrary: context.currentLibrary
+            currentLibrary: context.currentLibrary,
+            userSBSList: context.userSBSList
         };
 
         const missing = new Set<string>();
@@ -1747,6 +1775,9 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
                 return `\${${key}}`;
             }
             const value = tokenValues[key];
+            if (key === 'userSBSList') {
+                return String(value ?? '').replace(/'/g, "''");
+            }
             if (!value || !String(value).trim()) {
                 missing.add(key);
                 return `\${${key}}`;
