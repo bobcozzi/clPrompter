@@ -686,8 +686,158 @@ function isPagedQueryCandidate(sql: string): boolean {
     return normalized.startsWith('SELECT ') || normalized.startsWith('WITH ');
 }
 
+function isWordBoundaryChar(ch: string | undefined): boolean {
+    if (!ch) {
+        return true;
+    }
+    return !/[A-Z0-9_#$@]/i.test(ch);
+}
+
+function findTopLevelOrderByIndex(sql: string): number {
+    let depth = 0;
+    let inSingleQuote = false;
+    let inDoubleQuote = false;
+    let inLineComment = false;
+    let inBlockComment = false;
+    let lastIndex = -1;
+
+    for (let i = 0; i < sql.length; i++) {
+        const ch = sql[i];
+        const next = sql[i + 1];
+
+        if (inLineComment) {
+            if (ch === '\n' || ch === '\r') {
+                inLineComment = false;
+            }
+            continue;
+        }
+
+        if (inBlockComment) {
+            if (ch === '*' && next === '/') {
+                inBlockComment = false;
+                i += 1;
+            }
+            continue;
+        }
+
+        if (inSingleQuote) {
+            if (ch === "'" && next === "'") {
+                i += 1;
+                continue;
+            }
+            if (ch === "'") {
+                inSingleQuote = false;
+            }
+            continue;
+        }
+
+        if (inDoubleQuote) {
+            if (ch === '"' && next === '"') {
+                i += 1;
+                continue;
+            }
+            if (ch === '"') {
+                inDoubleQuote = false;
+            }
+            continue;
+        }
+
+        if (ch === '-' && next === '-') {
+            inLineComment = true;
+            i += 1;
+            continue;
+        }
+
+        if (ch === '/' && next === '*') {
+            inBlockComment = true;
+            i += 1;
+            continue;
+        }
+
+        if (ch === "'") {
+            inSingleQuote = true;
+            continue;
+        }
+
+        if (ch === '"') {
+            inDoubleQuote = true;
+            continue;
+        }
+
+        if (ch === '(') {
+            depth += 1;
+            continue;
+        }
+
+        if (ch === ')') {
+            depth = Math.max(0, depth - 1);
+            continue;
+        }
+
+        if (depth !== 0) {
+            continue;
+        }
+
+        if (i + 8 > sql.length) {
+            continue;
+        }
+
+        if (sql.slice(i, i + 5).toUpperCase() !== 'ORDER') {
+            continue;
+        }
+
+        let j = i + 5;
+        while (j < sql.length && /\s/.test(sql[j])) {
+            j += 1;
+        }
+
+        if (sql.slice(j, j + 2).toUpperCase() !== 'BY') {
+            continue;
+        }
+
+        const before = sql[i - 1];
+        const after = sql[j + 2];
+        if (!isWordBoundaryChar(before) || !isWordBoundaryChar(after)) {
+            continue;
+        }
+
+        lastIndex = i;
+    }
+
+    return lastIndex;
+}
+
+function splitTopLevelOrderBy(sql: string): { baseSql: string; orderByClause?: string } {
+    const orderByIndex = findTopLevelOrderByIndex(sql);
+    if (orderByIndex < 0) {
+        return { baseSql: sql };
+    }
+
+    const baseSql = sql.slice(0, orderByIndex).trim();
+    const orderByClause = sql.slice(orderByIndex + 5).trim();
+    if (!baseSql || !orderByClause) {
+        return { baseSql: sql };
+    }
+
+    // Remove leading BY from "ORDER BY ..." remainder.
+    const normalized = orderByClause.replace(/^BY\b/i, '').trim();
+    if (!normalized) {
+        return { baseSql: sql };
+    }
+
+    return {
+        baseSql,
+        orderByClause: normalized
+    };
+}
+
 function buildPagedSql(sql: string, offset: number, fetchRows: number): string {
     const baseSql = stripTrailingSemicolon(sql);
+    const split = splitTopLevelOrderBy(baseSql);
+    if (split.orderByClause) {
+        return `SELECT * FROM (${split.baseSql}) CLPROMPTER_PAGE ORDER BY ${split.orderByClause} OFFSET ${offset} ROWS FETCH NEXT ${fetchRows} ROWS ONLY`;
+    }
+
     return `SELECT * FROM (${baseSql}) CLPROMPTER_PAGE OFFSET ${offset} ROWS FETCH NEXT ${fetchRows} ROWS ONLY`;
 }
 

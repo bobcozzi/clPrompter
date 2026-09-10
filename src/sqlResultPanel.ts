@@ -157,7 +157,7 @@ export function notifySqlResultSessionClosed(message?: string): void {
 
 function renderSqlResultHtml(result: SqlResultPayload, cspSource: string, scriptUri: string): string {
     const columns = result.columns;
-    const profiles = buildColumnProfiles(columns, result.rows);
+    const profiles = buildColumnProfiles(columns, result.rows, result.columnMetadata ?? []);
     const initialPayload = buildClientPayload(result);
     const columnMetadataByName = new Map((result.columnMetadata ?? []).map((entry) => [normalizeColumnKey(entry.name), entry]));
     const colHeaders = columns.map((column, index) => {
@@ -442,7 +442,7 @@ function renderSqlResultHtml(result: SqlResultPayload, cspSource: string, script
 
 function buildClientPayload(result: SqlResultPayload) {
     const columns = result.columns;
-    const profiles = buildColumnProfiles(columns, result.rows);
+    const profiles = buildColumnProfiles(columns, result.rows, result.columnMetadata ?? []);
     const rowCells = result.rows.map((row) => {
         return columns.map((column) => {
             const profile = profiles[column];
@@ -619,6 +619,7 @@ type ColumnKind = 'number' | 'date' | 'time' | 'timestamp' | 'text';
 interface ColumnProfile {
     kind: ColumnKind;
     fractionDigits: number;
+    exactNumericScale?: number;
 }
 
 const MIN_FRACTION_DIGITS_FALLBACK = 2;
@@ -642,6 +643,10 @@ function formatCell(value: unknown, profile: ColumnProfile): string {
 
     if (profile.kind === 'number') {
         if (typeof value === 'number') {
+            if (typeof profile.exactNumericScale === 'number' && profile.exactNumericScale >= 0) {
+                return escapeHtml(value.toFixed(profile.exactNumericScale));
+            }
+
             if (Number.isInteger(value)) {
                 return escapeHtml(String(value));
             }
@@ -649,25 +654,53 @@ function formatCell(value: unknown, profile: ColumnProfile): string {
             return escapeHtml(value.toFixed(digits));
         }
 
+        const text = String(value);
+        if (typeof profile.exactNumericScale === 'number' && profile.exactNumericScale >= 0) {
+            return escapeHtml(normalizeNumericTextToScale(text, profile.exactNumericScale));
+        }
+
         // Keep exact text when DB returns numeric values as strings.
-        return escapeHtml(String(value));
+        return escapeHtml(text);
     }
 
     return escapeHtml(String(value));
 }
 
-function buildColumnProfiles(columns: string[], rows: Record<string, unknown>[]): Record<string, ColumnProfile> {
+function buildColumnProfiles(
+    columns: string[],
+    rows: Record<string, unknown>[],
+    metadata: SqlColumnMetadata[]
+): Record<string, ColumnProfile> {
     const out: Record<string, ColumnProfile> = {};
+    const metadataByName = new Map(metadata.map((entry) => [normalizeColumnKey(entry.name), entry]));
     for (const column of columns) {
-        out[column] = profileColumn(rows, column);
+        const columnMetadata = metadataByName.get(normalizeColumnKey(column))
+            ?? metadata.find((entry) => normalizeColumnKey(entry.label) === normalizeColumnKey(column));
+        out[column] = profileColumn(rows, column, columnMetadata);
     }
     return out;
 }
 
-function profileColumn(rows: Record<string, unknown>[], column: string): ColumnProfile {
+function isExactNumericType(typeName: string | undefined): boolean {
+    const normalized = (typeName ?? '').trim().toUpperCase();
+    return normalized === 'DECIMAL' || normalized === 'NUMERIC' || normalized === 'DEC';
+}
+
+function profileColumn(
+    rows: Record<string, unknown>[],
+    column: string,
+    metadata?: SqlColumnMetadata
+): ColumnProfile {
     let kind: ColumnKind = 'text';
     let fractionDigits = 0;
     let sawFractionalNumber = false;
+    let exactNumericScale: number | undefined;
+
+    if (metadata && isExactNumericType(metadata.typeName) && typeof metadata.scale === 'number' && metadata.scale >= 0) {
+        kind = 'number';
+        exactNumericScale = metadata.scale;
+        fractionDigits = Math.max(fractionDigits, metadata.scale);
+    }
 
     for (const row of rows) {
         const value = row[column];
@@ -723,7 +756,30 @@ function profileColumn(rows: Record<string, unknown>[], column: string): ColumnP
         fractionDigits = MIN_FRACTION_DIGITS_FALLBACK;
     }
 
-    return { kind, fractionDigits };
+    return { kind, fractionDigits, exactNumericScale };
+}
+
+function normalizeNumericTextToScale(value: string, scale: number): string {
+    const trimmed = value.trim();
+    const match = trimmed.match(/^([+-]?)(\d+)(?:\.(\d+))?$/);
+    if (!match) {
+        return value;
+    }
+
+    const sign = match[1] || '';
+    const integerPart = match[2] || '0';
+    const fractionPart = match[3] || '';
+
+    if (scale <= 0) {
+        return `${sign}${integerPart}`;
+    }
+
+    if (fractionPart.length >= scale) {
+        // Keep original precision when it exceeds catalog scale.
+        return `${sign}${integerPart}.${fractionPart}`;
+    }
+
+    return `${sign}${integerPart}.${fractionPart.padEnd(scale, '0')}`;
 }
 
 function shouldRightAlign(kind: ColumnKind): boolean {

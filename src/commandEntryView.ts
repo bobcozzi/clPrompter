@@ -213,9 +213,10 @@ const BUILT_IN_SQL_SNIPPETS: ReadonlyArray<CommandEntrySqlSnippet> = [
         id: 'builtin.active-jobs-slow',
         label: 'Active Jobs (Slow: All Info)',
         stmt: [
-            'SELECT JOB_NAME, SUBSYSTEM, AUTHORIZATION_NAME as USER_NAME, FUNCTION_TYPE, "FUNCTION",',
-            '       JOB_STATUS, MEMORY_POOL, TEMPORARY_STORAGE, CPU_TIME, TOTAL_DISK_IO_COUNT,',
-            '       OUTPUT_QUEUE, JOB_USER_IDENTITY, PAGE_FAULTS, DATABASE_LOCK_WAITS, OPEN_FILES',
+            'SELECT JOB_NAME, SUBSYSTEM, AUTHORIZATION_NAME as USER_NAME,',
+            " trim(FUNCTION_TYPE) concat '-' concat FUNCTION as function,",
+            ' JOB_STATUS, MEMORY_POOL, TEMPORARY_STORAGE, CPU_TIME, TOTAL_DISK_IO_COUNT',
+            ' , OUTPUT_QUEUE, JOB_USER_IDENTITY, PAGE_FAULTS, DATABASE_LOCK_WAITS, OPEN_FILES',
             "FROM TABLE(QSYS2.ACTIVE_JOB_INFO(DETAILED_INFO => 'ALL'))",
             "WHERE '${userSBSList}' = '' OR LOCATE(',' CONCAT UPPER(TRIM(SUBSYSTEM)) CONCAT ',', ',' CONCAT '${userSBSList}' CONCAT ',') > 0",
             'ORDER BY ORDINAL_POSITION'
@@ -228,8 +229,9 @@ const BUILT_IN_SQL_SNIPPETS: ReadonlyArray<CommandEntrySqlSnippet> = [
         id: 'builtin.active-jobs-usersbs',
         label: 'Active Jobs (Faster)',
         stmt: [
-            'SELECT JOB_NAME, SUBSYSTEM, AUTHORIZATION_NAME as USER_NAME, FUNCTION_TYPE, "FUNCTION",',
-            '       JOB_STATUS, MEMORY_POOL, TEMPORARY_STORAGE, CPU_TIME, TOTAL_DISK_IO_COUNT',
+            'SELECT JOB_NAME, SUBSYSTEM, AUTHORIZATION_NAME as USER_NAME,',
+            " trim(FUNCTION_TYPE) concat '-' concat FUNCTION as function,",
+            ' JOB_STATUS, MEMORY_POOL, TEMPORARY_STORAGE, CPU_TIME, TOTAL_DISK_IO_COUNT',
             "FROM TABLE(QSYS2.ACTIVE_JOB_INFO(SUBSYSTEM_LIST_FILTER => '${userSBSList}'))",
             'ORDER BY ORDINAL_POSITION'
         ].join(' '),
@@ -241,8 +243,9 @@ const BUILT_IN_SQL_SNIPPETS: ReadonlyArray<CommandEntrySqlSnippet> = [
         id: 'builtin.active-jobs-qinter',
         label: 'Active Jobs (QINTER)',
         stmt: [
-            'SELECT JOB_NAME, SUBSYSTEM, AUTHORIZATION_NAME as USER_NAME, FUNCTION_TYPE, "FUNCTION",',
-            '       JOB_STATUS, MEMORY_POOL, TEMPORARY_STORAGE, CPU_TIME, TOTAL_DISK_IO_COUNT',
+            'SELECT JOB_NAME, SUBSYSTEM, AUTHORIZATION_NAME as USER_NAME,',
+            " trim(FUNCTION_TYPE) concat '-' concat FUNCTION as function,",
+            ' JOB_STATUS, MEMORY_POOL, TEMPORARY_STORAGE, CPU_TIME, TOTAL_DISK_IO_COUNT',
             "FROM TABLE(QSYS2.ACTIVE_JOB_INFO(SUBSYSTEM_LIST_FILTER => 'QINTER'))",
             'ORDER BY ORDINAL_POSITION'
         ].join(' '),
@@ -254,13 +257,28 @@ const BUILT_IN_SQL_SNIPPETS: ReadonlyArray<CommandEntrySqlSnippet> = [
         id: 'builtin.active-jobs-qusrwrk',
         label: 'Active Jobs (QUSRWRK)',
         stmt: [
-            'SELECT JOB_NAME, SUBSYSTEM, AUTHORIZATION_NAME as USER_NAME, FUNCTION_TYPE, "FUNCTION",',
-            '       JOB_STATUS, MEMORY_POOL, TEMPORARY_STORAGE, CPU_TIME, TOTAL_DISK_IO_COUNT',
+            'SELECT JOB_NAME, SUBSYSTEM, AUTHORIZATION_NAME as USER_NAME,',
+            " trim(FUNCTION_TYPE) concat '-' concat FUNCTION as function,",
+            ' JOB_STATUS, MEMORY_POOL, TEMPORARY_STORAGE, CPU_TIME, TOTAL_DISK_IO_COUNT',
             "FROM TABLE(QSYS2.ACTIVE_JOB_INFO(SUBSYSTEM_LIST_FILTER => 'QUSRWRK'))",
             'ORDER BY ORDINAL_POSITION'
         ].join(' '),
         group: 'Admin',
         order: 40,
+        source: 'built-in'
+    },
+    {
+        id: 'builtin.active-jobs-qhttpsvr',
+        label: 'Active Jobs (QHTTPSVR)',
+        stmt: [
+            'SELECT JOB_NAME, SUBSYSTEM, AUTHORIZATION_NAME as USER_NAME,',
+            " trim(FUNCTION_TYPE) concat '-' concat FUNCTION as function,",
+            ' JOB_STATUS, MEMORY_POOL, TEMPORARY_STORAGE, CPU_TIME, TOTAL_DISK_IO_COUNT',
+            "FROM TABLE(QSYS2.ACTIVE_JOB_INFO(SUBSYSTEM_LIST_FILTER => 'QHTTPSVR'))",
+            'ORDER BY ORDINAL_POSITION'
+        ].join(' '),
+        group: 'Admin',
+        order: 50,
         source: 'built-in'
     },
     {
