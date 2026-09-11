@@ -20,4 +20,5 @@ assert.match(cancelCommand, /^CALL\s+QSYS2\.CANCEL_SQL\('123456\/MYUSER\/QZDASOI
 assert.strictEqual(detectCommandEntryPrefix('CL: CPYF FROMFILE(A) TOFILE(B)'), 'CL');
 assert.strictEqual(detectCommandEntryPrefix('   SQL: SELECT * FROM QIWS.QCUSTCDT'), 'SQL');
 assert.strictEqual(detectCommandEntryPrefix('SELECT * FROM QIWS.QCUSTCDT'), undefined);
+
 console.log('Command Entry model tests passed');

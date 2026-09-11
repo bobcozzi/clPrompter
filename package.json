@@ -2,7 +2,7 @@
   "name": "clprompter",
   "displayName": "%displayName%",
   "description": "%description%",
-  "version": "1.0.30",
+  "version": "1.0.31",
   "author": {
     "name": "Bob Cozzi",
     "url": "https://github.com/bobcozzi"
@@ -109,18 +109,6 @@
         "icon": "images/icon-close.svg"
       },
       {
-        "command": "clprompter.codeSnippet.pin",
-        "category": "%contributes.commands.16.category%",
-        "title": "%contributes.commands.16.title%",
-        "icon": "$(pin)"
-      },
-      {
-        "command": "clprompter.codeSnippet.unpin",
-        "category": "%contributes.commands.17.category%",
-        "title": "%contributes.commands.17.title%",
-        "icon": "$(pinned)"
-      },
-      {
         "command": "clprompter.codeSnippet.add",
         "category": "%contributes.commands.18.category%",
         "title": "%contributes.commands.18.title%",
@@ -184,6 +172,12 @@
         "category": "%contributes.commands.29.category%",
         "title": "%contributes.commands.29.title%",
         "icon": "images/icon-refresh.svg"
+      },
+      {
+        "command": "clprompter.codeSnippet.moreActions",
+        "category": "Code Snippet",
+        "title": "More Actions",
+        "icon": "$(ellipsis)"
       }
     ],
     "keybindings": [
@@ -341,6 +335,12 @@
           ],
           "description": "%contributes.configuration.properties.clPrompter.cmdEntryCodeSnippetTreeClickAction.description%"
         },
+        "clPrompter.cmdEntrySnippetsVisible": {
+          "order": 113.25,
+          "type": "boolean",
+          "default": false,
+          "description": "%contributes.configuration.properties.clPrompter.cmdEntrySnippetsVisible.description%"
+        },
         "clPrompter.kwdColor": {
           "type": "string",
           "format": "color",
@@ -490,39 +490,19 @@
     "menus": {
       "view/title": [
         {
-          "command": "clprompter.codeSnippet.pin",
-          "when": "view == clprompter.codeSnippetManagerView && !clprompter.codeSnippetManagerPinned",
-          "group": "navigation@0"
-        },
-        {
-          "command": "clprompter.codeSnippet.unpin",
-          "when": "view == clprompter.codeSnippetManagerView && clprompter.codeSnippetManagerPinned",
-          "group": "navigation@0"
-        },
-        {
-          "command": "clprompter.codeSnippet.add",
-          "when": "view == clprompter.codeSnippetManagerView",
-          "group": "navigation@1"
-        },
-        {
-          "command": "clprompter.codeSnippet.edit",
-          "when": "view == clprompter.codeSnippetManagerView && clprompter.codeSnippetSelected",
-          "group": "navigation@2"
-        },
-        {
           "command": "clprompter.codeSnippet.run",
           "when": "view == clprompter.codeSnippetManagerView && clprompter.codeSnippetSelected",
-          "group": "navigation@3"
-        },
-        {
-          "command": "clprompter.codeSnippet.delete",
-          "when": "view == clprompter.codeSnippetManagerView && clprompter.codeSnippetSelected",
-          "group": "navigation@4"
+          "group": "navigation@1"
         },
         {
           "command": "clprompter.codeSnippet.refresh",
           "when": "view == clprompter.codeSnippetManagerView",
           "group": "navigation@5"
+        },
+        {
+          "command": "clprompter.codeSnippet.moreActions",
+          "when": "view == clprompter.codeSnippetManagerView",
+          "group": "navigation@6"
         },
         {
           "command": "clprompter.closeCodeSnippetManager",

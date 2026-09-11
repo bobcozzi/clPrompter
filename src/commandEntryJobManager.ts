@@ -378,7 +378,7 @@ export class CommandEntryJobManager {
     async runSQLWithDetails(
         connection: IBMi,
         statements: string | string[],
-        options?: { bindings?: unknown[]; rows?: number }
+        options?: { bindings?: unknown[]; rows?: number; skipSyntaxCheck?: boolean }
     ): Promise<{ rows: Record<string, unknown>[]; rawResult?: unknown }> {
         this.logRouteSnapshot('runSQL.enter', connection, `rows=${options?.rows ?? '<none>'}`);
 
@@ -480,7 +480,7 @@ export class CommandEntryJobManager {
     async runSQL(
         connection: IBMi,
         statements: string | string[],
-        options?: { bindings?: unknown[]; rows?: number }
+        options?: { bindings?: unknown[]; rows?: number; skipSyntaxCheck?: boolean }
     ): Promise<Record<string, unknown>[]> {
         const result = await this.runSQLWithDetails(connection, statements, options);
         return result.rows;

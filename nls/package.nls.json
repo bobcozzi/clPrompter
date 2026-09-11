@@ -73,6 +73,7 @@
     "contributes.configuration.properties.clPrompter.cmdEntryCodeSnippetTreeClickAction.enumDescriptions.1": "Open the fully resolved Code Snippet text in an editor tab.",
     "contributes.configuration.properties.clPrompter.cmdEntryCodeSnippetTreeClickAction.enumDescriptions.2": "Do nothing when a Code Snippet node is clicked.",
     "contributes.configuration.properties.clPrompter.cmdEntryCodeSnippetTreeClickAction.description": "Controls what happens when you click a Code Snippet in the tree view (setting key: clPrompter.cmdEntryCodeSnippetTreeClickAction).",
+    "contributes.configuration.properties.clPrompter.cmdEntrySnippetsVisible.description": "Shows or hides the Cmd Entry Snippets tree view. This value is updated by the {} button and restored on restart.",
     "contributes.configuration.properties.clPrompter.kwdColor.description": "PARM keyword color in prompter.  Use CSS color values like ##1a237e, blue, or rgb(34,170,34).",
     "contributes.configuration.properties.clPrompter.kwdValueColor.description": "PARM value color in prompter.  Use CSS color values like ##1a237e, blue, or rgb(34,170,34).",
     "contributes.configuration.properties.clPrompter.kwdColorAutoAdjust.description": "PARM keyword color Auto-adjust for best contrast in dark/light/high-contrast themes. If false, uses your color exactly as specified.",

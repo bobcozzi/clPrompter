@@ -540,7 +540,7 @@ export function registerCodeSnippetManagerView(
     context: vscode.ExtensionContext,
     commandEntry: CommandEntryViewProvider
 ): vscode.Disposable {
-    const pinStateKey = 'clprompter.codeSnippetManagerPinned';
+    const snippetVisibilitySettingKey = 'cmdEntrySnippetsVisible';
     const provider = new CodeSnippetTreeDataProvider(commandEntry);
     const dnd = new CodeSnippetDragAndDropController(commandEntry, provider);
 
@@ -550,21 +550,32 @@ export function registerCodeSnippetManagerView(
         showCollapseAll: true
     });
 
-    const setVisible = async (visible: boolean) => {
+    const readPersistedVisibility = (): boolean => {
+        const config = vscode.workspace.getConfiguration('clPrompter');
+        return Boolean(config.get<boolean>(snippetVisibilitySettingKey, false));
+    };
+
+    const persistVisibility = async (visible: boolean): Promise<void> => {
+        try {
+            await vscode.workspace.getConfiguration('clPrompter').update(
+                snippetVisibilitySettingKey,
+                visible,
+                vscode.ConfigurationTarget.Global
+            );
+        } catch (error) {
+            console.warn('[clPrompter] Could not persist Cmd Entry Snippets visibility setting:', error instanceof Error ? error.message : String(error));
+        }
+    };
+
+    const setVisible = async (visible: boolean, persist = true) => {
+        if (persist) {
+            await persistVisibility(visible);
+        }
         await vscode.commands.executeCommand('setContext', 'clprompter.codeSnippetManagerVisible', visible);
     };
 
-    const setPinned = async (pinned: boolean) => {
-        await context.globalState.update(pinStateKey, pinned);
-        await vscode.commands.executeCommand('setContext', 'clprompter.codeSnippetManagerPinned', pinned);
-    };
-
-    const resolvePinnedVisibilityForSession = async () => {
-        const pinned = context.globalState.get<boolean>(pinStateKey, false);
-        await vscode.commands.executeCommand('setContext', 'clprompter.codeSnippetManagerPinned', pinned);
-        // Only show pinned snippets after CL Command Entry has actually been touched this session.
-        const commandEntryTouched = context.workspaceState.get<boolean>('clprompter.commandEntryTouchedThisSession', false);
-        await setVisible(commandEntryTouched ? pinned : false);
+    const restoreVisibilityFromSetting = async () => {
+        await setVisible(readPersistedVisibility(), false);
     };
 
     const refresh = () => provider.refresh();
@@ -611,19 +622,10 @@ export function registerCodeSnippetManagerView(
             await vscode.commands.executeCommand('clprompter.codeSnippetManagerView.focus');
         }),
         vscode.commands.registerCommand('clprompter.closeCodeSnippetManager', async () => {
-            await setPinned(false);
             await setVisible(false);
         }),
-        vscode.commands.registerCommand('clprompter.codeSnippet.pin', async () => {
-            await setPinned(true);
-            await setVisible(true);
-        }),
-        vscode.commands.registerCommand('clprompter.codeSnippet.unpin', async () => {
-            await setPinned(false);
-            await resolvePinnedVisibilityForSession();
-        }),
-        vscode.commands.registerCommand('clprompter.codeSnippet.resolvePinnedVisibility', async () => {
-            await resolvePinnedVisibilityForSession();
+        vscode.commands.registerCommand('clprompter.codeSnippet.restoreVisibilityFromSetting', async () => {
+            await restoreVisibilityFromSetting();
         }),
         vscode.commands.registerCommand('clprompter.codeSnippet.refresh', () => provider.refresh()),
         vscode.commands.registerCommand('clprompter.codeSnippet.add', () => {
@@ -725,12 +727,60 @@ export function registerCodeSnippetManagerView(
         }),
         vscode.commands.registerCommand('clprompter.codeSnippet.import', () => commandEntry.requestImportCodeSnippets()),
         vscode.commands.registerCommand('clprompter.codeSnippet.export', () => commandEntry.requestExportCodeSnippets())
+        ,
+        vscode.commands.registerCommand('clprompter.codeSnippet.moreActions', async () => {
+            const snippet = resolveSnippet();
+            const items: vscode.QuickPickItem[] = [
+                { label: '$(add) Add Code Snippet', description: 'Create a new code snippet', alwaysShow: true }
+            ];
+
+            if (snippet) {
+                items.push({ label: '$(edit) Edit Selected Code Snippet', description: snippet.label, alwaysShow: true });
+                items.push({ label: '$(trash) Delete Selected Code Snippet', description: snippet.label, alwaysShow: true });
+            }
+
+            const choice = await vscode.window.showQuickPick(items, {
+                placeHolder: snippet
+                    ? `Snippet actions for '${snippet.label}'`
+                    : 'Code Snippet actions'
+            });
+
+            if (!choice) {
+                return;
+            }
+
+            if (choice.label.includes('Add Code Snippet')) {
+                CodeSnippetEditorPanel.show(context, commandEntry, undefined, getAvailableGroups(commandEntry));
+                return;
+            }
+
+            if (!snippet) {
+                void vscode.window.showInformationMessage(vscode.l10n.t('Select a code snippet first.'));
+                return;
+            }
+
+            if (choice.label.includes('Edit Selected Code Snippet')) {
+                CodeSnippetEditorPanel.show(context, commandEntry, snippet, getAvailableGroups(commandEntry));
+                return;
+            }
+
+            if (choice.label.includes('Delete Selected Code Snippet')) {
+                const confirm = await vscode.window.showWarningMessage(
+                    vscode.l10n.t("Delete Code Snippet '{label}'?", { label: snippet.label }),
+                    { modal: true },
+                    'Delete'
+                );
+                if (confirm === 'Delete') {
+                    await commandEntry.deleteCodeSnippet(snippet.id);
+                }
+            }
+        })
     ];
 
     void (async () => {
-        const pinned = context.globalState.get<boolean>(pinStateKey, false);
-        await setPinned(pinned);
-        await setVisible(false);
+        // Keep snippets hidden at startup. Visibility is restored only after
+        // Command Entry initializes and signals readiness.
+        await setVisible(false, false);
     })();
 
     void updateSelectionContexts();
@@ -740,6 +790,9 @@ export function registerCodeSnippetManagerView(
             if (event.affectsConfiguration('clPrompter.cmdEntryCodeSnippetTreeClickAction')) {
                 provider.refresh();
             }
+            if (event.affectsConfiguration('clPrompter.cmdEntrySnippetsVisible')) {
+                void setVisible(readPersistedVisibility(), false);
+            }
         }),
         view.onDidChangeSelection(() => {
             void updateSelectionContexts();
@@ -748,10 +801,6 @@ export function registerCodeSnippetManagerView(
 
     view.onDidChangeVisibility((event) => {
         if (!event.visible) {
-            const pinned = context.globalState.get<boolean>(pinStateKey, false);
-            if (!pinned) {
-                void setVisible(false);
-            }
             void vscode.commands.executeCommand('setContext', 'clprompter.codeSnippetSelected', false);
             void vscode.commands.executeCommand('setContext', 'clprompter.codeSnippetUserSelected', false);
         }

@@ -323,7 +323,6 @@ export async function activate(context: vscode.ExtensionContext) {
     await vscode.commands.executeCommand('setContext', 'clprompter.ibmiLoaded', false);
     await vscode.commands.executeCommand('setContext', 'clprompter.connected', false);
     await setCommandEntryAvailable(false);
-    await vscode.commands.executeCommand('setContext', 'clprompter.codeSnippetManagerVisible', false);
 
     const getCommandEntryStartupMode = (): 'After Connection' | 'On Demand' => {
         const config = vscode.workspace.getConfiguration('clPrompter');
@@ -349,9 +348,15 @@ export async function activate(context: vscode.ExtensionContext) {
             : touchedThisSession;
         await setCommandEntryAvailable(shouldBeAvailable);
 
+        // Restore snippets as soon as Command Entry is made available on an active
+        // IBM i connection. This avoids waiting for the webview "ready" event,
+        // which only fires after the Command Entry tab is activated.
+        if (hasConnection && shouldBeAvailable) {
+            await vscode.commands.executeCommand('clprompter.codeSnippet.restoreVisibilityFromSetting');
+        }
+
         if (startupMode === 'After Connection' && hasConnection && !touchedThisSession) {
             await context.workspaceState.update('clprompter.commandEntryTouchedThisSession', true);
-            await vscode.commands.executeCommand('clprompter.codeSnippet.resolvePinnedVisibility');
         }
     };
 
@@ -433,7 +438,6 @@ export async function activate(context: vscode.ExtensionContext) {
             await setCommandEntryAvailable(true);
             void commandEntry.handleConnectionAvailable(code4i?.instance?.getConnection(), { autoInitializeDedicatedJob: true });
             await revealCommandEntryContainer();
-            await vscode.commands.executeCommand('clprompter.codeSnippet.resolvePinnedVisibility');
             commandEntry.focus();
         }),
         vscode.commands.registerCommand('clprompter.closeCommandEntry', async () => {
@@ -677,6 +681,7 @@ export async function activate(context: vscode.ExtensionContext) {
         // the case where the extension activates into an already-live session.
         code4i.instance.subscribe(context, 'disconnected', 'clPrompter-connected-context', () => {
             void vscode.commands.executeCommand('setContext', 'clprompter.connected', false);
+            void vscode.commands.executeCommand('setContext', 'clprompter.codeSnippetManagerVisible', false);
         });
         code4i.instance.subscribe(context, 'disconnected', 'clPrompter-command-entry-cleanup', () => {
             void (async () => {

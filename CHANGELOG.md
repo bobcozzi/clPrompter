@@ -4,6 +4,18 @@ All notable changes to this project are documented in this file.
 
 ## [Preview of CL Command Entry]
 
+## [1.0.31] - 2026-09-11
+
+### What's Improved
+- SQL result paging in the Command Entry result viewer is now more stable and predictable during repeated next/previous page navigation.
+- The SQL result viewer now keeps table headers visible while scrolling and improves general readability of large result sets.
+- NULL values in SQL results are easier to see with a subtle background highlight.
+- Code Snippet toolbar actions were simplified for safer use: Add/Edit/Delete are grouped under a More Actions menu, so run actions are less likely to be clicked by mistake.
+
+### What's Fixed
+- SQL statements entered in Command Entry now handle row paging more reliably across different query shapes.
+- SQL statement checking before execution is more tolerant in environments where prepare-only checks are restricted.
+
 ## [1.0.30] - 2026-09-10
 
 ### What's Fixed

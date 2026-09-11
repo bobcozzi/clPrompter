@@ -300,6 +300,17 @@ function renderSqlResultHtml(result: SqlResultPayload, cspSource: string, script
             padding: 3px 7px;
             font: inherit;
         }
+        #first-page,
+        #prev-page,
+        #next-page,
+        #last-page {
+            min-width: 34px;
+            padding: 4px 10px;
+            line-height: 1.15;
+            font-weight: 600;
+            cursor: pointer;
+            user-select: none;
+        }
         #rerun-sql {
             min-width: 28px;
             width: 28px;
@@ -402,6 +413,14 @@ function renderSqlResultHtml(result: SqlResultPayload, cspSource: string, script
       word-break: break-word;
       max-width: 440px;
     }
+        tbody td.sql-null-cell {
+            background: color-mix(in srgb, var(--vscode-editorError-foreground, #d16969) 20%, transparent);
+        }
+        tbody td.sql-null-cell .sql-null-text {
+            color: inherit;
+            opacity: 1;
+            font-weight: 500;
+        }
         thead th:not(:last-child),
         tbody td:not(:last-child) {
             box-shadow: inset -1px 0 0 var(--col-separator);
@@ -447,8 +466,10 @@ function buildClientPayload(result: SqlResultPayload) {
         return columns.map((column) => {
             const profile = profiles[column];
             const alignClass = shouldRightAlign(profile.kind) ? 'align-right' : '';
+            const cellClass = (row[column] === null || row[column] === undefined) ? 'sql-null-cell' : '';
             return {
                 alignClass,
+                cellClass,
                 html: formatCell(row[column], profile),
                 sortKind: profile.kind,
                 sortText: sortableTextValue(row[column]),
@@ -470,11 +491,12 @@ function buildClientPayload(result: SqlResultPayload) {
     };
 }
 
-function renderRowCellsHtml(rowCells: Array<Array<{ alignClass?: string; html: string }>>): string {
+function renderRowCellsHtml(rowCells: Array<Array<{ alignClass?: string; cellClass?: string; html: string }>>): string {
     return rowCells.map((cells, index) => {
         const tds = cells.map((cell) => {
-            const alignClass = cell.alignClass ? ` class="${cell.alignClass}"` : '';
-            return `<td${alignClass}>${cell.html}</td>`;
+            const classes = [cell.alignClass, cell.cellClass].filter(Boolean).join(' ');
+            const classAttr = classes ? ` class="${classes}"` : '';
+            return `<td${classAttr}>${cell.html}</td>`;
         }).join('');
         return `<tr><td class="align-right row-index-col">${index + 1}</td>${tds}</tr>`;
     }).join('');
@@ -626,7 +648,7 @@ const MIN_FRACTION_DIGITS_FALLBACK = 2;
 
 function formatCell(value: unknown, profile: ColumnProfile): string {
     if (value === null || value === undefined) {
-        return '<span style="opacity:.7">NULL</span>';
+        return '<span class="sql-null-text">NULL</span>';
     }
 
     if (value instanceof Date) {

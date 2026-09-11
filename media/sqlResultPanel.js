@@ -108,9 +108,35 @@
     var pageSize = 50;
     var pageSizeAuto = false;
     var pageIndex = 0;
+    var autoPageStep = 0;
     var rowOffsets = [];
     var rowHeights = [];
     var rerunInFlight = false;
+    var pagingDiagEnabled = true;
+
+    function logPagingDiag(reason) {
+        if (!pagingDiagEnabled || !tableWrap) {
+            return;
+        }
+
+        var viewportHeight = Math.max(1, tableWrap.clientHeight);
+        var maxScrollable = Math.max(0, tableWrap.scrollHeight - viewportHeight);
+        try {
+            console.log('[SQL Results][PagingDiag]', {
+                reason: reason,
+                pageSizeAuto: pageSizeAuto,
+                pageIndex: pageIndex,
+                totalPages: getTotalPages(),
+                scrollTop: tableWrap.scrollTop,
+                clientHeight: tableWrap.clientHeight,
+                scrollHeight: tableWrap.scrollHeight,
+                maxScrollable: maxScrollable,
+                rows: rows.length
+            });
+        } catch (_e) {
+            // Ignore console serialization issues.
+        }
+    }
 
     var tableSignature = initialColumns.join('|~|');
     var widthBySignature = (persistedState.columnWidthsBySignature && typeof persistedState.columnWidthsBySignature === 'object')
@@ -169,11 +195,13 @@
         if (!pageSizeSelect) {
             pageSizeAuto = false;
             pageSize = 50;
+            autoPageStep = 0;
             return;
         }
 
         var selectedValue = String(pageSizeSelect.value || '50').toUpperCase();
         pageSizeAuto = selectedValue === 'AUTO';
+        autoPageStep = 0;
         if (pageSizeAuto) {
             pageSize = 0;
             return;
@@ -213,7 +241,26 @@
             return 50;
         }
 
-        return Math.max(1, Math.floor(tableWrap.clientHeight / rowHeight));
+        return Math.max(1, Math.floor(getRowViewportHeight() / rowHeight));
+    }
+
+    function getRowViewportHeight() {
+        if (!tableWrap) {
+            return 1;
+        }
+
+        var totalHeight = Math.max(1, tableWrap.clientHeight);
+        var thead = tableWrap.querySelector('thead');
+        if (!thead) {
+            return totalHeight;
+        }
+
+        var headerHeight = thead.getBoundingClientRect().height;
+        if (!isFinite(headerHeight) || headerHeight <= 0) {
+            return totalHeight;
+        }
+
+        return Math.max(1, totalHeight - headerHeight);
     }
 
     function getEffectivePageSize() {
@@ -223,7 +270,158 @@
         return estimateVisibleRows();
     }
 
+    function getVisibleRowCountFromStartRow(startRow) {
+        if (!tableWrap || rowOffsets.length === 0) {
+            return 1;
+        }
+
+        var start = Math.max(0, Math.min(rowOffsets.length - 1, startRow));
+        var viewportHeight = getRowViewportHeight();
+        var viewportTop = rowOffsets[start] || 0;
+        var viewportBottom = viewportTop + viewportHeight;
+        var visibleCount = 0;
+
+        for (var i = start; i < rowOffsets.length; i++) {
+            var rowTop = rowOffsets[i] || 0;
+            if (rowTop >= viewportBottom) {
+                break;
+            }
+            // Count rows whose top edge is inside the current row viewport.
+            // This is more stable than overlap-based counting for page stepping.
+            if (rowTop >= viewportTop) {
+                visibleCount += 1;
+            }
+        }
+
+        return Math.max(1, visibleCount);
+    }
+
+    function getMeasuredRowHeight(rowIndex) {
+        if (!isFinite(rowIndex) || rowIndex < 0) {
+            return 24;
+        }
+
+        if (rowIndex < rowHeights.length && rowHeights[rowIndex] > 0) {
+            return rowHeights[rowIndex];
+        }
+
+        if (rowIndex < rowOffsets.length - 1) {
+            var previousOffset = rowOffsets[rowIndex] || 0;
+            var nextOffset = rowOffsets[rowIndex + 1] || previousOffset;
+            if (nextOffset > previousOffset) {
+                return nextOffset - previousOffset;
+            }
+        }
+
+        if (rowHeights.length > 0) {
+            return rowHeights[rowHeights.length - 1] || 24;
+        }
+
+        return 24;
+    }
+
+    function getAutoLastStartRow() {
+        var anchors = getAutoPageAnchors();
+        return anchors.length > 0 ? anchors[anchors.length - 1] : 0;
+    }
+
+    function getAutoPageAnchors() {
+        if (!tableWrap || rowOffsets.length === 0) {
+            return [0];
+        }
+
+        var anchors = [0];
+        var startRow = 0;
+        while (startRow < rowOffsets.length - 1) {
+            var nextStart = computePageDownTargetRow(startRow);
+            if (nextStart <= startRow) {
+                nextStart = startRow + 1;
+            }
+            if (nextStart >= rowOffsets.length) {
+                break;
+            }
+            anchors.push(nextStart);
+            startRow = nextStart;
+        }
+
+        return anchors;
+    }
+
+    function getAutoPageSizeForIndex(pageIdx, anchors) {
+        if (!anchors || anchors.length === 0) {
+            return 0;
+        }
+
+        var idx = Math.max(0, Math.min(anchors.length - 1, pageIdx));
+        var start = anchors[idx] || 0;
+        var end = (idx + 1 < anchors.length)
+            ? anchors[idx + 1]
+            : rowOffsets.length;
+        return Math.max(1, end - start);
+    }
+
+    function getAutoPageSizeFromStartRow(startRow) {
+        if (!rowOffsets.length) {
+            return 1;
+        }
+
+        var start = Math.max(0, Math.min(rowOffsets.length - 1, startRow));
+        var nextStart = computePageDownTargetRow(start);
+        if (nextStart <= start) {
+            return Math.max(1, rowOffsets.length - start);
+        }
+        return Math.max(1, nextStart - start);
+    }
+
+    function getAutoStepForCurrentView(currentTopRow) {
+        if (!rowOffsets.length) {
+            return 1;
+        }
+
+        if (autoPageStep > 0) {
+            return autoPageStep;
+        }
+
+        autoPageStep = getVisibleRowCountFromStartRow(currentTopRow);
+        return Math.max(1, autoPageStep);
+    }
+
+    function buildPageSummaryText() {
+        var totalPages = getTotalPages();
+        if (pageSizeAuto) {
+            var anchors = getAutoPageAnchors();
+            pageIndex = getAutoPageIndexFromScrollAnchors(anchors);
+            var autoSize = getAutoStepForCurrentView(getCurrentTopRowIndex());
+            return 'Page ' + (pageIndex + 1) + ' of ' + totalPages + ' (' + rows.length + ' rows, page AUTO=' + autoSize + ')';
+        }
+
+        var effectiveSize = getEffectivePageSize();
+        return 'Page ' + (pageIndex + 1) + ' of ' + totalPages + ' (' + rows.length + ' rows, page ' + effectiveSize + ')';
+    }
+
+    function getAutoPageIndexFromScrollAnchors(anchors) {
+        if (!tableWrap || !anchors || anchors.length === 0) {
+            return 0;
+        }
+
+        var topRow = findRowIndexForScrollTop(tableWrap.scrollTop);
+        var index = 0;
+        for (var i = 0; i < anchors.length; i++) {
+            var anchorRow = anchors[i] || 0;
+            if (topRow >= anchorRow) {
+                index = i;
+            } else {
+                break;
+            }
+        }
+        return Math.max(0, Math.min(index, anchors.length - 1));
+    }
+
     function getTotalPages() {
+        if (pageSizeAuto && tableWrap) {
+            return Math.max(1, getAutoPageAnchors().length);
+        }
+
         var size = getEffectivePageSize();
         return Math.max(1, Math.ceil(rows.length / size));
     }
@@ -246,9 +444,10 @@
         var renderedRows = getRenderedRows();
         rowOffsets = [];
         rowHeights = [];
-        var baseOffset = renderedRows.length > 0 ? renderedRows[0].offsetTop : 0;
+        var baseOffsetTop = renderedRows.length > 0 ? renderedRows[0].offsetTop : 0;
         for (var i = 0; i < renderedRows.length; i++) {
-            rowOffsets.push(Math.max(0, renderedRows[i].offsetTop - baseOffset));
+            var normalizedTop = Math.max(0, renderedRows[i].offsetTop - baseOffsetTop);
+            rowOffsets.push(normalizedTop);
             var measuredHeight = renderedRows[i].offsetHeight;
             rowHeights.push(measuredHeight > 0 ? measuredHeight : 0);
         }
@@ -277,10 +476,10 @@
         }
 
         var topIndex = Math.max(0, Math.min(rowOffsets.length - 1, currentTopRowIndex));
-        var viewportHeight = Math.max(1, tableWrap.clientHeight);
-        var currentTopOffset = rowOffsets[topIndex] || 0;
-        var targetScrollTop = currentTopOffset + viewportHeight;
-        var targetIndex = findRowIndexForScrollTop(targetScrollTop);
+        var visibleCount = pageSizeAuto
+            ? getAutoStepForCurrentView(topIndex)
+            : getVisibleRowCountFromStartRow(topIndex);
+        var targetIndex = topIndex + visibleCount;
 
         // Guarantee forward progress when not already at the last row.
         if (targetIndex <= topIndex && topIndex < rowOffsets.length - 1) {
@@ -300,26 +499,42 @@
             return 0;
         }
 
-        var viewportHeight = Math.max(1, tableWrap.clientHeight);
-        var currentTopOffset = rowOffsets[topIndex] || 0;
-        var targetIndex = topIndex;
-
-        // Walk upward row-by-row until adding one more row would exceed one viewport.
-        while (targetIndex > 0) {
-            var candidateIndex = targetIndex - 1;
-            var delta = currentTopOffset - (rowOffsets[candidateIndex] || 0);
-            if (delta > viewportHeight) {
+        // Jump back to the previous computed page anchor (same model as forward paging).
+        var anchors = getAutoPageAnchors();
+        var previous = 0;
+        for (var i = 0; i < anchors.length; i++) {
+            var anchor = anchors[i] || 0;
+            if (anchor >= topIndex) {
                 break;
             }
-            targetIndex = candidateIndex;
+            previous = anchor;
         }
 
-        // Guarantee backward progress if no candidate fit (very tall rows).
-        if (targetIndex >= topIndex) {
-            targetIndex = topIndex - 1;
+        return Math.max(0, Math.min(previous, topIndex - 1));
+    }
+
+    function findFirstRowIndexAtOrAfter(offset) {
+        if (!rowOffsets.length) {
+            return 0;
         }
 
-        return Math.max(0, Math.min(rowOffsets.length - 1, targetIndex));
+        var low = 0;
+        var high = rowOffsets.length - 1;
+        var best = rowOffsets.length;
+        while (low <= high) {
+            var mid = Math.floor((low + high) / 2);
+            if (rowOffsets[mid] >= offset) {
+                best = mid;
+                high = mid - 1;
+            } else {
+                low = mid + 1;
+            }
+        }
+
+        if (best >= rowOffsets.length) {
+            return rowOffsets.length - 1;
+        }
+        return best;
     }
 
     function findRowIndexForScrollTop(scrollTop) {
@@ -327,12 +542,15 @@
             return 0;
         }
 
+        // scrollTop can be 1px lower than measured row tops due to browser rounding.
+        var adjustedTop = scrollTop + 1;
+
         var low = 0;
         var high = rowOffsets.length - 1;
         var best = 0;
         while (low <= high) {
             var mid = Math.floor((low + high) / 2);
-            if (rowOffsets[mid] <= scrollTop) {
+            if (rowOffsets[mid] <= adjustedTop) {
                 best = mid;
                 low = mid + 1;
             } else {
@@ -347,14 +565,35 @@
             return 0;
         }
 
+        if (pageSizeAuto) {
+            var anchors = getAutoPageAnchors();
+            return getAutoPageIndexFromScrollAnchors(anchors);
+        }
+
+        var maxScrollable = Math.max(0, tableWrap.scrollHeight - tableWrap.clientHeight);
+        if (maxScrollable <= 1) {
+            return 0;
+        }
+
+        if (tableWrap.scrollTop <= 0) {
+            return 0;
+        }
+
+        var totalPages = getTotalPages();
+        if (tableWrap.scrollTop >= (maxScrollable - 1)) {
+            return Math.max(0, totalPages - 1);
+        }
+
         var topRow = findRowIndexForScrollTop(tableWrap.scrollTop);
         var size = getEffectivePageSize();
-        var totalPages = getTotalPages();
         return Math.max(0, Math.min(totalPages - 1, Math.floor(topRow / size)));
     }
 
     function getCurrentTopRowIndex() {
         if (!tableWrap || rowOffsets.length === 0) {
+            return 0;
+        }
+        if (tableWrap.scrollTop <= 1) {
             return 0;
         }
         return findRowIndexForScrollTop(tableWrap.scrollTop);
@@ -370,48 +609,87 @@
             return;
         }
 
+        var effectiveSize = getEffectivePageSize();
+        var totalPages = getTotalPages();
         var targetRow = Math.max(0, Math.min(rowOffsets.length - 1, rowIndex));
+        var requestedPageIndex = Math.max(0, Math.min(totalPages - 1, Math.floor(targetRow / effectiveSize)));
         tableWrap.scrollTop = Math.max(0, rowOffsets[targetRow]);
         syncPageIndexFromScroll();
+        if (!pageSizeAuto && requestedPageIndex > pageIndex) {
+            pageIndex = requestedPageIndex;
+            clampPageIndex();
+        }
         updatePageButtons();
         if (pageSummary) {
-            var effectiveSize = getEffectivePageSize();
-            var sizeLabel = pageSizeAuto ? ('AUTO=' + effectiveSize) : String(effectiveSize);
-            pageSummary.textContent = 'Page ' + (pageIndex + 1) + ' of ' + getTotalPages() + ' (' + rows.length + ' rows, page ' + sizeLabel + ')';
+            pageSummary.textContent = buildPageSummaryText();
         }
     }
 
     function jumpByPages(deltaPages) {
+        if (pageSizeAuto) {
+            if (!tableWrap) {
+                return;
+            }
+
+            rebuildRowOffsets();
+            var targetTopRow = getCurrentTopRowIndex();
+            if (deltaPages > 0) {
+                for (var down = 0; down < deltaPages; down++) {
+                    var nextRow = computePageDownTargetRow(targetTopRow);
+                    if (nextRow <= targetTopRow) {
+                        break;
+                    }
+                    targetTopRow = nextRow;
+                }
+            } else if (deltaPages < 0) {
+                for (var up = 0; up < Math.abs(deltaPages); up++) {
+                    var prevRow = computePageUpTargetRow(targetTopRow);
+                    if (prevRow >= targetTopRow) {
+                        break;
+                    }
+                    targetTopRow = prevRow;
+                }
+            }
+
+            tableWrap.scrollTop = Math.max(0, rowOffsets[targetTopRow] || 0);
+            syncPageIndexFromScroll();
+            updatePageButtons();
+            if (pageSummary) {
+                pageSummary.textContent = buildPageSummaryText();
+            }
+            logPagingDiag('jumpByPages:auto');
+            return;
+        }
+
         var baseTopRow = getCurrentTopRowIndex();
         var targetRow;
-
-        if (pageSizeAuto) {
-            if (deltaPages > 0) {
-                targetRow = computePageDownTargetRow(baseTopRow);
-            } else if (deltaPages < 0) {
-                targetRow = computePageUpTargetRow(baseTopRow);
-            } else {
-                targetRow = baseTopRow;
-            }
+        if (deltaPages === 1) {
+            targetRow = computePageDownTargetRow(baseTopRow);
+        } else if (deltaPages === -1) {
+            targetRow = computePageUpTargetRow(baseTopRow);
         } else {
             var effectiveSize = getEffectivePageSize();
             targetRow = baseTopRow + (deltaPages * effectiveSize);
         }
-
         scrollToRowIndex(targetRow);
     }
 
     function updatePageButtons() {
         if (pageSizeAuto && tableWrap && rowOffsets.length > 0) {
-            var currentTopRow = getCurrentTopRowIndex();
-            var maxScrollable = Math.max(0, tableWrap.scrollHeight - tableWrap.clientHeight);
-            var atTop = currentTopRow <= 0 || tableWrap.scrollTop <= 0;
-            var atBottom = tableWrap.scrollTop >= (maxScrollable - 1);
+            rebuildRowOffsets();
+            var anchors = getAutoPageAnchors();
+            var totalPages = Math.max(1, anchors.length);
+            var pageNumber = getAutoPageIndexFromScrollAnchors(anchors);
+            var topRow = getCurrentTopRowIndex();
+            var canPageBackward = topRow > 0;
+            var nextRow = computePageDownTargetRow(topRow);
+            var canPageForward = nextRow > topRow;
+            pageIndex = pageNumber;
 
-            if (firstBtn) { firstBtn.disabled = atTop; }
-            if (prevBtn) { prevBtn.disabled = atTop; }
-            if (nextBtn) { nextBtn.disabled = atBottom; }
-            if (lastBtn) { lastBtn.disabled = atBottom; }
+            if (firstBtn) { firstBtn.disabled = !canPageBackward; }
+            if (prevBtn) { prevBtn.disabled = !canPageBackward; }
+            if (nextBtn) { nextBtn.disabled = !canPageForward; }
+            if (lastBtn) { lastBtn.disabled = !canPageForward; }
             return;
         }
 
@@ -427,6 +705,7 @@
         var preserveScroll = !!opts.preserveScroll;
         var scrollToTop = !!opts.scrollToTop;
         var previousScrollTop = tableWrap ? tableWrap.scrollTop : 0;
+        autoPageStep = 0;
         var html = '';
         for (var i = 0; i < rows.length; i++) {
             var cells = rows[i];
@@ -434,7 +713,14 @@
             if (Array.isArray(cells)) {
                 for (var c = 0; c < cells.length; c++) {
                     var cell = cells[c] || {};
-                    var alignClass = cell.alignClass ? ' class="' + cell.alignClass + '"' : '';
+                    var classNames = [];
+                    if (cell.alignClass) {
+                        classNames.push(cell.alignClass);
+                    }
+                    if (cell.cellClass) {
+                        classNames.push(cell.cellClass);
+                    }
+                    var alignClass = classNames.length > 0 ? ' class="' + classNames.join(' ') + '"' : '';
                     var cellHtml = (typeof cell.html === 'string') ? cell.html : '';
                     tds += '<td' + alignClass + '>' + cellHtml + '</td>';
                 }
@@ -460,9 +746,7 @@
                 : (rows.length + ' rows returned.');
         }
         if (pageSummary) {
-            var effectiveSize = getEffectivePageSize();
-            var sizeLabel = pageSizeAuto ? ('AUTO=' + effectiveSize) : String(effectiveSize);
-            pageSummary.textContent = 'Page ' + (pageIndex + 1) + ' of ' + getTotalPages() + ' (' + rows.length + ' rows, page ' + sizeLabel + ')';
+            pageSummary.textContent = buildPageSummaryText();
         }
         updatePageButtons();
     }
@@ -703,6 +987,19 @@
 
     if (lastBtn) {
         lastBtn.addEventListener('click', function () {
+            if (pageSizeAuto && tableWrap) {
+                var anchors = getAutoPageAnchors();
+                var lastPage = Math.max(0, anchors.length - 1);
+                pageIndex = lastPage;
+                var lastTopRow = anchors[lastPage] || 0;
+                tableWrap.scrollTop = Math.max(0, rowOffsets[lastTopRow] || 0);
+                updatePageButtons();
+                if (pageSummary) {
+                    pageSummary.textContent = buildPageSummaryText();
+                }
+                return;
+            }
+
             var startOfLastPage = Math.max(0, rows.length - getEffectivePageSize());
             scrollToRowIndex(startOfLastPage);
         });
@@ -721,18 +1018,35 @@
         var nextPage = Math.max(0, Math.min(totalPages - 1, targetPage));
         pageIndex = nextPage;
 
-        if (tableWrap && pageIndex === 0) {
+        if (!tableWrap) {
+            renderRows();
+            return;
+        }
+
+        if (pageSizeAuto) {
+            var autoAnchors = getAutoPageAnchors();
+            var targetRow = autoAnchors[Math.max(0, Math.min(autoAnchors.length - 1, nextPage))] || 0;
+            tableWrap.scrollTop = Math.max(0, rowOffsets[targetRow] || 0);
+            syncPageIndexFromScroll();
+            updatePageButtons();
+            if (pageSummary) {
+                pageSummary.textContent = buildPageSummaryText();
+            }
+            return;
+        }
+
+        if (pageIndex === 0) {
             tableWrap.scrollTop = 0;
             syncPageIndexFromScroll();
             updatePageButtons();
             if (pageSummary) {
-                pageSummary.textContent = 'Page ' + (pageIndex + 1) + ' of ' + getTotalPages() + ' (' + rows.length + ' rows)';
+                pageSummary.textContent = buildPageSummaryText();
             }
             return;
         }
 
         var targetRow = pageIndex * getEffectivePageSize();
-        if (tableWrap && targetRow < rowOffsets.length) {
+        if (targetRow < rowOffsets.length) {
             scrollToRowIndex(targetRow);
             return;
         }
@@ -745,10 +1059,9 @@
             syncPageIndexFromScroll();
             updatePageButtons();
             if (pageSummary) {
-                var effectiveSize = getEffectivePageSize();
-                var sizeLabel = pageSizeAuto ? ('AUTO=' + effectiveSize) : String(effectiveSize);
-                pageSummary.textContent = 'Page ' + (pageIndex + 1) + ' of ' + getTotalPages() + ' (' + rows.length + ' rows, page ' + sizeLabel + ')';
+                pageSummary.textContent = buildPageSummaryText();
             }
+            logPagingDiag('scroll');
         });
     }
 
@@ -756,11 +1069,11 @@
         if (!pageSizeAuto) {
             return;
         }
+        autoPageStep = 0;
         syncPageIndexFromScroll();
         updatePageButtons();
         if (pageSummary) {
-            var effectiveSize = getEffectivePageSize();
-            pageSummary.textContent = 'Page ' + (pageIndex + 1) + ' of ' + getTotalPages() + ' (' + rows.length + ' rows, page AUTO=' + effectiveSize + ')';
+            pageSummary.textContent = buildPageSummaryText();
         }
     });
 
@@ -841,6 +1154,18 @@
         renderRows({ scrollToTop: true });
         updateSortIndicators();
         updateLoadButtons();
+        // Re-measure once the browser has finalized layout so AUTO summary starts accurate.
+        requestAnimationFrame(function () {
+            if (!tableWrap) {
+                return;
+            }
+            rebuildRowOffsets();
+            syncPageIndexFromScroll();
+            updatePageButtons();
+            if (pageSummary) {
+                pageSummary.textContent = buildPageSummaryText();
+            }
+        });
         setStatus('Sorting/resizing ready. headers=' + sortableHeaders.length + '.');
     } catch (error) {
         try {

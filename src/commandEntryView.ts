@@ -115,7 +115,7 @@ interface SnippetTemplateContext {
 const BUILT_IN_SQL_SNIPPETS: ReadonlyArray<CommandEntrySqlSnippet> = [
     {
         id: 'builtin.lastest-joblog',
-        label: 'Joblog: Last 200 msgs',
+        label: 'Joblog (last 200 msgs)',
         stmt: [
             'SELECT ORDINAL_POSITION as SEQNBR,',
             '       MESSAGE_ID as MSGID, SEVERITY as SEV, ',
@@ -139,7 +139,7 @@ const BUILT_IN_SQL_SNIPPETS: ReadonlyArray<CommandEntrySqlSnippet> = [
     },
     {
         id: 'builtin.full-joblog',
-        label: 'Joblog: Full',
+        label: 'Joblog (full)',
         stmt: [
             'SELECT ORDINAL_POSITION as SEQNBR,',
             '       MESSAGE_ID as MSGID, SEVERITY as SEV, ',
@@ -211,14 +211,13 @@ const BUILT_IN_SQL_SNIPPETS: ReadonlyArray<CommandEntrySqlSnippet> = [
     },
     {
         id: 'builtin.active-jobs-slow',
-        label: 'Active Jobs (Slow: All Info)',
+        label: 'Active Jobs (Detailed)',
         stmt: [
-            'SELECT JOB_NAME, SUBSYSTEM, AUTHORIZATION_NAME as USER_NAME,',
-            " trim(FUNCTION_TYPE) concat '-' concat FUNCTION as function,",
+            'SELECT aj.JOB_NAME, aj.SUBSYSTEM, aj.AUTHORIZATION_NAME as USER_NAME,',
+            " trim(aj.FUNCTION_TYPE) concat '-' concat aj.FUNCTION as FUNCTION_INFO,",
             ' JOB_STATUS, MEMORY_POOL, TEMPORARY_STORAGE, CPU_TIME, TOTAL_DISK_IO_COUNT',
             ' , OUTPUT_QUEUE, JOB_USER_IDENTITY, PAGE_FAULTS, DATABASE_LOCK_WAITS, OPEN_FILES',
-            "FROM TABLE(QSYS2.ACTIVE_JOB_INFO(DETAILED_INFO => 'ALL'))",
-            "WHERE '${userSBSList}' = '' OR LOCATE(',' CONCAT UPPER(TRIM(SUBSYSTEM)) CONCAT ',', ',' CONCAT '${userSBSList}' CONCAT ',') > 0",
+            "FROM TABLE(QSYS2.ACTIVE_JOB_INFO(DETAILED_INFO => 'ALL', SUBSYSTEM_LIST_FILTER => '${userSBSList}')) aj",
             'ORDER BY ORDINAL_POSITION'
         ].join(' '),
         group: 'Admin',
@@ -229,10 +228,10 @@ const BUILT_IN_SQL_SNIPPETS: ReadonlyArray<CommandEntrySqlSnippet> = [
         id: 'builtin.active-jobs-usersbs',
         label: 'Active Jobs (Faster)',
         stmt: [
-            'SELECT JOB_NAME, SUBSYSTEM, AUTHORIZATION_NAME as USER_NAME,',
-            " trim(FUNCTION_TYPE) concat '-' concat FUNCTION as function,",
+            'SELECT aj.JOB_NAME, aj.SUBSYSTEM, aj.AUTHORIZATION_NAME as USER_NAME,',
+            " trim(aj.FUNCTION_TYPE) concat '-' concat aj.FUNCTION as FUNCTION_INFO,",
             ' JOB_STATUS, MEMORY_POOL, TEMPORARY_STORAGE, CPU_TIME, TOTAL_DISK_IO_COUNT',
-            "FROM TABLE(QSYS2.ACTIVE_JOB_INFO(SUBSYSTEM_LIST_FILTER => '${userSBSList}'))",
+            "FROM TABLE(QSYS2.ACTIVE_JOB_INFO(SUBSYSTEM_LIST_FILTER => '${userSBSList}')) aj",
             'ORDER BY ORDINAL_POSITION'
         ].join(' '),
         group: 'Admin',
@@ -241,12 +240,12 @@ const BUILT_IN_SQL_SNIPPETS: ReadonlyArray<CommandEntrySqlSnippet> = [
     },
     {
         id: 'builtin.active-jobs-qinter',
-        label: 'Active Jobs (QINTER)',
+        label: 'Active Jobs sbs(QINTER)',
         stmt: [
-            'SELECT JOB_NAME, SUBSYSTEM, AUTHORIZATION_NAME as USER_NAME,',
-            " trim(FUNCTION_TYPE) concat '-' concat FUNCTION as function,",
+            'SELECT aj.JOB_NAME, aj.SUBSYSTEM, aj.AUTHORIZATION_NAME as USER_NAME,',
+            " trim(aj.FUNCTION_TYPE) concat '-' concat aj.FUNCTION as FUNCTION_INFO,",
             ' JOB_STATUS, MEMORY_POOL, TEMPORARY_STORAGE, CPU_TIME, TOTAL_DISK_IO_COUNT',
-            "FROM TABLE(QSYS2.ACTIVE_JOB_INFO(SUBSYSTEM_LIST_FILTER => 'QINTER'))",
+            "FROM TABLE(QSYS2.ACTIVE_JOB_INFO(SUBSYSTEM_LIST_FILTER => 'QINTER')) aj",
             'ORDER BY ORDINAL_POSITION'
         ].join(' '),
         group: 'Admin',
@@ -255,12 +254,12 @@ const BUILT_IN_SQL_SNIPPETS: ReadonlyArray<CommandEntrySqlSnippet> = [
     },
     {
         id: 'builtin.active-jobs-qusrwrk',
-        label: 'Active Jobs (QUSRWRK)',
+        label: 'Active Jobs sbs(QUSRWRK)',
         stmt: [
-            'SELECT JOB_NAME, SUBSYSTEM, AUTHORIZATION_NAME as USER_NAME,',
-            " trim(FUNCTION_TYPE) concat '-' concat FUNCTION as function,",
+            'SELECT aj.JOB_NAME, aj.SUBSYSTEM, aj.AUTHORIZATION_NAME as USER_NAME,',
+            " trim(aj.FUNCTION_TYPE) concat '-' concat aj.FUNCTION as FUNCTION_INFO,",
             ' JOB_STATUS, MEMORY_POOL, TEMPORARY_STORAGE, CPU_TIME, TOTAL_DISK_IO_COUNT',
-            "FROM TABLE(QSYS2.ACTIVE_JOB_INFO(SUBSYSTEM_LIST_FILTER => 'QUSRWRK'))",
+            "FROM TABLE(QSYS2.ACTIVE_JOB_INFO(SUBSYSTEM_LIST_FILTER => 'QUSRWRK')) aj",
             'ORDER BY ORDINAL_POSITION'
         ].join(' '),
         group: 'Admin',
@@ -269,12 +268,12 @@ const BUILT_IN_SQL_SNIPPETS: ReadonlyArray<CommandEntrySqlSnippet> = [
     },
     {
         id: 'builtin.active-jobs-qhttpsvr',
-        label: 'Active Jobs (QHTTPSVR)',
+        label: 'Active Jobs sbs(QHTTPSVR)',
         stmt: [
-            'SELECT JOB_NAME, SUBSYSTEM, AUTHORIZATION_NAME as USER_NAME,',
-            " trim(FUNCTION_TYPE) concat '-' concat FUNCTION as function,",
+            'SELECT aj.JOB_NAME, aj.SUBSYSTEM, aj.AUTHORIZATION_NAME as USER_NAME,',
+            " trim(aj.FUNCTION_TYPE) concat '-' concat aj.FUNCTION as FUNCTION_INFO,",
             ' JOB_STATUS, MEMORY_POOL, TEMPORARY_STORAGE, CPU_TIME, TOTAL_DISK_IO_COUNT',
-            "FROM TABLE(QSYS2.ACTIVE_JOB_INFO(SUBSYSTEM_LIST_FILTER => 'QHTTPSVR'))",
+            "FROM TABLE(QSYS2.ACTIVE_JOB_INFO(SUBSYSTEM_LIST_FILTER => 'QHTTPSVR')) aj",
             'ORDER BY ORDINAL_POSITION'
         ].join(' '),
         group: 'Admin',
@@ -669,7 +668,9 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
         switch (message.type) {
             case 'ready':
                 await this.context.workspaceState.update('clprompter.commandEntryTouchedThisSession', true);
-                await vscode.commands.executeCommand('clprompter.codeSnippet.resolvePinnedVisibility');
+                if (this.getConnection()) {
+                    await vscode.commands.executeCommand('clprompter.codeSnippet.restoreVisibilityFromSetting');
+                }
                 await this.applyDefaultSnippetMergeOnVersionUpdateIfNeeded();
                 const skipStartupClearForVsCodeUpdate = this.clearHistoryOnFirstReady && await this.consumeSkipHistoryClearOnNextReady();
                 const clearHistoryOnStartup = this.clearHistoryOnFirstReady
@@ -2147,12 +2148,16 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
             this.output.appendLine(`[Cmd Entry] SQL job display ID changed: ${this.lastPostedSqlJobId || '<none>'} -> ${sqlJobId || '<none>'}`);
         }
         this.lastPostedSqlJobId = sqlJobId;
-        console.log('[Cmd Entry][SqlJobDisplayRefresh] posting sqlJobId', {
-            sqlJobId: sqlJobId ?? '<none>',
-            connection: connection?.currentConnectionName ?? '<unknown>',
-            dedicatedEnabled: this.jobManager.isDedicatedEnabled(connection),
-            sharedJobId: connection?.getSqlJobId?.() ?? '<none>'
-        });
+
+        const debugEnabled = vscode.workspace.getConfiguration('clPrompter').get<boolean>('cmdEntryDebugLogging', false);
+        if (debugEnabled) {
+            console.log('[Cmd Entry][SqlJobDisplayRefresh] posting sqlJobId', {
+                sqlJobId: sqlJobId ?? '<none>',
+                connection: connection?.currentConnectionName ?? '<unknown>',
+                dedicatedEnabled: this.jobManager.isDedicatedEnabled(connection),
+                sharedJobId: connection?.getSqlJobId?.() ?? '<none>'
+            });
+        }
         this.post({ type: 'sqlJobId', sqlJobId });
     }
 
