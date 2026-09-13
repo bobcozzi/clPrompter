@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import IBMi from '@halcyontech/vscode-ibmi-types/api/IBMi';
-import { CommandEntryJobManager, DedicatedJobState } from './commandEntryJobManager';
+import { CommandEntryJobManager, DedicatedJobState, EffectiveJobConfig } from './commandEntryJobManager';
 import { CommandEntryService } from './commandEntryService';
 import { CommandExecution, CommandExecutionMode, SqlResultPayload } from './commandEntryModel';
 
@@ -17,6 +17,7 @@ export interface MultiSqlJobApiV1 {
     restartDedicatedJob(): Promise<string | undefined>;
     cancelDedicatedJobSql(): Promise<void>;
     runSql(statements: string | string[], options?: MultiSqlJobRunSqlOptions): Promise<Record<string, unknown>[]>;
+    getEffectiveConfig(): Promise<EffectiveJobConfig>;
     executeCommandEntry(command: string, mode: CommandExecutionMode, executionId?: string): Promise<CommandExecution>;
     closeSqlSession(sessionId?: string): Promise<void>;
     loadMoreSql(sessionId: string, fetchAll?: boolean, fetchRowsOverride?: number): Promise<SqlResultPayload>;
@@ -78,6 +79,11 @@ export function createMultiSqlJobApi(
         ): Promise<Record<string, unknown>[]> {
             const connection = requireConnection();
             return jobManager.runSQL(connection, statements, options);
+        },
+
+        async getEffectiveConfig(): Promise<EffectiveJobConfig> {
+            const connection = requireConnection();
+            return jobManager.getEffectiveConfig(connection);
         },
 
         async executeCommandEntry(

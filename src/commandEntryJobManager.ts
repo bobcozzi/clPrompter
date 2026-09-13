@@ -143,6 +143,17 @@ export interface DedicatedJobState {
     status: 'ready' | 'busy' | 'ended';
 }
 
+export interface EffectiveJobConfig {
+    currentLibrary?: string;
+    libraryList: string[];
+}
+
+const LIBRARY_LIST_INFO_SQL = `
+SELECT SYSTEM_SCHEMA_NAME, TYPE, ORDINAL_POSITION
+FROM QSYS2.LIBRARY_LIST_INFO
+ORDER BY ORDINAL_POSITION
+`;
+
 export class CommandEntryJobManager {
     private job: SqlJobLike | undefined;
     private connectionKey: string | undefined;
@@ -486,6 +497,47 @@ export class CommandEntryJobManager {
         return result.rows;
     }
 
+    async getEffectiveConfig(connection: IBMi): Promise<EffectiveJobConfig> {
+        const fallback = this.connectionConfigFallback(connection);
+
+        try {
+            const rows = await this.runSQL(connection, LIBRARY_LIST_INFO_SQL);
+            if (!Array.isArray(rows) || rows.length === 0) {
+                return fallback;
+            }
+
+            const libraryList: string[] = [];
+            const seen = new Set<string>();
+            let currentLibrary: string | undefined;
+
+            for (const row of rows) {
+                const schemaName = this.normalizeLibraryName(this.readRowString(row, 'SYSTEM_SCHEMA_NAME'));
+                if (!schemaName) {
+                    continue;
+                }
+
+                const type = this.readRowString(row, 'TYPE')?.trim().toUpperCase();
+                if (type === 'CURRENT') {
+                    currentLibrary = schemaName;
+                    continue;
+                }
+
+                if (!seen.has(schemaName)) {
+                    seen.add(schemaName);
+                    libraryList.push(schemaName);
+                }
+            }
+
+            return {
+                currentLibrary: currentLibrary ?? fallback.currentLibrary,
+                libraryList: libraryList.length > 0 ? libraryList : fallback.libraryList
+            };
+        } catch (error) {
+            this.output?.appendLine(`[Cmd Entry] Failed to resolve job-aware library configuration (${error instanceof Error ? error.message : String(error)}). Falling back to connection config.`);
+            return fallback;
+        }
+    }
+
     async restartJob(connection: IBMi): Promise<string | undefined> {
         this.logRouteSnapshot('restart.enter', connection);
 
@@ -557,6 +609,63 @@ export class CommandEntryJobManager {
 
     async dispose(): Promise<void> {
         await this.endDedicatedJob();
+    }
+
+    private readRowString(row: Record<string, unknown>, key: string): string | undefined {
+        const direct = row[key];
+        if (typeof direct === 'string') {
+            return direct;
+        }
+
+        const upper = row[key.toUpperCase()];
+        if (typeof upper === 'string') {
+            return upper;
+        }
+
+        const lower = row[key.toLowerCase()];
+        if (typeof lower === 'string') {
+            return lower;
+        }
+
+        for (const [candidateKey, candidateValue] of Object.entries(row)) {
+            if (candidateKey.toUpperCase() === key.toUpperCase() && typeof candidateValue === 'string') {
+                return candidateValue;
+            }
+        }
+
+        return undefined;
+    }
+
+    private normalizeLibraryName(value: string | undefined): string | undefined {
+        if (!value) {
+            return undefined;
+        }
+
+        const normalized = value.trim().toUpperCase();
+        return normalized.length > 0 ? normalized : undefined;
+    }
+
+    private connectionConfigFallback(connection: IBMi): EffectiveJobConfig {
+        const config = connection.getConfig() as {
+            currentLibrary?: unknown;
+            libraryList?: unknown;
+        } | undefined;
+
+        const currentLibrary = this.normalizeLibraryName(
+            typeof config?.currentLibrary === 'string' ? config.currentLibrary : undefined
+        );
+
+        const libraryList = Array.isArray(config?.libraryList)
+            ? (config.libraryList as unknown[])
+                .filter((entry): entry is string => typeof entry === 'string')
+                .map((entry) => this.normalizeLibraryName(entry))
+                .filter((entry): entry is string => Boolean(entry))
+            : [];
+
+        return {
+            currentLibrary,
+            libraryList
+        };
     }
 
     isRemoteMapepireServerEnabled(connection?: IBMi): boolean {
