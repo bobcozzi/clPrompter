@@ -1,10 +1,10 @@
-import * as vscode from 'vscode';
 import IBMi from '@halcyontech/vscode-ibmi-types/api/IBMi';
+import * as vscode from 'vscode';
 import { CLPrompter } from './clPrompter';
-import { CommandEntryHistory, CommandExecutionMode } from './commandEntryModel';
-import { CommandEntryService } from './commandEntryService';
-import { detectCommandEntryPrefix } from './commandEntryPrefixes';
 import { CommandEntryJobManager } from './commandEntryJobManager';
+import { CommandEntryHistory, CommandExecutionMode } from './commandEntryModel';
+import { detectCommandEntryPrefix } from './commandEntryPrefixes';
+import { CommandEntryService } from './commandEntryService';
 import { updateConnectionSqlSettings } from './commandEntrySqlSettings';
 import { configureSqlResultPanelAssets, notifySqlResultSessionClosed, setSqlResultPanelRequestHandler, showSqlResultPanel } from './sqlResultPanel';
 
@@ -321,6 +321,17 @@ function ensureSqlPrefixForRecall(command: string, isSql: boolean): string {
     }
     const trimmed = text.trim();
     return trimmed ? `SQL: ${trimmed}` : text;
+}
+
+function extractGoCommandName(command: string): string | undefined {
+    const text = String(command ?? '').trim();
+    const match = /^(?:QSYS\/)?GO\s+CMD(\S+)\s*$/i.exec(text);
+    if (!match) {
+        return undefined;
+    }
+
+    const commandName = String(match[1] || '').trim().replace(/\*$/, '');
+    return commandName || undefined;
 }
 
 function resolvePromptPrefixedCommand(command: string): { promptCommand?: string; syntaxError?: string } | undefined {
@@ -1154,6 +1165,50 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
             });
             return;
         }
+
+        const goCommandName = extractGoCommandName(command);
+        const selectSource = goCommandName !== undefined
+            ? `${goCommandName}*`
+            : command;
+        const selectCommand = /^([^\s]*)\*/.exec(selectSource);
+        if (selectCommand !== null) {
+            this.post({ type: 'notice', message: vscode.l10n.t("Selecting command...") });
+            const [name, library] = connection.upperCaseName(selectCommand[1]).split('/').reverse();
+
+            if (name.length > 10) {
+                this.post({ type: 'notice', message: vscode.l10n.t("{0} is not a valid command name", name) });
+            }
+
+            const routedConfig = await this.jobManager.getConfig(connection);
+            const libraries = library ? [library] : [routedConfig.currentLibrary ?? '', ...routedConfig.libraryList, '*LIBL'].filter(Boolean);
+            const query = goCommandName !== undefined
+                ? libraries
+                    .map((lib, index) => `select ${index} as LIB_ORD, OBJLIB, OBJNAME, OBJTEXT, COALESCE(NULLIF(TRIM(OBJTEXT), ''), OBJNAME) as SORTTEXT from table(QSYS2.OBJECT_STATISTICS('${lib}', 'CMD', '${name}*'))`)
+                    .join(' union all ') + ' order by SORTTEXT, LIB_ORD, OBJLIB, OBJNAME'
+                : libraries
+                    .map((lib, index) => `select ${index} as LIB_ORD, OBJLIB, OBJNAME, OBJTEXT from table(QSYS2.OBJECT_STATISTICS('${lib}', 'CMD', '${name}*'))`)
+                    .join(' union all ') + ' order by LIB_ORD, OBJNAME';
+            const suggestions = (await this.jobManager.runSQL(connection, query)).map(row => ({ library: String(row.OBJLIB), name: String(row.OBJNAME), text: row.OBJTEXT !== null ? String(row.OBJTEXT) : undefined }));
+
+            try {
+                if (suggestions.length > 0) {
+                    const selection = (await vscode.window.showQuickPick(suggestions.map(s => ({ label: `${s.library}/${s.name}`, description: s.text })), { title: vscode.l10n.t("Select command") }))?.label;
+                    if (selection !== undefined) {
+                        this.post({ type: 'setCommand', command: selection });
+                        this.post({ type: 'focusInput' });
+                    }
+                    this.post({ type: 'notice', message: undefined });
+                }
+                else {
+                    this.post({ type: 'notice', message: vscode.l10n.t("No selection match for {0} in {1}", name, library ? library : vscode.l10n.t("the library list")) });
+                }
+            } finally {
+                this.post({ type: 'focusInput' });
+            }
+
+            return;
+        }
+
         this.running = true;
         this.activeExecutionId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
         const sqlJobId = this.currentSqlJobId(connection);
@@ -1172,6 +1227,7 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
             sqlJobId,
             statusMessage
         });
+
         try {
             const execution = await this.service.execute(connection, command, mode, this.activeExecutionId, {
                 resultTitle: options.resultTitle

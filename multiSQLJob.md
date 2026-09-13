@@ -143,6 +143,7 @@ The activation return object now exposes:
 - restartDedicatedJob()
 - cancelDedicatedJobSql()
 - runSql(statements, options)
+- getConfig()
 - executeCommandEntry(command, mode, executionId?)
 - closeSqlSession(sessionId?)
 - loadMoreSql(sessionId, fetchAll?, fetchRowsOverride?)
