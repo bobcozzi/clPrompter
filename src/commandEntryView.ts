@@ -959,9 +959,10 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
                 this.post({ type: 'notice', message: vscode.l10n.t("{0} is not a valid command name", name) });
             }
 
-            const libraries = library ? [library] : [connection.getConfig().currentLibrary ?? '', ...connection.getConfig().libraryList, '*LIBL'].filter(Boolean);
+            const routedConfig = await this.jobManager.getConfig(connection);
+            const libraries = library ? [library] : [routedConfig.currentLibrary ?? '', ...routedConfig.libraryList, '*LIBL'].filter(Boolean);
             const query = [...libraries].map(lib => `select OBJLIB, OBJNAME, OBJTEXT from table(QSYS2.OBJECT_STATISTICS('${lib}', 'CMD', '${name}*'))`).join(' union all ') + ' order by OBJLIB, OBJNAME';
-            const suggestions = (await connection.runSQL(query)).map(row => ({ library: String(row.OBJLIB), name: String(row.OBJNAME), text: row.OBJTEXT !== null ? String(row.OBJTEXT) : undefined }));
+            const suggestions = (await this.jobManager.runSQL(connection, query)).map(row => ({ library: String(row.OBJLIB), name: String(row.OBJNAME), text: row.OBJTEXT !== null ? String(row.OBJTEXT) : undefined }));
 
             if (suggestions.length > 0) {
                 const selection = (await vscode.window.showQuickPick(suggestions.map(s => ({ label: `${s.library}/${s.name}`, description: s.text })), { title: vscode.l10n.t("Select command") }))?.label;
