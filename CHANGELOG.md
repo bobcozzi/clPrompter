@@ -4,6 +4,16 @@ All notable changes to this project are documented in this file.
 
 ## [Preview of CL Command Entry]
 
+## [1.0.32] - 2026-09-13
+
+### What's New
+- Command Entry now supports command selection from wildcard input, including IBM i style `GO CMD...` shortcuts.
+- Command lookup now uses the active connection's routed configuration so the library list matches the current SQL job context.
+
+### What's Fixed
+- Dismissing the command picker now restores focus to the command entry input.
+- `GO CMDWRK*` now behaves like `GO CMDWRK` by normalizing the trailing asterisk before lookup.
+
 ## [1.0.31] - 2026-09-11
 
 ### What's Improved
