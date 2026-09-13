@@ -542,6 +542,13 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
         view.webview.options = { enableScripts: true, localResourceRoots: [vscode.Uri.joinPath(this.context.extensionUri, 'media')] };
         view.webview.html = this.html(view.webview);
         view.webview.onDidReceiveMessage((message: CommandEntryRequest) => this.receive(message), undefined, this.context.subscriptions);
+        view.onDidChangeVisibility(() => {
+            if (!view.visible) {
+                return;
+            }
+            this.post({ type: 'focusInput' });
+            setTimeout(() => this.post({ type: 'focusInput' }), 75);
+        }, undefined, this.context.subscriptions);
         view.onDidDispose(() => {
             if (this.view === view) {
                 this.view = undefined;
@@ -711,6 +718,10 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
                 });
                 this.clearInputOnFirstReady = false;
                 this.clearHistoryOnFirstReady = false;
+
+                // Ensure initial panel activation places keyboard focus in the command input.
+                this.post({ type: 'focusInput' });
+                setTimeout(() => this.post({ type: 'focusInput' }), 75);
 
                 if (this.pendingCommandText !== undefined) {
                     this.post({ type: 'setCommand', command: this.pendingCommandText });
@@ -1180,12 +1191,19 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
             }
 
             const routedConfig = await this.jobManager.getConfig(connection);
-            const libraries = library ? [library] : [routedConfig.currentLibrary ?? '', ...routedConfig.libraryList, '*LIBL'].filter(Boolean);
+            // Use precomputed wildcard order from LIBRARY_LIST_INFO so first ordinal occurrence wins
+            // across SYSTEM/CURRENT/PRODUCT/USER entries.
+            const libraries = library
+                ? [library]
+                : (routedConfig.wildcardLibraryOrder && routedConfig.wildcardLibraryOrder.length > 0
+                    ? routedConfig.wildcardLibraryOrder
+                    : [...routedConfig.libraryList, ...(routedConfig.currentLibrary ? [routedConfig.currentLibrary] : [])]);
+            const uniqueLibraries = [...new Set(libraries.map((lib) => String(lib || '').trim()).filter(Boolean))];
             const query = goCommandName !== undefined
-                ? libraries
+                ? uniqueLibraries
                     .map((lib, index) => `select ${index} as LIB_ORD, OBJLIB, OBJNAME, OBJTEXT, COALESCE(NULLIF(TRIM(OBJTEXT), ''), OBJNAME) as SORTTEXT from table(QSYS2.OBJECT_STATISTICS('${lib}', 'CMD', '${name}*'))`)
                     .join(' union all ') + ' order by SORTTEXT, LIB_ORD, OBJLIB, OBJNAME'
-                : libraries
+                : uniqueLibraries
                     .map((lib, index) => `select ${index} as LIB_ORD, OBJLIB, OBJNAME, OBJTEXT from table(QSYS2.OBJECT_STATISTICS('${lib}', 'CMD', '${name}*'))`)
                     .join(' union all ') + ' order by LIB_ORD, OBJNAME';
             const suggestions = (await this.jobManager.runSQL(connection, query)).map(row => ({ library: String(row.OBJLIB), name: String(row.OBJNAME), text: row.OBJTEXT !== null ? String(row.OBJTEXT) : undefined }));
@@ -1204,6 +1222,7 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
                 }
             } finally {
                 this.post({ type: 'focusInput' });
+                setTimeout(() => this.post({ type: 'focusInput' }), 50);
             }
 
             return;
@@ -1248,6 +1267,10 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
                 addToHistory: shouldAddToHistory,
                 addToCommandEntryLog: shouldAddToCommandEntryLog
             });
+            if (isSql) {
+                this.post({ type: 'focusInput' });
+                setTimeout(() => this.post({ type: 'focusInput' }), 75);
+            }
             if (isSql && !shouldAddToCommandEntryLog) {
                 this.post({ type: 'notice', message: vscode.l10n.t('SQL execution was run, but logging to Command Entry Log is disabled by settings.') });
             }

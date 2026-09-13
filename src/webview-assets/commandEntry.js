@@ -1072,6 +1072,9 @@
   if (severityFilter) severityFilter.addEventListener('change', () => { save(); render(); });
   command.addEventListener('keydown', event => {
     if (event.key === 'Home' || event.key === 'End') {
+      if (event.shiftKey) {
+        return;
+      }
       // Prevent browser/page-level scroll behavior so Home/End always acts on the command text area.
       event.preventDefault();
       event.stopPropagation();
@@ -1554,6 +1557,11 @@
         resizeCommandInput();
         if (shouldAddToCommandEntryLog) {
           render({ pinNewest: true });
+        }
+        const executionIsSql = !!message.execution.sqlResult
+          || (message.execution.messages || []).some(entry => String(entry.messageId || '').trim().toUpperCase() === 'SQL0000');
+        if (executionIsSql) {
+          command.focus();
         }
         break;
       }

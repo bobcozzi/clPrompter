@@ -146,6 +146,7 @@ export interface DedicatedJobState {
 export interface EffectiveJobConfig {
     currentLibrary?: string;
     libraryList: string[];
+    wildcardLibraryOrder?: string[];
 }
 
 const LIBRARY_LIST_INFO_SQL = `
@@ -508,6 +509,8 @@ export class CommandEntryJobManager {
 
             const libraryList: string[] = [];
             const seen = new Set<string>();
+            const wildcardLibraryOrder: string[] = [];
+            const wildcardSeen = new Set<string>();
             let currentLibrary: string | undefined;
 
             for (const row of rows) {
@@ -519,6 +522,17 @@ export class CommandEntryJobManager {
                 const type = this.readRowString(row, 'TYPE')?.trim().toUpperCase();
                 if (type === 'CURRENT') {
                     currentLibrary = schemaName;
+                }
+
+                // Preserve the IBM i sequence as returned by LIBRARY_LIST_INFO and
+                // de-duplicate by first occurrence across all portions (SYSTEM/CURRENT/PRODUCT/USER).
+                // This naturally enforces precedence by ordinal position, including PRODUCT duplicates.
+                if (!wildcardSeen.has(schemaName)) {
+                    wildcardSeen.add(schemaName);
+                    wildcardLibraryOrder.push(schemaName);
+                }
+
+                if (type === 'CURRENT') {
                     continue;
                 }
 
@@ -530,7 +544,8 @@ export class CommandEntryJobManager {
 
             return {
                 currentLibrary: currentLibrary ?? fallback.currentLibrary,
-                libraryList: libraryList.length > 0 ? libraryList : fallback.libraryList
+                libraryList: libraryList.length > 0 ? libraryList : fallback.libraryList,
+                wildcardLibraryOrder: wildcardLibraryOrder.length > 0 ? wildcardLibraryOrder : fallback.wildcardLibraryOrder
             };
         } catch (error) {
             this.output?.appendLine(`[Cmd Entry] Failed to resolve job-aware library configuration (${error instanceof Error ? error.message : String(error)}). Falling back to connection config.`);
@@ -662,9 +677,15 @@ export class CommandEntryJobManager {
                 .filter((entry): entry is string => Boolean(entry))
             : [];
 
+        const wildcardLibraryOrder = [...new Set([
+            ...libraryList,
+            ...(currentLibrary ? [currentLibrary] : [])
+        ])];
+
         return {
             currentLibrary,
-            libraryList
+            libraryList,
+            wildcardLibraryOrder
         };
     }
 

@@ -4,15 +4,17 @@ All notable changes to this project are documented in this file.
 
 ## [Preview of CL Command Entry]
 
-## [1.0.32] - 2026-09-13
+## [1.0.33] - 2026-09-13
 
 ### What's New
-- Command Entry now supports command selection from wildcard input, including IBM i style `GO CMD...` shortcuts.
-- Command lookup now uses the active connection's routed configuration so the library list matches the current SQL job context.
+- Command Entry now supports command selection from wildcard input, including generic command names `dsp*` or the IBM i style `GO CMD...`.
+- Wildcard command lookup (`WRK*`, `DSP*`, or `GO CMD...`) resolves command names from the active routed SQL job library context and follows IBM i library-list ordinal precedence across System, Current, Product, and User portions, with first occurrence winning for duplicate libraries. This applies to wildcard selection only; normal CL command execution routing is unchanged.
 
 ### What's Fixed
 - Dismissing the command picker now restores focus to the command entry input.
-- `GO CMDWRK*` now behaves like `GO CMDWRK` by normalizing the trailing asterisk before lookup.
+- `GO CMDWRK*` behaves like `GO CMDWRK` by normalizing (ignoring) the trailing asterisk before lookup.
+- After an SQL statement is run, the keyboard focus returns to the Command Entry input textarea.
+- Activating or re-focusing the CL Command Entry panel now places keyboard focus in the Command Entry input textarea.
 
 ## [1.0.31] - 2026-09-11
 
