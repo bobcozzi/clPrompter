@@ -239,8 +239,9 @@ if [ "$OPENVSX_ONLY" = true ]; then
   echo "⏭️  Open VSX-only mode enabled: skipping VS Code Marketplace publish."
 else
   echo "📤 Publishing to VS Code Marketplace..."
-  MAX_PUBLISH_ATTEMPTS=1
-  PUBLISH_ATTEMPT_TIMEOUT_SECONDS="${PUBLISH_ATTEMPT_TIMEOUT_SECONDS:-60}"
+  MAX_PUBLISH_ATTEMPTS="${MAX_PUBLISH_ATTEMPTS:-3}"
+  PUBLISH_ATTEMPT_TIMEOUT_SECONDS="${PUBLISH_ATTEMPT_TIMEOUT_SECONDS:-180}"
+  PUBLISH_RETRY_DELAY_SECONDS="${PUBLISH_RETRY_DELAY_SECONDS:-20}"
   PUBLISH_COOLDOWN_SECONDS="${PUBLISH_COOLDOWN_SECONDS:-1500}"
   PUBLISH_COOLDOWN_STATE_FILE="${TMPDIR:-/tmp}/clprompter-marketplace-publish.state"
   PUBLISH_NODE_DEBUG_FLAGS=""
@@ -274,6 +275,7 @@ else
   fi
 
   for ATTEMPT in $(seq 1 "$MAX_PUBLISH_ATTEMPTS"); do
+    TRANSIENT_FAILURE=false
     echo "📡 Marketplace publish attempt ${ATTEMPT}/${MAX_PUBLISH_ATTEMPTS}..."
 
     # Publish the already-validated VSIX to avoid re-packaging drift between attempts.
@@ -288,6 +290,20 @@ else
     cat "$PUBLISH_LOG_FILE"
 
     if [ "$PUBLISH_EXIT_CODE" -eq 124 ] || grep -Eiq "request timeout|timed out|etimedout|econnreset|eai_again|socket hang up|temporar|service unavailable|too many requests|http[[:space:]]*429|http[[:space:]]*500|http[[:space:]]*502|http[[:space:]]*503|http[[:space:]]*504|_apis/gallery" "$PUBLISH_LOG_FILE"; then
+      TRANSIENT_FAILURE=true
+    fi
+
+    if [ "$ATTEMPT" -lt "$MAX_PUBLISH_ATTEMPTS" ]; then
+      if [ "$TRANSIENT_FAILURE" = true ]; then
+        echo "⚠️  Transient Marketplace failure detected. Retrying in ${PUBLISH_RETRY_DELAY_SECONDS}s..."
+      else
+        echo "⚠️  Marketplace publish failed. Retrying in ${PUBLISH_RETRY_DELAY_SECONDS}s..."
+      fi
+      sleep "$PUBLISH_RETRY_DELAY_SECONDS"
+      continue
+    fi
+
+    if [ "$TRANSIENT_FAILURE" = true ]; then
       write_cooldown_state "timeout-or-transient"
     fi
 
@@ -299,9 +315,9 @@ fi
 
 if [ "$PUBLISH_SUCCESS" != true ]; then
   if [ "$PUBLISH_ONLY" = true ]; then
-    echo "❌ Marketplace publish failed after 1 attempt."
+    echo "❌ Marketplace publish failed after ${MAX_PUBLISH_ATTEMPTS} attempt(s)."
   else
-    echo "❌ Marketplace publish failed after 1 attempt. Rolling back tag..."
+    echo "❌ Marketplace publish failed after ${MAX_PUBLISH_ATTEMPTS} attempt(s). Rolling back tag..."
     git tag -d "$TAG"
     git push --delete origin "$TAG"
   fi
