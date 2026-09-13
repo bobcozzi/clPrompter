@@ -497,7 +497,7 @@ export class CommandEntryJobManager {
         return result.rows;
     }
 
-    async getEffectiveConfig(connection: IBMi): Promise<EffectiveJobConfig> {
+    async getConfig(connection: IBMi): Promise<EffectiveJobConfig> {
         const fallback = this.connectionConfigFallback(connection);
 
         try {

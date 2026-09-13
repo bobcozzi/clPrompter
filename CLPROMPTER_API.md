@@ -65,7 +65,7 @@ In addition to CLPrompter and CLPrompterCallback, the extension now exports `mul
 - restartDedicatedJob()
 - cancelDedicatedJobSql()
 - runSql(statements, options)
-- getEffectiveConfig()
+- getConfig()
 - executeCommandEntry(command, mode, executionId?)
 - closeSqlSession(sessionId?)
 - loadMoreSql(sessionId, fetchAll?, fetchRowsOverride?)

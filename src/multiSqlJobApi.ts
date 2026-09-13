@@ -17,7 +17,7 @@ export interface MultiSqlJobApiV1 {
     restartDedicatedJob(): Promise<string | undefined>;
     cancelDedicatedJobSql(): Promise<void>;
     runSql(statements: string | string[], options?: MultiSqlJobRunSqlOptions): Promise<Record<string, unknown>[]>;
-    getEffectiveConfig(): Promise<EffectiveJobConfig>;
+    getConfig(): Promise<EffectiveJobConfig>;
     executeCommandEntry(command: string, mode: CommandExecutionMode, executionId?: string): Promise<CommandExecution>;
     closeSqlSession(sessionId?: string): Promise<void>;
     loadMoreSql(sessionId: string, fetchAll?: boolean, fetchRowsOverride?: number): Promise<SqlResultPayload>;
@@ -81,9 +81,9 @@ export function createMultiSqlJobApi(
             return jobManager.runSQL(connection, statements, options);
         },
 
-        async getEffectiveConfig(): Promise<EffectiveJobConfig> {
+        async getConfig(): Promise<EffectiveJobConfig> {
             const connection = requireConnection();
-            return jobManager.getEffectiveConfig(connection);
+            return jobManager.getConfig(connection);
         },
 
         async executeCommandEntry(
