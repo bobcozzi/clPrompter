@@ -179,6 +179,13 @@ For all three save-location settings, enter `${tmpdir}`, `${userHome}`, `${works
 - [Source Code](https://github.com/bobcozzi/clPrompter)
 - [Issues](https://github.com/bobcozzi/clPrompter/issues)
 
+## Contributors
+
+Thanks so much to everyone [who has contributed](https://github.com/bobcozzi/clPrompter/graphs/contributors).
+
+- [@bobcozzi](https://github.com/bobcozzi)
+- [@sebjulliand](https://github.com/sebjulliand)
+
 ## Contributing
 
 Contributions are welcome! To contribute:
