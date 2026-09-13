@@ -16,6 +16,8 @@ const SQL_SNIPPETS_ORDER_KEY = 'commandEntry.sqlSnippets.order';
 const SQL_SNIPPETS_HIDDEN_BUILTINS_KEY = 'commandEntry.sqlSnippets.hiddenBuiltins';
 const SQL_SNIPPETS_DEFAULTS_MERGED_VERSION_KEY = 'commandEntry.sqlSnippets.defaultsMergedVersion';
 const SQL_SNIPPETS_MAX = 200;
+const CMD_ENTRY_HELP_PANEL_TYPE = 'clprompter.commandEntryHelp';
+const CMD_ENTRY_HELP_PANEL_TITLE = 'CL Command Entry Help';
 export const DEFAULT_CODE_SNIPPET_GROUPS = ['Job Info', 'Admin', 'SPOOLED Files'] as const;
 
 type CommandEntryRequest =
@@ -34,6 +36,7 @@ type CommandEntryRequest =
     | { type: 'refreshCodeSnippets' }
     | { type: 'importCodeSnippets' }
     | { type: 'exportCodeSnippets' }
+    | { type: 'openCmdEntryHelp' }
     | { type: 'openCmdEntrySettings' }
     | { type: 'openSnippetsMenu' }
     | { type: 'openSqlSnippetsMenu' }
@@ -101,15 +104,18 @@ interface SnippetTemplateContext {
     sqlJobNumber?: string;
     currentUser?: string;
     currentLibrary?: string;
+    userSBSList?: string;
 }
 
 
 
 
+// Command Entry uses two distinct user-facing log terms:
+// History Log = recalled command history, and Joblog = the IBM i job message log.
 const BUILT_IN_SQL_SNIPPETS: ReadonlyArray<CommandEntrySqlSnippet> = [
     {
         id: 'builtin.lastest-joblog',
-        label: 'Joblog: Last 200 msgs',
+        label: 'Joblog (last 200 msgs)',
         stmt: [
             'SELECT ORDINAL_POSITION as SEQNBR,',
             '       MESSAGE_ID as MSGID, SEVERITY as SEV, ',
@@ -133,7 +139,7 @@ const BUILT_IN_SQL_SNIPPETS: ReadonlyArray<CommandEntrySqlSnippet> = [
     },
     {
         id: 'builtin.full-joblog',
-        label: 'Joblog: Full',
+        label: 'Joblog (full)',
         stmt: [
             'SELECT ORDINAL_POSITION as SEQNBR,',
             '       MESSAGE_ID as MSGID, SEVERITY as SEV, ',
@@ -196,7 +202,7 @@ const BUILT_IN_SQL_SNIPPETS: ReadonlyArray<CommandEntrySqlSnippet> = [
             '       SIZE, FORM_TYPE, OUTPUT_QUEUE_LIBRARY AS OUTQ_LIB, OUTPUT_QUEUE AS OUTQ_NAME,',
             '       ASP_NUMBER, SYSTEM',
             "FROM TABLE(QSYS2.SPOOLED_FILE_INFO(JOB_NAME => '${sqlJobId}' ))",
-            "WHERE SPOOLED_FILE_NAME <> 'QPRINT' AND JOB_NAME <> 'MAPEPIRE'",
+            "WHERE (SPOOLED_FILE_NAME <> 'QPRINT' AND JOB_NAME <> 'MAPEPIRE')",
             'ORDER BY CREATION_TIMESTAMP'
         ].join(' '),
         group: 'Job Info',
@@ -204,13 +210,14 @@ const BUILT_IN_SQL_SNIPPETS: ReadonlyArray<CommandEntrySqlSnippet> = [
         source: 'built-in'
     },
     {
-        id: 'builtin.current-library-objects',
-        label: 'Active Jobs (Slow: All Info)',
+        id: 'builtin.active-jobs-slow',
+        label: 'Active Jobs (Detailed)',
         stmt: [
-            'SELECT JOB_NAME, SUBSYSTEM, AUTHORIZATION_NAME as USER_NAME, FUNCTION_TYPE, "FUNCTION",',
-            '       JOB_STATUS, MEMORY_POOL, TEMPORARY_STORAGE, CPU_TIME, TOTAL_DISK_IO_COUNT,',
-            '       OUTPUT_QUEUE, JOB_USER_IDENTITY, PAGE_FAULTS, DATABASE_LOCK_WAITS, OPEN_FILES',
-            "FROM TABLE(QSYS2.ACTIVE_JOB_INFO(DETAILED_INFO => 'ALL'))",
+            'SELECT aj.JOB_NAME, aj.SUBSYSTEM, aj.AUTHORIZATION_NAME as USER_NAME,',
+            " trim(aj.FUNCTION_TYPE) concat '-' concat aj.FUNCTION as FUNCTION_INFO,",
+            ' JOB_STATUS, MEMORY_POOL, TEMPORARY_STORAGE, CPU_TIME, TOTAL_DISK_IO_COUNT',
+            ' , OUTPUT_QUEUE, JOB_USER_IDENTITY, PAGE_FAULTS, DATABASE_LOCK_WAITS, OPEN_FILES',
+            "FROM TABLE(QSYS2.ACTIVE_JOB_INFO(DETAILED_INFO => 'ALL', SUBSYSTEM_LIST_FILTER => '${userSBSList}')) aj",
             'ORDER BY ORDINAL_POSITION'
         ].join(' '),
         group: 'Admin',
@@ -218,12 +225,13 @@ const BUILT_IN_SQL_SNIPPETS: ReadonlyArray<CommandEntrySqlSnippet> = [
         source: 'built-in'
     },
     {
-        id: 'builtin.active-jobs-all',
+        id: 'builtin.active-jobs-usersbs',
         label: 'Active Jobs (Faster)',
         stmt: [
-            'SELECT JOB_NAME, SUBSYSTEM, AUTHORIZATION_NAME as USER_NAME, FUNCTION_TYPE, "FUNCTION",',
-            '       JOB_STATUS, MEMORY_POOL, TEMPORARY_STORAGE, CPU_TIME, TOTAL_DISK_IO_COUNT',
-            'FROM TABLE(QSYS2.ACTIVE_JOB_INFO())',
+            'SELECT aj.JOB_NAME, aj.SUBSYSTEM, aj.AUTHORIZATION_NAME as USER_NAME,',
+            " trim(aj.FUNCTION_TYPE) concat '-' concat aj.FUNCTION as FUNCTION_INFO,",
+            ' JOB_STATUS, MEMORY_POOL, TEMPORARY_STORAGE, CPU_TIME, TOTAL_DISK_IO_COUNT',
+            "FROM TABLE(QSYS2.ACTIVE_JOB_INFO(SUBSYSTEM_LIST_FILTER => '${userSBSList}')) aj",
             'ORDER BY ORDINAL_POSITION'
         ].join(' '),
         group: 'Admin',
@@ -232,11 +240,12 @@ const BUILT_IN_SQL_SNIPPETS: ReadonlyArray<CommandEntrySqlSnippet> = [
     },
     {
         id: 'builtin.active-jobs-qinter',
-        label: 'Active Jobs (QINTER)',
+        label: 'Active Jobs sbs(QINTER)',
         stmt: [
-            'SELECT JOB_NAME, SUBSYSTEM, AUTHORIZATION_NAME as USER_NAME, FUNCTION_TYPE, "FUNCTION",',
-            '       JOB_STATUS, MEMORY_POOL, TEMPORARY_STORAGE, CPU_TIME, TOTAL_DISK_IO_COUNT',
-            "FROM TABLE(QSYS2.ACTIVE_JOB_INFO(SUBSYSTEM_LIST_FILTER => 'QINTER'))",
+            'SELECT aj.JOB_NAME, aj.SUBSYSTEM, aj.AUTHORIZATION_NAME as USER_NAME,',
+            " trim(aj.FUNCTION_TYPE) concat '-' concat aj.FUNCTION as FUNCTION_INFO,",
+            ' JOB_STATUS, MEMORY_POOL, TEMPORARY_STORAGE, CPU_TIME, TOTAL_DISK_IO_COUNT',
+            "FROM TABLE(QSYS2.ACTIVE_JOB_INFO(SUBSYSTEM_LIST_FILTER => 'QINTER')) aj",
             'ORDER BY ORDINAL_POSITION'
         ].join(' '),
         group: 'Admin',
@@ -244,16 +253,31 @@ const BUILT_IN_SQL_SNIPPETS: ReadonlyArray<CommandEntrySqlSnippet> = [
         source: 'built-in'
     },
     {
-        id: 'builtin.active-jobs-qinter',
-        label: 'Active Jobs (QUSRWRK)',
+        id: 'builtin.active-jobs-qusrwrk',
+        label: 'Active Jobs sbs(QUSRWRK)',
         stmt: [
-            'SELECT JOB_NAME, SUBSYSTEM, AUTHORIZATION_NAME as USER_NAME, FUNCTION_TYPE, "FUNCTION",',
-            '       JOB_STATUS, MEMORY_POOL, TEMPORARY_STORAGE, CPU_TIME, TOTAL_DISK_IO_COUNT',
-            "FROM TABLE(QSYS2.ACTIVE_JOB_INFO(SUBSYSTEM_LIST_FILTER => 'QUSRWRK'))",
+            'SELECT aj.JOB_NAME, aj.SUBSYSTEM, aj.AUTHORIZATION_NAME as USER_NAME,',
+            " trim(aj.FUNCTION_TYPE) concat '-' concat aj.FUNCTION as FUNCTION_INFO,",
+            ' JOB_STATUS, MEMORY_POOL, TEMPORARY_STORAGE, CPU_TIME, TOTAL_DISK_IO_COUNT',
+            "FROM TABLE(QSYS2.ACTIVE_JOB_INFO(SUBSYSTEM_LIST_FILTER => 'QUSRWRK')) aj",
             'ORDER BY ORDINAL_POSITION'
         ].join(' '),
         group: 'Admin',
         order: 40,
+        source: 'built-in'
+    },
+    {
+        id: 'builtin.active-jobs-qhttpsvr',
+        label: 'Active Jobs sbs(QHTTPSVR)',
+        stmt: [
+            'SELECT aj.JOB_NAME, aj.SUBSYSTEM, aj.AUTHORIZATION_NAME as USER_NAME,',
+            " trim(aj.FUNCTION_TYPE) concat '-' concat aj.FUNCTION as FUNCTION_INFO,",
+            ' JOB_STATUS, MEMORY_POOL, TEMPORARY_STORAGE, CPU_TIME, TOTAL_DISK_IO_COUNT',
+            "FROM TABLE(QSYS2.ACTIVE_JOB_INFO(SUBSYSTEM_LIST_FILTER => 'QHTTPSVR')) aj",
+            'ORDER BY ORDINAL_POSITION'
+        ].join(' '),
+        group: 'Admin',
+        order: 50,
         source: 'built-in'
     },
     {
@@ -310,6 +334,117 @@ function extractGoCommandName(command: string): string | undefined {
     return commandName || undefined;
 }
 
+function resolvePromptPrefixedCommand(command: string): { promptCommand?: string; syntaxError?: string } | undefined {
+    const text = String(command ?? '');
+    const trimmedStart = text.trimStart();
+    const hasLeadingQuestion = trimmedStart.startsWith('?');
+    const withoutLeadingQuestion = hasLeadingQuestion ? trimmedStart.slice(1).trimStart() : trimmedStart;
+
+    if (hasLeadingQuestion && !withoutLeadingQuestion) {
+        return { promptCommand: '' };
+    }
+
+    const explicitPrefixMatch = withoutLeadingQuestion.match(/^(cl|sql)\s*:\s*([\s\S]*)$/i);
+    if (explicitPrefixMatch) {
+        const prefix = explicitPrefixMatch[1].toUpperCase();
+        const remainder = String(explicitPrefixMatch[2] || '').trimStart();
+        if (!remainder.startsWith('?') && !hasLeadingQuestion) {
+            return undefined;
+        }
+
+        const commandAfterQuestion = remainder.startsWith('?')
+            ? remainder.slice(1).trimStart()
+            : remainder;
+        if (prefix === 'SQL') {
+            // Preserve SQL-prefix intent so prompt path can report the standard SQL prompt restriction.
+            return { promptCommand: `SQL: ${commandAfterQuestion}`.trim() };
+        }
+
+        return { promptCommand: commandAfterQuestion };
+    }
+
+    const genericLabelMatch = withoutLeadingQuestion.match(/^([^:\s][^:]*)\s*:\s*([\s\S]*)$/);
+    if (genericLabelMatch) {
+        const remainder = String(genericLabelMatch[2] || '').trimStart();
+        if (!remainder.startsWith('?') && !hasLeadingQuestion) {
+            return undefined;
+        }
+        return {
+            promptCommand: remainder.startsWith('?')
+                ? remainder.slice(1).trimStart()
+                : remainder
+        };
+    }
+
+    if (hasLeadingQuestion) {
+        return { promptCommand: withoutLeadingQuestion };
+    }
+
+    return undefined;
+}
+
+function splitUserCommandLabel(command: string): { labelPrefix?: string; commandText: string } {
+    const text = String(command ?? '');
+    const trimmedStart = text.trimStart();
+    const withoutLeadingQuestion = trimmedStart.startsWith('?') ? trimmedStart.slice(1).trimStart() : trimmedStart;
+
+    // Treat CL:/SQL: as execution prefixes, not user labels.
+    if (/^(?:cl|sql)\s*:/i.test(withoutLeadingQuestion)) {
+        return { commandText: withoutLeadingQuestion };
+    }
+
+    const genericLabelMatch = withoutLeadingQuestion.match(/^([^:\s][^:]*)\s*:\s*([\s\S]*)$/);
+    if (!genericLabelMatch) {
+        return { commandText: withoutLeadingQuestion };
+    }
+
+    const label = String(genericLabelMatch[1] || '').trim();
+    const commandText = String(genericLabelMatch[2] || '');
+    if (!label) {
+        return { commandText: withoutLeadingQuestion };
+    }
+
+    return {
+        labelPrefix: `${label}: `,
+        commandText
+    };
+}
+
+function applyUserCommandLabel(command: string, labelPrefix?: string): string {
+    const normalized = String(command ?? '').trimStart();
+    if (!labelPrefix) {
+        return normalized;
+    }
+    return `${labelPrefix}${normalized}`;
+}
+
+function hasLeadingLabelOrPrefix(command: string): boolean {
+    const trimmed = String(command ?? '').trimStart();
+    return /^(?:cl|sql)\s*:/i.test(trimmed) || /^[^:\s][^:]*\s*:/.test(trimmed);
+}
+
+function normalizeSnippetSubsystemList(rawValue: unknown): string {
+    const raw = String(rawValue ?? '').trim();
+    if (!raw) {
+        return '';
+    }
+
+    const tokens = raw
+        .split(/[\s,;:]+/)
+        .map((token) => token.trim().toUpperCase())
+        .filter((token) => token.length > 0);
+
+    if (tokens.length === 0) {
+        return '';
+    }
+
+    if (tokens.length === 1 && (tokens[0] === '*ALL' || tokens[0] === '*NONE')) {
+        return '';
+    }
+
+    return tokens.join(',');
+}
+
 /** Persistent panel webview. It deliberately does not own an IBM i connection. */
 export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
     public static readonly viewType = 'clprompter.commandEntryView.main';
@@ -320,6 +455,7 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
     private clearInputOnFirstReady = true;
     private clearHistoryOnFirstReady = true;
     private lastPostedSqlJobId: string | undefined;
+    private cmdEntryHelpPanel: vscode.WebviewPanel | undefined;
     private readonly output: vscode.OutputChannel;
     private readonly jobManager: CommandEntryJobManager;
     private readonly service: CommandEntryService;
@@ -336,7 +472,7 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
         }
     ) {
         this.output = dependencies?.output ?? vscode.window.createOutputChannel('CLPROMPTER');
-        this.jobManager = dependencies?.jobManager ?? new CommandEntryJobManager(this.output);
+        this.jobManager = dependencies?.jobManager ?? new CommandEntryJobManager(this.output, this.context);
         this.service = dependencies?.service ?? new CommandEntryService(this.jobManager);
         configureSqlResultPanelAssets(this.context.extensionUri);
 
@@ -491,12 +627,18 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
     async dispose(): Promise<void> {
         await this.service.closeSqlSession();
         setSqlResultPanelRequestHandler(undefined);
+        this.cmdEntryHelpPanel?.dispose();
+        this.cmdEntryHelpPanel = undefined;
         this.onDidChangeCodeSnippetsEmitter.dispose();
         await this.jobManager.dispose();
         this.output.dispose();
     }
 
-    private async handleSqlResultPanelRequest(request: { type: 'loadMore' | 'loadAll' | 'prefetch' | 'closeSession'; sessionId: string } | { type: 'rerunSql'; statement: string }) {
+    private async handleSqlResultPanelRequest(
+        request:
+            | { type: 'loadMore' | 'loadAll' | 'prefetch' | 'closeSession'; sessionId: string }
+            | { type: 'rerunSql'; statement: string; resultTitle?: string }
+    ) {
         if (request.type === 'rerunSql') {
             const statement = String(request.statement || '').trim();
             if (!statement) {
@@ -508,7 +650,9 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
                 throw new Error('Not connected to IBM i, or the SQL runner is unavailable.');
             }
 
-            const execution = await this.service.execute(connection, `SQL: ${statement}`, '*RUN');
+            const execution = await this.service.execute(connection, `SQL: ${statement}`, '*RUN', undefined, {
+                resultTitle: request.resultTitle
+            });
             if (execution.failure || !execution.sqlResult) {
                 throw new Error(execution.failure || 'Unable to rerun SQL statement.');
             }
@@ -535,7 +679,9 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
         switch (message.type) {
             case 'ready':
                 await this.context.workspaceState.update('clprompter.commandEntryTouchedThisSession', true);
-                await vscode.commands.executeCommand('clprompter.codeSnippet.resolvePinnedVisibility');
+                if (this.getConnection()) {
+                    await vscode.commands.executeCommand('clprompter.codeSnippet.restoreVisibilityFromSetting');
+                }
                 await this.applyDefaultSnippetMergeOnVersionUpdateIfNeeded();
                 const skipStartupClearForVsCodeUpdate = this.clearHistoryOnFirstReady && await this.consumeSkipHistoryClearOnNextReady();
                 const clearHistoryOnStartup = this.clearHistoryOnFirstReady
@@ -630,6 +776,9 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
                 break;
             case 'exportCodeSnippets':
                 await this.exportCodeSnippetsToJson();
+                break;
+            case 'openCmdEntryHelp':
+                await this.openCmdEntryHelpPanel();
                 break;
             case 'openCmdEntrySettings':
                 await vscode.commands.executeCommand('workbench.action.openSettings', 'clPrompter.cmdEntry');
@@ -779,6 +928,7 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
     }
 
     private async displayJoblogForSqlJob(sqlJobId: string): Promise<void> {
+        // Joblog here means the IBM i job message log for the active SQL job.
         const qualifiedJob = sqlJobId.trim();
         if (!qualifiedJob) {
             this.post({ type: 'notice', message: vscode.l10n.t('No SQL job ID is available.') });
@@ -818,7 +968,9 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
         }
 
         const command = `SQL: ${resolution.resolved}`;
-        const execution = await this.service.execute(connection, command, '*RUN');
+        const execution = await this.service.execute(connection, command, '*RUN', undefined, {
+            resultTitle: fullJoblogSnippet.label
+        });
         if (execution.failure) {
             this.output.appendLine(`[Cmd Entry] Display Joblog failed for ${qualifiedJob}: ${execution.failure}`);
             this.post({ type: 'notice', message: vscode.l10n.t('Display Joblog failed: {failure}', { failure: execution.failure }) });
@@ -832,6 +984,7 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
     }
 
     private async showHistoryPicker(): Promise<void> {
+        // History Log is the command recall list, separate from the IBM i job message log.
         const history = this.history();
         if (history.length === 0) {
             this.post({ type: 'notice', message: vscode.l10n.t('No command history is available yet.') });
@@ -913,14 +1066,39 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
     }
 
     private async prompt(command: string): Promise<void> {
-        if (!command.trim()) { this.post({ type: 'notice', message: vscode.l10n.t('Enter a CL command to prompt.') }); return; }
-        if (isSqlCommandText(command)) {
+        const labeledCommand = splitUserCommandLabel(command);
+        const promptPrefixResolution = resolvePromptPrefixedCommand(command);
+        let normalizedCommand = labeledCommand.commandText;
+
+        if (promptPrefixResolution !== undefined) {
+            if (promptPrefixResolution.syntaxError) {
+                this.post({ type: 'notice', message: vscode.l10n.t(promptPrefixResolution.syntaxError) });
+                return;
+            }
+
+            normalizedCommand = String(promptPrefixResolution.promptCommand || '');
+            const normalizedForDisplay = applyUserCommandLabel(normalizedCommand, labeledCommand.labelPrefix);
+            if (normalizedForDisplay !== command) {
+                this.post({ type: 'setCommand', command: normalizedForDisplay });
+            }
+        }
+
+        const commandForPrompter = applyUserCommandLabel(normalizedCommand, labeledCommand.labelPrefix);
+
+        if (!normalizedCommand.trim()) { this.post({ type: 'notice', message: vscode.l10n.t('Enter a CL command to prompt.') }); return; }
+        if (isSqlCommandText(normalizedCommand)) {
             this.post({ type: 'notice', message: vscode.l10n.t('Prompt is only available for CL commands. Run SQL statements directly.') });
             return;
         }
         try {
-            const result = await CLPrompter(this.context.extensionUri, command);
-            if (result && result !== command) { this.post({ type: 'setCommand', command: result }); }
+            const result = await CLPrompter(this.context.extensionUri, commandForPrompter);
+            const promptedCommand = result && result.trim().length > 0 ? result : commandForPrompter;
+            const promptedForDisplay = hasLeadingLabelOrPrefix(promptedCommand)
+                ? String(promptedCommand).trimStart()
+                : applyUserCommandLabel(promptedCommand, labeledCommand.labelPrefix);
+            if (promptedForDisplay !== command) {
+                this.post({ type: 'setCommand', command: promptedForDisplay });
+            }
         } catch (error) {
             this.output.appendLine(`[Cmd Entry] Prompt failed: ${String(error)}`);
             this.post({ type: 'notice', message: vscode.l10n.t('Unable to open the CL prompter. See CLPROMPTER Output for details.') });
@@ -934,8 +1112,35 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
     private async run(
         command: string,
         mode: CommandExecutionMode,
-        options: { sourceType?: 'user' | 'snippet'; logToHistory?: boolean; logToCommandEntryLog?: boolean } = {}
+        options: {
+            sourceType?: 'user' | 'snippet';
+            logToHistory?: boolean;
+            logToCommandEntryLog?: boolean;
+            resultTitle?: string;
+        } = {}
     ): Promise<void> {
+        const promptPrefixResolution = resolvePromptPrefixedCommand(command);
+        if (promptPrefixResolution !== undefined) {
+            if (promptPrefixResolution.syntaxError) {
+                this.post({ type: 'notice', message: vscode.l10n.t(promptPrefixResolution.syntaxError) });
+                return;
+            }
+
+            const promptPrefixedCommand = String(promptPrefixResolution.promptCommand || '');
+            if (!promptPrefixedCommand.trim()) {
+                this.post({ type: 'notice', message: vscode.l10n.t('Enter a CL command to prompt.') });
+                return;
+            }
+            if (isSqlCommandText(promptPrefixedCommand)) {
+                this.post({ type: 'notice', message: vscode.l10n.t('Prompt is only available for CL commands. Run SQL statements directly.') });
+                return;
+            }
+
+            // Mirror 5250/F4 behavior: treat leading ? as a prompt request, not execution.
+            await this.prompt(command);
+            return;
+        }
+
         if (this.running) { return; }
         if (!command.trim()) { this.post({ type: 'notice', message: vscode.l10n.t('Enter a CL command to run.') }); return; }
 
@@ -1024,7 +1229,9 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
         });
 
         try {
-            const execution = await this.service.execute(connection, command, mode, this.activeExecutionId);
+            const execution = await this.service.execute(connection, command, mode, this.activeExecutionId, {
+                resultTitle: options.resultTitle
+            });
             const executionForPost = isSql
                 ? { ...execution, command: ensureSqlPrefixForRecall(execution.command, true) }
                 : execution;
@@ -1064,7 +1271,7 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
         }
 
         if (!this.jobManager.isDedicatedUsable(connection)) {
-            this.post({ type: 'notice', message: vscode.l10n.t('Reconnect Server Job is only available when using Mapepire server mode and dedicated SQL job mode.') });
+            this.post({ type: 'notice', message: vscode.l10n.t('Reconnect Server Job is only available when using Mapepire server mode and private SQL job mode.') });
             return;
         }
 
@@ -1072,7 +1279,7 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
             const sqlJobId = await this.jobManager.restartJob(connection);
             this.refreshSqlJobId(connection);
             this.postJobCapabilities();
-            this.post({ type: 'notice', message: sqlJobId ? vscode.l10n.t('Reconnected dedicated SQL job {jobId}.', { jobId: sqlJobId }) : vscode.l10n.t('Reconnected dedicated SQL job.') });
+            this.post({ type: 'notice', message: sqlJobId ? vscode.l10n.t('Reconnected private SQL job {jobId}.', { jobId: sqlJobId }) : vscode.l10n.t('Reconnected private SQL job.') });
         } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
             this.output.appendLine(`[Cmd Entry] Reconnect Server Job failed: ${message}`);
@@ -1088,21 +1295,21 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
         }
 
         if (!this.jobManager.isDedicatedUsable(connection)) {
-            this.post({ type: 'notice', message: vscode.l10n.t('Cancel SQL Job is only available in dedicated SQL job mode.') });
+            this.post({ type: 'notice', message: vscode.l10n.t('Cancel SQL Job is only available in private SQL job mode.') });
             this.postJobCapabilities();
             return;
         }
 
         const sqlJobId = this.currentSqlJobId(connection);
         if (!sqlJobId) {
-            this.post({ type: 'notice', message: vscode.l10n.t('No dedicated SQL job ID is available to cancel.') });
+            this.post({ type: 'notice', message: vscode.l10n.t('No private SQL job ID is available to cancel.') });
             this.postJobCapabilities();
             return;
         }
 
         try {
             await this.jobManager.cancelActive(connection);
-            this.output.appendLine(`[Cmd Entry] Manual cancel requested for dedicated SQL job ${sqlJobId}.`);
+            this.output.appendLine(`[Cmd Entry] Manual cancel requested for private SQL job ${sqlJobId}.`);
             this.post({ type: 'notice', message: vscode.l10n.t('Cancel SQL requested for job {jobId}. IBM i may ignore this when no interruptible SQL is active.', { jobId: sqlJobId }) });
         } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
@@ -1614,12 +1821,15 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
         const sqlJobId = this.currentSqlJobId(connection) || connection?.getSqlJobId?.();
         const parts = this.parseSqlJobParts(sqlJobId);
         const config = connection?.getConfig?.();
+        const extensionConfig = vscode.workspace.getConfiguration('clPrompter');
+        const userSBSList = normalizeSnippetSubsystemList(extensionConfig.get<string>('cmdEntrySnippetsACTSBS', ''));
         return {
             sqlJobId: parts.sqlJobId,
             sqlJobName: parts.sqlJobName,
             sqlJobNumber: parts.sqlJobNumber,
             currentUser: connection?.currentUser,
-            currentLibrary: typeof config?.currentLibrary === 'string' ? config.currentLibrary : undefined
+            currentLibrary: typeof config?.currentLibrary === 'string' ? config.currentLibrary : undefined,
+            userSBSList
         };
     }
 
@@ -1629,7 +1839,8 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
             sqlJobName: context.sqlJobName,
             sqlJobNumber: context.sqlJobNumber,
             currentUser: context.currentUser,
-            currentLibrary: context.currentLibrary
+            currentLibrary: context.currentLibrary,
+            userSBSList: context.userSBSList
         };
 
         const missing = new Set<string>();
@@ -1639,6 +1850,9 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
                 return `\${${key}}`;
             }
             const value = tokenValues[key];
+            if (key === 'userSBSList') {
+                return String(value ?? '').replace(/'/g, "''");
+            }
             if (!value || !String(value).trim()) {
                 missing.add(key);
                 return `\${${key}}`;
@@ -1680,7 +1894,8 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
             await this.run(resolution.resolved, '*RUN', {
                 sourceType: 'snippet',
                 logToHistory: this.shouldAddToHistory('snippet', sqlLike),
-                logToCommandEntryLog: this.shouldAddToCommandEntryLog('snippet', sqlLike)
+                logToCommandEntryLog: this.shouldAddToCommandEntryLog('snippet', sqlLike),
+                resultTitle: snippet.label
             });
         } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
@@ -1956,11 +2171,11 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
 
         // Create the dedicated job automatically
         try {
-            this.output.appendLine(`[Cmd Entry] Auto-initializing dedicated SQL job on panel startup...`);
+            this.output.appendLine(`[Cmd Entry] Auto-initializing private SQL job on panel startup...`);
             const sqlJobId = await this.jobManager.restartJob(connection);
             this.refreshSqlJobId(connection);
             if (sqlJobId) {
-                this.output.appendLine(`[Cmd Entry] Auto-initialized dedicated SQL job: ${sqlJobId}`);
+                this.output.appendLine(`[Cmd Entry] Auto-initialized private SQL job: ${sqlJobId}`);
             }
         } catch (error) {
             this.refreshSqlJobId(connection);
@@ -1989,16 +2204,33 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
             this.output.appendLine(`[Cmd Entry] SQL job display ID changed: ${this.lastPostedSqlJobId || '<none>'} -> ${sqlJobId || '<none>'}`);
         }
         this.lastPostedSqlJobId = sqlJobId;
-        console.log('[Cmd Entry][SqlJobDisplayRefresh] posting sqlJobId', {
-            sqlJobId: sqlJobId ?? '<none>',
-            connection: connection?.currentConnectionName ?? '<unknown>',
-            dedicatedEnabled: this.jobManager.isDedicatedEnabled(connection),
-            sharedJobId: connection?.getSqlJobId?.() ?? '<none>'
-        });
+
+        const debugEnabled = vscode.workspace.getConfiguration('clPrompter').get<boolean>('cmdEntryDebugLogging', false);
+        if (debugEnabled) {
+            console.log('[Cmd Entry][SqlJobDisplayRefresh] posting sqlJobId', {
+                sqlJobId: sqlJobId ?? '<none>',
+                connection: connection?.currentConnectionName ?? '<unknown>',
+                dedicatedEnabled: this.jobManager.isDedicatedEnabled(connection),
+                sharedJobId: connection?.getSqlJobId?.() ?? '<none>'
+            });
+        }
         this.post({ type: 'sqlJobId', sqlJobId });
     }
 
     private buildHistoryConnectionKey(connection = this.getConnection()): string {
+        if (!connection) {
+            return 'disconnected';
+        }
+
+        const host = String(connection.currentHost ?? (connection as any).host ?? '').trim().toLowerCase();
+        const user = String(connection.currentUser ?? (connection as any).username ?? '').trim().toLowerCase();
+        const port = String(connection.currentPort ?? (connection as any).port ?? '').trim();
+        const key = `${host}|${user}|${port}`;
+
+        return key.length > 0 ? key : 'disconnected';
+    }
+
+    private buildLegacyHistoryConnectionKey(connection = this.getConnection()): string {
         if (!connection) {
             return 'disconnected';
         }
@@ -2025,10 +2257,22 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
     }
 
     private history(connection = this.getConnection()): CommandEntryHistory[] {
+        // History Log entries are stored per connection scope so recall stays local to the active IBM i endpoint.
         const scopedKey = this.historyStorageKey(connection);
         const scopedHistory = this.context.globalState.get<CommandEntryHistory[] | undefined>(scopedKey);
         if (Array.isArray(scopedHistory)) {
             return scopedHistory;
+        }
+
+        // Compatibility fallback for older per-connection keys that included
+        // the connection name segment.
+        if (this.historyIsConnectionScoped()) {
+            const legacyScopedKey = `${HISTORY_KEY}.${this.buildLegacyHistoryConnectionKey(connection)}`;
+            const legacyScopedHistory = this.context.globalState.get<CommandEntryHistory[] | undefined>(legacyScopedKey);
+            if (Array.isArray(legacyScopedHistory)) {
+                void this.context.globalState.update(scopedKey, legacyScopedHistory.slice(0, MAX_HISTORY));
+                return legacyScopedHistory;
+            }
         }
 
         // One-time compatibility fallback for pre-connection-scoped history.
@@ -2070,6 +2314,53 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
         const history = this.history().filter(item => item.command !== entry.command || item.mode !== entry.mode);
         void this.setHistory([entry, ...history]);
     }
+
+    private async openCmdEntryHelpPanel(): Promise<void> {
+        if (this.cmdEntryHelpPanel) {
+            this.cmdEntryHelpPanel.reveal(vscode.ViewColumn.Beside, true);
+            return;
+        }
+
+        this.cmdEntryHelpPanel = vscode.window.createWebviewPanel(
+            CMD_ENTRY_HELP_PANEL_TYPE,
+            CMD_ENTRY_HELP_PANEL_TITLE,
+            vscode.ViewColumn.Beside,
+            {
+                enableScripts: false,
+                retainContextWhenHidden: true,
+                localResourceRoots: [
+                    vscode.Uri.joinPath(this.context.extensionUri, 'media'),
+                    vscode.Uri.joinPath(this.context.extensionUri, 'images')
+                ]
+            }
+        );
+
+        this.cmdEntryHelpPanel.onDidDispose(() => {
+            this.cmdEntryHelpPanel = undefined;
+        });
+
+        this.cmdEntryHelpPanel.webview.html = await this.buildCmdEntryHelpHtml(this.cmdEntryHelpPanel.webview);
+    }
+
+    private async buildCmdEntryHelpHtml(webview: vscode.Webview): Promise<string> {
+        const templateUri = vscode.Uri.joinPath(this.context.extensionUri, 'media', 'cmdEntryHelp.html');
+        const screenshotUri = webview.asWebviewUri(
+            vscode.Uri.joinPath(this.context.extensionUri, 'images', 'cmdEntry_FullPanel.png')
+        ).toString();
+
+        try {
+            const bytes = await vscode.workspace.fs.readFile(templateUri);
+            const template = Buffer.from(bytes).toString('utf8');
+            return template
+                .split('{{CSP_SOURCE}}').join(webview.cspSource)
+                .split('{{HELP_TITLE}}').join(CMD_ENTRY_HELP_PANEL_TITLE)
+                .split('{{IMG_CMDENTRY_FULL_PANEL}}').join(screenshotUri);
+        } catch (error) {
+            this.output.appendLine(`[Cmd Entry] Failed to load cmdEntry help template: ${error instanceof Error ? error.message : String(error)}`);
+            return `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><title>${CMD_ENTRY_HELP_PANEL_TITLE}</title></head><body><h1>${CMD_ENTRY_HELP_PANEL_TITLE}</h1><p>Unable to load help content.</p></body></html>`;
+        }
+    }
+
     private post(message: unknown): void { void this.view?.webview.postMessage(message); }
 
     private html(webview: vscode.Webview): string {
@@ -2141,7 +2432,8 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
                                 <button id="snippets-menu-add" type="button" role="menuitem">Add more...</button>
                             </div>
                         </div>
-                        <button id="cmdentry-settings" type="button" aria-label="Open Command Entry settings" data-tooltip="Command Entry Settings">⚙</button>
+                        <button id="cmdentry-help" type="button" aria-label="Open Command Entry help" data-tooltip="Help">?</button>
+                        <button id="cmdentry-settings" type="button" aria-label="Open Command Entry settings" data-tooltip="Cmd Entry Settings">⚙</button>
                     </div>
                     <div id="status" role="status" aria-live="polite">
                         <span id="status-text"></span>

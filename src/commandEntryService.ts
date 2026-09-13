@@ -6,6 +6,7 @@ import { CommandEntryJobManager } from './commandEntryJobManager';
 import { detectCommandEntryPrefix } from './commandEntryPrefixes';
 import { buildCancelSqlJobCommand, CMD_RUN_SQL, normalizeSqlJobId } from './commandEntrySqlHelpers';
 import { getConnectionSqlSettings } from './commandEntrySqlSettings';
+import { checkSQLBeforePaging, checkSQLForExecution } from './sqlSyntaxChecker';
 
 export { buildCancelSqlJobCommand, CMD_RUN_SQL, normalizeSqlJobId };
 
@@ -19,6 +20,7 @@ interface SqlPagingSession {
     id: string;
     connectionKey: string;
     statement: string;
+    resultTitle?: string;
     rows: Record<string, unknown>[];
     columnMetadata?: SqlColumnMetadata[];
     columns: string[];
@@ -483,7 +485,30 @@ function extractTableReference(statement: string): { schema?: string; table?: st
     };
 }
 
-async function fetchColumnMetadataFromCatalog(connection: IBMi, statement: string, fallbackNames: string[]): Promise<SqlColumnMetadata[]> {
+async function runCmdEntrySql(
+    connection: IBMi,
+    jobManager: CommandEntryJobManager | undefined,
+    sql: string,
+    options?: { bindings?: unknown[]; rows?: number; skipSyntaxCheck?: boolean }
+): Promise<Record<string, unknown>[]> {
+    if (!options?.skipSyntaxCheck) {
+        await checkSQLForExecution(connection, sql, jobManager);
+    }
+
+    const executeOptions = options ? { bindings: options.bindings, rows: options.rows } : undefined;
+    if (jobManager) {
+        return await jobManager.runSQL(connection, sql, executeOptions);
+    }
+
+    return await connection.runSQL(sql, executeOptions as never) as Record<string, unknown>[];
+}
+
+async function fetchColumnMetadataFromCatalog(
+    connection: IBMi,
+    statement: string,
+    fallbackNames: string[],
+    jobManager?: CommandEntryJobManager
+): Promise<SqlColumnMetadata[]> {
     if (fallbackNames.length === 0) {
         return [];
     }
@@ -496,7 +521,7 @@ async function fetchColumnMetadataFromCatalog(connection: IBMi, statement: strin
 
     const resolveCurrentSchema = async (): Promise<string | undefined> => {
         try {
-            const rows = await connection.runSQL('VALUES CURRENT SCHEMA') as Record<string, unknown>[];
+            const rows = await runCmdEntrySql(connection, jobManager, 'VALUES CURRENT SCHEMA', { skipSyntaxCheck: true });
             const row = rows?.[0];
             if (!row) {
                 return undefined;
@@ -519,7 +544,7 @@ async function fetchColumnMetadataFromCatalog(connection: IBMi, statement: strin
 
     const resolveCurrentPathSchemas = async (): Promise<string[]> => {
         try {
-            const rows = await connection.runSQL('VALUES CURRENT PATH') as Record<string, unknown>[];
+            const rows = await runCmdEntrySql(connection, jobManager, 'VALUES CURRENT PATH', { skipSyntaxCheck: true });
             const row = rows?.[0];
             if (!row) {
                 return [];
@@ -541,7 +566,7 @@ WHERE TABLE_SCHEMA = '${schema.replace(/'/g, "''")}'
     AND TABLE_NAME = '${tableName.replace(/'/g, "''")}'
 ORDER BY ORDINAL_POSITION`;
 
-        const rows = await connection.runSQL(sql) as Record<string, unknown>[];
+        const rows = await runCmdEntrySql(connection, jobManager, sql, { skipSyntaxCheck: true });
         return rows;
     };
 
@@ -685,9 +710,287 @@ function isPagedQueryCandidate(sql: string): boolean {
     return normalized.startsWith('SELECT ') || normalized.startsWith('WITH ');
 }
 
+function isWordBoundaryChar(ch: string | undefined): boolean {
+    if (!ch) {
+        return true;
+    }
+    return !/[A-Z0-9_#$@]/i.test(ch);
+}
+
+function findTopLevelOrderByIndex(sql: string): number {
+    let depth = 0;
+    let inSingleQuote = false;
+    let inDoubleQuote = false;
+    let inLineComment = false;
+    let inBlockComment = false;
+    let lastIndex = -1;
+
+    for (let i = 0; i < sql.length; i++) {
+        const ch = sql[i];
+        const next = sql[i + 1];
+
+        if (inLineComment) {
+            if (ch === '\n' || ch === '\r') {
+                inLineComment = false;
+            }
+            continue;
+        }
+
+        if (inBlockComment) {
+            if (ch === '*' && next === '/') {
+                inBlockComment = false;
+                i += 1;
+            }
+            continue;
+        }
+
+        if (inSingleQuote) {
+            if (ch === "'" && next === "'") {
+                i += 1;
+                continue;
+            }
+            if (ch === "'") {
+                inSingleQuote = false;
+            }
+            continue;
+        }
+
+        if (inDoubleQuote) {
+            if (ch === '"' && next === '"') {
+                i += 1;
+                continue;
+            }
+            if (ch === '"') {
+                inDoubleQuote = false;
+            }
+            continue;
+        }
+
+        if (ch === '-' && next === '-') {
+            inLineComment = true;
+            i += 1;
+            continue;
+        }
+
+        if (ch === '/' && next === '*') {
+            inBlockComment = true;
+            i += 1;
+            continue;
+        }
+
+        if (ch === "'") {
+            inSingleQuote = true;
+            continue;
+        }
+
+        if (ch === '"') {
+            inDoubleQuote = true;
+            continue;
+        }
+
+        if (ch === '(') {
+            depth += 1;
+            continue;
+        }
+
+        if (ch === ')') {
+            depth = Math.max(0, depth - 1);
+            continue;
+        }
+
+        if (depth !== 0) {
+            continue;
+        }
+
+        if (i + 8 > sql.length) {
+            continue;
+        }
+
+        if (sql.slice(i, i + 5).toUpperCase() !== 'ORDER') {
+            continue;
+        }
+
+        let j = i + 5;
+        while (j < sql.length && /\s/.test(sql[j])) {
+            j += 1;
+        }
+
+        if (sql.slice(j, j + 2).toUpperCase() !== 'BY') {
+            continue;
+        }
+
+        const before = sql[i - 1];
+        const after = sql[j + 2];
+        if (!isWordBoundaryChar(before) || !isWordBoundaryChar(after)) {
+            continue;
+        }
+
+        lastIndex = i;
+    }
+
+    return lastIndex;
+}
+
+function findTopLevelKeywordIndex(sql: string, keyword: string): number {
+    const upperKeyword = keyword.toUpperCase();
+    let depth = 0;
+    let inSingleQuote = false;
+    let inDoubleQuote = false;
+    let inLineComment = false;
+    let inBlockComment = false;
+
+    for (let i = 0; i < sql.length; i++) {
+        const ch = sql[i];
+        const next = sql[i + 1];
+
+        if (inLineComment) {
+            if (ch === '\n' || ch === '\r') {
+                inLineComment = false;
+            }
+            continue;
+        }
+
+        if (inBlockComment) {
+            if (ch === '*' && next === '/') {
+                inBlockComment = false;
+                i += 1;
+            }
+            continue;
+        }
+
+        if (inSingleQuote) {
+            if (ch === "'" && next === "'") {
+                i += 1;
+                continue;
+            }
+            if (ch === "'") {
+                inSingleQuote = false;
+            }
+            continue;
+        }
+
+        if (inDoubleQuote) {
+            if (ch === '"' && next === '"') {
+                i += 1;
+                continue;
+            }
+            if (ch === '"') {
+                inDoubleQuote = false;
+            }
+            continue;
+        }
+
+        if (ch === '-' && next === '-') {
+            inLineComment = true;
+            i += 1;
+            continue;
+        }
+
+        if (ch === '/' && next === '*') {
+            inBlockComment = true;
+            i += 1;
+            continue;
+        }
+
+        if (ch === "'") {
+            inSingleQuote = true;
+            continue;
+        }
+
+        if (ch === '"') {
+            inDoubleQuote = true;
+            continue;
+        }
+
+        if (ch === '(') {
+            depth += 1;
+            continue;
+        }
+
+        if (ch === ')') {
+            depth = Math.max(0, depth - 1);
+            continue;
+        }
+
+        if (depth !== 0) {
+            continue;
+        }
+
+        if (i + upperKeyword.length > sql.length) {
+            continue;
+        }
+
+        if (sql.slice(i, i + upperKeyword.length).toUpperCase() !== upperKeyword) {
+            continue;
+        }
+
+        const before = sql[i - 1];
+        const after = sql[i + upperKeyword.length];
+        if (!isWordBoundaryChar(before) || !isWordBoundaryChar(after)) {
+            continue;
+        }
+
+        return i;
+    }
+
+    return -1;
+}
+
+function hasTopLevelUserRowLimiter(sql: string): boolean {
+    const normalized = stripTrailingSemicolon(sql);
+
+    if (findTopLevelKeywordIndex(normalized, 'LIMIT') >= 0) {
+        return true;
+    }
+
+    if (findTopLevelKeywordIndex(normalized, 'OFFSET') >= 0) {
+        return true;
+    }
+
+    const fetchIndex = findTopLevelKeywordIndex(normalized, 'FETCH');
+    if (fetchIndex >= 0) {
+        const remainder = normalized.slice(fetchIndex + 'FETCH'.length);
+        if (/^\s+(FIRST|NEXT)\b/i.test(remainder)) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+function splitTopLevelOrderBy(sql: string): { baseSql: string; orderByClause?: string } {
+    const orderByIndex = findTopLevelOrderByIndex(sql);
+    if (orderByIndex < 0) {
+        return { baseSql: sql };
+    }
+
+    const baseSql = sql.slice(0, orderByIndex).trim();
+    const orderByClause = sql.slice(orderByIndex + 5).trim();
+    if (!baseSql || !orderByClause) {
+        return { baseSql: sql };
+    }
+
+    // Remove leading BY from "ORDER BY ..." remainder.
+    const normalized = orderByClause.replace(/^BY\b/i, '').trim();
+    if (!normalized) {
+        return { baseSql: sql };
+    }
+
+    return {
+        baseSql,
+        orderByClause: normalized
+    };
+}
+
 function buildPagedSql(sql: string, offset: number, fetchRows: number): string {
     const baseSql = stripTrailingSemicolon(sql);
-    return `SELECT * FROM (${baseSql}) CLPROMPTER_PAGE OFFSET ${offset} ROWS FETCH NEXT ${fetchRows} ROWS ONLY`;
+    checkSQLBeforePaging(baseSql);
+    const split = splitTopLevelOrderBy(baseSql);
+    if (split.orderByClause) {
+        return `${split.baseSql} ORDER BY ${split.orderByClause} OFFSET ${offset} ROWS FETCH NEXT ${fetchRows} ROWS ONLY`;
+    }
+
+    return `${baseSql} OFFSET ${offset} ROWS FETCH NEXT ${fetchRows} ROWS ONLY`;
 }
 
 function resolveConfiguredSqlFetchLimit(connection?: IBMi, context?: vscode.ExtensionContext): number {
@@ -772,12 +1075,17 @@ export class CommandEntryService {
     private async runSqlRows(
         connection: IBMi,
         statement: string,
-        rows?: number
+        rows?: number,
+        options?: { skipSyntaxCheck?: boolean }
     ): Promise<{ rows: Record<string, unknown>[]; metadata?: SqlColumnMetadata[] }> {
+        if (!options?.skipSyntaxCheck) {
+            await checkSQLForExecution(connection, statement, this.jobManager);
+        }
+
         const rawResult = this.jobManager
             ? await this.jobManager.runSQLWithDetails(connection, statement, { rows })
             : await tryRunSharedMapepireQuery(connection, statement, rows)
-            ?? await connection.runSQL(statement, rows ? { rows } : undefined) as Record<string, unknown>[];
+            ?? await runCmdEntrySql(connection, this.jobManager, statement, { rows, skipSyntaxCheck: true });
 
         const detailedRawResult = rawResult
             && typeof rawResult === 'object'
@@ -821,10 +1129,11 @@ export class CommandEntryService {
         }
 
         const statement = stripTrailingSemicolon(sqlStatement);
+        await checkSQLForExecution(connection, statement, this.jobManager);
         if (!isPagedQueryCandidate(statement)) {
             const rawRows = maxRows === NOMAX_SENTINEL
-                ? await this.jobManager.runSQL(connection, statement)
-                : await this.jobManager.runSQL(connection, statement, { rows: maxRows });
+                ? await runCmdEntrySql(connection, this.jobManager, statement, { skipSyntaxCheck: true })
+                : await runCmdEntrySql(connection, this.jobManager, statement, { rows: maxRows, skipSyntaxCheck: true });
             const normalizedRows = Array.isArray(rawRows)
                 ? rawRows as Record<string, unknown>[]
                 : Array.isArray((rawRows as { data?: unknown[] }).data)
@@ -845,7 +1154,7 @@ export class CommandEntryService {
                 ? DEDICATED_SQL_PAGE_SIZE
                 : Math.min(DEDICATED_SQL_PAGE_SIZE, maxRows - rows.length);
             const pageSql = buildPagedSql(statement, offset, fetchRows);
-            const pageRows = await this.jobManager.runSQL(connection, pageSql, { rows: fetchRows });
+            const pageRows = await runCmdEntrySql(connection, this.jobManager, pageSql, { rows: fetchRows, skipSyntaxCheck: true });
             const normalizedPage = Array.isArray(pageRows)
                 ? pageRows as Record<string, unknown>[]
                 : Array.isArray((pageRows as { data?: unknown[] }).data)
@@ -875,7 +1184,7 @@ export class CommandEntryService {
         fetchRows: number
     ): Promise<{ rows: Record<string, unknown>[]; metadata?: SqlColumnMetadata[] }> {
         const pageSql = buildPagedSql(sqlStatement, offset, fetchRows);
-        return this.runSqlRows(connection, pageSql, fetchRows);
+        return this.runSqlRows(connection, pageSql, fetchRows, { skipSyntaxCheck: true });
     }
 
     private async fetchSqlChunk(
@@ -929,16 +1238,24 @@ export class CommandEntryService {
         connection: IBMi,
         statement: string,
         rows: Record<string, unknown>[],
-        options?: { sessionId?: string; hasMoreRows?: boolean; fetchSize?: number; prefetchSize?: number; columnMetadata?: SqlColumnMetadata[] }
+        options?: {
+            sessionId?: string;
+            hasMoreRows?: boolean;
+            fetchSize?: number;
+            prefetchSize?: number;
+            columnMetadata?: SqlColumnMetadata[];
+            resultTitle?: string;
+        }
     ) {
         const columns = deriveSqlColumns(rows);
-        const catalogMetadata = await fetchColumnMetadataFromCatalog(connection, statement, columns);
+        const catalogMetadata = await fetchColumnMetadataFromCatalog(connection, statement, columns, this.jobManager);
         const metadataFromSql = hasUsefulColumnMetadata(options?.columnMetadata)
             ? mergeColumnMetadata(columns, options?.columnMetadata, catalogMetadata)
             : catalogMetadata;
         const finalMetadata = enrichMetadataWithInferredTypes(columns, metadataFromSql, rows);
         return {
             statement,
+            resultTitle: options?.resultTitle,
             columns,
             columnMetadata: finalMetadata,
             rows,
@@ -1004,7 +1321,8 @@ export class CommandEntryService {
                     hasMoreRows: false,
                     fetchSize: session.fetchSize,
                     prefetchSize: session.prefetchSize,
-                    columnMetadata: session.columnMetadata
+                    columnMetadata: session.columnMetadata,
+                    resultTitle: session.resultTitle
                 });
                 await this.closeSqlSession(session.id);
                 return payload;
@@ -1029,7 +1347,8 @@ export class CommandEntryService {
             hasMoreRows,
             fetchSize: session.fetchSize,
             prefetchSize: session.prefetchSize,
-            columnMetadata: session.columnMetadata
+            columnMetadata: session.columnMetadata,
+            resultTitle: session.resultTitle
         });
 
         if (!hasMoreRows) {
@@ -1039,7 +1358,13 @@ export class CommandEntryService {
         return payload;
     }
 
-    async execute(connection: IBMi, command: string, mode: CommandExecutionMode, id?: string): Promise<CommandExecution> {
+    async execute(
+        connection: IBMi,
+        command: string,
+        mode: CommandExecutionMode,
+        id?: string,
+        options?: { resultTitle?: string }
+    ): Promise<CommandExecution> {
         const started = Date.now();
         const startedDate = new Date(started);
         const startedAt = startedDate.toISOString();
@@ -1052,13 +1377,18 @@ export class CommandEntryService {
                 const prefetchRows = resolveConfiguredSqlPrefetchRows(connection, this.context);
                 const unlimited = maxRows === NOMAX_SENTINEL;
                 const normalizedSql = stripTrailingSemicolon(sqlStatement);
+                const userManagedRowLimiter = hasTopLevelUserRowLimiter(normalizedSql);
                 let rows: Record<string, unknown>[];
                 let hasMoreRows = false;
                 let sessionId: string | undefined;
 
                 let columnMetadata: SqlColumnMetadata[] | undefined;
 
-                if (!isPagedQueryCandidate(normalizedSql) || unlimited) {
+                if (userManagedRowLimiter) {
+                    const result = await this.runSqlRows(connection, normalizedSql, undefined);
+                    rows = result.rows;
+                    columnMetadata = result.metadata;
+                } else if (!isPagedQueryCandidate(normalizedSql) || unlimited) {
                     const result = this.jobManager
                         ? await this.runDedicatedSqlWithPaging(connection, normalizedSql, maxRows)
                         : await this.runSqlRows(connection, normalizedSql, unlimited ? undefined : maxRows);
@@ -1078,6 +1408,7 @@ export class CommandEntryService {
                             id: this.createSessionId(),
                             connectionKey: this.buildConnectionKey(connection),
                             statement: normalizedSql,
+                            resultTitle: options?.resultTitle,
                             rows: [...rows],
                             columnMetadata,
                             columns: deriveSqlColumns(rows),
@@ -1107,11 +1438,13 @@ export class CommandEntryService {
                         messageId: 'SQL0000',
                         severity: 0,
                         type: 'INFO',
-                        text: unlimited
-                            ? `${rowCount} ${rowLabel} returned (*NOMAX)`
-                            : hasMoreRows
-                                ? `${rowCount} ${rowLabel} returned (prefetched ${rowCount}; rows per fetch ${maxRows})`
-                                : `${rowCount} ${rowLabel} returned (rows per fetch ${maxRows})`,
+                        text: userManagedRowLimiter
+                            ? `${rowCount} ${rowLabel} returned (user-managed row limiter)`
+                            : unlimited
+                                ? `${rowCount} ${rowLabel} returned (*NOMAX)`
+                                : hasMoreRows
+                                    ? `${rowCount} ${rowLabel} returned (prefetched ${rowCount}; rows per fetch ${maxRows})`
+                                    : `${rowCount} ${rowLabel} returned (rows per fetch ${maxRows})`,
                         sentTimestamp: toIsoTimestamp(startedDate),
                         sentFromProgram: '',
                         sentFromStmt: '',
@@ -1127,9 +1460,10 @@ export class CommandEntryService {
                     sqlResult: await this.buildSqlResultPayload(connection, normalizedSql, rows, {
                         sessionId,
                         hasMoreRows,
-                        fetchSize: unlimited ? undefined : maxRows,
-                        prefetchSize: unlimited ? undefined : Math.min(maxRows, prefetchRows),
-                        columnMetadata
+                        fetchSize: (unlimited || userManagedRowLimiter) ? undefined : maxRows,
+                        prefetchSize: (unlimited || userManagedRowLimiter) ? undefined : Math.min(maxRows, prefetchRows),
+                        columnMetadata,
+                        resultTitle: options?.resultTitle
                     })
                 };
             }
@@ -1137,9 +1471,7 @@ export class CommandEntryService {
             // `bindings` is Code for IBM i 3.x's public Mapepire parameter API.
             // It keeps CL command text out of the SQL source and prevents SQL injection.
             const udtfLibrary = getUDTFLibrary(connection);
-            const rows = this.jobManager
-                ? await this.jobManager.runSQL(connection, buildCmdRunSql(udtfLibrary), { bindings: [command, mode] })
-                : await connection.runSQL(buildCmdRunSql(udtfLibrary), { bindings: [command, mode] });
+            const rows = await runCmdEntrySql(connection, this.jobManager, buildCmdRunSql(udtfLibrary), { bindings: [command, mode], skipSyntaxCheck: true });
             const messages = mapCommandMessages(rows as Record<string, unknown>[]);
             return {
                 id: id ?? `${started}-${Math.random().toString(36).slice(2, 8)}`,

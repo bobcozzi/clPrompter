@@ -33,12 +33,12 @@ export const CL_VARIABLE_PATTERN = /^&[A-Z][A-Z0-9_]{0,21}$/i;
 
 // Function to get proper EOL character for cross-platform compatibility
 function getEOL(): string {
-    const activeEditor = vscode.window.activeTextEditor;
-    if (activeEditor) {
-        return activeEditor.document.eol === vscode.EndOfLine.CRLF ? '\r\n' : '\n';
-    }
-    // Default to LF if no active editor
-    return '\n';
+  const activeEditor = vscode.window.activeTextEditor;
+  if (activeEditor) {
+    return activeEditor.document.eol === vscode.EndOfLine.CRLF ? '\r\n' : '\n';
+  }
+  // Default to LF if no active editor
+  return '\n';
 }
 
 // import { DOMParser } from '@xmldom/xmldom';
@@ -46,218 +46,218 @@ function getEOL(): string {
 
 /** Tokenizer */
 export function tokenizeCL(input: string): CLToken[] {
-    const tokens: CLToken[] = [];
-    let i = 0;
+  const tokens: CLToken[] = [];
+  let i = 0;
 
-    const peek = (): string => input[i];
-    const peekN = (n: number): string => input.substring(i, i + n);
-    const next = (): string => input[i++];
-    const isSpace = (ch: string): boolean => ch === ' ' || ch === '\t';
-    const isAlpha = (ch: string): boolean => /[A-Z]/i.test(ch);
-    const isDigit = (ch: string): boolean => /[0-9]/.test(ch);
+  const peek = (): string => input[i];
+  const peekN = (n: number): string => input.substring(i, i + n);
+  const next = (): string => input[i++];
+  const isSpace = (ch: string): boolean => ch === ' ' || ch === '\t';
+  const isAlpha = (ch: string): boolean => /[A-Z]/i.test(ch);
+  const isDigit = (ch: string): boolean => /[0-9]/.test(ch);
 
-    // IBM i CL symbolic operators (per IBM documentation)
-    const SYMBOLIC_OPERATORS = [
-        '*CAT', '*BCAT', '*TCAT',           // Character string operators
-        '*AND', '*OR', '*NOT',              // Logical operators
-        '*EQ', '*GT', '*LT', '*GE', '*LE',  // Relational operators
-        '*NE', '*NG', '*NL'                 // More relational operators
-    ];
+  // IBM i CL symbolic operators (per IBM documentation)
+  const SYMBOLIC_OPERATORS = [
+    '*CAT', '*BCAT', '*TCAT',           // Character string operators
+    '*AND', '*OR', '*NOT',              // Logical operators
+    '*EQ', '*GT', '*LT', '*GE', '*LE',  // Relational operators
+    '*NE', '*NG', '*NL'                 // More relational operators
+  ];
 
-    while (i < input.length) {
-        const ch = peek();
+  while (i < input.length) {
+    const ch = peek();
 
-        if (isSpace(ch)) {
-            while (isSpace(peek())) next();
-            tokens.push({ type: 'space', value: ' ' });
-        } else if (ch === '(' || ch === ')') {
-            tokens.push({ type: ch === '(' ? 'paren_open' : 'paren_close', value: ch });
-            next();
+    if (isSpace(ch)) {
+      while (isSpace(peek())) next();
+      tokens.push({ type: 'space', value: ' ' });
+    } else if (ch === '(' || ch === ')') {
+      tokens.push({ type: ch === '(' ? 'paren_open' : 'paren_close', value: ch });
+      next();
 
-        } else if (ch === "'") {
-            // Quoted string, preserve all quotes and doubled quotes
-            let str = '';
-            str += next(); // opening quote
-            while (i < input.length) {
-                const curr = next();
-                str += curr;
-                if (curr === "'") {
-                    // Check for doubled quote (escaped quote)
-                    if (peek() === "'") {
-                        str += next(); // add the second quote
-                        continue;
-                    } else {
-                        break; // end of quoted string
-                    }
-                }
-            }
-            tokens.push({ type: 'string', value: str });
-        } else if (ch === '&') {
-            // Variable
-            let varName = next();
-            while (i < input.length && (isAlpha(peek()) || isDigit(peek()) || peek() === '_')) {
-                varName += next();
-            }
-            tokens.push({ type: 'variable', value: varName });
-        } else if (ch === '*') {
-            // Check if this is a symbolic operator, symbolic value, or multiplication operator
-            if (isAlpha(input[i + 1])) {
-                // Read the full symbolic token
-                let sym = next(); // consume '*'
-                while (i < input.length && isAlpha(peek())) sym += next();
-                const upperSym = sym.toUpperCase();
-
-                // Check if it's a known operator
-                if (SYMBOLIC_OPERATORS.includes(upperSym)) {
-                    tokens.push({ type: 'operator', value: upperSym });
-                } else {
-                    // It's a symbolic value like *FILE, *LIBL, *CURLIB
-                    tokens.push({ type: 'symbolic_value', value: sym });
-                }
-            } else {
-                // Standalone * is multiplication operator
-                next();
-                tokens.push({ type: 'operator', value: '*' });
-            }
-        } else if (peekN(2) === '||' || peekN(2) === '|>' || peekN(2) === '|<' ||
-                   peekN(2) === '>=' || peekN(2) === '<=' || peekN(2) === '¬=' ||
-                   peekN(2) === '¬>' || peekN(2) === '¬<') {
-            // Two-character operators
-            const op = peekN(2);
-            next(); next();
-            tokens.push({ type: 'operator', value: op });
-        } else if (ch === '+' || ch === '-' || ch === '/' ||
-                   ch === '=' || ch === '>' || ch === '<' ||
-                   ch === '&' || ch === '|' || ch === '¬') {
-            // Single-character operators
-            next();
-            tokens.push({ type: 'operator', value: ch });
-        } else if (ch === '%') {
-            // Built-in function
-            let fn = next();
-            while (i < input.length && isAlpha(peek())) fn += next();
-            tokens.push({ type: 'function', value: fn });
-        } else {
-            // Keyword, command, or value
-            let val = '';
-            while (i < input.length && !isSpace(peek()) && peek() !== '(' && peek() !== ')') {
-                val += next();
-            }
-            const upperVal = val.toUpperCase();
-            // Check for command (first token, can be LIB/CMD or just CMD)
-            if (tokens.length === 0 && /^([A-Z][A-Z0-9]*\/)?[A-Z][A-Z0-9]*$/.test(upperVal)) {
-                tokens.push({ type: 'command', value: upperVal });
-            } else if (/^[A-Z][A-Z0-9]*$/.test(upperVal)) {
-                // Store original case; formatCLCmd applies case conversion to parameter names separately.
-                // This preserves mixed-case values (e.g. Case=MIXED params) through the formatter.
-                tokens.push({ type: 'keyword', value: val });
-            } else {
-                tokens.push({ type: 'value', value: val });
-            }
+    } else if (ch === "'") {
+      // Quoted string, preserve all quotes and doubled quotes
+      let str = '';
+      str += next(); // opening quote
+      while (i < input.length) {
+        const curr = next();
+        str += curr;
+        if (curr === "'") {
+          // Check for doubled quote (escaped quote)
+          if (peek() === "'") {
+            str += next(); // add the second quote
+            continue;
+          } else {
+            break; // end of quoted string
+          }
         }
-    }
+      }
+      tokens.push({ type: 'string', value: str });
+    } else if (ch === '&') {
+      // Variable
+      let varName = next();
+      while (i < input.length && (isAlpha(peek()) || isDigit(peek()) || peek() === '_')) {
+        varName += next();
+      }
+      tokens.push({ type: 'variable', value: varName });
+    } else if (ch === '*') {
+      // Check if this is a symbolic operator, symbolic value, or multiplication operator
+      if (isAlpha(input[i + 1])) {
+        // Read the full symbolic token
+        let sym = next(); // consume '*'
+        while (i < input.length && isAlpha(peek())) sym += next();
+        const upperSym = sym.toUpperCase();
 
-    return tokens;
+        // Check if it's a known operator
+        if (SYMBOLIC_OPERATORS.includes(upperSym)) {
+          tokens.push({ type: 'operator', value: upperSym });
+        } else {
+          // It's a symbolic value like *FILE, *LIBL, *CURLIB
+          tokens.push({ type: 'symbolic_value', value: sym });
+        }
+      } else {
+        // Standalone * is multiplication operator
+        next();
+        tokens.push({ type: 'operator', value: '*' });
+      }
+    } else if (peekN(2) === '||' || peekN(2) === '|>' || peekN(2) === '|<' ||
+      peekN(2) === '>=' || peekN(2) === '<=' || peekN(2) === '¬=' ||
+      peekN(2) === '¬>' || peekN(2) === '¬<') {
+      // Two-character operators
+      const op = peekN(2);
+      next(); next();
+      tokens.push({ type: 'operator', value: op });
+    } else if (ch === '+' || ch === '-' || ch === '/' ||
+      ch === '=' || ch === '>' || ch === '<' ||
+      ch === '&' || ch === '|' || ch === '¬') {
+      // Single-character operators
+      next();
+      tokens.push({ type: 'operator', value: ch });
+    } else if (ch === '%') {
+      // Built-in function
+      let fn = next();
+      while (i < input.length && isAlpha(peek())) fn += next();
+      tokens.push({ type: 'function', value: fn });
+    } else {
+      // Keyword, command, or value
+      let val = '';
+      while (i < input.length && !isSpace(peek()) && peek() !== '(' && peek() !== ')') {
+        val += next();
+      }
+      const upperVal = val.toUpperCase();
+      // Check for command (first token, can be LIB/CMD or just CMD)
+      if (tokens.length === 0 && /^([A-Z][A-Z0-9]*\/)?[A-Z][A-Z0-9]*$/.test(upperVal)) {
+        tokens.push({ type: 'command', value: upperVal });
+      } else if (/^[A-Z][A-Z0-9]*$/.test(upperVal)) {
+        // Store original case; formatCLCmd applies case conversion to parameter names separately.
+        // This preserves mixed-case values (e.g. Case=MIXED params) through the formatter.
+        tokens.push({ type: 'keyword', value: val });
+      } else {
+        tokens.push({ type: 'value', value: val });
+      }
+    }
+  }
+
+  return tokens;
 }
 
 /** Parser */
 export function parseCL(tokens: CLToken[], comment?: string): CLNode {
-    let i = 0;
-    const next = () => tokens[i++];
-    const peek = () => tokens[i];
-    const consume = (expectedType: CLToken['type']): CLToken => {
-        const tok = next();
-        if (tok.type !== expectedType) throw new Error(`Expected ${expectedType} but got ${tok.type}`);
-        return tok;
-    };
+  let i = 0;
+  const next = () => tokens[i++];
+  const peek = () => tokens[i];
+  const consume = (expectedType: CLToken['type']): CLToken => {
+    const tok = next();
+    if (tok.type !== expectedType) throw new Error(`Expected ${expectedType} but got ${tok.type}`);
+    return tok;
+  };
 
 
-    function parseValue(): CLValue {
-        // Collects multiple groups: unwrapped expression(s) and parenthesized groups
-        const values: CLValue[] = [];
-        while (i < tokens.length) {
-            // Skip spaces between groups
-            while (peek() && peek().type === 'space') next();
-
-            // Stop if the enclosing param's ')' is next
-            if (peek() && peek().type === 'paren_close') break;
-
-            if (peek() && peek().type === 'paren_open') {
-                next(); // consume '('
-                const exprTokens: CLToken[] = [];
-                let depth = 1;
-                while (i < tokens.length && depth > 0) {
-                    const tok = next();
-                    if (tok.type === 'paren_open') depth++;
-                    if (tok.type === 'paren_close') depth--;
-                    if (depth > 0) exprTokens.push(tok);
-                }
-                // Mark this expression as originally wrapped
-                values.push({ type: 'expression', tokens: exprTokens, wrapped: true } as any);
-                continue;
-            }
-
-            // Unwrapped expression until next '(' or ')'
-            const exprTokens: CLToken[] = [];
-            while (i < tokens.length && peek().type !== 'paren_close' && peek().type !== 'paren_open') {
-                exprTokens.push(next());
-            }
-            if (exprTokens.length === 1) {
-                const single = exprTokens[0];
-                if (
-                    single.type === 'string' ||
-                    single.type === 'value' ||
-                    single.type === 'symbolic_value' ||
-                    single.type === 'variable'
-                ) {
-                    values.push(single.value);
-                } else {
-                    values.push({ type: 'expression', tokens: exprTokens, wrapped: false } as any);
-                }
-            } else if (exprTokens.length > 0) {
-                values.push({ type: 'expression', tokens: exprTokens, wrapped: false } as any);
-            }
-        }
-        if (values.length === 1) return values[0];
-        return values;
-    }
-
-    const commandToken = consume('command');
-    const parameters: CLParsedParm[] = [];
-    let positionalIndex = 1;
-    let seenNamed = false;
-
+  function parseValue(): CLValue {
+    // Collects multiple groups: unwrapped expression(s) and parenthesized groups
+    const values: CLValue[] = [];
     while (i < tokens.length) {
-        if (peek() && peek().type === 'space') next();
-        const tok = peek();
-        if (!tok) break;
+      // Skip spaces between groups
+      while (peek() && peek().type === 'space') next();
 
-        // Named parameter: KEYWORD '(' value ')'
-        if (tok.type === 'keyword') {
-            const lookahead = tokens[i + 1];
-            if (lookahead && lookahead.type === 'paren_open') {
-                const parmName = next(); // keyword
-                seenNamed = true;
-                next(); // consume '('
-                const val = parseValue();
-                if (peek() && peek().type === 'paren_close') next();
-                parameters.push({ name: parmName.value, value: val });
-                continue;
-            }
+      // Stop if the enclosing param's ')' is next
+      if (peek() && peek().type === 'paren_close') break;
+
+      if (peek() && peek().type === 'paren_open') {
+        next(); // consume '('
+        const exprTokens: CLToken[] = [];
+        let depth = 1;
+        while (i < tokens.length && depth > 0) {
+          const tok = next();
+          if (tok.type === 'paren_open') depth++;
+          if (tok.type === 'paren_close') depth--;
+          if (depth > 0) exprTokens.push(tok);
         }
+        // Mark this expression as originally wrapped
+        values.push({ type: 'expression', tokens: exprTokens, wrapped: true } as any);
+        continue;
+      }
 
-        // Positional parameter(s) allowed only before first named parameter
-        if (!seenNamed && (tok.type === 'value' || tok.type === 'string' || tok.type === 'variable' || tok.type === 'symbolic_value' || tok.type === 'function')) {
-            const posTok = next(); // consume the positional token
-            parameters.push({ name: `__pos${positionalIndex++}`, value: posTok.value });
-            continue;
+      // Unwrapped expression until next '(' or ')'
+      const exprTokens: CLToken[] = [];
+      while (i < tokens.length && peek().type !== 'paren_close' && peek().type !== 'paren_open') {
+        exprTokens.push(next());
+      }
+      if (exprTokens.length === 1) {
+        const single = exprTokens[0];
+        if (
+          single.type === 'string' ||
+          single.type === 'value' ||
+          single.type === 'symbolic_value' ||
+          single.type === 'variable'
+        ) {
+          values.push(single.value);
+        } else {
+          values.push({ type: 'expression', tokens: exprTokens, wrapped: false } as any);
         }
+      } else if (exprTokens.length > 0) {
+        values.push({ type: 'expression', tokens: exprTokens, wrapped: false } as any);
+      }
+    }
+    if (values.length === 1) return values[0];
+    return values;
+  }
 
-        // Otherwise, consume and move on
-        next();
+  const commandToken = consume('command');
+  const parameters: CLParsedParm[] = [];
+  let positionalIndex = 1;
+  let seenNamed = false;
+
+  while (i < tokens.length) {
+    if (peek() && peek().type === 'space') next();
+    const tok = peek();
+    if (!tok) break;
+
+    // Named parameter: KEYWORD '(' value ')'
+    if (tok.type === 'keyword') {
+      const lookahead = tokens[i + 1];
+      if (lookahead && lookahead.type === 'paren_open') {
+        const parmName = next(); // keyword
+        seenNamed = true;
+        next(); // consume '('
+        const val = parseValue();
+        if (peek() && peek().type === 'paren_close') next();
+        parameters.push({ name: parmName.value, value: val });
+        continue;
+      }
     }
 
-    return { type: 'command_call', name: commandToken.value, parameters, comment };
+    // Positional parameter(s) allowed only before first named parameter
+    if (!seenNamed && (tok.type === 'value' || tok.type === 'string' || tok.type === 'variable' || tok.type === 'symbolic_value' || tok.type === 'function')) {
+      const posTok = next(); // consume the positional token
+      parameters.push({ name: `__pos${positionalIndex++}`, value: posTok.value });
+      continue;
+    }
+
+    // Otherwise, consume and move on
+    next();
+  }
+
+  return { type: 'command_call', name: commandToken.value, parameters, comment };
 }
 
 // Add these helpers near your submit/prompt handling:
@@ -265,23 +265,23 @@ export function parseCL(tokens: CLToken[], comment?: string): CLNode {
 type AnyMeta = any; // use your real ParmMeta type
 
 export function mapPositionalToMetaValue(meta: AnyMeta, raw: string) {
-    // Heuristic: if first top-level Elem is QUAL (OBJ+LIB), convert "LIB/OBJ" or "OBJ" into [ ['OBJ','LIB'] ]
-    const hasQualFirst =
-        Array.isArray(meta.Elems) &&
-        meta.Elems.length > 0 &&
-        meta.Elems[0] &&
-        (meta.Elems[0].Type === 'QUAL' || meta.Elems[0].type === 'QUAL');
+  // Heuristic: if first top-level Elem is QUAL (OBJ+LIB), convert "LIB/OBJ" or "OBJ" into [ ['OBJ','LIB'] ]
+  const hasQualFirst =
+    Array.isArray(meta.Elems) &&
+    meta.Elems.length > 0 &&
+    meta.Elems[0] &&
+    (meta.Elems[0].Type === 'QUAL' || meta.Elems[0].type === 'QUAL');
 
-    if (hasQualFirst) {
-        const parts = raw.split('/');
-        const obj = parts.length === 2 ? parts[1] : parts[0];
-        const lib = parts.length === 2 ? parts[0] : '*LIBL';
-        // Shape expected downstream: [ ['OBJ','LIB'] ] (+ other elem groups remain default/empty)
-        return [[obj, lib]];
-    }
+  if (hasQualFirst) {
+    const parts = raw.split('/');
+    const obj = parts.length === 2 ? parts[1] : parts[0];
+    const lib = parts.length === 2 ? parts[0] : '*LIBL';
+    // Shape expected downstream: [ ['OBJ','LIB'] ] (+ other elem groups remain default/empty)
+    return [[obj, lib]];
+  }
 
-    // Otherwise leave as-is (simple CHAR, etc.)
-    return raw;
+  // Otherwise leave as-is (simple CHAR, etc.)
+  return raw;
 }
 
 
@@ -297,52 +297,66 @@ export function mapPositionalToMetaValue(meta: AnyMeta, raw: string) {
  * that appear after the first named keyword.
  */
 export function resolvePositionalsToKeywords(ast: import('./types').CLNode, parmMetas: AnyMeta[]) {
-    const mapped: import('./types').CLParsedParm[] = [];
-    let metaIdx = 0;
-    let seenNamed = false;
+  const mapped: import('./types').CLParsedParm[] = [];
+  let metaIdx = 0;
+  let seenNamed = false;
 
-    for (const p of ast.parameters) {
-        if (p.name.startsWith('__pos')) {
-            if (seenNamed) {
-                console.warn('[clPrompter] Positional found after a named parameter. Ignoring:', p.value);
-                continue;
-            }
-            // Find next unmapped meta
-            while (metaIdx < parmMetas.length && mapped.some(m => m.name === parmMetas[metaIdx].Kwd)) {
-                metaIdx++;
-            }
-            if (metaIdx >= parmMetas.length) continue;
+  for (const p of ast.parameters) {
+    if (p.name.startsWith('__pos')) {
+      if (seenNamed) {
+        console.warn('[clPrompter] Positional found after a named parameter. Ignoring:', p.value);
+        continue;
+      }
+      // Find next unmapped meta
+      while (metaIdx < parmMetas.length && mapped.some(m => m.name === parmMetas[metaIdx].Kwd)) {
+        metaIdx++;
+      }
+      if (metaIdx >= parmMetas.length) continue;
 
-            const meta = parmMetas[metaIdx++];
-            const val = typeof p.value === 'string' ? mapPositionalToMetaValue(meta, p.value) : p.value;
-            mapped.push({ name: meta.Kwd, value: val });
-        } else {
-            seenNamed = true;
-            mapped.push(p);
-        }
+      const meta = parmMetas[metaIdx++];
+      const val = typeof p.value === 'string' ? mapPositionalToMetaValue(meta, p.value) : p.value;
+      mapped.push({ name: meta.Kwd, value: val });
+    } else {
+      seenNamed = true;
+      mapped.push(p);
     }
+  }
 
-    return { ...ast, parameters: mapped };
+  return { ...ast, parameters: mapped };
 }
 
 
 
 // Named parm = keyword immediately followed by '(' (no blanks)
 function isNamedAt(tokens: any[], idx: number): boolean {
-    return tokens[idx]?.type === 'keyword' && tokens[idx + 1]?.type === 'paren_open';
+  return tokens[idx]?.type === 'keyword' && tokens[idx + 1]?.type === 'paren_open';
 }
 
 // Helper: numeric PosNbr (or “no pos”)
 function getPosNbrMeta(m: any): number {
-    const raw = m?.PosNbr ?? m?.Pos ?? m?.Position ?? m?.PosNum ?? m?.PosNumber;
-    const n = Number.parseInt(String(raw), 10);
-    return Number.isFinite(n) && n > 0 ? n : Number.POSITIVE_INFINITY;
+  const raw = m?.PosNbr ?? m?.Pos ?? m?.Position ?? m?.PosNum ?? m?.PosNumber;
+  const n = Number.parseInt(String(raw), 10);
+  return Number.isFinite(n) && n > 0 ? n : Number.POSITIVE_INFINITY;
 }
 
 //////////
 export function rewriteLeadingPositionalsByList(fullCmd: string, positionalKwds: string[], cmdMaxPos?: number): string {
   const tokens = tokenizeCL(fullCmd);
   if (!tokens.length || positionalKwds.length === 0) return fullCmd;
+
+  // If the command starts with a user label (e.g. "maytag: ADDLIBLE QGPL"),
+  // tokenizeCL will not classify the command token because the label appears first.
+  // Strip and preserve that label so positional rewriting still runs on the command.
+  const labelPrefixMatch = fullCmd.match(/^(\s*(?!(?:cl|sql)\s*:)[^:\s][^:]*\s*:\s*)([\s\S]*)$/i);
+  if (labelPrefixMatch) {
+    const labelPrefix = labelPrefixMatch[1];
+    const commandText = labelPrefixMatch[2];
+    if (commandText.trim().length === 0) {
+      return fullCmd;
+    }
+    const rewrittenCommandText = rewriteLeadingPositionalsByList(commandText, positionalKwds, cmdMaxPos);
+    return `${labelPrefix}${rewrittenCommandText}`;
+  }
 
   const cmdIdx = tokens.findIndex(t => t.type === 'command');
   if (cmdIdx < 0) return fullCmd;
@@ -505,64 +519,64 @@ export function rewriteLeadingPositionals(fullCmd: string, parmMetas: any[], cmd
 
 // Optional: debug the token stream if needed
 export function debugTokenStream(fullCmd: string): void {
-    const toks = tokenizeCL(fullCmd);
-    console.log('[clPrompter::rewriteLeadingPositionals] TOKENS:', toks.map((t: any) => `${t.type}:${t.value}`).join(' | '));
+  const toks = tokenizeCL(fullCmd);
+  console.log('[clPrompter::rewriteLeadingPositionals] TOKENS:', toks.map((t: any) => `${t.type}:${t.value}`).join(' | '));
 }
 
 // Depth-aware helpers (same logic as in extension.ts)
 function skipQuoted(str: string, i: number): number {
-    const quote = str[i];
-    i++;
-    while (i < str.length) {
-        if (str[i] === quote) {
-            if (str[i + 1] === quote) {
-                i += 2;
-                continue;
-            }
-            return i + 1;
-        }
-        i++;
+  const quote = str[i];
+  i++;
+  while (i < str.length) {
+    if (str[i] === quote) {
+      if (str[i + 1] === quote) {
+        i += 2;
+        continue;
+      }
+      return i + 1;
     }
-    return i;
+    i++;
+  }
+  return i;
 }
 
 function findMatchingParen(str: string, openIdx: number): number {
-    let i = openIdx;
-    let depth = 0;
-    while (i < str.length) {
-        const ch = str[i];
-        if (ch === "'" || ch === '"') {
-            i = skipQuoted(str, i);
-            continue;
-        }
-        if (ch === '(') depth++;
-        else if (ch === ')') {
-            depth--;
-            if (depth === 0) return i;
-        }
-        i++;
+  let i = openIdx;
+  let depth = 0;
+  while (i < str.length) {
+    const ch = str[i];
+    if (ch === "'" || ch === '"') {
+      i = skipQuoted(str, i);
+      continue;
     }
-    return -1;
+    if (ch === '(') depth++;
+    else if (ch === ')') {
+      depth--;
+      if (depth === 0) return i;
+    }
+    i++;
+  }
+  return -1;
 }
 
 // Extracts KW(value) pairs, preserving nested parens inside value
 function extractParms(parmStr: string): Array<{ kwd: string; value: string }> {
-    const out: Array<{ kwd: string; value: string }> = [];
-    const re = /\b([A-Z0-9$#@_]+)\s*\(/gi;
-    let m: RegExpExecArray | null;
-    while ((m = re.exec(parmStr))) {
-        const kwd = m[1].toUpperCase();
-        const openIdx = m.index + m[0].lastIndexOf('(');
-        const closeIdx = findMatchingParen(parmStr, openIdx);
-        if (closeIdx > openIdx) {
-            const value = parmStr.slice(openIdx + 1, closeIdx);
-            out.push({ kwd, value });
-            re.lastIndex = closeIdx + 1;
-        } else {
-            break;
-        }
+  const out: Array<{ kwd: string; value: string }> = [];
+  const re = /\b([A-Z0-9$#@_]+)\s*\(/gi;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(parmStr))) {
+    const kwd = m[1].toUpperCase();
+    const openIdx = m.index + m[0].lastIndexOf('(');
+    const closeIdx = findMatchingParen(parmStr, openIdx);
+    if (closeIdx > openIdx) {
+      const value = parmStr.slice(openIdx + 1, closeIdx);
+      out.push({ kwd, value });
+      re.lastIndex = closeIdx + 1;
+    } else {
+      break;
     }
-    return out;
+  }
+  return out;
 }
 
 /**
@@ -570,250 +584,250 @@ function extractParms(parmStr: string): Array<{ kwd: string; value: string }> {
  * Returns { command: string, comment: string | undefined }
  */
 export function extractCommentFromCommand(input: string): { command: string; comment?: string } {
-    // Look for /* comment */ at the end of the command (with optional whitespace before it)
-    // The comment can only start after a space (per IBM i CL rules)
+  // Look for /* comment */ at the end of the command (with optional whitespace before it)
+  // The comment can only start after a space (per IBM i CL rules)
 
-    let commentIdx = -1;
-    let inQuote = false;
+  let commentIdx = -1;
+  let inQuote = false;
 
-    // Scan through the string, tracking whether we're inside a quoted string
-    for (let i = 0; i < input.length - 2; i++) {
-        const char = input[i];
+  // Scan through the string, tracking whether we're inside a quoted string
+  for (let i = 0; i < input.length - 2; i++) {
+    const char = input[i];
 
-        // Toggle quote state when we encounter a single quote
-        if (char === "'") {
-            // Check if it's a doubled quote (escaped quote)
-            if (i + 1 < input.length && input[i + 1] === "'") {
-                i++; // Skip the next quote
-                continue;
-            }
-            inQuote = !inQuote;
-        }
-
-        // Check for ' /*' pattern when not inside quotes
-        if (!inQuote && char === ' ' && input[i + 1] === '/' && input[i + 2] === '*') {
-            commentIdx = i + 1; // Point to the '/' character
-            break;
-        }
+    // Toggle quote state when we encounter a single quote
+    if (char === "'") {
+      // Check if it's a doubled quote (escaped quote)
+      if (i + 1 < input.length && input[i + 1] === "'") {
+        i++; // Skip the next quote
+        continue;
+      }
+      inQuote = !inQuote;
     }
 
-    // Also check if comment starts at position 0
-    if (commentIdx === -1 && input.startsWith('/*')) {
-        commentIdx = 0;
+    // Check for ' /*' pattern when not inside quotes
+    if (!inQuote && char === ' ' && input[i + 1] === '/' && input[i + 2] === '*') {
+      commentIdx = i + 1; // Point to the '/' character
+      break;
     }
+  }
 
-    if (commentIdx === -1) {
-        // No comment found
-        return { command: input };
-    }
+  // Also check if comment starts at position 0
+  if (commentIdx === -1 && input.startsWith('/*')) {
+    commentIdx = 0;
+  }
 
-    // Extract comment and command parts
-    const commentPart = input.substring(commentIdx).trim();
-    const commandPart = input.substring(0, commentIdx).trim();
-
-    // Verify the comment has both /* and */
-    if (commentPart.includes('/*') && commentPart.includes('*/')) {
-        return { command: commandPart, comment: commentPart };
-    }
-
-    // Comment is incomplete, return full command
+  if (commentIdx === -1) {
+    // No comment found
     return { command: input };
+  }
+
+  // Extract comment and command parts
+  const commentPart = input.substring(commentIdx).trim();
+  const commandPart = input.substring(0, commentIdx).trim();
+
+  // Verify the comment has both /* and */
+  if (commentPart.includes('/*') && commentPart.includes('*/')) {
+    return { command: commandPart, comment: commentPart };
+  }
+
+  // Comment is incomplete, return full command
+  return { command: input };
 }
 
 
 export function formatCLCmd(label: string | undefined, cmdName: string, parmStr: string, comment?: string): string {
-    // Extract comment from parmStr if present (and no comment already provided)
-    let actualComment = comment;
-    let actualParmStr = parmStr;
+  // Extract comment from parmStr if present (and no comment already provided)
+  let actualComment = comment;
+  let actualParmStr = parmStr;
 
-    if (!actualComment) {
-        const extracted = extractCommentFromCommand(parmStr);
-        actualParmStr = extracted.command;
-        actualComment = extracted.comment;
+  if (!actualComment) {
+    const extracted = extractCommentFromCommand(parmStr);
+    actualParmStr = extracted.command;
+    actualComment = extracted.comment;
+  }
+
+  // Tokenize and parse the full command (command name + params)
+  const tokens = tokenizeCL(`${cmdName} ${actualParmStr}`);
+  let ast: CLNode;
+  try {
+    ast = parseCL(tokens, actualComment);
+  } catch (err) {
+    console.error('[clPrompter] formatCLCmd: failed to parse command, returning unformatted:', err);
+    return [label ? label.trim() + ':' : '', cmdName, actualParmStr].filter(Boolean).join(' ');
+  }
+
+  // Ensure command name is set as provided
+  ast.name = cmdName;
+
+  // Get VS Code configuration for formatting
+  const config = vscode.workspace.getConfiguration('clPrompter');
+  const convertCmdAndParmNameCase = config.get('convertCmdAndParmNameCase', '*UPPER') as '*UPPER' | '*LOWER' | '*NONE';
+
+  // Apply case conversion to command name and parameter keywords
+  if (convertCmdAndParmNameCase !== '*NONE') {
+    const lowercase = 'abcdefghijklmnopqrstuvwxyz';
+    const uppercase = lowercase.toUpperCase();
+    let fromCase = '';
+    let toCase = '';
+
+    if (convertCmdAndParmNameCase === '*UPPER') {
+      fromCase = lowercase;
+      toCase = uppercase;
+    } else if (convertCmdAndParmNameCase === '*LOWER') {
+      fromCase = uppercase;
+      toCase = lowercase;
     }
 
-    // Tokenize and parse the full command (command name + params)
-    const tokens = tokenizeCL(`${cmdName} ${actualParmStr}`);
-    let ast: CLNode;
-    try {
-        ast = parseCL(tokens, actualComment);
-    } catch (err) {
-        console.error('[clPrompter] formatCLCmd: failed to parse command, returning unformatted:', err);
-        return [label ? label.trim() + ':' : '', cmdName, actualParmStr].filter(Boolean).join(' ');
+    // Import translateCase from formatCL
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { translateCase } = require('./formatCL');
+
+    // Convert command name
+    if (ast.name) {
+      ast.name = translateCase(ast.name, fromCase, toCase);
     }
 
-    // Ensure command name is set as provided
-    ast.name = cmdName;
-
-    // Get VS Code configuration for formatting
-    const config = vscode.workspace.getConfiguration('clPrompter');
-    const convertCmdAndParmNameCase = config.get('convertCmdAndParmNameCase', '*UPPER') as '*UPPER' | '*LOWER' | '*NONE';
-
-    // Apply case conversion to command name and parameter keywords
-    if (convertCmdAndParmNameCase !== '*NONE') {
-        const lowercase = 'abcdefghijklmnopqrstuvwxyz';
-        const uppercase = lowercase.toUpperCase();
-        let fromCase = '';
-        let toCase = '';
-
-        if (convertCmdAndParmNameCase === '*UPPER') {
-            fromCase = lowercase;
-            toCase = uppercase;
-        } else if (convertCmdAndParmNameCase === '*LOWER') {
-            fromCase = uppercase;
-            toCase = lowercase;
-        }
-
-        // Import translateCase from formatCL
-        // eslint-disable-next-line @typescript-eslint/no-var-requires
-        const { translateCase } = require('./formatCL');
-
-        // Convert command name
-        if (ast.name) {
-            ast.name = translateCase(ast.name, fromCase, toCase);
-        }
-
-        // Convert parameter keywords
-        for (const param of ast.parameters) {
-            if (param.name) {
-                param.name = translateCase(param.name, fromCase, toCase);
-            }
-        }
-
-        // Convert label if present
-        if (label) {
-            label = translateCase(label, fromCase, toCase);
-        }
+    // Convert parameter keywords
+    for (const param of ast.parameters) {
+      if (param.name) {
+        param.name = translateCase(param.name, fromCase, toCase);
+      }
     }
 
-    // Use the unified formatter (v2)
-    try {
-        return formatCLCommand_v2(ast, label, {
-            leftMargin: config.get<number>('formatCmdPosition', 14),
-            rightMargin: config.get<number>('formatRightMargin', 70),
-            contIndent: config.get<number>('formatContinuePosition', 27),
-            continuationChar: '+',
-            labelPosition: config.get<number>('formatLabelPosition', 2),
-            kwdPosition: config.get<number>('formatKwdPosition', 25)
-        });
-    } catch (err) {
-        console.error('[clPrompter] formatCLCmd: formatter failed, returning unformatted:', err);
-        return [label ? label.trim() + ':' : '', cmdName, actualParmStr].filter(Boolean).join(' ');
+    // Convert label if present
+    if (label) {
+      label = translateCase(label, fromCase, toCase);
     }
+  }
+
+  // Use the unified formatter (v2)
+  try {
+    return formatCLCommand_v2(ast, label, {
+      leftMargin: config.get<number>('formatCmdPosition', 14),
+      rightMargin: config.get<number>('formatRightMargin', 70),
+      contIndent: config.get<number>('formatContinuePosition', 27),
+      continuationChar: '+',
+      labelPosition: config.get<number>('formatLabelPosition', 2),
+      kwdPosition: config.get<number>('formatKwdPosition', 25)
+    });
+  } catch (err) {
+    console.error('[clPrompter] formatCLCmd: formatter failed, returning unformatted:', err);
+    return [label ? label.trim() + ':' : '', cmdName, actualParmStr].filter(Boolean).join(' ');
+  }
 }
 
 /** Formatter */
 export function formatCL(node: CLNode,
-    indent = 0,
-    indentStep = 2,
-    rightMargin = 80,
-    continuationChar = '+'): string {
-    const pad = (n: number) => ' '.repeat(n);
-    const outputLines: string[] = [];
+  indent = 0,
+  indentStep = 2,
+  rightMargin = 80,
+  continuationChar = '+'): string {
+  const pad = (n: number) => ' '.repeat(n);
+  const outputLines: string[] = [];
 
-    const formatValue = (value: CLValue, currentIndent: number): string => {
-        if (typeof value === 'string') {
-            return value;
-        }
-        if (Array.isArray(value)) {
-            // NEW: array of expressions (each may have wrapped=true/false)
-            if (value.length > 0 && value.every(isExpression)) {
-                return value
-                    .map((v) => {
-                        const inner = formatValue(v, currentIndent + indentStep);
-                        const wrapped = (v as any).wrapped === true;
-                        return wrapped ? `(${inner})` : inner;
-                    })
-                    .join(' ');
-            }
-            // Legacy: array of arrays (Max>1 ELEM as nested arrays)
-            if (value.length > 0 && Array.isArray(value[0])) {
-                return value.map((v) => formatValue(v, currentIndent + indentStep)).join(' ');
-            }
-            // Single grouped value
-            return '(' + value.map((v) => formatValue(v, currentIndent + indentStep)).join(' ') + ')';
-        }
-
-        if ('function' in value) {
-            const args = value.args.map((a) => formatValue(a, currentIndent + indentStep));
-            const inner = args.join(' ');
-            const candidate = `${value.function}(${inner})`;
-            if ((pad(currentIndent) + candidate).length <= rightMargin) {
-                return candidate;
-            } else {
-                const eol = getEOL();
-                return (
-                    `${value.function}(` +
-                    eol +
-                    args.map((arg) => pad(currentIndent + indentStep) + arg).join(eol) +
-                    eol +
-                    pad(currentIndent) + ')'
-                );
-            }
-        }
-        if ('type' in value && value.type === 'command_call') {
-            return formatCL(value, currentIndent + indentStep, indentStep, rightMargin, continuationChar);
-        }
-        if ('type' in value && value.type === 'expression') {
-            // --- Use the new chunking logic for wrapping ---
-            const chunks = splitExpressionTokensForWrap(value.tokens);
-            // Try to fit as much as possible on the current line, wrap at spaces if needed
-            let expr = '';
-            let lineLen = currentIndent;
-            for (let i = 0; i < chunks.length; i++) {
-                const chunk = chunks[i];
-                if (i === 0) {
-                    expr += chunk;
-                    lineLen += chunk.length;
-                } else {
-                    // +1 for the space
-                    if (lineLen + 1 + chunk.length > rightMargin) {
-                        const eol = getEOL();
-                        expr += `${eol}${chunk}`; // <-- REMOVE INDENTATION HERE
-                        lineLen = chunk.length;
-                    } else {
-                        expr += ' ' + chunk;
-                        lineLen += 1 + chunk.length;
-                    }
-                }
-            }
-            return expr;
-        }
-        return '';
-    };
-
-    let currentLine = pad(indent) + node.name;
-    const collectedLines: string[] = [];
-
-    for (const parm of node.parameters) {
-        const formattedValue = formatValue(
-            parm.value,
-            indent + indentStep + parm.name.length + 1
-        );
-        const formatted = parm.name.startsWith('__pos')
-            ? `${pad(indent + indentStep)}${formattedValue}`
-            : `${pad(indent + indentStep)}${parm.name}(${formattedValue})`;
-
-        const trimmed = formatted.trim();
-
-        if (currentLine.length + 1 + trimmed.length > rightMargin) {
-            collectedLines.push(currentLine + ' ' + continuationChar);
-            currentLine = trimmed;
-        } else {
-            collectedLines.push(currentLine + ' ' + continuationChar);
-            currentLine = trimmed;
-        }
+  const formatValue = (value: CLValue, currentIndent: number): string => {
+    if (typeof value === 'string') {
+      return value;
+    }
+    if (Array.isArray(value)) {
+      // NEW: array of expressions (each may have wrapped=true/false)
+      if (value.length > 0 && value.every(isExpression)) {
+        return value
+          .map((v) => {
+            const inner = formatValue(v, currentIndent + indentStep);
+            const wrapped = (v as any).wrapped === true;
+            return wrapped ? `(${inner})` : inner;
+          })
+          .join(' ');
+      }
+      // Legacy: array of arrays (Max>1 ELEM as nested arrays)
+      if (value.length > 0 && Array.isArray(value[0])) {
+        return value.map((v) => formatValue(v, currentIndent + indentStep)).join(' ');
+      }
+      // Single grouped value
+      return '(' + value.map((v) => formatValue(v, currentIndent + indentStep)).join(' ') + ')';
     }
 
-    collectedLines.push(currentLine); // Final line
+    if ('function' in value) {
+      const args = value.args.map((a) => formatValue(a, currentIndent + indentStep));
+      const inner = args.join(' ');
+      const candidate = `${value.function}(${inner})`;
+      if ((pad(currentIndent) + candidate).length <= rightMargin) {
+        return candidate;
+      } else {
+        const eol = getEOL();
+        return (
+          `${value.function}(` +
+          eol +
+          args.map((arg) => pad(currentIndent + indentStep) + arg).join(eol) +
+          eol +
+          pad(currentIndent) + ')'
+        );
+      }
+    }
+    if ('type' in value && value.type === 'command_call') {
+      return formatCL(value, currentIndent + indentStep, indentStep, rightMargin, continuationChar);
+    }
+    if ('type' in value && value.type === 'expression') {
+      // --- Use the new chunking logic for wrapping ---
+      const chunks = splitExpressionTokensForWrap(value.tokens);
+      // Try to fit as much as possible on the current line, wrap at spaces if needed
+      let expr = '';
+      let lineLen = currentIndent;
+      for (let i = 0; i < chunks.length; i++) {
+        const chunk = chunks[i];
+        if (i === 0) {
+          expr += chunk;
+          lineLen += chunk.length;
+        } else {
+          // +1 for the space
+          if (lineLen + 1 + chunk.length > rightMargin) {
+            const eol = getEOL();
+            expr += `${eol}${chunk}`; // <-- REMOVE INDENTATION HERE
+            lineLen = chunk.length;
+          } else {
+            expr += ' ' + chunk;
+            lineLen += 1 + chunk.length;
+          }
+        }
+      }
+      return expr;
+    }
+    return '';
+  };
 
-    // Update all but the last line to ensure continuation char is at the end
-    const finalLines = collectedLines.map((line, idx) =>
-        idx < collectedLines.length - 1 ? line.replace(/[ \t]*$/, ' ' + continuationChar) : line
+  let currentLine = pad(indent) + node.name;
+  const collectedLines: string[] = [];
+
+  for (const parm of node.parameters) {
+    const formattedValue = formatValue(
+      parm.value,
+      indent + indentStep + parm.name.length + 1
     );
+    const formatted = parm.name.startsWith('__pos')
+      ? `${pad(indent + indentStep)}${formattedValue}`
+      : `${pad(indent + indentStep)}${parm.name}(${formattedValue})`;
 
-    const eol = getEOL();
-    return finalLines.join(eol);
+    const trimmed = formatted.trim();
+
+    if (currentLine.length + 1 + trimmed.length > rightMargin) {
+      collectedLines.push(currentLine + ' ' + continuationChar);
+      currentLine = trimmed;
+    } else {
+      collectedLines.push(currentLine + ' ' + continuationChar);
+      currentLine = trimmed;
+    }
+  }
+
+  collectedLines.push(currentLine); // Final line
+
+  // Update all but the last line to ensure continuation char is at the end
+  const finalLines = collectedLines.map((line, idx) =>
+    idx < collectedLines.length - 1 ? line.replace(/[ \t]*$/, ' ' + continuationChar) : line
+  );
+
+  const eol = getEOL();
+  return finalLines.join(eol);
 }
 
 
@@ -822,73 +836,73 @@ export function formatCL(node: CLNode,
  * Returns an array of "chunks" (strings) that can be joined or wrapped as needed.
  */
 function splitExpressionTokensForWrap(tokens: CLToken[]): string[] {
-    // Build chunks by treating the entire token sequence as a continuous stream.
-    // Break tokens into word-like chunks that can be wrapped optimally.
-    // This is similar to how quoted strings wrap - find natural break points.
-    const chunks: string[] = [];
-    let current = '';
+  // Build chunks by treating the entire token sequence as a continuous stream.
+  // Break tokens into word-like chunks that can be wrapped optimally.
+  // This is similar to how quoted strings wrap - find natural break points.
+  const chunks: string[] = [];
+  let current = '';
 
-    for (let i = 0; i < tokens.length; i++) {
-        const t = tokens[i];
+  for (let i = 0; i < tokens.length; i++) {
+    const t = tokens[i];
 
-        if (t.type === 'string') {
-            // Strings with quotes - add to current
-            current += t.value;
-        } else if (t.type === 'space') {
-            // Space creates a potential break point
-            // Add the space to current, then break to create a chunk
-            if (current.trim()) {
-                current += ' ';
-                chunks.push(current.trimEnd());
-                current = '';
-            }
-        } else {
-            // Variables, symbolic values, etc.
-            current += t.value;
-        }
-    }
-
-    // Add any remaining content
-    if (current.trim()) {
+    if (t.type === 'string') {
+      // Strings with quotes - add to current
+      current += t.value;
+    } else if (t.type === 'space') {
+      // Space creates a potential break point
+      // Add the space to current, then break to create a chunk
+      if (current.trim()) {
+        current += ' ';
         chunks.push(current.trimEnd());
+        current = '';
+      }
+    } else {
+      // Variables, symbolic values, etc.
+      current += t.value;
     }
+  }
 
-    return chunks;
+  // Add any remaining content
+  if (current.trim()) {
+    chunks.push(current.trimEnd());
+  }
+
+  return chunks;
 }
 
 
 function padTo(pos: number, currentLen: number): string {
-    return ' '.repeat(Math.max(0, pos - currentLen));
+  return ' '.repeat(Math.max(0, pos - currentLen));
 }
 
 function applyCase(text: string, keywordCase: 'upper' | 'lower'): string {
-    // Skip case conversion if it's quoted (literal string)
-    if (text.includes("'") || text.includes('"') || /\s/.test(text)) {
-        return text;
-    }
+  // Skip case conversion if it's quoted (literal string)
+  if (text.includes("'") || text.includes('"') || /\s/.test(text)) {
+    return text;
+  }
 
-    return keywordCase === 'upper' ? text.toUpperCase() : text.toLowerCase();
+  return keywordCase === 'upper' ? text.toUpperCase() : text.toLowerCase();
 }
 
 function isExpression(val: any): val is { type: 'expression'; tokens: CLToken[] } {
-    return typeof val === 'object' && val !== null && val.type === 'expression';
+  return typeof val === 'object' && val !== null && val.type === 'expression';
 }
 
 export function formatCL_SEU(
-    node: CLNode,
-    label?: string
+  node: CLNode,
+  label?: string
 ): string {
-    // Unified formatter - route to formatCLCommand_v2
-    const config = vscode.workspace.getConfiguration('clPrompter');
+  // Unified formatter - route to formatCLCommand_v2
+  const config = vscode.workspace.getConfiguration('clPrompter');
 
-    return formatCLCommand_v2(node, label, {
-        leftMargin: config.get<number>('formatCmdPosition', 14),
-        rightMargin: config.get<number>('formatRightMargin', 70),
-        contIndent: config.get<number>('formatContinuePosition', 27),
-        continuationChar: '+',
-        labelPosition: config.get<number>('formatLabelPosition', 2),
-        kwdPosition: config.get<number>('formatKwdPosition', 25)
-    });
+  return formatCLCommand_v2(node, label, {
+    leftMargin: config.get<number>('formatCmdPosition', 14),
+    rightMargin: config.get<number>('formatRightMargin', 70),
+    contIndent: config.get<number>('formatContinuePosition', 27),
+    continuationChar: '+',
+    labelPosition: config.get<number>('formatLabelPosition', 2),
+    kwdPosition: config.get<number>('formatKwdPosition', 25)
+  });
 }
 
 /**
@@ -898,110 +912,110 @@ export function formatCL_SEU(
 
 
 function isCLNameChar(ch: string, isFirst: boolean): boolean {
-    if (isFirst) return /[a-zA-Z&]/.test(ch); // allow & for variables
-    return /[a-zA-Z0-9@#$_]/.test(ch);
+  if (isFirst) return /[a-zA-Z&]/.test(ch); // allow & for variables
+  return /[a-zA-Z0-9@#$_]/.test(ch);
 }
 
 function findLastSafeBreak(text: string, maxLen: number): number {
-    // Try to break at the last space within maxLen
-    let breakAt = text.lastIndexOf(' ', maxLen);
-    if (breakAt === -1 || breakAt === 0) breakAt = maxLen;
+  // Try to break at the last space within maxLen
+  let breakAt = text.lastIndexOf(' ', maxLen);
+  if (breakAt === -1 || breakAt === 0) breakAt = maxLen;
 
-    // Check if breaking here would split a valid CL name or variable
-    let left = breakAt - 1;
-    while (left >= 0 && isCLNameChar(text[left], false)) left--;
-    left++;
-    // If the word starts with a valid first char, and the break is not at a space, don't break here
-    if (
-        left < breakAt &&
-        isCLNameChar(text[left], true) &&
-        breakAt < text.length &&
-        isCLNameChar(text[breakAt], false)
-    ) {
-        // Find the next space after maxLen
-        let nextSpace = text.indexOf(' ', maxLen);
-        if (nextSpace === -1) return text.length;
-        return nextSpace;
-    }
-    return breakAt;
+  // Check if breaking here would split a valid CL name or variable
+  let left = breakAt - 1;
+  while (left >= 0 && isCLNameChar(text[left], false)) left--;
+  left++;
+  // If the word starts with a valid first char, and the break is not at a space, don't break here
+  if (
+    left < breakAt &&
+    isCLNameChar(text[left], true) &&
+    breakAt < text.length &&
+    isCLNameChar(text[breakAt], false)
+  ) {
+    // Find the next space after maxLen
+    let nextSpace = text.indexOf(' ', maxLen);
+    if (nextSpace === -1) return text.length;
+    return nextSpace;
+  }
+  return breakAt;
 }
 function collectAtomicValues(node: CLNode | CLValue): Set<string> {
-    const values = new Set<string>();
+  const values = new Set<string>();
 
-    function walk(val: CLNode | CLValue) {
-        if (typeof val === 'string') {
-            // Check if this is a quoted string
-            const isQuoted = val.startsWith("'") && val.endsWith("'");
+  function walk(val: CLNode | CLValue) {
+    if (typeof val === 'string') {
+      // Check if this is a quoted string
+      const isQuoted = val.startsWith("'") && val.endsWith("'");
 
-            // Always treat short quoted strings as atomic (up to 50 chars to be safe)
-            // This prevents breaking strings like '*FROMFILE', '*YES', etc.
-            if (isQuoted && val.length <= 50) {
-                values.add(val);
-            }
-            // Also treat unquoted short strings as atomic
-            else if (!isQuoted && val.length <= 10) {
-                values.add(val);
-            }
+      // Always treat short quoted strings as atomic (up to 50 chars to be safe)
+      // This prevents breaking strings like '*FROMFILE', '*YES', etc.
+      if (isQuoted && val.length <= 50) {
+        values.add(val);
+      }
+      // Also treat unquoted short strings as atomic
+      else if (!isQuoted && val.length <= 10) {
+        values.add(val);
+      }
 
-            // Always treat numbers as atomic
-            if (/^\d+$/.test(val)) values.add(val);
-            // *symbol, %func, &var (check after removing quotes if present)
-            const unquoted = isQuoted ? val.slice(1, -1) : val;
-            if (/^[*%&]/.test(unquoted)) {
-                values.add(val);
-                console.log(`[collectAtomicValues] Added atomic value: ${val}`);
-            }
-        } else if (Array.isArray(val)) {
-            val.forEach(walk);
-        } else if ('function' in val) {
-            val.args.forEach(walk);
-        } else if ('type' in val && val.type === 'expression') {
-            // Check if expression contains a variable token
-            const hasVariable = val.tokens.some(t =>
-                t.type === 'variable' ||
-                (t.type === 'value' && CL_VARIABLE_PATTERN.test(t.value))
-            );
+      // Always treat numbers as atomic
+      if (/^\d+$/.test(val)) values.add(val);
+      // *symbol, %func, &var (check after removing quotes if present)
+      const unquoted = isQuoted ? val.slice(1, -1) : val;
+      if (/^[*%&]/.test(unquoted)) {
+        values.add(val);
+        console.log(`[collectAtomicValues] Added atomic value: ${val}`);
+      }
+    } else if (Array.isArray(val)) {
+      val.forEach(walk);
+    } else if ('function' in val) {
+      val.args.forEach(walk);
+    } else if ('type' in val && val.type === 'expression') {
+      // Check if expression contains a variable token
+      const hasVariable = val.tokens.some(t =>
+        t.type === 'variable' ||
+        (t.type === 'value' && CL_VARIABLE_PATTERN.test(t.value))
+      );
 
-            // Check if expression has operators or keywords
-            const hasOperatorOrKeyword = val.tokens.some(t =>
-                t.type === 'keyword' ||
-                t.type === 'symbolic_value' ||
-                (t.type === 'value' && /^[*%]/.test(t.value))
-            );
+      // Check if expression has operators or keywords
+      const hasOperatorOrKeyword = val.tokens.some(t =>
+        t.type === 'keyword' ||
+        t.type === 'symbolic_value' ||
+        (t.type === 'value' && /^[*%]/.test(t.value))
+      );
 
-            // ONLY treat simple variable expressions as atomic (no operators/keywords)
-            // E.g., &LONGVAR_FIELDNAME is atomic, but &VAR *EQ '*FROM' is NOT
-            if (hasVariable && !hasOperatorOrKeyword) {
-                // This is a simple variable expression - keep it atomic
-                const fullExpression = val.tokens.map(t => t.value).join('');
-                values.add(fullExpression);
-                console.log(`[collectAtomicValues] Added atomic value from simple variable expression: ${fullExpression}`);
-            } else {
-                // Complex expression or no variables - add individual atomic components
-                // Add short quoted strings, numbers, and keywords as atomic
-                for (const t of val.tokens) {
-                    if (t.type === 'string' && t.value.length <= 50) {
-                        // Quoted strings up to 50 chars are atomic
-                        values.add(t.value);
-                        console.log(`[collectAtomicValues] Added atomic quoted string: ${t.value}`);
-                    } else if (t.type === 'value' && /^\d+$/.test(t.value)) {
-                        values.add(t.value);
-                    } else if (t.type === 'symbolic_value' || (t.type === 'value' && /^[*%]/.test(t.value))) {
-                        // Keywords (*YES), built-in functions (%FUNC)
-                        values.add(t.value);
-                        console.log(`[collectAtomicValues] Added atomic symbolic value: ${t.value}`);
-                    }
-                }
-            }
-        } else if ('type' in val && val.type === 'command_call') {
-            val.parameters.forEach(p => walk(p.value));
+      // ONLY treat simple variable expressions as atomic (no operators/keywords)
+      // E.g., &LONGVAR_FIELDNAME is atomic, but &VAR *EQ '*FROM' is NOT
+      if (hasVariable && !hasOperatorOrKeyword) {
+        // This is a simple variable expression - keep it atomic
+        const fullExpression = val.tokens.map(t => t.value).join('');
+        values.add(fullExpression);
+        console.log(`[collectAtomicValues] Added atomic value from simple variable expression: ${fullExpression}`);
+      } else {
+        // Complex expression or no variables - add individual atomic components
+        // Add short quoted strings, numbers, and keywords as atomic
+        for (const t of val.tokens) {
+          if (t.type === 'string' && t.value.length <= 50) {
+            // Quoted strings up to 50 chars are atomic
+            values.add(t.value);
+            console.log(`[collectAtomicValues] Added atomic quoted string: ${t.value}`);
+          } else if (t.type === 'value' && /^\d+$/.test(t.value)) {
+            values.add(t.value);
+          } else if (t.type === 'symbolic_value' || (t.type === 'value' && /^[*%]/.test(t.value))) {
+            // Keywords (*YES), built-in functions (%FUNC)
+            values.add(t.value);
+            console.log(`[collectAtomicValues] Added atomic symbolic value: ${t.value}`);
+          }
         }
+      }
+    } else if ('type' in val && val.type === 'command_call') {
+      val.parameters.forEach(p => walk(p.value));
     }
+  }
 
-    walk(node);
-    console.log(`[collectAtomicValues] Total atomic values collected: ${values.size}`);
-    console.log(`[collectAtomicValues] Atomic values:`, Array.from(values));
-    return values;
+  walk(node);
+  console.log(`[collectAtomicValues] Total atomic values collected: ${values.size}`);
+  console.log(`[collectAtomicValues] Atomic values:`, Array.from(values));
+  return values;
 }
 
 // ...existing code...

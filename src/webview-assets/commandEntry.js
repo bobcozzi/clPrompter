@@ -6,7 +6,7 @@
   const MENU_POSITION_DEBUG = true;
   const minTextareaRows = 2;
   const command = document.getElementById('command'), mode = document.getElementById('mode'), severityFilter = document.getElementById('message-severity-filter');
-  const run = document.getElementById('run'), prompt = document.getElementById('prompt'), snippets = document.getElementById('snippets'), cmdEntrySettings = document.getElementById('cmdentry-settings'), snippetsMenuList = document.getElementById('snippets-menu-list'), snippetsMenuManage = document.getElementById('snippets-menu-manage'), snippetsMenuToggle = document.getElementById('snippets-menu-toggle'), snippetsMenuRefresh = document.getElementById('snippets-menu-refresh'), snippetsMenuImport = document.getElementById('snippets-menu-import'), snippetsMenuExport = document.getElementById('snippets-menu-export'), snippetsMenuAdd = document.getElementById('snippets-menu-add'), clearCommand = document.getElementById('clear-command'), toolbarMenu = document.getElementById('toolbar-menu'), toolbarMenuList = document.getElementById('toolbar-menu-list'), menuViewLog = document.getElementById('menu-view-log'), menuClearLog = document.getElementById('menu-clear-log'), menuClearSqlLog = document.getElementById('menu-clear-sql-log'), menuToggleSqlLog = document.getElementById('menu-toggle-sql-log'), menuToggleMessageDetails = document.getElementById('menu-toggle-message-details'), menuUseSharedSqlJob = document.getElementById('menu-use-shared-sql-job'), menuUsePrivateSqlJob = document.getElementById('menu-use-private-sql-job'), menuStartNewJob = document.getElementById('menu-start-new-job'), menuCancelSqlJob = document.getElementById('menu-cancel-sql-job'), menuClearHistory = document.getElementById('menu-clear-history'), historyPrev = document.getElementById('history-prev'), historyNext = document.getElementById('history-next'), statusJobMenu = document.getElementById('status-job-menu'), statusJobMenuCopy = document.getElementById('status-job-menu-copy'), statusJobMenuDisplayJoblog = document.getElementById('status-job-menu-display-joblog');
+  const run = document.getElementById('run'), prompt = document.getElementById('prompt'), cmdEntryHelp = document.getElementById('cmdentry-help'), snippets = document.getElementById('snippets'), cmdEntrySettings = document.getElementById('cmdentry-settings'), snippetsMenuList = document.getElementById('snippets-menu-list'), snippetsMenuManage = document.getElementById('snippets-menu-manage'), snippetsMenuToggle = document.getElementById('snippets-menu-toggle'), snippetsMenuRefresh = document.getElementById('snippets-menu-refresh'), snippetsMenuImport = document.getElementById('snippets-menu-import'), snippetsMenuExport = document.getElementById('snippets-menu-export'), snippetsMenuAdd = document.getElementById('snippets-menu-add'), clearCommand = document.getElementById('clear-command'), toolbarMenu = document.getElementById('toolbar-menu'), toolbarMenuList = document.getElementById('toolbar-menu-list'), menuViewLog = document.getElementById('menu-view-log'), menuClearLog = document.getElementById('menu-clear-log'), menuClearSqlLog = document.getElementById('menu-clear-sql-log'), menuToggleSqlLog = document.getElementById('menu-toggle-sql-log'), menuToggleMessageDetails = document.getElementById('menu-toggle-message-details'), menuUseSharedSqlJob = document.getElementById('menu-use-shared-sql-job'), menuUsePrivateSqlJob = document.getElementById('menu-use-private-sql-job'), menuStartNewJob = document.getElementById('menu-start-new-job'), menuCancelSqlJob = document.getElementById('menu-cancel-sql-job'), menuClearHistory = document.getElementById('menu-clear-history'), historyPrev = document.getElementById('history-prev'), historyNext = document.getElementById('history-next'), statusJobMenu = document.getElementById('status-job-menu'), statusJobMenuCopy = document.getElementById('status-job-menu-copy'), statusJobMenuDisplayJoblog = document.getElementById('status-job-menu-display-joblog');
   const statusText = document.getElementById('status-text'), statusJobId = document.getElementById('status-jobid'), results = document.getElementById('results');
   let historyIndex = -1, runningStartedAt, runningTimerId, runningStatusPrefix = 'Running…', historyDraft = '', sqlJobPollingId;
   let statusJobSingleClickTimer;
@@ -19,9 +19,46 @@
   let messageDetailsMode = 'SHOW';
   let logSqlStatementsToCommandLog = false;
   let baseMinHeightPx = 0, autoResizing = false;
+  const parseConnectionScopeKey = value => {
+    const raw = String(value || '').trim().toLowerCase();
+    if (!raw || raw === defaultConnectionScopeKey) {
+      return { raw: defaultConnectionScopeKey };
+    }
+    const parts = raw.split('|');
+    if (parts.length >= 4) {
+      return {
+        raw,
+        host: parts[0] || '',
+        user: parts[1] || '',
+        name: parts.slice(2, parts.length - 1).join('|'),
+        port: parts[parts.length - 1] || ''
+      };
+    }
+    if (parts.length === 3) {
+      return {
+        raw,
+        host: parts[0] || '',
+        user: parts[1] || '',
+        port: parts[2] || ''
+      };
+    }
+    return { raw };
+  };
   const normalizeConnectionScopeKey = value => {
-    const key = String(value || '').trim().toLowerCase();
-    return key || defaultConnectionScopeKey;
+    const parsed = parseConnectionScopeKey(value);
+    if (parsed.host || parsed.user || parsed.port) {
+      return `${parsed.host || ''}|${parsed.user || ''}|${parsed.port || ''}`;
+    }
+    return parsed.raw || defaultConnectionScopeKey;
+  };
+  const findBucketKeyByEndpoint = (buckets, key) => {
+    const target = normalizeConnectionScopeKey(key);
+    for (const candidate of Object.keys(buckets || {})) {
+      if (normalizeConnectionScopeKey(candidate) === target) {
+        return candidate;
+      }
+    }
+    return undefined;
   };
   const ensureExecutionBuckets = () => {
     if (!state.executionsByConnection || typeof state.executionsByConnection !== 'object' || Array.isArray(state.executionsByConnection)) {
@@ -53,10 +90,18 @@
     return buckets[activeKey];
   };
   const setActiveConnectionScope = key => {
+    if (!state.executionsByConnection || typeof state.executionsByConnection !== 'object' || Array.isArray(state.executionsByConnection)) {
+      state.executionsByConnection = {};
+    }
+    const buckets = state.executionsByConnection;
     state.activeConnectionScopeKey = normalizeConnectionScopeKey(key);
-    const buckets = ensureExecutionBuckets();
     if (!Array.isArray(buckets[state.activeConnectionScopeKey])) {
-      buckets[state.activeConnectionScopeKey] = [];
+      const compatibilityKey = findBucketKeyByEndpoint(buckets, key);
+      if (compatibilityKey && Array.isArray(buckets[compatibilityKey])) {
+        buckets[state.activeConnectionScopeKey] = buckets[compatibilityKey].slice(0, maxExecutions);
+      } else {
+        buckets[state.activeConnectionScopeKey] = [];
+      }
     }
   };
   const applyAppearancePreferences = (commandTextColor, sqlStatementColor) => {
@@ -619,14 +664,14 @@
       menuCancelSqlJob.disabled = cancelDisabled;
       const reason = cancelDisabled
         ? dedicatedRequiredReason
-        : 'Cancel the last SQL request on the dedicated SQL job';
+        : 'Cancel the last SQL request on the private SQL job';
       menuCancelSqlJob.title = reason;
       menuCancelSqlJob.setAttribute('aria-disabled', String(cancelDisabled));
     }
     if (menuStartNewJob) {
       menuStartNewJob.disabled = !canStartNewJob;
       const reason = canStartNewJob
-        ? 'Reconnect the dedicated SQL job'
+        ? 'Reconnect the private SQL job'
         : dedicatedRequiredReason;
       menuStartNewJob.title = reason;
       menuStartNewJob.setAttribute('aria-disabled', String(!canStartNewJob));
@@ -645,7 +690,7 @@
       menuUsePrivateSqlJob.disabled = !remoteMapepireEnabled || !useSharedSqlJob;
       menuUsePrivateSqlJob.textContent = `${!useSharedSqlJob ? '✓ ' : ''}Use Private SQL Job`;
       menuUsePrivateSqlJob.title = remoteMapepireEnabled
-        ? 'Use a dedicated/private SQL job for Command Entry'
+        ? 'Use a private SQL job for Command Entry'
         : serverModeReason;
       menuUsePrivateSqlJob.setAttribute('aria-disabled', String(menuUsePrivateSqlJob.disabled));
     }
@@ -1072,6 +1117,9 @@
     }
   });
   run.addEventListener('click', requestRun); prompt.addEventListener('click', requestPrompt); clearCommand.addEventListener('click', clearCommandInput);
+  cmdEntryHelp?.addEventListener('click', () => {
+    vscode.postMessage({ type: 'openCmdEntryHelp' });
+  });
   snippets?.addEventListener('click', event => {
     event.preventDefault();
     event.stopPropagation();

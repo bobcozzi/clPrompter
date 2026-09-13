@@ -2,14 +2,73 @@
 set -euo pipefail
 
 PUBLISH_ONLY=false
-if [ "${1:-}" = "-p" ]; then
+MP_ONLY=false
+OPENVSX_ONLY=false
+FORCE_RETRY=false
+PUBLISH_DEBUG="${PUBLISH_DEBUG:-false}"
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -p)
+      PUBLISH_ONLY=true
+      shift
+      ;;
+    -m|--mp-only|--marketplace-only)
+      MP_ONLY=true
+      shift
+      ;;
+    -o|--ovsx-only)
+      OPENVSX_ONLY=true
+      shift
+      ;;
+    --force)
+      FORCE_RETRY=true
+      shift
+      ;;
+    --debug)
+      PUBLISH_DEBUG=true
+      shift
+      ;;
+    --help|-h)
+      echo "Usage: $0 [--debug] [--force] [-p] [-m|--mp-only] [-o|--ovsx-only] \"commit message\""
+      echo "  -p: publish-only mode (skip git tag/commit/push and GitHub release steps)"
+      echo "  -m, --mp-only: publish only to VS Code Marketplace (skip Open VSX)"
+      echo "  -o, --ovsx-only: publish only to Open VSX (skip VS Code Marketplace)"
+      echo "  --force: clear Marketplace cooldown state before publish checks"
+      echo "  --debug: enable Node HTTP/TLS tracing for Marketplace publish attempts"
+      exit 0
+      ;;
+    --)
+      shift
+      break
+      ;;
+    -*)
+      break
+      ;;
+    *)
+      break
+      ;;
+  esac
+done
+
+if [ "$MP_ONLY" = true ] && [ "$OPENVSX_ONLY" = true ]; then
+  echo "❌ Error: -m/--mp-only and -o/--ovsx-only cannot be used together."
+  exit 1
+fi
+
+# Convenience behavior: if marketplace-only was requested without a commit
+# message, run in publish-only mode automatically.
+if { [ "$MP_ONLY" = true ] || [ "$OPENVSX_ONLY" = true ]; } && [ -z "${1:-}" ]; then
   PUBLISH_ONLY=true
-  shift
 fi
 
 if [ "$PUBLISH_ONLY" != true ] && [ -z "${1:-}" ]; then
-  echo "Usage: $0 [-p] \"commit message\""
+  echo "Usage: $0 [--debug] [--force] [-p] [-m|--mp-only] [-o|--ovsx-only] \"commit message\""
   echo "  -p: publish-only mode (skip git tag/commit/push and GitHub release steps)"
+  echo "  -m, --mp-only: publish only to VS Code Marketplace (skip Open VSX)"
+  echo "  -o, --ovsx-only: publish only to Open VSX (skip VS Code Marketplace)"
+  echo "  --force: clear Marketplace cooldown state before publish checks"
+  echo "  --debug: enable Node HTTP/TLS tracing for Marketplace publish attempts"
   exit 1
 fi
 
@@ -28,6 +87,13 @@ VERSION=$(node -p "require('./package.json').version")
 TAG="v${VERSION}"
 
 echo "📦 Publishing version ${VERSION}..."
+
+if [ "$MP_ONLY" = true ] && [ "$PUBLISH_ONLY" = true ]; then
+  echo "⏭️  Marketplace-only mode without commit message: using publish-only flow."
+fi
+if [ "$OPENVSX_ONLY" = true ] && [ "$PUBLISH_ONLY" = true ]; then
+  echo "⏭️  Open VSX-only mode without commit message: using publish-only flow."
+fi
 
 if [ "$PUBLISH_ONLY" = true ]; then
   echo "⏭️  Publish-only mode enabled: skipping git/github steps."
@@ -80,57 +146,167 @@ if [ "$PUBLISH_ONLY" != true ]; then
   git push origin "$TAG" || exit 1
 fi
 
-# Publish to Microsoft Marketplace
-echo "📤 Publishing to VS Code Marketplace..."
-if [ -z "${VSCE_PAT:-}" ]; then
-  echo "❌ Error: VSCE_PAT environment variable is not set."
-  echo "Run: export VSCE_PAT=<your-personal-access-token>"
-  exit 1
+read_cooldown_state() {
+  if [ ! -f "$PUBLISH_COOLDOWN_STATE_FILE" ]; then
+    return 1
+  fi
+
+  local last_failed_epoch now_epoch elapsed_seconds remaining_seconds
+  last_failed_epoch=$(cut -d' ' -f1 "$PUBLISH_COOLDOWN_STATE_FILE" 2>/dev/null || true)
+  if ! [[ "$last_failed_epoch" =~ ^[0-9]+$ ]]; then
+    return 1
+  fi
+
+  now_epoch=$(date +%s)
+  elapsed_seconds=$(( now_epoch - last_failed_epoch ))
+  if [ "$elapsed_seconds" -lt "$PUBLISH_COOLDOWN_SECONDS" ]; then
+    remaining_seconds=$(( PUBLISH_COOLDOWN_SECONDS - elapsed_seconds ))
+    echo "$remaining_seconds"
+    return 0
+  fi
+
+  return 1
+}
+
+clear_cooldown_state() {
+  rm -f "$PUBLISH_COOLDOWN_STATE_FILE"
+}
+
+write_cooldown_state() {
+  local reason="$1"
+  printf '%s %s\n' "$(date +%s)" "$reason" >"$PUBLISH_COOLDOWN_STATE_FILE"
+}
+
+run_with_timeout() {
+  local timeout_seconds="$1"
+  shift
+
+  node -e '
+const { spawn } = require("child_process");
+
+const timeoutSeconds = Number(process.argv[1]);
+const args = process.argv.slice(2);
+const nodeDebugFlags = process.env.PUBLISH_NODE_DEBUG_FLAGS || "";
+
+if (args.length === 0) {
+  console.error("No command provided.");
+  process.exit(1);
+}
+
+const childEnv = { ...process.env };
+if (nodeDebugFlags) {
+  childEnv.NODE_DEBUG = nodeDebugFlags;
+}
+
+const child = spawn(args[0], args.slice(1), { stdio: "inherit", env: childEnv });
+const timeoutHandle = setTimeout(() => {
+  console.error(`Marketplace publish timed out after ${timeoutSeconds}s; terminating the publish process.`);
+  child.kill("SIGTERM");
+  setTimeout(() => child.kill("SIGKILL"), 5000).unref();
+}, timeoutSeconds * 1000);
+
+child.on("exit", (code) => {
+  clearTimeout(timeoutHandle);
+  process.exit(code === null ? 124 : code);
+});
+
+child.on("error", (error) => {
+  clearTimeout(timeoutHandle);
+  console.error(error.message);
+  process.exit(1);
+});
+' "$timeout_seconds" "$@"
+}
+
+# Publish to Open VSX first (independent of Marketplace availability)
+if [ "$MP_ONLY" = true ]; then
+  echo "⏭️  Marketplace-only mode enabled: skipping Open VSX publish."
+else
+  if [ -z "${OVSX_PAT:-${VSCE_PAT:-}}" ]; then
+    echo "❌ Error: OVSX_PAT (or VSCE_PAT fallback) environment variable is not set."
+    echo "Run: export OVSX_PAT=<your-open-vsx-token>"
+    exit 1
+  fi
+  echo "📤 Publishing to Open VSX..."
+  npx ovsx publish --packagePath "$VSIX_FILE" -p "${OVSX_PAT:-$VSCE_PAT}" || {
+    echo "⚠️  Open VSX publish failed (continuing to VS Code Marketplace publish)"
+  }
 fi
 
-MAX_PUBLISH_ATTEMPTS=3
-PUBLISH_RETRY_DELAY_SECONDS=20
-PUBLISH_LOG_FILE=$(mktemp)
-PUBLISH_SUCCESS=false
+# Publish to Microsoft Marketplace
+PUBLISH_SUCCESS=true
+if [ "$OPENVSX_ONLY" = true ]; then
+  echo "⏭️  Open VSX-only mode enabled: skipping VS Code Marketplace publish."
+else
+  echo "📤 Publishing to VS Code Marketplace..."
+  MAX_PUBLISH_ATTEMPTS=1
+  PUBLISH_ATTEMPT_TIMEOUT_SECONDS="${PUBLISH_ATTEMPT_TIMEOUT_SECONDS:-60}"
+  PUBLISH_COOLDOWN_SECONDS="${PUBLISH_COOLDOWN_SECONDS:-1500}"
+  PUBLISH_COOLDOWN_STATE_FILE="${TMPDIR:-/tmp}/clprompter-marketplace-publish.state"
+  PUBLISH_NODE_DEBUG_FLAGS=""
+  if [ "$PUBLISH_DEBUG" = true ]; then
+    PUBLISH_NODE_DEBUG_FLAGS="http,https,tls"
+    echo "🪲 Publish debug enabled: Marketplace publish will emit Node HTTP/TLS traces."
+  fi
+  PUBLISH_LOG_FILE=$(mktemp)
+  PUBLISH_SUCCESS=false
 
-for ATTEMPT in $(seq 1 "$MAX_PUBLISH_ATTEMPTS"); do
-  echo "📡 Marketplace publish attempt ${ATTEMPT}/${MAX_PUBLISH_ATTEMPTS}..."
+  if [ "$FORCE_RETRY" = true ]; then
+    if [ -f "$PUBLISH_COOLDOWN_STATE_FILE" ]; then
+      echo "🧹 --force enabled: clearing Marketplace cooldown state file."
+      rm -f "$PUBLISH_COOLDOWN_STATE_FILE"
+    else
+      echo "🧹 --force enabled: no Marketplace cooldown state file found."
+    fi
+  fi
 
-  if vsce publish -p "$VSCE_PAT" >"$PUBLISH_LOG_FILE" 2>&1; then
+  if [ -z "${VSCE_PAT:-}" ]; then
+    echo "❌ Error: VSCE_PAT environment variable is not set."
+    echo "Run: export VSCE_PAT=<your-personal-access-token>"
+    exit 1
+  fi
+
+  COOLDOWN_REMAINING_SECONDS="$(read_cooldown_state || true)"
+  if [ -n "$COOLDOWN_REMAINING_SECONDS" ]; then
+    echo "❌ Marketplace publish recently failed. Wait about $(( (COOLDOWN_REMAINING_SECONDS + 59) / 60 )) minute(s) before trying again."
+    echo "   This avoids re-running a publish while the Marketplace is still rejecting it."
+    exit 1
+  fi
+
+  for ATTEMPT in $(seq 1 "$MAX_PUBLISH_ATTEMPTS"); do
+    echo "📡 Marketplace publish attempt ${ATTEMPT}/${MAX_PUBLISH_ATTEMPTS}..."
+
+    # Publish the already-validated VSIX to avoid re-packaging drift between attempts.
+    if run_with_timeout "$PUBLISH_ATTEMPT_TIMEOUT_SECONDS" vsce publish --packagePath "$VSIX_FILE" -p "$VSCE_PAT" >"$PUBLISH_LOG_FILE" 2>&1; then
+      cat "$PUBLISH_LOG_FILE"
+      PUBLISH_SUCCESS=true
+      clear_cooldown_state
+      break
+    fi
+
+    PUBLISH_EXIT_CODE=$?
     cat "$PUBLISH_LOG_FILE"
-    PUBLISH_SUCCESS=true
+
+    if [ "$PUBLISH_EXIT_CODE" -eq 124 ] || grep -Eiq "request timeout|timed out|etimedout|econnreset|eai_again|socket hang up|temporar|service unavailable|too many requests|http[[:space:]]*429|http[[:space:]]*500|http[[:space:]]*502|http[[:space:]]*503|http[[:space:]]*504|_apis/gallery" "$PUBLISH_LOG_FILE"; then
+      write_cooldown_state "timeout-or-transient"
+    fi
+
     break
-  fi
+  done
 
-  cat "$PUBLISH_LOG_FILE"
-
-  if [ "$ATTEMPT" -lt "$MAX_PUBLISH_ATTEMPTS" ] && grep -Eiq "request timeout|etimedout|econnreset|temporar|socket hang up|_apis/gallery" "$PUBLISH_LOG_FILE"; then
-    echo "⚠️  Marketplace publish attempt ${ATTEMPT} failed with a transient network/service error. Retrying in ${PUBLISH_RETRY_DELAY_SECONDS}s..."
-    sleep "$PUBLISH_RETRY_DELAY_SECONDS"
-    continue
-  fi
-
-  break
-done
-
-rm -f "$PUBLISH_LOG_FILE"
+  rm -f "$PUBLISH_LOG_FILE"
+fi
 
 if [ "$PUBLISH_SUCCESS" != true ]; then
   if [ "$PUBLISH_ONLY" = true ]; then
-    echo "❌ Marketplace publish failed after ${MAX_PUBLISH_ATTEMPTS} attempt(s)."
+    echo "❌ Marketplace publish failed after 1 attempt."
   else
-    echo "❌ Marketplace publish failed after ${MAX_PUBLISH_ATTEMPTS} attempt(s). Rolling back tag..."
+    echo "❌ Marketplace publish failed after 1 attempt. Rolling back tag..."
     git tag -d "$TAG"
     git push --delete origin "$TAG"
   fi
   exit 1
 fi
-
-# Publish to Open VSX
-echo "📤 Publishing to Open VSX..."
-npx ovsx publish -p "${OVSX_PAT:-$VSCE_PAT}" || {
-  echo "⚠️  Open VSX publish failed (VS Code Marketplace publish succeeded)"
-}
 
 if [ "$PUBLISH_ONLY" != true ]; then
   # Create GitHub Release (auto-extracts changelog)
@@ -160,8 +336,12 @@ if [ "$PUBLISH_ONLY" != true ]; then
 fi
 
 echo "✅ Successfully published ${TAG}!"
-echo "📦 VS Code Marketplace: https://marketplace.visualstudio.com/items?itemName=CozziResearch.clprompter"
-echo "📦 Open VSX: https://open-vsx.org/extension/CozziResearch/clprompter"
+if [ "$OPENVSX_ONLY" != true ]; then
+  echo "📦 VS Code Marketplace: https://marketplace.visualstudio.com/items?itemName=CozziResearch.clprompter"
+fi
+if [ "$MP_ONLY" != true ]; then
+  echo "📦 Open VSX: https://open-vsx.org/extension/CozziResearch/clprompter"
+fi
 if [ "$PUBLISH_ONLY" != true ]; then
   echo "📝 GitHub Release: https://github.com/bobcozzi/clPrompter/releases/tag/${TAG}"
 fi

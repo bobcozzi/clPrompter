@@ -80,7 +80,7 @@ The `CL Command Entry Panel` is intended for **non-interactive CL commands** suc
 ![CL Command Entry Menu](images/cmdEntryMenu.png)
 
 
-### Dedicated SQL Job Reconnect (Optional)
+### Private SQL Job Reconnect (Optional)
 
 If you use private Command Entry job mode, these settings and steps ensure your IBM i job environment is reset correctly:
 

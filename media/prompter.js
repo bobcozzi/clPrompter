@@ -22,7 +22,7 @@
  * SOFTWARE.
  */
 import { createCBInput } from './webview-assets/cbinput.js';
-import { getDefaultLengthForType, parseParenthesizedContent, getLengthClass, isSpecifiedFromChildDefault } from './promptHelpers.js';
+import { CL_VARIABLE_PATTERN, getDefaultLengthForType, isValidNameValue, parseParenthesizedContent, getLengthClass, isSpecifiedFromChildDefault } from './promptHelpers.js';
 const WEBVIEW_DEBUG_LOGS = false;
 function debugLog(...args) {
     if (WEBVIEW_DEBUG_LOGS) {
@@ -1137,7 +1137,6 @@ function configureRtnValValidation(input, container) {
         wrapper.appendChild(targetElement);
         wrapper.appendChild(errorSpan);
     }
-    const CL_VAR_PATTERN = /^&[A-Z][A-Z0-9_]{0,21}$/i;
     const validateRtnVal = () => {
         if (!input.value) {
             input.setCustomValidity('');
@@ -1146,7 +1145,7 @@ function configureRtnValValidation(input, container) {
             errorSpan.textContent = '';
             return;
         }
-        if (CL_VAR_PATTERN.test(input.value)) {
+        if (CL_VARIABLE_PATTERN.test(input.value)) {
             input.setCustomValidity('');
             input.style.color = '#006400';
             input.classList.remove('validation-error');
@@ -1379,6 +1378,82 @@ function configureSngValExclusivityForFirstInstance(input, parm, container) {
     input.addEventListener('change', handleChange);
     input.addEventListener('keydown', handleEnter);
 }
+function configureNameTypeValidation(input, type, len, alwVar, suggestions) {
+    const typeUpper = String(type || '').toUpperCase().replace('*', '');
+    const isNameLikeType = typeUpper === 'NAME' || typeUpper === 'SNAME' || typeUpper === 'CNAME';
+    if (!isNameLikeType) {
+        return;
+    }
+    const maxLen = Number.parseInt(String(len || ''), 10) || getDefaultLengthForType(typeUpper);
+    const validationMessage = `Value must be a valid IBM i name (1-${maxLen} chars)`;
+    const validate = () => {
+        const value = (input.value || '').trim();
+        // Respect existing errors from other validators.
+        if (input.validationMessage && input.dataset.nameTypeValidationError !== '1') {
+            return;
+        }
+        if (!value) {
+            if (input.dataset.nameTypeValidationError === '1') {
+                input.setCustomValidity('');
+                input.classList.remove('validation-error');
+                input.dataset.nameTypeValidationError = '0';
+            }
+            return;
+        }
+        if (value.startsWith('*')) {
+            const allowedDisplayValues = (suggestions || []).filter(s => !s.startsWith('_RANGE_') && !s.startsWith('_REL_') && !s.startsWith('_DEPREL_'));
+            const isKnownSpecialValue = allowedDisplayValues.some(v => v.toUpperCase() === value.toUpperCase());
+            if (!isKnownSpecialValue) {
+                input.setCustomValidity(validationMessage);
+                input.classList.add('validation-error');
+                input.dataset.nameTypeValidationError = '1';
+                return;
+            }
+            if (input.dataset.nameTypeValidationError === '1') {
+                input.setCustomValidity('');
+                input.classList.remove('validation-error');
+                input.dataset.nameTypeValidationError = '0';
+            }
+            return;
+        }
+        if (value.startsWith('&')) {
+            if (alwVar === false) {
+                input.setCustomValidity('CL variable not allowed for this parameter');
+                input.classList.add('validation-error');
+                input.dataset.nameTypeValidationError = '1';
+                return;
+            }
+            if (!CL_VARIABLE_PATTERN.test(value)) {
+                input.setCustomValidity(validationMessage);
+                input.classList.add('validation-error');
+                input.dataset.nameTypeValidationError = '1';
+                return;
+            }
+            if (input.dataset.nameTypeValidationError === '1') {
+                input.setCustomValidity('');
+                input.classList.remove('validation-error');
+                input.dataset.nameTypeValidationError = '0';
+            }
+            return;
+        }
+        if (!isValidNameValue(value, maxLen, typeUpper)) {
+            input.setCustomValidity(validationMessage);
+            input.classList.add('validation-error');
+            input.dataset.nameTypeValidationError = '1';
+            return;
+        }
+        if (input.dataset.nameTypeValidationError === '1') {
+            input.setCustomValidity('');
+            input.classList.remove('validation-error');
+            input.dataset.nameTypeValidationError = '0';
+        }
+    };
+    input.addEventListener('blur', validate);
+    input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter')
+            validate();
+    });
+}
 function setupValidations(input, attrs, container) {
     // Defer all validation setup until after DOM insertion
     // This ensures the input element is in the DOM before we try to wrap it
@@ -1425,6 +1500,7 @@ function setupValidations(input, attrs, container) {
                 configureAlwVarValidation(input, container);
             }
         }
+        configureNameTypeValidation(input, attrs.type, attrs.len, attrs.alwVar, attrs.suggestions);
     }, 0);
 }
 // Helper: Validate all inputs with range validation after form population
@@ -1873,10 +1949,10 @@ function createInputForType(type, name, dft, len, suggestions, isRestricted = fa
                 hintSpan.className = 'constraint-hint';
                 hintSpan.textContent = hint;
                 hintContainer.appendChild(hintSpan);
-                setupValidations(input, { suggestions, full, len, alwVar, rtnVal }, hintContainer);
+                setupValidations(input, { suggestions, full, len, type, alwVar, rtnVal }, hintContainer);
                 return hintContainer;
             }
-            setupValidations(input, { suggestions, full, len, alwVar, rtnVal });
+            setupValidations(input, { suggestions, full, len, type, alwVar, rtnVal });
             return input;
         }
         // Has actual special values - use CBInput but with filtered suggestions
@@ -2046,7 +2122,7 @@ function createInputForType(type, name, dft, len, suggestions, isRestricted = fa
             // Note: Case conversion is handled by buildCLCommand() based on convertParmValueToUpperCase setting
         });
         // Configure all validations (range, full, alwVar, rtnVal, etc.)
-        setupValidations(input, { suggestions, full, len, alwVar, rtnVal, idx, parm });
+        setupValidations(input, { suggestions, full, len, type, alwVar, rtnVal, idx, parm });
         return input;
     }
 }

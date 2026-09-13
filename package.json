@@ -2,7 +2,7 @@
   "name": "clprompter",
   "displayName": "%displayName%",
   "description": "%description%",
-  "version": "1.0.27",
+  "version": "1.0.31",
   "author": {
     "name": "Bob Cozzi",
     "url": "https://github.com/bobcozzi"
@@ -109,18 +109,6 @@
         "icon": "images/icon-close.svg"
       },
       {
-        "command": "clprompter.codeSnippet.pin",
-        "category": "%contributes.commands.16.category%",
-        "title": "%contributes.commands.16.title%",
-        "icon": "$(pin)"
-      },
-      {
-        "command": "clprompter.codeSnippet.unpin",
-        "category": "%contributes.commands.17.category%",
-        "title": "%contributes.commands.17.title%",
-        "icon": "$(pinned)"
-      },
-      {
         "command": "clprompter.codeSnippet.add",
         "category": "%contributes.commands.18.category%",
         "title": "%contributes.commands.18.title%",
@@ -184,6 +172,12 @@
         "category": "%contributes.commands.29.category%",
         "title": "%contributes.commands.29.title%",
         "icon": "images/icon-refresh.svg"
+      },
+      {
+        "command": "clprompter.codeSnippet.moreActions",
+        "category": "Code Snippet",
+        "title": "More Actions",
+        "icon": "$(ellipsis)"
       }
     ],
     "keybindings": [
@@ -319,6 +313,12 @@
           "default": false,
           "description": "%contributes.configuration.properties.clPrompter.cmdEntryRecordSnippetsToLog.description%"
         },
+        "clPrompter.cmdEntrySnippetsACTSBS": {
+          "order": 113.5,
+          "type": "string",
+          "default": "QINTER, QBATCH, QUSRWRK",
+          "description": "%contributes.configuration.properties.clPrompter.cmdEntrySnippetsACTSBS.description%"
+        },
         "clPrompter.cmdEntryCodeSnippetTreeClickAction": {
           "order": 113,
           "type": "string",
@@ -334,6 +334,12 @@
             "%contributes.configuration.properties.clPrompter.cmdEntryCodeSnippetTreeClickAction.enumDescriptions.2%"
           ],
           "description": "%contributes.configuration.properties.clPrompter.cmdEntryCodeSnippetTreeClickAction.description%"
+        },
+        "clPrompter.cmdEntrySnippetsVisible": {
+          "order": 113.25,
+          "type": "boolean",
+          "default": false,
+          "description": "%contributes.configuration.properties.clPrompter.cmdEntrySnippetsVisible.description%"
         },
         "clPrompter.kwdColor": {
           "type": "string",
@@ -484,39 +490,19 @@
     "menus": {
       "view/title": [
         {
-          "command": "clprompter.codeSnippet.pin",
-          "when": "view == clprompter.codeSnippetManagerView && !clprompter.codeSnippetManagerPinned",
-          "group": "navigation@0"
-        },
-        {
-          "command": "clprompter.codeSnippet.unpin",
-          "when": "view == clprompter.codeSnippetManagerView && clprompter.codeSnippetManagerPinned",
-          "group": "navigation@0"
-        },
-        {
-          "command": "clprompter.codeSnippet.add",
-          "when": "view == clprompter.codeSnippetManagerView",
-          "group": "navigation@1"
-        },
-        {
-          "command": "clprompter.codeSnippet.edit",
-          "when": "view == clprompter.codeSnippetManagerView && clprompter.codeSnippetSelected",
-          "group": "navigation@2"
-        },
-        {
           "command": "clprompter.codeSnippet.run",
           "when": "view == clprompter.codeSnippetManagerView && clprompter.codeSnippetSelected",
-          "group": "navigation@3"
-        },
-        {
-          "command": "clprompter.codeSnippet.delete",
-          "when": "view == clprompter.codeSnippetManagerView && clprompter.codeSnippetSelected",
-          "group": "navigation@4"
+          "group": "navigation@1"
         },
         {
           "command": "clprompter.codeSnippet.refresh",
           "when": "view == clprompter.codeSnippetManagerView",
           "group": "navigation@5"
+        },
+        {
+          "command": "clprompter.codeSnippet.moreActions",
+          "when": "view == clprompter.codeSnippetManagerView",
+          "group": "navigation@6"
         },
         {
           "command": "clprompter.closeCodeSnippetManager",
@@ -629,6 +615,7 @@
     "copy-assets": "cp -r src/webview-assets/* media/",
     "copy-nls": "cp nls/package.nls*.json ./",
     "build": "npm run compile && npm run compile-webview && npm run copy-assets && npm run copy-nls",
+    "test:name-validation": "tsc src/test/testNameTypeValidation.ts --outDir out --module commonjs --target es2020 --esModuleInterop --skipLibCheck && node out/test/testNameTypeValidation.js",
     "test:api": "tsc src/testAPICall.ts --outDir out --module commonjs --target es2020 --esModuleInterop --skipLibCheck && node out/testAPICall.js",
     "test:command-entry": "tsc src/test/testCommandEntry.ts --outDir out --module commonjs --target es2020 --esModuleInterop --skipLibCheck && node out/test/testCommandEntry.js",
     "test:dep-qual-default": "tsc src/test/testDepQualDefault.ts --outDir out --module commonjs --target es2020 --esModuleInterop --skipLibCheck && node out/test/testDepQualDefault.js"

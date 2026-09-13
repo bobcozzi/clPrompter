@@ -8,7 +8,7 @@ type SqlResultPanelRequest =
     | { type: 'loadMore'; sessionId: string }
     | { type: 'loadAll'; sessionId: string }
     | { type: 'prefetch'; sessionId: string }
-    | { type: 'rerunSql'; statement: string }
+    | { type: 'rerunSql'; statement: string; resultTitle?: string }
     | { type: 'closeSession'; sessionId: string };
 
 type SqlResultPanelRequestHandler = (request: SqlResultPanelRequest) => Promise<SqlResultPayload | undefined>;
@@ -17,6 +17,7 @@ class SqlResultPanel {
     private panel: vscode.WebviewPanel | undefined;
     private requestHandler: SqlResultPanelRequestHandler | undefined;
     private activeSessionId: string | undefined;
+    private activeResultTitle: string | undefined;
 
     setRequestHandler(handler: SqlResultPanelRequestHandler | undefined): void {
         this.requestHandler = handler;
@@ -45,12 +46,14 @@ class SqlResultPanel {
                 }
                 this.panel = undefined;
                 this.activeSessionId = undefined;
+                this.activeResultTitle = undefined;
             });
         } else {
             this.panel.reveal(vscode.ViewColumn.Beside, true);
         }
 
         this.activeSessionId = result.sessionId;
+        this.activeResultTitle = result.resultTitle;
         this.panel.title = `${PANEL_TITLE} (${result.rowCount})`;
         const extensionUri = sqlResultPanelExtensionUri;
         const scriptUri = extensionUri
@@ -65,6 +68,7 @@ class SqlResultPanel {
         }
 
         this.activeSessionId = result.sessionId;
+        this.activeResultTitle = result.resultTitle;
         this.panel.title = `${PANEL_TITLE} (${result.rowCount})`;
         const payload = buildClientPayload(result);
         void this.panel.webview.postMessage({ type: 'sqlResultReplace', payload });
@@ -77,6 +81,7 @@ class SqlResultPanel {
 
         const sessionId = this.activeSessionId;
         this.activeSessionId = undefined;
+        this.activeResultTitle = undefined;
         void this.panel.webview.postMessage({
             type: 'sqlSessionClosed',
             sessionId,
@@ -89,7 +94,7 @@ class SqlResultPanel {
             return;
         }
 
-        const request = message as { type?: string; sessionId?: string; statement?: string };
+        const request = message as { type?: string; sessionId?: string; statement?: string; resultTitle?: string };
         if (!request.type) {
             return;
         }
@@ -100,7 +105,11 @@ class SqlResultPanel {
                 throw new Error('No SQL statement was provided to rerun.');
             }
 
-            const updated = await this.requestHandler({ type: 'rerunSql', statement });
+            const updated = await this.requestHandler({
+                type: 'rerunSql',
+                statement,
+                resultTitle: request.resultTitle ?? this.activeResultTitle
+            });
             if (updated) {
                 this.update(updated);
             }
@@ -148,7 +157,7 @@ export function notifySqlResultSessionClosed(message?: string): void {
 
 function renderSqlResultHtml(result: SqlResultPayload, cspSource: string, scriptUri: string): string {
     const columns = result.columns;
-    const profiles = buildColumnProfiles(columns, result.rows);
+    const profiles = buildColumnProfiles(columns, result.rows, result.columnMetadata ?? []);
     const initialPayload = buildClientPayload(result);
     const columnMetadataByName = new Map((result.columnMetadata ?? []).map((entry) => [normalizeColumnKey(entry.name), entry]));
     const colHeaders = columns.map((column, index) => {
@@ -223,6 +232,7 @@ function renderSqlResultHtml(result: SqlResultPayload, cspSource: string, script
       --fg: var(--vscode-editor-foreground);
       --muted: var(--vscode-descriptionForeground);
       --border: var(--vscode-panel-border);
+            --col-separator: color-mix(in srgb, var(--fg) 14%, transparent);
       --header-bg: color-mix(in srgb, var(--bg) 82%, var(--fg) 18%);
       --row-even: color-mix(in srgb, var(--bg) 90%, var(--fg) 10%);
       --row-odd: color-mix(in srgb, var(--bg) 96%, var(--fg) 4%);
@@ -251,8 +261,17 @@ function renderSqlResultHtml(result: SqlResultPayload, cspSource: string, script
       margin: 0 0 10px;
       color: var(--muted);
     }
+        .result-title {
+            margin: 0 0 8px;
+            font-size: 14px;
+            font-weight: 600;
+            line-height: 1.3;
+        }
+        .result-title.is-hidden {
+            display: none;
+        }
     .table-wrap {
-      border: 1px solid var(--border);
+            border: none;
       border-radius: 6px;
       overflow: auto;
       max-height: calc(100vh - 170px);
@@ -280,6 +299,17 @@ function renderSqlResultHtml(result: SqlResultPayload, cspSource: string, script
             border-radius: 4px;
             padding: 3px 7px;
             font: inherit;
+        }
+        #first-page,
+        #prev-page,
+        #next-page,
+        #last-page {
+            min-width: 34px;
+            padding: 4px 10px;
+            line-height: 1.15;
+            font-weight: 600;
+            cursor: pointer;
+            user-select: none;
         }
         #rerun-sql {
             min-width: 28px;
@@ -336,8 +366,7 @@ function renderSqlResultHtml(result: SqlResultPayload, cspSource: string, script
       text-align: left;
       font-weight: 600;
       padding: 7px 8px;
-      border-bottom: 1px solid var(--border);
-      border-right: 1px solid var(--border);
+            border: none;
       white-space: nowrap;
             vertical-align: bottom;
             position: sticky;
@@ -378,13 +407,24 @@ function renderSqlResultHtml(result: SqlResultPayload, cspSource: string, script
         }
     tbody td {
       padding: 6px 8px;
-      border-bottom: 1px solid var(--border);
-      border-right: 1px solid var(--border);
+            border: none;
       vertical-align: top;
       white-space: pre-wrap;
       word-break: break-word;
       max-width: 440px;
     }
+        tbody td.sql-null-cell {
+            background: color-mix(in srgb, var(--vscode-editorError-foreground, #d16969) 20%, transparent);
+        }
+        tbody td.sql-null-cell .sql-null-text {
+            color: inherit;
+            opacity: 1;
+            font-weight: 500;
+        }
+        thead th:not(:last-child),
+        tbody td:not(:last-child) {
+            box-shadow: inset -1px 0 0 var(--col-separator);
+        }
     th.align-right,
     td.align-right {
       text-align: right;
@@ -410,6 +450,7 @@ function renderSqlResultHtml(result: SqlResultPayload, cspSource: string, script
   </style>
 </head>
 <body>
+        <h3 class="result-title${result.resultTitle ? '' : ' is-hidden'}" id="result-title">${result.resultTitle ? escapeHtml(result.resultTitle) : ''}</h3>
     <pre class="sql" id="sql-statement">${escapeHtml(result.statement)}</pre>
     <pre id="sql-results-bootstrap" style="display:none">${escapeHtml(bootstrapPayloadJson)}</pre>
   ${tableHtml}
@@ -420,13 +461,15 @@ function renderSqlResultHtml(result: SqlResultPayload, cspSource: string, script
 
 function buildClientPayload(result: SqlResultPayload) {
     const columns = result.columns;
-    const profiles = buildColumnProfiles(columns, result.rows);
+    const profiles = buildColumnProfiles(columns, result.rows, result.columnMetadata ?? []);
     const rowCells = result.rows.map((row) => {
         return columns.map((column) => {
             const profile = profiles[column];
             const alignClass = shouldRightAlign(profile.kind) ? 'align-right' : '';
+            const cellClass = (row[column] === null || row[column] === undefined) ? 'sql-null-cell' : '';
             return {
                 alignClass,
+                cellClass,
                 html: formatCell(row[column], profile),
                 sortKind: profile.kind,
                 sortText: sortableTextValue(row[column]),
@@ -437,6 +480,7 @@ function buildClientPayload(result: SqlResultPayload) {
 
     return {
         rowCells,
+        resultTitle: result.resultTitle ?? '',
         rowCount: result.rowCount,
         displayedRowCount: result.displayedRowCount,
         sessionId: result.sessionId ?? '',
@@ -447,11 +491,12 @@ function buildClientPayload(result: SqlResultPayload) {
     };
 }
 
-function renderRowCellsHtml(rowCells: Array<Array<{ alignClass?: string; html: string }>>): string {
+function renderRowCellsHtml(rowCells: Array<Array<{ alignClass?: string; cellClass?: string; html: string }>>): string {
     return rowCells.map((cells, index) => {
         const tds = cells.map((cell) => {
-            const alignClass = cell.alignClass ? ` class="${cell.alignClass}"` : '';
-            return `<td${alignClass}>${cell.html}</td>`;
+            const classes = [cell.alignClass, cell.cellClass].filter(Boolean).join(' ');
+            const classAttr = classes ? ` class="${classes}"` : '';
+            return `<td${classAttr}>${cell.html}</td>`;
         }).join('');
         return `<tr><td class="align-right row-index-col">${index + 1}</td>${tds}</tr>`;
     }).join('');
@@ -596,13 +641,14 @@ type ColumnKind = 'number' | 'date' | 'time' | 'timestamp' | 'text';
 interface ColumnProfile {
     kind: ColumnKind;
     fractionDigits: number;
+    exactNumericScale?: number;
 }
 
 const MIN_FRACTION_DIGITS_FALLBACK = 2;
 
 function formatCell(value: unknown, profile: ColumnProfile): string {
     if (value === null || value === undefined) {
-        return '<span style="opacity:.7">NULL</span>';
+        return '<span class="sql-null-text">NULL</span>';
     }
 
     if (value instanceof Date) {
@@ -619,6 +665,10 @@ function formatCell(value: unknown, profile: ColumnProfile): string {
 
     if (profile.kind === 'number') {
         if (typeof value === 'number') {
+            if (typeof profile.exactNumericScale === 'number' && profile.exactNumericScale >= 0) {
+                return escapeHtml(value.toFixed(profile.exactNumericScale));
+            }
+
             if (Number.isInteger(value)) {
                 return escapeHtml(String(value));
             }
@@ -626,25 +676,53 @@ function formatCell(value: unknown, profile: ColumnProfile): string {
             return escapeHtml(value.toFixed(digits));
         }
 
+        const text = String(value);
+        if (typeof profile.exactNumericScale === 'number' && profile.exactNumericScale >= 0) {
+            return escapeHtml(normalizeNumericTextToScale(text, profile.exactNumericScale));
+        }
+
         // Keep exact text when DB returns numeric values as strings.
-        return escapeHtml(String(value));
+        return escapeHtml(text);
     }
 
     return escapeHtml(String(value));
 }
 
-function buildColumnProfiles(columns: string[], rows: Record<string, unknown>[]): Record<string, ColumnProfile> {
+function buildColumnProfiles(
+    columns: string[],
+    rows: Record<string, unknown>[],
+    metadata: SqlColumnMetadata[]
+): Record<string, ColumnProfile> {
     const out: Record<string, ColumnProfile> = {};
+    const metadataByName = new Map(metadata.map((entry) => [normalizeColumnKey(entry.name), entry]));
     for (const column of columns) {
-        out[column] = profileColumn(rows, column);
+        const columnMetadata = metadataByName.get(normalizeColumnKey(column))
+            ?? metadata.find((entry) => normalizeColumnKey(entry.label) === normalizeColumnKey(column));
+        out[column] = profileColumn(rows, column, columnMetadata);
     }
     return out;
 }
 
-function profileColumn(rows: Record<string, unknown>[], column: string): ColumnProfile {
+function isExactNumericType(typeName: string | undefined): boolean {
+    const normalized = (typeName ?? '').trim().toUpperCase();
+    return normalized === 'DECIMAL' || normalized === 'NUMERIC' || normalized === 'DEC';
+}
+
+function profileColumn(
+    rows: Record<string, unknown>[],
+    column: string,
+    metadata?: SqlColumnMetadata
+): ColumnProfile {
     let kind: ColumnKind = 'text';
     let fractionDigits = 0;
     let sawFractionalNumber = false;
+    let exactNumericScale: number | undefined;
+
+    if (metadata && isExactNumericType(metadata.typeName) && typeof metadata.scale === 'number' && metadata.scale >= 0) {
+        kind = 'number';
+        exactNumericScale = metadata.scale;
+        fractionDigits = Math.max(fractionDigits, metadata.scale);
+    }
 
     for (const row of rows) {
         const value = row[column];
@@ -700,7 +778,30 @@ function profileColumn(rows: Record<string, unknown>[], column: string): ColumnP
         fractionDigits = MIN_FRACTION_DIGITS_FALLBACK;
     }
 
-    return { kind, fractionDigits };
+    return { kind, fractionDigits, exactNumericScale };
+}
+
+function normalizeNumericTextToScale(value: string, scale: number): string {
+    const trimmed = value.trim();
+    const match = trimmed.match(/^([+-]?)(\d+)(?:\.(\d+))?$/);
+    if (!match) {
+        return value;
+    }
+
+    const sign = match[1] || '';
+    const integerPart = match[2] || '0';
+    const fractionPart = match[3] || '';
+
+    if (scale <= 0) {
+        return `${sign}${integerPart}`;
+    }
+
+    if (fractionPart.length >= scale) {
+        // Keep original precision when it exceeds catalog scale.
+        return `${sign}${integerPart}.${fractionPart}`;
+    }
+
+    return `${sign}${integerPart}.${fractionPart.padEnd(scale, '0')}`;
 }
 
 function shouldRightAlign(kind: ColumnKind): boolean {
