@@ -299,6 +299,17 @@ function ensureSqlPrefixForRecall(command: string, isSql: boolean): string {
     return trimmed ? `SQL: ${trimmed}` : text;
 }
 
+function extractGoCommandName(command: string): string | undefined {
+    const text = String(command ?? '').trim();
+    const match = /^(?:QSYS\/)?GO\s+CMD(\S+)\s*$/i.exec(text);
+    if (!match) {
+        return undefined;
+    }
+
+    const commandName = String(match[1] || '').trim().replace(/\*$/, '');
+    return commandName || undefined;
+}
+
 /** Persistent panel webview. It deliberately does not own an IBM i connection. */
 export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
     public static readonly viewType = 'clprompter.commandEntryView.main';
@@ -950,7 +961,11 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
             return;
         }
 
-        const selectCommand = /^([^\s]*)\*/.exec(command);
+        const goCommandName = extractGoCommandName(command);
+        const selectSource = goCommandName !== undefined
+            ? `${goCommandName}*`
+            : command;
+        const selectCommand = /^([^\s]*)\*/.exec(selectSource);
         if (selectCommand !== null) {
             this.post({ type: 'notice', message: vscode.l10n.t("Selecting command...") });
             const [name, library] = connection.upperCaseName(selectCommand[1]).split('/').reverse();
@@ -961,19 +976,29 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
 
             const routedConfig = await this.jobManager.getConfig(connection);
             const libraries = library ? [library] : [routedConfig.currentLibrary ?? '', ...routedConfig.libraryList, '*LIBL'].filter(Boolean);
-            const query = [...libraries].map(lib => `select OBJLIB, OBJNAME, OBJTEXT from table(QSYS2.OBJECT_STATISTICS('${lib}', 'CMD', '${name}*'))`).join(' union all ') + ' order by OBJLIB, OBJNAME';
+            const query = goCommandName !== undefined
+                ? libraries
+                    .map((lib, index) => `select ${index} as LIB_ORD, OBJLIB, OBJNAME, OBJTEXT, COALESCE(NULLIF(TRIM(OBJTEXT), ''), OBJNAME) as SORTTEXT from table(QSYS2.OBJECT_STATISTICS('${lib}', 'CMD', '${name}*'))`)
+                    .join(' union all ') + ' order by SORTTEXT, LIB_ORD, OBJLIB, OBJNAME'
+                : libraries
+                    .map((lib, index) => `select ${index} as LIB_ORD, OBJLIB, OBJNAME, OBJTEXT from table(QSYS2.OBJECT_STATISTICS('${lib}', 'CMD', '${name}*'))`)
+                    .join(' union all ') + ' order by LIB_ORD, OBJNAME';
             const suggestions = (await this.jobManager.runSQL(connection, query)).map(row => ({ library: String(row.OBJLIB), name: String(row.OBJNAME), text: row.OBJTEXT !== null ? String(row.OBJTEXT) : undefined }));
 
-            if (suggestions.length > 0) {
-                const selection = (await vscode.window.showQuickPick(suggestions.map(s => ({ label: `${s.library}/${s.name}`, description: s.text })), { title: vscode.l10n.t("Select command") }))?.label;
-                if (selection !== undefined) {
-                    this.post({ type: 'setCommand', command: selection });
-                    this.post({ type: 'focusInput' });
+            try {
+                if (suggestions.length > 0) {
+                    const selection = (await vscode.window.showQuickPick(suggestions.map(s => ({ label: `${s.library}/${s.name}`, description: s.text })), { title: vscode.l10n.t("Select command") }))?.label;
+                    if (selection !== undefined) {
+                        this.post({ type: 'setCommand', command: selection });
+                        this.post({ type: 'focusInput' });
+                    }
+                    this.post({ type: 'notice', message: undefined });
                 }
-                this.post({ type: 'notice', message: undefined });
-            }
-            else {
-                this.post({ type: 'notice', message: vscode.l10n.t("No selection match for {0} in {1}", name, library ? library : vscode.l10n.t("the library list")) });
+                else {
+                    this.post({ type: 'notice', message: vscode.l10n.t("No selection match for {0} in {1}", name, library ? library : vscode.l10n.t("the library list")) });
+                }
+            } finally {
+                this.post({ type: 'focusInput' });
             }
 
             return;
