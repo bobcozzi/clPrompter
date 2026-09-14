@@ -1157,7 +1157,7 @@ export class CommandEntryService {
         statement: string,
         rows?: number,
         options?: { skipSyntaxCheck?: boolean }
-    ): Promise<{ rows: Record<string, unknown>[]; metadata?: SqlColumnMetadata[] }> {
+    ): Promise<{ rows: Record<string, unknown>[]; metadata?: SqlColumnMetadata[]; elapsedMs?: number }> {
         if (!options?.skipSyntaxCheck) {
             await checkSQLForExecution(connection, statement, this.jobManager);
         }
@@ -1187,7 +1187,22 @@ export class CommandEntryService {
 
         const metadataSource = detailedRawResult ?? rawResult;
         const metadata = extractSqlColumnMetadata(metadataSource, deriveSqlColumns(normalizedRows));
-        return { rows: normalizedRows, metadata };
+        const elapsedMs = typeof rawResult === 'object' && rawResult !== null && !Array.isArray(rawResult)
+            ? (() => {
+                const candidate = rawResult as Record<string, unknown>;
+                const value = candidate.elapsedMs ?? candidate.elapsed_ms ?? candidate.elapsed ?? candidate.durationMs ?? candidate.duration_ms ?? candidate.duration ?? candidate.timeMs ?? candidate.time_ms ?? candidate.time ?? candidate.execution_time;
+                if (typeof value === 'number' && Number.isFinite(value) && value >= 0) {
+                    return value;
+                }
+                if (typeof value === 'string') {
+                    const parsed = Number(value.trim());
+                    return Number.isFinite(parsed) && parsed >= 0 ? parsed : undefined;
+                }
+                return undefined;
+            })()
+            : undefined;
+
+        return { rows: normalizedRows, metadata, elapsedMs };
     }
 
     private async runSqlRowsWithDetails(
@@ -1225,7 +1240,7 @@ export class CommandEntryService {
         return targetRows;
     }
 
-    private async runDedicatedSqlWithPaging(connection: IBMi, sqlStatement: string, maxRows: number): Promise<{ rows: Record<string, unknown>[]; metadata?: SqlColumnMetadata[] }> {
+    private async runDedicatedSqlWithPaging(connection: IBMi, sqlStatement: string, maxRows: number): Promise<{ rows: Record<string, unknown>[]; metadata?: SqlColumnMetadata[]; elapsedMs?: number }> {
         if (!this.jobManager) {
             const result = await this.runSqlRows(connection, sqlStatement, maxRows === NOMAX_SENTINEL ? undefined : maxRows);
             return result;
@@ -1250,7 +1265,7 @@ export class CommandEntryService {
         const unlimited = maxRows === NOMAX_SENTINEL;
         if (!unlimited) {
             const limitedResult = await this.runSqlRowsWithDetails(connection, statement, maxRows, { skipSyntaxCheck: true });
-            return { rows: limitedResult.rows, metadata: limitedResult.metadata };
+            return { rows: limitedResult.rows, metadata: limitedResult.metadata, elapsedMs: limitedResult.elapsedMs };
         }
 
         const initialResult = await this.runSqlRowsWithDetails(connection, statement, undefined, { skipSyntaxCheck: true });
@@ -1258,7 +1273,7 @@ export class CommandEntryService {
         let metadata: SqlColumnMetadata[] | undefined = initialResult.metadata;
 
         if (!initialResult.rawResult || !this.jobManager) {
-            return { rows, metadata };
+            return { rows, metadata, elapsedMs: initialResult.elapsedMs };
         }
 
         let continuationResult = await this.jobManager.continueSQLFromResult(initialResult.rawResult, {
@@ -1293,7 +1308,7 @@ export class CommandEntryService {
             });
         }
 
-        return { rows, metadata };
+        return { rows, metadata, elapsedMs: initialResult.elapsedMs };
     }
 
     private async fetchSqlPage(
@@ -1367,6 +1382,7 @@ export class CommandEntryService {
             prefetchSize?: number;
             columnMetadata?: SqlColumnMetadata[];
             resultTitle?: string;
+            elapsedMs?: number;
         }
     ) {
         const columns = deriveSqlColumns(rows);
@@ -1392,7 +1408,8 @@ export class CommandEntryService {
             sessionId: options?.sessionId,
             hasMoreRows: options?.hasMoreRows,
             fetchSize: options?.fetchSize,
-            prefetchSize: options?.prefetchSize
+            prefetchSize: options?.prefetchSize,
+            elapsedMs: options?.elapsedMs
         };
     }
 
@@ -1542,7 +1559,8 @@ export class CommandEntryService {
                     fetchSize: session.fetchSize,
                     prefetchSize: session.prefetchSize,
                     columnMetadata: session.columnMetadata,
-                    resultTitle: session.resultTitle
+                    resultTitle: session.resultTitle,
+                    elapsedMs: undefined
                 });
                 await this.closeSqlSession(session.id);
                 return payload;
@@ -1571,7 +1589,8 @@ export class CommandEntryService {
             fetchSize: session.fetchSize,
             prefetchSize: session.prefetchSize,
             columnMetadata: session.columnMetadata,
-            resultTitle: session.resultTitle
+            resultTitle: session.resultTitle,
+            elapsedMs: undefined
         });
 
         if (!hasMoreRows) {
@@ -1608,25 +1627,29 @@ export class CommandEntryService {
                 let rows: Record<string, unknown>[];
                 let hasMoreRows = false;
                 let sessionId: string | undefined;
+                let queryElapsedMs: number | undefined;
 
                 let columnMetadata: SqlColumnMetadata[] | undefined;
 
                 if (userManagedRowLimiter) {
-                    const result = await this.runSqlRows(connection, normalizedSql, undefined);
+                    const result = await this.runSqlRowsWithDetails(connection, normalizedSql, undefined);
                     rows = result.rows;
                     columnMetadata = result.metadata;
+                    queryElapsedMs = result.elapsedMs;
                 } else if (!isPagedQueryCandidate(normalizedSql) || unlimited) {
                     const result = this.jobManager
                         ? await this.runDedicatedSqlWithPaging(connection, normalizedSql, maxRows)
                         : await this.runSqlRows(connection, normalizedSql, unlimited ? undefined : maxRows);
                     rows = result.rows;
                     columnMetadata = result.metadata;
+                    queryElapsedMs = result.elapsedMs;
                 } else {
                     const prefetchSize = Math.min(maxRows, prefetchRows);
                     if (this.jobManager) {
                         const initialChunk = await this.runSqlRowsWithDetails(connection, normalizedSql, prefetchSize);
                         rows = initialChunk.rows;
                         columnMetadata = initialChunk.metadata;
+                        queryElapsedMs = initialChunk.elapsedMs;
                         this.logSqlDiag(`query.firstChunk rows=${rows.length} requested=${prefetchSize} continuationType=${initialChunk.continuation?.type ?? '<none>'} hasFetchMore=${initialChunk.continuation?.hasFetchMore ?? false} isDone=${initialChunk.continuation?.isDone ?? '<unknown>'} contId=${initialChunk.continuation?.contId ?? '<none>'} id=${initialChunk.continuation?.id ?? '<none>'}`);
                         this.logSqlInfo(`query.firstChunk rows=${rows.length} requested=${prefetchSize} tuple(type=${initialChunk.continuation?.type ?? '<none>'},id=${initialChunk.continuation?.id ?? '<none>'},cont_id=${initialChunk.continuation?.contId ?? '<none>'},is_done=${initialChunk.continuation?.isDone ?? '<unknown>'},hasFetchMore=${initialChunk.continuation?.hasFetchMore ?? false})`);
                         const continuationAvailable = !!initialChunk.rawResult
@@ -1733,27 +1756,30 @@ export class CommandEntryService {
                 const rowCount = rows.length;
                 const rowLabel = rowCount === 1 ? 'row' : 'rows';
                 const effectiveRowsPerFetch = hasMoreRows ? Math.min(maxRows, prefetchRows) : maxRows;
+                const executionElapsedMs = queryElapsedMs ?? (Date.now() - started);
+                const sqlSummaryText = userManagedRowLimiter
+                    ? `${rowCount} ${rowLabel} returned (user-managed row limiter)`
+                    : unlimited
+                        ? `${rowCount} ${rowLabel} returned (*NOMAX)`
+                        : hasMoreRows
+                            ? `${rowCount} ${rowLabel} returned (prefetched ${rowCount}; rows per fetch ${effectiveRowsPerFetch})`
+                            : `${rowCount} ${rowLabel} returned (rows per fetch ${effectiveRowsPerFetch})`;
                 this.logSqlInfo(`query.end rows=${rowCount} hasMore=${hasMoreRows} sessionId=${sessionId ?? '<none>'}`);
                 this.logSqlDiag(`query.end rows=${rowCount} hasMore=${hasMoreRows} sessionId=${sessionId ?? '<none>'} fetchSize=${(unlimited || userManagedRowLimiter) ? '<none>' : effectiveRowsPerFetch}`);
+                this.logSqlDiag(`query.messageCreated text="${sqlSummaryText}" elapsedMs=${queryElapsedMs ?? '<undefined>'} rowCount=${rowCount} hasMoreRows=${hasMoreRows} sessionId=${sessionId ?? '<none>'}`);
                 return {
                     id: id ?? `${started}-${Math.random().toString(36).slice(2, 8)}`,
                     command,
                     mode,
                     startedAt,
-                    elapsedMs: Date.now() - started,
+                    elapsedMs: executionElapsedMs,
                     outcome: 'success',
                     messages: [{
                         ordinalPosition: 1,
                         messageId: 'SQL0000',
                         severity: 0,
                         type: 'INFO',
-                        text: userManagedRowLimiter
-                            ? `${rowCount} ${rowLabel} returned (user-managed row limiter)`
-                            : unlimited
-                                ? `${rowCount} ${rowLabel} returned (*NOMAX)`
-                                : hasMoreRows
-                                    ? `${rowCount} ${rowLabel} returned (prefetched ${rowCount}; rows per fetch ${effectiveRowsPerFetch})`
-                                    : `${rowCount} ${rowLabel} returned (rows per fetch ${effectiveRowsPerFetch})`,
+                        text: sqlSummaryText,
                         sentTimestamp: toIsoTimestamp(startedDate),
                         sentFromProgram: '',
                         sentFromStmt: '',
@@ -1772,7 +1798,8 @@ export class CommandEntryService {
                         fetchSize: (unlimited || userManagedRowLimiter) ? undefined : effectiveRowsPerFetch,
                         prefetchSize: (unlimited || userManagedRowLimiter) ? undefined : Math.min(maxRows, prefetchRows),
                         columnMetadata,
-                        resultTitle: options?.resultTitle
+                        resultTitle: options?.resultTitle,
+                        elapsedMs: queryElapsedMs
                     })
                 };
             }

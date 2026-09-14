@@ -169,6 +169,7 @@ export interface RunSQLWithDetailsResult {
     rows: Record<string, unknown>[];
     rawResult?: unknown;
     continuation?: SqlContinuationTuple;
+    elapsedMs?: number;
 }
 
 export interface DedicatedJobState {
@@ -196,6 +197,19 @@ function toOptionalBoolean(value: unknown): boolean | undefined {
         }
         if (normalized === '0' || normalized === 'n' || normalized === 'no' || normalized === 'false') {
             return false;
+        }
+    }
+    return undefined;
+}
+
+function toOptionalElapsedMs(value: unknown): number | undefined {
+    if (typeof value === 'number' && Number.isFinite(value) && value >= 0) {
+        return value;
+    }
+    if (typeof value === 'string') {
+        const parsed = Number(value.trim());
+        if (Number.isFinite(parsed) && parsed >= 0) {
+            return parsed;
         }
     }
     return undefined;
@@ -682,6 +696,29 @@ export class CommandEntryJobManager {
         return undefined;
     }
 
+    private extractElapsedMs(result: unknown): number | undefined {
+        if (!result || typeof result !== 'object' || Array.isArray(result)) {
+            return undefined;
+        }
+
+        const candidate = result as Record<string, unknown>;
+        return [
+            candidate.execution_time,
+            candidate.executionTime,
+            candidate.elapsedMs,
+            candidate.elapsed_ms,
+            candidate.elapsed,
+            candidate.durationMs,
+            candidate.duration_ms,
+            candidate.duration,
+            candidate.timeMs,
+            candidate.time_ms,
+            candidate.time,
+            candidate.elapsedTime,
+            candidate.elapsed_time
+        ].map(toOptionalElapsedMs).find((entry) => entry !== undefined);
+    }
+
     private logContinuationCandidate(source: SqlContinuationTuple['source'], candidate: Record<string, unknown>): void {
         if (!isCommandEntryDebugLoggingEnabled()) {
             return;
@@ -840,7 +877,7 @@ export class CommandEntryJobManager {
         let continuation = this.extractContinuationTuple(currentResult, 'dedicated');
 
         if (!continuation?.hasFetchMore) {
-            return { rows: allRows, rawResult: currentResult, continuation };
+            return { rows: allRows, rawResult: currentResult, continuation, elapsedMs: this.extractElapsedMs(currentResult) };
         }
 
         for (let iteration = 1; iteration <= DEDICATED_FETCH_MORE_MAX_ITERATIONS; iteration += 1) {
@@ -950,7 +987,7 @@ export class CommandEntryJobManager {
             }
         }
 
-        return { rows: additionalRows, rawResult: currentResult, continuation };
+        return { rows: additionalRows, rawResult: currentResult, continuation, elapsedMs: this.extractElapsedMs(currentResult) };
     }
 
     private async executeSqlOnJob(
@@ -1144,7 +1181,7 @@ export class CommandEntryJobManager {
                 if (continuation) {
                     this.debugLog(`[Cmd Entry] shared continuation tuple type=${continuation.type ?? '<none>'} id=${continuation.id ?? '<none>'} cont_id=${continuation.contId ?? '<none>'} is_done=${continuation.isDone ?? '<unknown>'} fetchMore=${continuation.hasFetchMore}`);
                 }
-                return { rows, rawResult: sharedResult, continuation };
+                return { rows, rawResult: sharedResult, continuation, elapsedMs: this.extractElapsedMs(sharedResult) };
             } finally {
                 this.observeSharedJobId(connection, reason);
             }
@@ -1221,11 +1258,11 @@ export class CommandEntryJobManager {
             }
 
             if (rows.length > 0) {
-                return { rows, rawResult: result, continuation };
+                return { rows, rawResult: result, continuation, elapsedMs: this.extractElapsedMs(result) };
             }
 
             this.debugLog('[Cmd Entry] WARNING: Could not extract rows from result');
-            return { rows: [], rawResult: result, continuation };
+            return { rows: [], rawResult: result, continuation, elapsedMs: this.extractElapsedMs(result) };
         } catch (error) {
             this.output?.appendLine(`[Cmd Entry] SQL execution failed: ${error instanceof Error ? error.message : String(error)}`);
             throw error;

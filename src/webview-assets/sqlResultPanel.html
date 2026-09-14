@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Content-Security-Policy"
+        content="default-src 'none'; img-src {{CSP_SOURCE}} https: data:; style-src {{CSP_SOURCE}} 'unsafe-inline'; script-src {{CSP_SOURCE}};">
+    <title>{{PANEL_TITLE}}</title>
+    <style>
+        :root {
+            color-scheme: light dark;
+            --bg: var(--vscode-editor-background);
+            --fg: var(--vscode-editor-foreground);
+            --muted: var(--vscode-descriptionForeground);
+            --border: var(--vscode-panel-border);
+            --col-separator: color-mix(in srgb, var(--fg) 14%, transparent);
+            --header-bg: color-mix(in srgb, var(--bg) 82%, var(--fg) 18%);
+            --row-even: color-mix(in srgb, var(--bg) 90%, var(--fg) 10%);
+            --row-odd: color-mix(in srgb, var(--bg) 96%, var(--fg) 4%);
+        }
+
+        body {
+            margin: 0;
+            padding: 14px;
+            background: var(--bg);
+            color: var(--fg);
+            font: 12px/1.45 var(--vscode-editor-font-family, Consolas, monospace);
+        }
+
+        .sql {
+            margin: 0 0 8px;
+            padding: 8px 10px;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            background: color-mix(in srgb, var(--bg) 92%, var(--fg) 8%);
+            white-space: pre-wrap;
+            word-break: break-word;
+            display: none;
+        }
+
+        .sql.is-visible {
+            display: block;
+        }
+
+        .result-header {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            justify-content: space-between;
+            margin: 0 0 8px;
+            flex-wrap: nowrap;
+        }
+
+        .result-header .result-title {
+            margin: 0;
+            flex: 1 1 auto;
+            min-width: 0;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .result-header button {
+            flex: 0 0 auto;
+        }
+
+        .meta {
+            margin: 0 0 10px;
+            color: var(--muted);
+        }
+
+        .result-title {
+            margin: 0 0 8px;
+            font-size: 14px;
+            font-weight: 600;
+            line-height: 1.3;
+        }
+
+        .result-title.is-hidden {
+            display: none;
+        }
+
+        .table-wrap {
+            border: none;
+            border-radius: 6px;
+            overflow: auto;
+            max-height: calc(100vh - 170px);
+        }
+
+        .paging-toolbar {
+            display: flex;
+            gap: 6px;
+            align-items: center;
+            margin: 0 0 10px;
+            flex-wrap: wrap;
+        }
+
+        .fetch-toolbar {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+            margin: 0 0 10px;
+            flex-wrap: wrap;
+        }
+
+        .paging-toolbar button,
+        .paging-toolbar select {
+            border: 1px solid var(--border);
+            background: color-mix(in srgb, var(--bg) 92%, var(--fg) 8%);
+            color: var(--fg);
+            border-radius: 4px;
+            padding: 3px 7px;
+            font: inherit;
+        }
+
+        button[data-tooltip] {
+            position: relative;
+        }
+
+        button[data-tooltip]:hover::after,
+        button[data-tooltip]:focus-visible::after {
+            content: attr(data-tooltip);
+            position: absolute;
+            right: 0;
+            left: auto;
+            top: calc(100% + 6px);
+            transform: none;
+            white-space: nowrap;
+            max-width: min(220px, calc(100vw - 20px));
+            padding: 2px 6px;
+            border-radius: 3px;
+            background: var(--vscode-editorHoverWidget-background, var(--vscode-editor-background));
+            color: var(--vscode-editorHoverWidget-foreground, var(--vscode-foreground));
+            border: 1px solid var(--vscode-editorHoverWidget-border, var(--vscode-contrastBorder, transparent));
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+            z-index: 2147483647;
+            pointer-events: none;
+            font-size: 11px;
+            line-height: 1.2;
+        }
+
+        #first-page,
+        #prev-page,
+        #next-page,
+        #last-page {
+            min-width: 34px;
+            padding: 4px 10px;
+            line-height: 1.15;
+            font-weight: 600;
+            cursor: pointer;
+            user-select: none;
+        }
+
+        #rerun-sql {
+            min-width: 28px;
+            width: 28px;
+            padding: 3px 0;
+            font-weight: 700;
+            font-size: 12px;
+            line-height: 1;
+        }
+
+        .paging-toolbar button.is-disabled {
+            opacity: 0.45;
+            cursor: default;
+        }
+
+        #page-summary {
+            min-width: 170px;
+            color: var(--muted);
+        }
+
+        .toolbar-spacer {
+            flex: 1 1 auto;
+        }
+
+        table {
+            width: max-content;
+            min-width: 100%;
+            border-collapse: collapse;
+            table-layout: auto;
+        }
+
+        .stacked-header {
+            display: inline-flex;
+            flex-direction: column;
+            align-items: flex-start;
+            justify-content: flex-end;
+            gap: 0;
+            line-height: 1.15;
+            white-space: normal;
+            text-align: left;
+            pointer-events: none;
+        }
+
+        .stacked-header span {
+            display: block;
+            min-width: 0;
+        }
+
+        thead th {
+            position: sticky;
+            top: 0;
+            z-index: 1;
+            background: var(--header-bg);
+            text-align: left;
+            font-weight: 600;
+            padding: 7px 8px;
+            border: none;
+            white-space: nowrap;
+            vertical-align: bottom;
+            position: sticky;
+        }
+
+        thead th.sortable-col {
+            cursor: pointer;
+            user-select: none;
+            padding-right: 16px;
+        }
+
+        thead th.sortable-col:hover {
+            background: color-mix(in srgb, var(--header-bg) 82%, var(--fg) 18%);
+        }
+
+        thead th.sortable-col.is-sorted::after {
+            content: ' \25B2';
+            font-size: 10px;
+            opacity: 0.9;
+            margin-left: 4px;
+        }
+
+        thead th.sortable-col.is-sorted.is-desc::after {
+            content: ' \25BC';
+        }
+
+        .col-resize-handle {
+            position: absolute;
+            top: 0;
+            right: -2px;
+            width: 8px;
+            height: 100%;
+            cursor: col-resize;
+            z-index: 3;
+        }
+
+        .col-resize-handle:hover {
+            background: color-mix(in srgb, var(--vscode-focusBorder, var(--fg)) 45%, transparent);
+        }
+
+        body.is-col-resizing,
+        body.is-col-resizing * {
+            cursor: col-resize !important;
+            user-select: none;
+        }
+
+        tbody td {
+            padding: 6px 8px;
+            border: none;
+            vertical-align: top;
+            white-space: pre-wrap;
+            word-break: break-word;
+            max-width: 440px;
+        }
+
+        tbody td.sql-null-cell {
+            background: color-mix(in srgb, var(--vscode-editorError-foreground, #d16969) 20%, transparent);
+        }
+
+        tbody td.sql-null-cell .sql-null-text {
+            color: inherit;
+            opacity: 1;
+            font-weight: 500;
+        }
+
+        thead th:not(:last-child),
+        tbody td:not(:last-child) {
+            box-shadow: inset -1px 0 0 var(--col-separator);
+        }
+
+        th.align-right,
+        td.align-right {
+            text-align: right;
+            font-variant-numeric: tabular-nums;
+        }
+
+        th.row-index-col,
+        td.row-index-col {
+            position: sticky;
+            left: 0;
+            z-index: 2;
+            background: var(--header-bg);
+        }
+
+        td.row-index-col {
+            z-index: 1;
+            background: color-mix(in srgb, var(--bg) 94%, var(--fg) 6%);
+        }
+
+        tbody tr:nth-child(odd) {
+            background: var(--row-odd);
+        }
+
+        tbody tr:nth-child(even) {
+            background: var(--row-even);
+        }
+
+        .empty {
+            color: var(--muted);
+            margin: 12px 0 0;
+        }
+    </style>
+</head>
+
+<body>
+    {{BODY_HTML}}
+</body>
+
+</html>

@@ -38,12 +38,21 @@
         persistedState = {};
     }
 
+    var l10n = (initialPayload.l10n && typeof initialPayload.l10n === 'object')
+        ? initialPayload.l10n
+        : {};
+
+    function t(key, fallback) {
+        var value = l10n[key];
+        return (typeof value === 'string' && value.length > 0) ? value : fallback;
+    }
+
     var tbody = document.getElementById('results-body');
     var firstBtn = document.getElementById('first-page');
     var prevBtn = document.getElementById('prev-page');
     var nextBtn = document.getElementById('next-page');
     var lastBtn = document.getElementById('last-page');
-    var pageSizeSelect = document.getElementById('page-size');
+    var pageSizeSelect = null;
     var pageSummary = document.getElementById('page-summary');
     var loadMoreBtn = document.getElementById('load-more');
     var loadAllBtn = document.getElementById('load-all');
@@ -53,6 +62,7 @@
     var toggleSqlStmtBtn = document.getElementById('toggle-sql-stmt');
     var sqlStatement = document.getElementById('sql-statement');
     var tableWrap = document.querySelector('.table-wrap');
+    var currentElapsedMs = Number(initialPayload.elapsedMs || 0);
 
     if (!tbody) {
         return;
@@ -69,12 +79,56 @@
         rerunBtn.disabled = !!isBusy;
         rerunBtn.setAttribute('aria-busy', isBusy ? 'true' : 'false');
         rerunBtn.title = t('refresh', 'Refresh');
+        rerunBtn.setAttribute('data-tooltip', t('refresh', 'Refresh'));
+        rerunBtn.setAttribute('aria-label', t('refresh', 'Refresh'));
+    }
+
+    function updatePagingButtonTitles() {
+        if (firstBtn) {
+            firstBtn.title = t('top', 'Top');
+            firstBtn.setAttribute('data-tooltip', t('top', 'Top'));
+            firstBtn.setAttribute('aria-label', t('top', 'Top'));
+        }
+        if (prevBtn) {
+            prevBtn.title = t('priorPage', 'Prior page');
+            prevBtn.setAttribute('data-tooltip', t('priorPage', 'Prior page'));
+            prevBtn.setAttribute('aria-label', t('priorPage', 'Prior page'));
+        }
+        if (nextBtn) {
+            nextBtn.title = t('nextPage', 'Next page');
+            nextBtn.setAttribute('data-tooltip', t('nextPage', 'Next page'));
+            nextBtn.setAttribute('aria-label', t('nextPage', 'Next page'));
+        }
+        if (lastBtn) {
+            lastBtn.title = t('bottom', 'Bottom');
+            lastBtn.setAttribute('data-tooltip', t('bottom', 'Bottom'));
+            lastBtn.setAttribute('aria-label', t('bottom', 'Bottom'));
+        }
     }
 
     if (toggleSqlStmtBtn && sqlStatement) {
-        toggleSqlStmtBtn.addEventListener('click', function () {
+        var syncSqlToggleState = function () {
+            var isVisible = sqlStatement.classList.contains('is-visible');
+            var visibleText = isVisible ? t('hideSqlStmt', '</sql>') : t('viewSqlStmt', '<sql>');
+            var tooltipText = isVisible ? t('hideSqlStatement', 'Hide SQL stmt') : t('showFullSqlStatement', 'Show full SQL stmt');
+            toggleSqlStmtBtn.textContent = visibleText;
+            toggleSqlStmtBtn.title = tooltipText;
+            toggleSqlStmtBtn.setAttribute('data-tooltip', tooltipText);
+            toggleSqlStmtBtn.setAttribute('aria-label', tooltipText);
+            toggleSqlStmtBtn.setAttribute('aria-expanded', isVisible ? 'true' : 'false');
+        };
+
+        syncSqlToggleState();
+        toggleSqlStmtBtn.addEventListener('click', function (event) {
+            if (event) {
+                event.preventDefault();
+                event.stopPropagation();
+            }
             var isVisible = sqlStatement.classList.toggle('is-visible');
-            toggleSqlStmtBtn.textContent = isVisible ? t('hideSqlStmt', 'Hide SQL Stmt') : t('viewSqlStmt', '<SQL>');
+            toggleSqlStmtBtn.textContent = isVisible ? t('hideSqlStmt', '</sql>') : t('viewSqlStmt', '<sql>');
+            toggleSqlStmtBtn.title = isVisible ? t('hideSqlStatement', 'Hide SQL stmt') : t('showFullSqlStatement', 'Show full SQL stmt');
+            toggleSqlStmtBtn.setAttribute('data-tooltip', toggleSqlStmtBtn.title);
+            toggleSqlStmtBtn.setAttribute('aria-label', toggleSqlStmtBtn.title);
             toggleSqlStmtBtn.setAttribute('aria-expanded', isVisible ? 'true' : 'false');
         });
     }
@@ -84,14 +138,6 @@
     var hasMoreRows = !!initialPayload.hasMoreRows;
     var fetchSize = Number(initialPayload.fetchSize || 0);
     var rows = Array.isArray(initialPayload.rowCells) ? initialPayload.rowCells.slice() : [];
-    var l10n = (initialPayload.l10n && typeof initialPayload.l10n === 'object')
-        ? initialPayload.l10n
-        : {};
-
-    function t(key, fallback) {
-        var value = l10n[key];
-        return (typeof value === 'string' && value.length > 0) ? value : fallback;
-    }
 
     function formatTemplate(template, tokens) {
         var text = String(template || '');
@@ -100,6 +146,14 @@
             var replacement = values[token];
             return replacement === undefined || replacement === null ? '' : String(replacement);
         });
+    }
+
+    function formatElapsedMs(elapsedMs) {
+        var numeric = Number(elapsedMs);
+        if (!isFinite(numeric) || numeric < 0) {
+            return '';
+        }
+        return Math.round(numeric) + ' ms';
     }
 
     function renderResultTitle() {
@@ -120,15 +174,15 @@
     var suppressSortUntil = 0;
     var minColumnWidthPx = 80;
     var pageSize = 50;
-    var pageSizeAuto = false;
+    var pageSizeAuto = true;
     var pageIndex = 0;
-    var autoPageStep = 0;
     var rowOffsets = [];
     var rowHeights = [];
     var rerunInFlight = false;
     var loadAllInProgress = false;
     var stopLoadAllRequested = false;
     var pagingDiagEnabled = true;
+    var autoPagingSpacer = null;
 
     function logPagingDiag(reason) {
         if (!pagingDiagEnabled || !tableWrap) {
@@ -152,6 +206,77 @@
         } catch (_e) {
             // Ignore console serialization issues.
         }
+    }
+
+    function getAverageRowHeight() {
+        var totalHeight = 0;
+        var measured = 0;
+        for (var i = 0; i < rowHeights.length; i++) {
+            var h = rowHeights[i];
+            if (h > 0) {
+                totalHeight += h;
+                measured += 1;
+            }
+        }
+
+        if (measured > 0) {
+            return totalHeight / measured;
+        }
+
+        var renderedRows = getRenderedRows();
+        if (renderedRows.length > 0) {
+            var height = renderedRows[0].getBoundingClientRect().height;
+            if (isFinite(height) && height > 0) {
+                return height;
+            }
+        }
+
+        return 0;
+    }
+
+    function ensureAutoPagingSpacer() {
+        if (!tableWrap) {
+            return null;
+        }
+
+        if (!autoPagingSpacer || autoPagingSpacer.parentElement !== tableWrap) {
+            autoPagingSpacer = document.createElement('div');
+            autoPagingSpacer.className = 'auto-paging-spacer';
+            autoPagingSpacer.setAttribute('aria-hidden', 'true');
+            autoPagingSpacer.style.width = '1px';
+            autoPagingSpacer.style.height = '0px';
+            tableWrap.appendChild(autoPagingSpacer);
+        }
+
+        return autoPagingSpacer;
+    }
+
+    function updateAutoPagingSpacer() {
+        var spacer = ensureAutoPagingSpacer();
+        if (!spacer) {
+            return;
+        }
+
+        if (!pageSizeAuto || rows.length === 0) {
+            spacer.style.height = '0px';
+            return;
+        }
+
+        var autoRowsPerPage = Math.max(1, estimateVisibleRows());
+        var remainder = rows.length % autoRowsPerPage;
+        if (remainder === 0) {
+            spacer.style.height = '0px';
+            return;
+        }
+
+        var missingRows = autoRowsPerPage - remainder;
+        var averageRowHeight = getAverageRowHeight();
+        if (!isFinite(averageRowHeight) || averageRowHeight <= 0) {
+            spacer.style.height = '0px';
+            return;
+        }
+
+        spacer.style.height = Math.max(0, Math.round(missingRows * averageRowHeight)) + 'px';
     }
 
     var tableSignature = initialColumns.join('|~|');
@@ -208,23 +333,8 @@
     }
 
     function updatePageSizeFromSelection() {
-        if (!pageSizeSelect) {
-            pageSizeAuto = false;
-            pageSize = 50;
-            autoPageStep = 0;
-            return;
-        }
-
-        var selectedValue = String(pageSizeSelect.value || '50').toUpperCase();
-        pageSizeAuto = selectedValue === 'AUTO';
-        autoPageStep = 0;
-        if (pageSizeAuto) {
-            pageSize = 0;
-            return;
-        }
-
-        var nextSize = Number(selectedValue);
-        pageSize = (isFinite(nextSize) && nextSize > 0) ? Math.floor(nextSize) : 50;
+        pageSizeAuto = true;
+        pageSize = 0;
     }
 
     function estimateVisibleRows() {
@@ -346,18 +456,10 @@
             return [0];
         }
 
+        var autoRowsPerPage = Math.max(1, estimateVisibleRows());
         var anchors = [0];
-        var startRow = 0;
-        while (startRow < rowOffsets.length - 1) {
-            var nextStart = computePageDownTargetRow(startRow);
-            if (nextStart <= startRow) {
-                nextStart = startRow + 1;
-            }
-            if (nextStart >= rowOffsets.length) {
-                break;
-            }
-            anchors.push(nextStart);
-            startRow = nextStart;
+        for (var startRow = autoRowsPerPage; startRow < rowOffsets.length; startRow += autoRowsPerPage) {
+            anchors.push(startRow);
         }
 
         return anchors;
@@ -393,13 +495,22 @@
         if (!rowOffsets.length) {
             return 1;
         }
+        return Math.max(1, estimateVisibleRows());
+    }
 
-        if (autoPageStep > 0) {
-            return autoPageStep;
+    function refreshAutoPagingLayout(reason) {
+        if (!pageSizeAuto || !tableWrap) {
+            return;
         }
 
-        autoPageStep = getVisibleRowCountFromStartRow(currentTopRow);
-        return Math.max(1, autoPageStep);
+        rebuildRowOffsets();
+        updateAutoPagingSpacer();
+        syncPageIndexFromScroll();
+        updatePageButtons();
+        if (pageSummary) {
+            pageSummary.textContent = buildPageSummaryText();
+        }
+        logPagingDiag('refreshAuto:' + reason);
     }
 
     function buildPageSummaryText() {
@@ -418,11 +529,29 @@
             return 0;
         }
 
+        var maxScrollable = Math.max(0, tableWrap.scrollHeight - tableWrap.clientHeight);
+        if (maxScrollable <= 1) {
+            return 0;
+        }
+
+        if (tableWrap.scrollTop >= (maxScrollable - 1)) {
+            return Math.max(0, anchors.length - 1);
+        }
+
         var topRow = findRowIndexForScrollTop(tableWrap.scrollTop);
+        return getAutoPageIndexFromTopRow(anchors, topRow);
+    }
+
+    function getAutoPageIndexFromTopRow(anchors, topRow) {
+        if (!anchors || anchors.length === 0) {
+            return 0;
+        }
+
+        var normalizedTop = Math.max(0, topRow);
         var index = 0;
         for (var i = 0; i < anchors.length; i++) {
             var anchorRow = anchors[i] || 0;
-            if (topRow >= anchorRow) {
+            if (normalizedTop >= anchorRow) {
                 index = i;
             } else {
                 break;
@@ -490,6 +619,15 @@
         }
 
         var topIndex = Math.max(0, Math.min(rowOffsets.length - 1, currentTopRowIndex));
+        if (pageSizeAuto) {
+            var anchors = getAutoPageAnchors();
+            var anchorIndex = getAutoPageIndexFromTopRow(anchors, topIndex);
+            if (anchorIndex >= anchors.length - 1) {
+                return anchors[anchors.length - 1] || 0;
+            }
+            return anchors[anchorIndex + 1] || topIndex;
+        }
+
         var visibleCount = pageSizeAuto
             ? getAutoStepForCurrentView(topIndex)
             : getVisibleRowCountFromStartRow(topIndex);
@@ -511,6 +649,15 @@
         var topIndex = Math.max(0, Math.min(rowOffsets.length - 1, currentTopRowIndex));
         if (topIndex <= 0) {
             return 0;
+        }
+
+        if (pageSizeAuto) {
+            var autoAnchors = getAutoPageAnchors();
+            var autoAnchorIndex = getAutoPageIndexFromTopRow(autoAnchors, topIndex);
+            if (autoAnchorIndex <= 0) {
+                return 0;
+            }
+            return autoAnchors[autoAnchorIndex - 1] || 0;
         }
 
         // Jump back to the previous computed page anchor (same model as forward paging).
@@ -646,24 +793,17 @@
             }
 
             rebuildRowOffsets();
-            var targetTopRow = getCurrentTopRowIndex();
-            if (deltaPages > 0) {
-                for (var down = 0; down < deltaPages; down++) {
-                    var nextRow = computePageDownTargetRow(targetTopRow);
-                    if (nextRow <= targetTopRow) {
-                        break;
-                    }
-                    targetTopRow = nextRow;
-                }
-            } else if (deltaPages < 0) {
-                for (var up = 0; up < Math.abs(deltaPages); up++) {
-                    var prevRow = computePageUpTargetRow(targetTopRow);
-                    if (prevRow >= targetTopRow) {
-                        break;
-                    }
-                    targetTopRow = prevRow;
-                }
+            var anchors = getAutoPageAnchors();
+            var currentAnchorIndex = getAutoPageIndexFromScrollAnchors(anchors);
+            var targetAnchorIndex = currentAnchorIndex + deltaPages;
+            if (targetAnchorIndex < 0) {
+                targetAnchorIndex = 0;
             }
+            if (targetAnchorIndex > anchors.length - 1) {
+                targetAnchorIndex = anchors.length - 1;
+            }
+
+            var targetTopRow = anchors[targetAnchorIndex] || 0;
 
             tableWrap.scrollTop = Math.max(0, rowOffsets[targetTopRow] || 0);
             syncPageIndexFromScroll();
@@ -688,30 +828,37 @@
         scrollToRowIndex(targetRow);
     }
 
+    function setPagingButtonState(button, isDisabled) {
+        if (!button) {
+            return;
+        }
+        button.disabled = false;
+        button.classList.toggle('is-disabled', !!isDisabled);
+        button.setAttribute('aria-disabled', isDisabled ? 'true' : 'false');
+    }
+
     function updatePageButtons() {
         if (pageSizeAuto && tableWrap && rowOffsets.length > 0) {
             rebuildRowOffsets();
             var anchors = getAutoPageAnchors();
             var totalPages = Math.max(1, anchors.length);
             var pageNumber = getAutoPageIndexFromScrollAnchors(anchors);
-            var topRow = getCurrentTopRowIndex();
-            var canPageBackward = topRow > 0;
-            var nextRow = computePageDownTargetRow(topRow);
-            var canPageForward = nextRow > topRow;
+            var canPageBackward = pageNumber > 0;
+            var canPageForward = pageNumber < (totalPages - 1);
             pageIndex = pageNumber;
 
-            if (firstBtn) { firstBtn.disabled = !canPageBackward; }
-            if (prevBtn) { prevBtn.disabled = !canPageBackward; }
-            if (nextBtn) { nextBtn.disabled = !canPageForward; }
-            if (lastBtn) { lastBtn.disabled = !canPageForward; }
+            if (firstBtn) { setPagingButtonState(firstBtn, !canPageBackward); }
+            if (prevBtn) { setPagingButtonState(prevBtn, !canPageBackward); }
+            if (nextBtn) { setPagingButtonState(nextBtn, !canPageForward); }
+            if (lastBtn) { setPagingButtonState(lastBtn, !canPageForward); }
             return;
         }
 
         var totalPages = getTotalPages();
-        if (firstBtn) { firstBtn.disabled = pageIndex <= 0; }
-        if (prevBtn) { prevBtn.disabled = pageIndex <= 0; }
-        if (nextBtn) { nextBtn.disabled = pageIndex >= totalPages - 1; }
-        if (lastBtn) { lastBtn.disabled = pageIndex >= totalPages - 1; }
+        if (firstBtn) { setPagingButtonState(firstBtn, pageIndex <= 0); }
+        if (prevBtn) { setPagingButtonState(prevBtn, pageIndex <= 0); }
+        if (nextBtn) { setPagingButtonState(nextBtn, pageIndex >= totalPages - 1); }
+        if (lastBtn) { setPagingButtonState(lastBtn, pageIndex >= totalPages - 1); }
     }
 
     function renderRows(options) {
@@ -719,7 +866,6 @@
         var preserveScroll = !!opts.preserveScroll;
         var scrollToTop = !!opts.scrollToTop;
         var previousScrollTop = tableWrap ? tableWrap.scrollTop : 0;
-        autoPageStep = 0;
         var html = '';
         for (var i = 0; i < rows.length; i++) {
             var cells = rows[i];
@@ -744,6 +890,7 @@
         tbody.innerHTML = html;
 
         rebuildRowOffsets();
+        updateAutoPagingSpacer();
         if (tableWrap) {
             if (scrollToTop) {
                 tableWrap.scrollTop = 0;
@@ -755,9 +902,10 @@
         syncPageIndexFromScroll();
 
         if (resultMeta) {
+            var elapsedText = formatElapsedMs(currentElapsedMs);
             resultMeta.textContent = hasMoreRows
-                ? formatTemplate(t('moreRowsAvailableTemplate', '{count} rows loaded. More available.'), { count: rows.length })
-                : formatTemplate(t('rowsReturnedTemplate', '{count} rows returned.'), { count: rows.length });
+                ? formatTemplate(t('moreRowsAvailableTemplate', '{count} rows loaded. More available.'), { count: rows.length }) + (elapsedText ? ' ' + elapsedText : '')
+                : formatTemplate(t('rowsReturnedTemplate', '{count} rows returned.'), { count: rows.length }) + (elapsedText ? ' ' + elapsedText : '');
         }
         if (pageSummary) {
             pageSummary.textContent = buildPageSummaryText();
@@ -953,23 +1101,42 @@
 
     function updateLoadButtons() {
         var canFetch = !!sessionId && !!hasMoreRows;
+        var showAllRowsReturned = !canFetch && rows.length > 0;
         var nextRows = Number(fetchSize);
         var hasValidNextRows = isFinite(nextRows) && nextRows > 0;
         var loadMoreLabel = hasValidNextRows
             ? formatTemplate(t('loadNextRowsTemplate', 'Load next {count} rows'), { count: Math.floor(nextRows) })
             : t('loadMore', 'Load more');
         if (loadMoreBtn) {
-            loadMoreBtn.hidden = !canFetch;
-            loadMoreBtn.textContent = loadMoreLabel;
-            loadMoreBtn.title = loadMoreLabel;
-            loadMoreBtn.setAttribute('aria-label', loadMoreLabel);
-            loadMoreBtn.disabled = loadAllInProgress || !canFetch;
+            if (canFetch) {
+                loadMoreBtn.hidden = false;
+                loadMoreBtn.textContent = loadMoreLabel;
+                loadMoreBtn.title = t('loadMoreResultRows', 'Load more rows');
+                loadMoreBtn.setAttribute('data-tooltip', t('loadMoreResultRows', 'Load more rows'));
+                loadMoreBtn.setAttribute('aria-label', t('loadMoreResultRows', 'Load more rows'));
+                loadMoreBtn.disabled = !!loadAllInProgress;
+            } else if (showAllRowsReturned) {
+                var allRowsReturnedLabel = t('allRowsReturnedButton', 'All rows returned');
+                loadMoreBtn.hidden = false;
+                loadMoreBtn.textContent = allRowsReturnedLabel;
+                loadMoreBtn.title = allRowsReturnedLabel;
+                loadMoreBtn.setAttribute('data-tooltip', allRowsReturnedLabel);
+                loadMoreBtn.setAttribute('aria-label', allRowsReturnedLabel);
+                loadMoreBtn.disabled = true;
+            } else {
+                loadMoreBtn.hidden = true;
+                loadMoreBtn.disabled = true;
+            }
         }
         if (loadAllBtn) {
             loadAllBtn.hidden = !canFetch;
-            loadAllBtn.textContent = loadAllInProgress
+            var loadAllLabel = loadAllInProgress
                 ? (stopLoadAllRequested ? t('stoppingRequested', 'Stopping requested...') : t('stop', 'Stop'))
                 : t('loadAll', 'Load all');
+            loadAllBtn.textContent = loadAllLabel;
+            loadAllBtn.title = t('loadAllRemainingResultRows', 'Load all rows');
+            loadAllBtn.setAttribute('data-tooltip', t('loadAllRemainingResultRows', 'Load all rows'));
+            loadAllBtn.setAttribute('aria-label', t('loadAllRemainingResultRows', 'Load all rows'));
             loadAllBtn.disabled = !canFetch;
         }
     }
@@ -1009,25 +1176,49 @@
     }
 
     if (firstBtn) {
+        firstBtn.title = t('top', 'Top');
+        firstBtn.setAttribute('data-tooltip', t('top', 'Top'));
+        firstBtn.setAttribute('aria-label', t('top', 'Top'));
         firstBtn.addEventListener('click', function () {
+            if (firstBtn.classList.contains('is-disabled')) {
+                return;
+            }
             scrollToRowIndex(0);
         });
     }
 
     if (prevBtn) {
+        prevBtn.title = t('priorPage', 'Prior page');
+        prevBtn.setAttribute('data-tooltip', t('priorPage', 'Prior page'));
+        prevBtn.setAttribute('aria-label', t('priorPage', 'Prior page'));
         prevBtn.addEventListener('click', function () {
+            if (prevBtn.classList.contains('is-disabled')) {
+                return;
+            }
             jumpByPages(-1);
         });
     }
 
     if (nextBtn) {
+        nextBtn.title = t('nextPage', 'Next page');
+        nextBtn.setAttribute('data-tooltip', t('nextPage', 'Next page'));
+        nextBtn.setAttribute('aria-label', t('nextPage', 'Next page'));
         nextBtn.addEventListener('click', function () {
+            if (nextBtn.classList.contains('is-disabled')) {
+                return;
+            }
             jumpByPages(1);
         });
     }
 
     if (lastBtn) {
+        lastBtn.title = t('bottom', 'Bottom');
+        lastBtn.setAttribute('data-tooltip', t('bottom', 'Bottom'));
+        lastBtn.setAttribute('aria-label', t('bottom', 'Bottom'));
         lastBtn.addEventListener('click', function () {
+            if (lastBtn.classList.contains('is-disabled')) {
+                return;
+            }
             if (pageSizeAuto && tableWrap) {
                 var anchors = getAutoPageAnchors();
                 var lastPage = Math.max(0, anchors.length - 1);
@@ -1043,14 +1234,6 @@
 
             var startOfLastPage = Math.max(0, rows.length - getEffectivePageSize());
             scrollToRowIndex(startOfLastPage);
-        });
-    }
-
-    if (pageSizeSelect) {
-        pageSizeSelect.addEventListener('change', function () {
-            updatePageSizeFromSelection();
-            pageIndex = 0;
-            renderRows({ scrollToTop: true });
         });
     }
 
@@ -1107,15 +1290,29 @@
     }
 
     window.addEventListener('resize', function () {
-        if (!pageSizeAuto) {
+        refreshAutoPagingLayout('windowResize');
+    });
+
+    if (tableWrap && typeof ResizeObserver !== 'undefined') {
+        var resizeObserver = new ResizeObserver(function () {
+            refreshAutoPagingLayout('tableWrapResize');
+        });
+        resizeObserver.observe(tableWrap);
+    }
+
+    document.addEventListener('visibilitychange', function () {
+        if (document.visibilityState !== 'visible') {
             return;
         }
-        autoPageStep = 0;
-        syncPageIndexFromScroll();
-        updatePageButtons();
-        if (pageSummary) {
-            pageSummary.textContent = buildPageSummaryText();
-        }
+        requestAnimationFrame(function () {
+            refreshAutoPagingLayout('documentVisible');
+        });
+    });
+
+    window.addEventListener('focus', function () {
+        requestAnimationFrame(function () {
+            refreshAutoPagingLayout('windowFocus');
+        });
     });
 
     if (rerunBtn) {
@@ -1184,7 +1381,9 @@
         sessionId = payload.sessionId || '';
         hasMoreRows = !!payload.hasMoreRows;
         fetchSize = Number(payload.fetchSize || 0);
+        currentElapsedMs = Number(payload.elapsedMs || 0);
         l10n = (payload.l10n && typeof payload.l10n === 'object') ? payload.l10n : l10n;
+        updatePagingButtonTitles();
         renderResultTitle();
 
         if (sortColumnIndex >= 0) {
@@ -1211,6 +1410,7 @@
     try {
         updatePageSizeFromSelection();
         setRerunBusy(false);
+        updatePagingButtonTitles();
         attachSortHandlers();
         attachResizeHandlers();
         applyWidths();
@@ -1220,15 +1420,7 @@
         updateLoadButtons();
         // Re-measure once the browser has finalized layout so AUTO summary starts accurate.
         requestAnimationFrame(function () {
-            if (!tableWrap) {
-                return;
-            }
-            rebuildRowOffsets();
-            syncPageIndexFromScroll();
-            updatePageButtons();
-            if (pageSummary) {
-                pageSummary.textContent = buildPageSummaryText();
-            }
+            refreshAutoPagingLayout('initialRender');
         });
     } catch (error) {
         try {

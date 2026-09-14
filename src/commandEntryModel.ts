@@ -49,6 +49,7 @@ export interface SqlColumnMetadata {
 export interface SqlResultPayload {
     statement: string;
     resultTitle?: string;
+    elapsedMs?: number;
     columns: string[];
     columnMetadata?: SqlColumnMetadata[];
     rows: Record<string, unknown>[];

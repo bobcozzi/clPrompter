@@ -72,6 +72,9 @@ class CodeSnippetPreviewTreeItem extends vscode.TreeItem {
         this.contextValue = snippet.source === 'built-in' ? 'codeSnippetPreviewBuiltIn' : 'codeSnippetPreviewUser';
         this.tooltip = new vscode.MarkdownString(['```text', snippet.codeTemplate, '```'].join('\n'));
         this.command = commandForTreeClickAction(clickAction, snippet);
+        if (clickAction === 'Run') {
+            this.iconPath = new vscode.ThemeIcon('debug-start', new vscode.ThemeColor('debugIcon.startForeground'));
+        }
     }
 }
 
@@ -91,6 +94,9 @@ class CodeSnippetTreeItem extends vscode.TreeItem {
         ].join('\n'));
         this.contextValue = snippet.source === 'built-in' ? 'codeSnippetBuiltIn' : 'codeSnippetUser';
         this.command = commandForTreeClickAction(clickAction, snippet);
+        if (clickAction === 'Run') {
+            this.iconPath = new vscode.ThemeIcon('debug-start', new vscode.ThemeColor('debugIcon.startForeground'));
+        }
     }
 }
 

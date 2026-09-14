@@ -7,6 +7,14 @@ All notable changes to this project are documented in this file.
 ## [1.0.34] - 2026-09-14
 
 ### What's Improved
+- Command Entry resultset paging via the `>` and `<` buttons now works the way you would expect.
+- the time to run the sql statement on Command Entry is returned.
+- The buttons and reveal SQL have been made more user friendly.
+
+
+## [1.0.34] - 2026-09-14
+
+### What's Improved
 - Command Entry SQL result retrieval through the Mapepire interface was refined for better accuracy and efficiency, including improved continuation-aware result handling.
 - Added foundational alignment for an upcoming Code for IBM i Connection Settings enhancement so SQL run from Command Entry and Code Snippets can surface better result-set column headings.
 - Users can no click-to-sort or click-to-resize columns in SQL results run from Command Entry or Code Snippets.

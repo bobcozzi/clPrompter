@@ -1,8 +1,11 @@
+import * as fs from 'fs';
+import * as path from 'path';
 import * as vscode from 'vscode';
 import { SqlColumnMetadata, SqlResultPayload } from './commandEntryModel';
 
 const PANEL_TYPE = 'clprompter.sqlResults';
 const PANEL_TITLE = 'SQL Results';
+const SQL_RESULT_TEMPLATE_NAME = 'sqlResultPanel.html';
 
 interface SqlResultPanelL10n {
     sqlResultsTitle: string;
@@ -15,11 +18,14 @@ interface SqlResultPanelL10n {
     auto: string;
     viewSqlStmt: string;
     hideSqlStmt: string;
+    showFullSqlStatement: string;
+    hideSqlStatement: string;
     noRowsReturned: string;
     loadMore: string;
     loadAll: string;
     loadMoreResultRows: string;
     loadAllRemainingResultRows: string;
+    allRowsReturnedButton: string;
     loadNextRowsTemplate: string;
     loadingNextRows: string;
     loadingAllRemainingRows: string;
@@ -52,13 +58,16 @@ function getSqlResultPanelL10n(): SqlResultPanelL10n {
         bottom: vscode.l10n.t('Bottom'),
         pagingSize: vscode.l10n.t('Paging size'),
         auto: vscode.l10n.t('Auto'),
-        viewSqlStmt: vscode.l10n.t('<SQL>'),
-        hideSqlStmt: vscode.l10n.t('Hide SQL Stmt'),
+        viewSqlStmt: vscode.l10n.t('<sql>'),
+        hideSqlStmt: vscode.l10n.t('</sql>'),
+        showFullSqlStatement: vscode.l10n.t('Show full SQL stmt'),
+        hideSqlStatement: vscode.l10n.t('Hide SQL stmt'),
         noRowsReturned: vscode.l10n.t('No rows returned.'),
         loadMore: vscode.l10n.t('Load more'),
         loadAll: vscode.l10n.t('Load all'),
-        loadMoreResultRows: vscode.l10n.t('Load more result rows'),
-        loadAllRemainingResultRows: vscode.l10n.t('Load all remaining result rows'),
+        loadMoreResultRows: vscode.l10n.t('Load more rows'),
+        loadAllRemainingResultRows: vscode.l10n.t('Load all rows'),
+        allRowsReturnedButton: vscode.l10n.t('All rows returned'),
         loadNextRowsTemplate: vscode.l10n.t('Load next {count} rows', { count: '{count}' }),
         loadingNextRows: vscode.l10n.t('Loading next rows...'),
         loadingAllRemainingRows: vscode.l10n.t('Loading all remaining rows...'),
@@ -80,6 +89,15 @@ function getSqlResultPanelL10n(): SqlResultPanelL10n {
         additionalRowsLoadedTemplate: vscode.l10n.t('Additional rows loaded ({count} total).', { count: '{count}' }),
         allRowsLoaded: vscode.l10n.t('All rows loaded.')
     };
+}
+
+function readSqlResultTemplate(): string | undefined {
+    try {
+        const templatePath = path.join(__dirname, '..', 'media', SQL_RESULT_TEMPLATE_NAME);
+        return fs.readFileSync(templatePath, 'utf8');
+    } catch {
+        return undefined;
+    }
 }
 
 type SqlResultPanelRequest =
@@ -362,33 +380,23 @@ function renderSqlResultHtml(result: SqlResultPayload, cspSource: string, script
     });
     const initialBodyRowsHtml = renderRowCellsHtml(initialPayload.rowCells);
 
+    const sqlHeaderHtml = `<div class="result-header">
+                <h3 class="result-title${result.resultTitle ? '' : ' is-hidden'}" id="result-title">${result.resultTitle ? escapeHtml(result.resultTitle) : ''}</h3>
+                <button id="toggle-sql-stmt" type="button" title="${escapeHtml(l10n.showFullSqlStatement)}" data-tooltip="${escapeHtml(l10n.showFullSqlStatement)}" aria-label="${escapeHtml(l10n.showFullSqlStatement)}" aria-expanded="false">${escapeHtml(l10n.viewSqlStmt)}</button>
+            </div>`;
+    const sqlStatementHtml = `<pre class="sql" id="sql-statement">${escapeHtml(result.statement)}</pre>`;
     const tableHtml = columns.length === 0
-        ? `<div class="paging-toolbar" id="paging-toolbar">
-                    <button id="rerun-sql" type="button" title="${escapeHtml(l10n.refresh)}" aria-label="${escapeHtml(l10n.refresh)}">&#x25B6;</button>
-                    <span class="toolbar-spacer"></span>
-                    <button id="toggle-sql-stmt" type="button" title="${escapeHtml(l10n.viewSqlStmt)}" aria-label="${escapeHtml(l10n.viewSqlStmt)}" aria-expanded="false">${escapeHtml(l10n.viewSqlStmt)}</button>
-                </div>
-                <p class="empty">${escapeHtml(l10n.noRowsReturned)}</p>`
+        ? `<p class="empty">${escapeHtml(l10n.noRowsReturned)}</p>`
         : `<div class="paging-toolbar" id="paging-toolbar">
-                    <button id="rerun-sql" type="button" title="${escapeHtml(l10n.refresh)}" aria-label="${escapeHtml(l10n.refresh)}">&#x25B6;</button>
-                    <button id="first-page" type="button" title="${escapeHtml(l10n.top)}" aria-label="${escapeHtml(l10n.top)}"><<</button>
-                    <button id="prev-page" type="button" title="${escapeHtml(l10n.priorPage)}" aria-label="${escapeHtml(l10n.priorPage)}"><</button>
+                    <button id="rerun-sql" type="button" title="${escapeHtml(l10n.refresh)}" data-tooltip="${escapeHtml(l10n.refresh)}" aria-label="${escapeHtml(l10n.refresh)}">&#x25B6;</button>
+                    <button id="first-page" type="button" title="${escapeHtml(l10n.top)}" data-tooltip="${escapeHtml(l10n.top)}" aria-label="${escapeHtml(l10n.top)}"><<</button>
+                    <button id="prev-page" type="button" title="${escapeHtml(l10n.priorPage)}" data-tooltip="${escapeHtml(l10n.priorPage)}" aria-label="${escapeHtml(l10n.priorPage)}"><</button>
                                 <span id="page-summary">Page 1 of 1</span>
-                    <button id="next-page" type="button" title="${escapeHtml(l10n.nextPage)}" aria-label="${escapeHtml(l10n.nextPage)}">></button>
-                    <button id="last-page" type="button" title="${escapeHtml(l10n.bottom)}" aria-label="${escapeHtml(l10n.bottom)}">>></button>
-                                <label for="page-size" title="${escapeHtml(l10n.pagingSize)}">${escapeHtml(vscode.l10n.t('Paging Size:'))}</label>
-                                <select id="page-size" title="${escapeHtml(l10n.pagingSize)}" aria-label="${escapeHtml(l10n.pagingSize)}">
-                                    <option value="AUTO" selected>${escapeHtml(l10n.auto)}</option>
-                                        <option value="25">25</option>
-                                        <option value="50">50</option>
-                                        <option value="100">100</option>
-                                        <option value="250">250</option>
-                                        <option value="500">500</option>
-                                </select>
-                            <button id="load-more" type="button" title="${escapeHtml(l10n.loadMoreResultRows)}" aria-label="${escapeHtml(l10n.loadMoreResultRows)}" hidden>${escapeHtml(l10n.loadMore)}</button>
-                            <button id="load-all" type="button" title="${escapeHtml(l10n.loadAllRemainingResultRows)}" aria-label="${escapeHtml(l10n.loadAllRemainingResultRows)}" hidden>${escapeHtml(l10n.loadAll)}</button>
+                    <button id="next-page" type="button" title="${escapeHtml(l10n.nextPage)}" data-tooltip="${escapeHtml(l10n.nextPage)}" aria-label="${escapeHtml(l10n.nextPage)}">></button>
+                    <button id="last-page" type="button" title="${escapeHtml(l10n.bottom)}" data-tooltip="${escapeHtml(l10n.bottom)}" aria-label="${escapeHtml(l10n.bottom)}">>></button>
+                            <button id="load-more" type="button" title="${escapeHtml(l10n.loadMoreResultRows)}" data-tooltip="${escapeHtml(l10n.loadMoreResultRows)}" aria-label="${escapeHtml(l10n.loadMoreResultRows)}" hidden>${escapeHtml(l10n.loadMore)}</button>
+                            <button id="load-all" type="button" title="${escapeHtml(l10n.loadAllRemainingResultRows)}" data-tooltip="${escapeHtml(l10n.loadAllRemainingResultRows)}" aria-label="${escapeHtml(l10n.loadAllRemainingResultRows)}" hidden>${escapeHtml(l10n.loadAll)}</button>
                     <span class="toolbar-spacer"></span>
-                            <button id="toggle-sql-stmt" type="button" title="${escapeHtml(l10n.viewSqlStmt)}" aria-label="${escapeHtml(l10n.viewSqlStmt)}" aria-expanded="false">${escapeHtml(l10n.viewSqlStmt)}</button>
                         </div>
                 <p class="meta" id="result-meta"></p>
                     <div class="table-wrap"><table><thead><tr>${allHeaders}</tr></thead><tbody id="results-body">${initialBodyRowsHtml}</tbody></table></div>`;
@@ -396,238 +404,21 @@ function renderSqlResultHtml(result: SqlResultPayload, cspSource: string, script
     const sqlResultsScriptTag = scriptUri
         ? `<script src="${scriptUri}"></script>`
         : '';
-
-    return `<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${cspSource} https: data:; style-src ${cspSource} 'unsafe-inline'; script-src ${cspSource};">
-  <title>${PANEL_TITLE}</title>
-  <style>
-    :root {
-      color-scheme: light dark;
-      --bg: var(--vscode-editor-background);
-      --fg: var(--vscode-editor-foreground);
-      --muted: var(--vscode-descriptionForeground);
-      --border: var(--vscode-panel-border);
-            --col-separator: color-mix(in srgb, var(--fg) 14%, transparent);
-      --header-bg: color-mix(in srgb, var(--bg) 82%, var(--fg) 18%);
-      --row-even: color-mix(in srgb, var(--bg) 90%, var(--fg) 10%);
-      --row-odd: color-mix(in srgb, var(--bg) 96%, var(--fg) 4%);
-    }
-    body {
-      margin: 0;
-      padding: 14px;
-      background: var(--bg);
-      color: var(--fg);
-      font: 12px/1.45 var(--vscode-editor-font-family, Consolas, monospace);
-    }
-    .sql {
-            margin: 0 0 8px;
-      padding: 8px 10px;
-      border: 1px solid var(--border);
-      border-radius: 6px;
-      background: color-mix(in srgb, var(--bg) 92%, var(--fg) 8%);
-      white-space: pre-wrap;
-      word-break: break-word;
-            display: none;
-        }
-        .sql.is-visible {
-            display: block;
-    }
-    .meta {
-      margin: 0 0 10px;
-      color: var(--muted);
-    }
-        .result-title {
-            margin: 0 0 8px;
-            font-size: 14px;
-            font-weight: 600;
-            line-height: 1.3;
-        }
-        .result-title.is-hidden {
-            display: none;
-        }
-    .table-wrap {
-            border: none;
-      border-radius: 6px;
-      overflow: auto;
-      max-height: calc(100vh - 170px);
-    }
-        .paging-toolbar {
-            display: flex;
-            gap: 6px;
-            align-items: center;
-            margin: 0 0 10px;
-            flex-wrap: wrap;
-        }
-        .fetch-toolbar {
-            display: flex;
-            gap: 8px;
-            align-items: center;
-            margin: 0 0 10px;
-            flex-wrap: wrap;
-        }
-        .paging-toolbar button,
-        .paging-toolbar select {
-            border: 1px solid var(--border);
-            background: color-mix(in srgb, var(--bg) 92%, var(--fg) 8%);
-            color: var(--fg);
-            border-radius: 4px;
-            padding: 3px 7px;
-            font: inherit;
-        }
-        #first-page,
-        #prev-page,
-        #next-page,
-        #last-page {
-            min-width: 34px;
-            padding: 4px 10px;
-            line-height: 1.15;
-            font-weight: 600;
-            cursor: pointer;
-            user-select: none;
-        }
-        #rerun-sql {
-            min-width: 28px;
-            width: 28px;
-            padding: 3px 0;
-            font-weight: 700;
-            font-size: 12px;
-            line-height: 1;
-        }
-        .paging-toolbar button:disabled {
-            opacity: 0.45;
-            cursor: default;
-        }
-        #page-summary {
-            min-width: 170px;
-            color: var(--muted);
-        }
-        .toolbar-spacer {
-            flex: 1 1 auto;
-        }
-    table {
-      width: max-content;
-      min-width: 100%;
-      border-collapse: collapse;
-      table-layout: auto;
-    }
-    .stacked-header {
-      display: inline-flex;
-      flex-direction: column;
-      align-items: flex-start;
-        justify-content: flex-end;
-      gap: 0;
-      line-height: 1.15;
-      white-space: normal;
-      text-align: left;
-        pointer-events: none;
-    }
-    .stacked-header span {
-      display: block;
-      min-width: 0;
-    }
-    thead th {
-      position: sticky;
-      top: 0;
-      z-index: 1;
-      background: var(--header-bg);
-      text-align: left;
-      font-weight: 600;
-      padding: 7px 8px;
-            border: none;
-      white-space: nowrap;
-            vertical-align: bottom;
-            position: sticky;
-    }
-        thead th.sortable-col {
-            cursor: pointer;
-            user-select: none;
-            padding-right: 16px;
-        }
-        thead th.sortable-col:hover {
-            background: color-mix(in srgb, var(--header-bg) 82%, var(--fg) 18%);
-        }
-        thead th.sortable-col.is-sorted::after {
-            content: ' \\25B2';
-            font-size: 10px;
-            opacity: 0.9;
-            margin-left: 4px;
-        }
-        thead th.sortable-col.is-sorted.is-desc::after {
-            content: ' \\25BC';
-        }
-        .col-resize-handle {
-            position: absolute;
-            top: 0;
-            right: -2px;
-            width: 8px;
-            height: 100%;
-            cursor: col-resize;
-            z-index: 3;
-        }
-        .col-resize-handle:hover {
-            background: color-mix(in srgb, var(--vscode-focusBorder, var(--fg)) 45%, transparent);
-        }
-        body.is-col-resizing,
-        body.is-col-resizing * {
-            cursor: col-resize !important;
-            user-select: none;
-        }
-    tbody td {
-      padding: 6px 8px;
-            border: none;
-      vertical-align: top;
-      white-space: pre-wrap;
-      word-break: break-word;
-      max-width: 440px;
-    }
-        tbody td.sql-null-cell {
-            background: color-mix(in srgb, var(--vscode-editorError-foreground, #d16969) 20%, transparent);
-        }
-        tbody td.sql-null-cell .sql-null-text {
-            color: inherit;
-            opacity: 1;
-            font-weight: 500;
-        }
-        thead th:not(:last-child),
-        tbody td:not(:last-child) {
-            box-shadow: inset -1px 0 0 var(--col-separator);
-        }
-    th.align-right,
-    td.align-right {
-      text-align: right;
-      font-variant-numeric: tabular-nums;
-    }
-        th.row-index-col,
-        td.row-index-col {
-            position: sticky;
-            left: 0;
-            z-index: 2;
-            background: var(--header-bg);
-        }
-        td.row-index-col {
-            z-index: 1;
-            background: color-mix(in srgb, var(--bg) 94%, var(--fg) 6%);
-        }
-    tbody tr:nth-child(odd) { background: var(--row-odd); }
-    tbody tr:nth-child(even) { background: var(--row-even); }
-    .empty {
-      color: var(--muted);
-      margin: 12px 0 0;
-    }
-  </style>
-</head>
-<body>
-        <h3 class="result-title${result.resultTitle ? '' : ' is-hidden'}" id="result-title">${result.resultTitle ? escapeHtml(result.resultTitle) : ''}</h3>
-    <pre class="sql" id="sql-statement">${escapeHtml(result.statement)}</pre>
+    const bodyHtml = `${sqlHeaderHtml}
+    ${sqlStatementHtml}
     <pre id="sql-results-bootstrap" style="display:none">${escapeHtml(bootstrapPayloadJson)}</pre>
-  ${tableHtml}
-    ${sqlResultsScriptTag}
-</body>
-</html>`;
+    ${tableHtml}
+    ${sqlResultsScriptTag}`;
+
+    const template = readSqlResultTemplate();
+    if (!template) {
+        return `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><title>${PANEL_TITLE}</title></head><body>${bodyHtml}</body></html>`;
+    }
+
+    return template
+        .split('{{CSP_SOURCE}}').join(cspSource)
+        .split('{{PANEL_TITLE}}').join(PANEL_TITLE)
+        .split('{{BODY_HTML}}').join(bodyHtml);
 }
 
 function buildClientPayload(result: SqlResultPayload, l10n: SqlResultPanelL10n) {
@@ -654,6 +445,7 @@ function buildClientPayload(result: SqlResultPayload, l10n: SqlResultPanelL10n) 
         resultTitle: result.resultTitle ?? '',
         rowCount: result.rowCount,
         displayedRowCount: result.displayedRowCount,
+        elapsedMs: result.elapsedMs,
         sessionId: result.sessionId ?? '',
         hasMoreRows: !!result.hasMoreRows,
         fetchSize: result.fetchSize ?? 0,
