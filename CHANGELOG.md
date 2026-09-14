@@ -4,7 +4,7 @@ All notable changes to this project are documented in this file.
 
 ## [Preview of CL Command Entry]
 
-## [1.0.34] - 2026-09-14
+## [1.0.35] - 2026-09-14
 
 ### What's Improved
 - Command Entry resultset paging via the `>` and `<` buttons now works the way you would expect.
