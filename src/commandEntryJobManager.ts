@@ -65,6 +65,10 @@ function isPositiveInteger(value: unknown): value is number {
     return typeof value === 'number' && Number.isInteger(value) && value > 0;
 }
 
+function stripTrailingSemicolon(sql: string): string {
+    return sql.replace(/;\s*$/, '').trim();
+}
+
 function isTruthyConfigFlag(value: unknown): boolean {
     if (value === true) {
         return true;
@@ -88,6 +92,7 @@ function waitFor(ms: number): Promise<void> {
 }
 
 const CANCEL_SQL_STATEMENT = 'CALL QSYS2.CANCEL_SQL(?)';
+const DEDICATED_FETCH_MORE_MAX_ITERATIONS = 10000;
 
 let connectionObjectSequence = 0;
 const connectionObjectIds = new WeakMap<object, number>();
@@ -127,6 +132,12 @@ function getSharedSqlJobStatus(connection: IBMi): string | undefined {
 
 type SqlJobLike = {
     execute: (statements: string | string[], bindings?: unknown[]) => Promise<Record<string, unknown>[]>;
+    query?: (statement: string, options?: { isTerseResults?: boolean; parameters?: unknown[] }) => {
+        execute: (rows?: number) => Promise<unknown>;
+        fetchMore?: (rows?: number) => Promise<unknown>;
+        close?: () => Promise<void> | void;
+    };
+    send?: (request: unknown) => Promise<unknown>;
     getJobId?: () => string | undefined;
     close?: () => Promise<void> | void;
     end?: () => Promise<void> | void;
@@ -137,17 +148,77 @@ type MapepireLike = {
     newJob: (connection: IBMi, options?: { jdbc?: unknown; javaPath?: string }) => Promise<SqlJobLike>;
 };
 
+type JobExecuteSignature = 'query.executeRows' | 'query.execute' | 'options.rows' | 'legacy.positionalRows' | 'default.noRowsOption' | 'shared.connection.runSQL';
+
+export interface SqlContinuationTuple {
+    type?: string;
+    id?: string;
+    contId?: string;
+    isDone?: boolean;
+    hasFetchMore: boolean;
+    source: 'shared' | 'dedicated' | 'offsetPagingFallback' | 'unknown';
+    rawKeys?: string[];
+}
+
+interface SqlMoreProtocolResponse {
+    result: unknown;
+    tokenUsed: string;
+}
+
+export interface RunSQLWithDetailsResult {
+    rows: Record<string, unknown>[];
+    rawResult?: unknown;
+    continuation?: SqlContinuationTuple;
+}
+
 export interface DedicatedJobState {
     enabled: boolean;
     jobId?: string;
     status: 'ready' | 'busy' | 'ended';
 }
 
+function toOptionalBoolean(value: unknown): boolean | undefined {
+    if (typeof value === 'boolean') {
+        return value;
+    }
+    if (typeof value === 'number') {
+        if (value === 1) { return true; }
+        if (value === 0) { return false; }
+        return undefined;
+    }
+    if (typeof value === 'string') {
+        const normalized = value.trim().toLowerCase();
+        if (!normalized) {
+            return undefined;
+        }
+        if (normalized === '1' || normalized === 'y' || normalized === 'yes' || normalized === 'true') {
+            return true;
+        }
+        if (normalized === '0' || normalized === 'n' || normalized === 'no' || normalized === 'false') {
+            return false;
+        }
+    }
+    return undefined;
+}
+
 export interface EffectiveJobConfig {
     currentLibrary?: string;
     libraryList: string[];
-    wildcardLibraryOrder?: string[];
 }
+
+type DedicatedRouteDecision = {
+    dedicatedEnabled: boolean;
+    dedicatedEnabledReason: string;
+    remoteServerEnabled: boolean;
+    remoteServerReason: string;
+    remoteFlags: {
+        mapepireUseServer: boolean;
+        mapepireServerMode: boolean;
+        connectToRemoteMapepireServer: boolean;
+    };
+    route: 'dedicated' | 'shared';
+    finalReason: string;
+};
 
 const LIBRARY_LIST_INFO_SQL = `
 SELECT SYSTEM_SCHEMA_NAME, TYPE, ORDINAL_POSITION
@@ -174,13 +245,238 @@ export class CommandEntryJobManager {
         }
     }
 
-    private canUseDedicatedForConnection(connection?: IBMi): boolean {
-        if (!this.isDedicatedEnabled(connection)) {
-            return false;
+    logInfo(message: string): void {
+        this.output?.appendLine(message);
+    }
+
+    logDiagnostic(message: string): void {
+        this.debugLog(message);
+    }
+
+    private logContinuationJsonDump(label: string, result: unknown): void {
+        if (!isCommandEntryDebugLoggingEnabled()) {
+            return;
         }
 
-        // In single-mode Mapepire, force shared SQL job usage.
-        return this.isRemoteMapepireServerEnabled(connection);
+        if (!result || typeof result !== 'object' || Array.isArray(result)) {
+            return;
+        }
+
+        const candidate = result as Record<string, unknown>;
+        const keys = Object.keys(candidate).filter((key) => /(?:^|_|-)(?:id|cont|done|fetch|type|more)/i.test(key) || /continuation|fetchMore|is_done|isDone/i.test(key));
+        if (keys.length === 0) {
+            return;
+        }
+
+        const nestedContinuation = candidate.continuation && typeof candidate.continuation === 'object' && !Array.isArray(candidate.continuation)
+            ? candidate.continuation as Record<string, unknown>
+            : undefined;
+        const topId = [candidate.id, candidate.ID, candidate.continuationId, candidate.continuation_id]
+            .find((value) => typeof value === 'string' && value.trim().length > 0) as string | undefined;
+        const topContId = [candidate.cont_id, candidate.contId, candidate.CONT_ID]
+            .find((value) => typeof value === 'string' && value.trim().length > 0) as string | undefined;
+        const topIsDone = [candidate.is_done, candidate.isDone, candidate.done, candidate.IS_DONE]
+            .map(toOptionalBoolean)
+            .find((value) => value !== undefined);
+        const nestedId = nestedContinuation
+            ? [nestedContinuation.id, nestedContinuation.ID, nestedContinuation.continuationId, nestedContinuation.continuation_id]
+                .find((value) => typeof value === 'string' && value.trim().length > 0) as string | undefined
+            : undefined;
+        const nestedContId = nestedContinuation
+            ? [nestedContinuation.cont_id, nestedContinuation.contId, nestedContinuation.CONT_ID]
+                .find((value) => typeof value === 'string' && value.trim().length > 0) as string | undefined
+            : undefined;
+        const nestedIsDone = nestedContinuation
+            ? [nestedContinuation.is_done, nestedContinuation.isDone, nestedContinuation.done, nestedContinuation.IS_DONE]
+                .map(toOptionalBoolean)
+                .find((value) => value !== undefined)
+            : undefined;
+        const topHasFetchMore = typeof candidate.fetchMore === 'function';
+        const nestedHasFetchMore = !!nestedContinuation && typeof nestedContinuation.fetchMore === 'function';
+
+        this.output?.appendLine(
+            `[Cmd Entry][ContinuationDump] ${label} summary top(id=${topId ?? '<none>'},cont_id=${topContId ?? '<none>'},is_done=${topIsDone ?? '<unknown>'},fetchMore=${topHasFetchMore}) nested(id=${nestedId ?? '<none>'},cont_id=${nestedContId ?? '<none>'},is_done=${nestedIsDone ?? '<unknown>'},fetchMore=${nestedHasFetchMore})`
+        );
+
+        try {
+            const json = JSON.stringify(candidate, (key, value) => {
+                if (typeof value === 'function') {
+                    return '[Function]';
+                }
+
+                // Keep protocol attributes visible while suppressing row payload noise.
+                if (Array.isArray(value) && /^(rows|data)$/i.test(String(key || ''))) {
+                    return `[${key || 'array'} omitted: ${value.length} row(s)]`;
+                }
+
+                return value;
+            }, 2);
+            const maxChars = 4000;
+            if (json.length <= maxChars) {
+                this.output?.appendLine(`[Cmd Entry][ContinuationDump] ${label} ${json}`);
+            } else {
+                const head = json.slice(0, 2200);
+                const tail = json.slice(-1400);
+                this.output?.appendLine(
+                    `[Cmd Entry][ContinuationDump] ${label} ${head}\n... [truncated ${json.length - (head.length + tail.length)} chars] ...\n${tail}`
+                );
+            }
+        } catch (error) {
+            this.output?.appendLine(`[Cmd Entry][ContinuationDump] ${label} keys=${keys.join(', ')} error=${error instanceof Error ? error.message : String(error)}`);
+        }
+    }
+
+    private readConnectionSharedJobOverride(connection?: IBMi): boolean | undefined {
+        if (!connection) {
+            return undefined;
+        }
+
+        const config = (connection as any).getConfig?.() as Record<string, unknown> | undefined;
+        if (!config || typeof config !== 'object') {
+            return undefined;
+        }
+
+        const readBoolean = (value: unknown): boolean | undefined => {
+            if (typeof value === 'boolean') {
+                return value;
+            }
+            if (typeof value === 'string') {
+                const normalized = value.trim().toLowerCase();
+                if (normalized === 'true') {
+                    return true;
+                }
+                if (normalized === 'false') {
+                    return false;
+                }
+            }
+            return undefined;
+        };
+
+        const readFromObject = (candidate: unknown): boolean | undefined => {
+            if (!candidate || typeof candidate !== 'object') {
+                return undefined;
+            }
+
+            const source = candidate as Record<string, unknown>;
+            return readBoolean(source.sharedSQLJob) ?? readBoolean(source.sharedSqlJob);
+        };
+
+        const direct = readFromObject(config.cmdEntry);
+        if (direct !== undefined) {
+            return direct;
+        }
+
+        const extensionScoped = config.clPrompter;
+        if (extensionScoped && typeof extensionScoped === 'object') {
+            const nested = readFromObject((extensionScoped as Record<string, unknown>).cmdEntry);
+            if (nested !== undefined) {
+                return nested;
+            }
+        }
+
+        const extensionScopedLower = config.clprompter;
+        if (extensionScopedLower && typeof extensionScopedLower === 'object') {
+            const nested = readFromObject((extensionScopedLower as Record<string, unknown>).cmdEntry);
+            if (nested !== undefined) {
+                return nested;
+            }
+        }
+
+        return undefined;
+    }
+
+    private getDedicatedRouteDecision(connection?: IBMi): DedicatedRouteDecision {
+        const config = vscode.workspace.getConfiguration('clPrompter');
+
+        const connectionSharedOverride = this.readConnectionSharedJobOverride(connection);
+        const workspaceLegacyShared = config.get<boolean | undefined>('cmdEntrySQLUseSharedJob')
+            ?? config.get<boolean | undefined>('cmdEntryUseSharedSQLJob');
+        const workspaceDedicated = config.get<boolean | undefined>('cmdEntryUseDedicatedJob');
+        const legacyDedicated = config.get<boolean>('commandEntryUseDedicatedJob', false);
+
+        let dedicatedEnabled = false;
+        let dedicatedEnabledReason = 'default commandEntryUseDedicatedJob=false';
+        if (typeof connectionSharedOverride === 'boolean') {
+            dedicatedEnabled = !connectionSharedOverride;
+            dedicatedEnabledReason = `connection cmdEntry.sharedSQLJob=${connectionSharedOverride}`;
+        } else if (workspaceLegacyShared !== undefined) {
+            dedicatedEnabled = !workspaceLegacyShared;
+            dedicatedEnabledReason = `workspace cmdEntrySQLUseSharedJob/cmdEntryUseSharedSQLJob=${workspaceLegacyShared}`;
+        } else if (workspaceDedicated !== undefined) {
+            dedicatedEnabled = workspaceDedicated;
+            dedicatedEnabledReason = `workspace cmdEntryUseDedicatedJob=${workspaceDedicated}`;
+        } else {
+            dedicatedEnabled = legacyDedicated;
+            dedicatedEnabledReason = `workspace commandEntryUseDedicatedJob=${legacyDedicated}`;
+        }
+
+        const connectionConfig = (connection as any)?.getConfig?.() as Record<string, unknown> | undefined;
+        const flagUseServer = isTruthyConfigFlag(connectionConfig?.mapepireUseServer);
+        const flagServerMode = isTruthyConfigFlag(connectionConfig?.mapepireServerMode);
+        const flagConnectRemote = isTruthyConfigFlag(connectionConfig?.connectToRemoteMapepireServer);
+        const remoteServerEnabled = flagUseServer || flagServerMode || flagConnectRemote;
+        const remoteServerReason = `mapepireUseServer=${flagUseServer}, mapepireServerMode=${flagServerMode}, connectToRemoteMapepireServer=${flagConnectRemote}`;
+
+        if (!dedicatedEnabled) {
+            return {
+                dedicatedEnabled,
+                dedicatedEnabledReason,
+                remoteServerEnabled,
+                remoteServerReason,
+                remoteFlags: {
+                    mapepireUseServer: flagUseServer,
+                    mapepireServerMode: flagServerMode,
+                    connectToRemoteMapepireServer: flagConnectRemote
+                },
+                route: 'shared',
+                finalReason: `dedicated disabled (${dedicatedEnabledReason})`
+            };
+        }
+
+        if (!remoteServerEnabled) {
+            return {
+                dedicatedEnabled,
+                dedicatedEnabledReason,
+                remoteServerEnabled,
+                remoteServerReason,
+                remoteFlags: {
+                    mapepireUseServer: flagUseServer,
+                    mapepireServerMode: flagServerMode,
+                    connectToRemoteMapepireServer: flagConnectRemote
+                },
+                route: 'shared',
+                finalReason: `single-mode mapepire/shared-job gate active (${remoteServerReason})`
+            };
+        }
+
+        return {
+            dedicatedEnabled,
+            dedicatedEnabledReason,
+            remoteServerEnabled,
+            remoteServerReason,
+            remoteFlags: {
+                mapepireUseServer: flagUseServer,
+                mapepireServerMode: flagServerMode,
+                connectToRemoteMapepireServer: flagConnectRemote
+            },
+            route: 'dedicated',
+            finalReason: `dedicated allowed (${dedicatedEnabledReason}; ${remoteServerReason})`
+        };
+    }
+
+    private logDedicatedRouteDecision(phase: string, connection?: IBMi): void {
+        if (!isCommandEntryDebugLoggingEnabled() || !connection) {
+            return;
+        }
+
+        const decision = this.getDedicatedRouteDecision(connection);
+        this.output?.appendLine(
+            `[Cmd Entry][GateDiag] ${phase} route=${decision.route} finalReason=${decision.finalReason} dedicatedEnabled=${decision.dedicatedEnabled} dedicatedReason=${decision.dedicatedEnabledReason} remoteServerEnabled=${decision.remoteServerEnabled} remoteReason=${decision.remoteServerReason}`
+        );
+    }
+
+    private canUseDedicatedForConnection(connection?: IBMi): boolean {
+        return this.getDedicatedRouteDecision(connection).route === 'dedicated';
     }
 
     isDedicatedUsable(connection?: IBMi): boolean {
@@ -353,11 +649,316 @@ export class CommandEntryJobManager {
         return [];
     }
 
-    private async executeDedicatedSql(
+    private extractReportedRowCount(result: unknown): number | undefined {
+        if (!result || typeof result !== 'object' || Array.isArray(result)) {
+            return undefined;
+        }
+
+        const candidate = result as Record<string, unknown>;
+        const value = [
+            candidate.rowCount,
+            candidate.row_count,
+            candidate.rowsReturned,
+            candidate.rows_returned,
+            candidate.returnedRows,
+            candidate.returned_rows,
+            candidate.recordCount,
+            candidate.record_count,
+            candidate.count,
+            candidate.COUNT
+        ].find((entry) => entry !== undefined && entry !== null);
+
+        if (typeof value === 'number' && Number.isInteger(value) && value >= 0) {
+            return value;
+        }
+
+        if (typeof value === 'string') {
+            const parsed = Number(value.trim());
+            if (Number.isInteger(parsed) && parsed >= 0) {
+                return parsed;
+            }
+        }
+
+        return undefined;
+    }
+
+    private logContinuationCandidate(source: SqlContinuationTuple['source'], candidate: Record<string, unknown>): void {
+        if (!isCommandEntryDebugLoggingEnabled()) {
+            return;
+        }
+
+        const rawKeys = Object.keys(candidate);
+        const interestingKeys = rawKeys.filter((key) => /(?:^|_|-)(?:id|cont|done|fetch|type|more)/i.test(key) || /continuation|fetchMore|is_done|isDone/i.test(key));
+        const nestedCandidates = [
+            candidate.continuation,
+            candidate.resultset,
+            candidate.resultSet,
+            candidate.page,
+            candidate.metadata,
+            candidate.meta
+        ].filter((entry) => !!entry && typeof entry === 'object' && !Array.isArray(entry)) as Record<string, unknown>[];
+
+        const nestedSummary = nestedCandidates.map((entry, index) => {
+            const keys = Object.keys(entry);
+            return `n${index + 1}={${keys.slice(0, 15).join(', ')}}`;
+        }).join(' ');
+
+        this.debugLog(
+            `[Cmd Entry][ContinuationCandidate] source=${source} keys=${rawKeys.join(', ')} interestingKeys=${interestingKeys.join(', ')} nested=${nestedSummary || '<none>'}`
+        );
+
+        if (interestingKeys.length === 0) {
+            return;
+        }
+
+        try {
+            const filtered: Record<string, unknown> = {};
+            for (const key of interestingKeys) {
+                filtered[key] = candidate[key];
+            }
+            const json = JSON.stringify(filtered, (_key, value) => typeof value === 'function' ? '[Function]' : value, 2);
+            this.debugLog(`[Cmd Entry][ContinuationCandidate] source=${source} filtered=${json.substring(0, 4000)}`);
+        } catch (error) {
+            this.debugLog(`[Cmd Entry][ContinuationCandidate] source=${source} filtered=<json_error:${error instanceof Error ? error.message : String(error)}>`);
+        }
+    }
+
+    private extractContinuationTuple(result: unknown, source: SqlContinuationTuple['source']): SqlContinuationTuple | undefined {
+        if (!result || typeof result !== 'object' || Array.isArray(result)) {
+            return undefined;
+        }
+
+        const candidate = result as Record<string, unknown>;
+        this.logContinuationCandidate(source, candidate);
+        const rawKeys = Object.keys(candidate);
+        const type = typeof candidate.type === 'string' ? candidate.type.trim().toLowerCase() : undefined;
+        const id = [candidate.id, candidate.ID, candidate.continuationId, candidate.continuation_id, candidate.correlationId, candidate.correlation_id]
+            .find((value) => typeof value === 'string' && value.trim().length > 0) as string | undefined;
+        const contId = [candidate.cont_id, candidate.contId, candidate.CONT_ID]
+            .find((value) => typeof value === 'string' && value.trim().length > 0) as string | undefined;
+        const isDone = [candidate.is_done, candidate.isDone, candidate.done, candidate.IS_DONE]
+            .map(toOptionalBoolean)
+            .find((value) => value !== undefined);
+        const hasFetchMore = typeof candidate.fetchMore === 'function';
+
+        if (!id && !contId && isDone === undefined && !hasFetchMore) {
+            return undefined;
+        }
+
+        return {
+            type,
+            id: id?.trim(),
+            contId: contId?.trim(),
+            isDone,
+            hasFetchMore,
+            source,
+            rawKeys
+        };
+    }
+
+    private getContinuationToken(continuation?: SqlContinuationTuple): string | undefined {
+        const raw = continuation?.contId ?? continuation?.id;
+        if (!raw || typeof raw !== 'string') {
+            return undefined;
+        }
+        const normalized = raw.trim();
+        return normalized.length > 0 ? normalized : undefined;
+    }
+
+    isContinuationUsable(continuation?: SqlContinuationTuple): boolean {
+        if (!continuation || continuation.isDone === true) {
+            return false;
+        }
+
+        if (continuation.hasFetchMore) {
+            return true;
+        }
+
+        if (continuation.source === 'dedicated' && this.getContinuationToken(continuation)) {
+            return true;
+        }
+
+        return false;
+    }
+
+    private async runSqlMoreProtocol(
+        job: SqlJobLike,
+        continuation: SqlContinuationTuple,
+        sqlStatement?: string,
+        rows?: number
+    ): Promise<SqlMoreProtocolResponse | undefined> {
+        if (continuation.source !== 'dedicated') {
+            return undefined;
+        }
+
+        const token = this.getContinuationToken(continuation);
+        if (!token || continuation.isDone === true) {
+            return undefined;
+        }
+
+        const send = (job as any).send?.bind(job) as ((request: unknown) => Promise<unknown>) | undefined;
+        if (typeof send !== 'function') {
+            this.output?.appendLine('[Cmd Entry][SQLPolicy] sqlmore.request unavailable reason=missing-job-send');
+            return undefined;
+        }
+
+        const normalizedSql = typeof sqlStatement === 'string' ? stripTrailingSemicolon(sqlStatement) : '';
+        if (!normalizedSql) {
+            this.output?.appendLine(`[Cmd Entry][SQLPolicy] sqlmore.request skipped cont_id=${token} reason=missing-sql`);
+            return undefined;
+        }
+
+        const request: Record<string, unknown> = {
+            id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+            type: 'sqlmore',
+            cont_id: token,
+            sql: normalizedSql
+        };
+        if (isPositiveInteger(rows)) {
+            request.rows = rows;
+        }
+
+        this.output?.appendLine(`[Cmd Entry][SQLPolicy] sqlmore.request source=dedicated cont_id=${token} rows=${request.rows ?? '<none>'} sqlLen=${normalizedSql.length}`);
+
+        try {
+            const result = await send(request);
+            this.logContinuationJsonDump(`sqlmore.request cont_id=${token}`, result);
+            return { result, tokenUsed: token };
+        } catch (error) {
+            this.output?.appendLine(`[Cmd Entry][SQLPolicy] sqlmore.request failed cont_id=${token} error=${error instanceof Error ? error.message : String(error)}`);
+            return undefined;
+        }
+    }
+
+    private async fetchAllDedicatedRowsByContinuation(
+        initialResult: unknown,
+        initialRows: Record<string, unknown>[],
+        targetRows?: number
+    ): Promise<RunSQLWithDetailsResult> {
+        const allRows = [...initialRows];
+        let currentResult = initialResult;
+        let continuation = this.extractContinuationTuple(currentResult, 'dedicated');
+
+        if (!continuation?.hasFetchMore) {
+            return { rows: allRows, rawResult: currentResult, continuation };
+        }
+
+        for (let iteration = 1; iteration <= DEDICATED_FETCH_MORE_MAX_ITERATIONS; iteration += 1) {
+            if (isPositiveInteger(targetRows) && allRows.length >= targetRows) {
+                break;
+            }
+
+            if (continuation?.isDone === true) {
+                break;
+            }
+
+            const fetchMore = (currentResult as any).fetchMore;
+            if (typeof fetchMore !== 'function') {
+                break;
+            }
+
+            const nextResult = await fetchMore.call(currentResult);
+            const nextRows = this.rowsFromExecutionResult(nextResult);
+            if (nextRows.length > 0) {
+                allRows.push(...nextRows);
+            }
+
+            if (nextResult && typeof nextResult === 'object') {
+                currentResult = nextResult;
+            }
+
+            continuation = this.extractContinuationTuple(currentResult, 'dedicated') ?? continuation;
+
+            if (nextRows.length === 0 && continuation?.isDone !== false) {
+                break;
+            }
+        }
+
+        return { rows: allRows, rawResult: currentResult, continuation };
+    }
+
+    async continueSQLFromResult(
+        initialResult: unknown,
+        options?: { targetRows?: number; statement?: string }
+    ): Promise<RunSQLWithDetailsResult> {
+        const additionalRows: Record<string, unknown>[] = [];
+        let currentResult = initialResult;
+        let continuation = this.extractContinuationTuple(currentResult, 'dedicated')
+            ?? this.extractContinuationTuple(currentResult, 'shared');
+
+        if (!this.isContinuationUsable(continuation)) {
+            return { rows: additionalRows, rawResult: currentResult, continuation };
+        }
+
+        const targetRows = options?.targetRows;
+        this.logContinuationJsonDump(`continueSQLFromResult.enter targetRows=${targetRows ?? '<none>'}`, currentResult);
+        for (let iteration = 1; iteration <= DEDICATED_FETCH_MORE_MAX_ITERATIONS; iteration += 1) {
+            if (isPositiveInteger(targetRows) && additionalRows.length >= targetRows) {
+                break;
+            }
+
+            if (continuation?.isDone === true) {
+                break;
+            }
+
+            let nextResult: unknown;
+            const fetchMore = (currentResult as any).fetchMore;
+            if (typeof fetchMore === 'function') {
+                nextResult = await fetchMore.call(currentResult);
+            } else {
+                if (!continuation) {
+                    break;
+                }
+                const sqlMoreResult = this.job
+                    ? await this.runSqlMoreProtocol(this.job, continuation, options?.statement, targetRows)
+                    : undefined;
+                if (!sqlMoreResult) {
+                    break;
+                }
+                nextResult = sqlMoreResult.result;
+            }
+            const nextRows = this.rowsFromExecutionResult(nextResult);
+            if (nextRows.length > 0) {
+                if (isPositiveInteger(targetRows)) {
+                    const remaining = Math.max(0, targetRows - additionalRows.length);
+                    if (remaining > 0) {
+                        additionalRows.push(...nextRows.slice(0, remaining));
+                    }
+                } else {
+                    additionalRows.push(...nextRows);
+                }
+            }
+
+            if (nextResult && typeof nextResult === 'object') {
+                currentResult = nextResult;
+            }
+
+            this.logContinuationJsonDump(`continueSQLFromResult.step=${iteration} targetRows=${targetRows ?? '<none>'} fetchedRows=${nextRows.length}`, currentResult);
+
+            continuation = this.extractContinuationTuple(currentResult, 'dedicated')
+                ?? this.extractContinuationTuple(currentResult, 'shared')
+                ?? continuation;
+
+            if (continuation) {
+                this.output?.appendLine(
+                    `[Cmd Entry][SQLPolicy] continueSQLFromResult.step=${iteration} tuple(type=${continuation.type ?? '<none>'},id=${continuation.id ?? '<none>'},cont_id=${continuation.contId ?? '<none>'},is_done=${continuation.isDone ?? '<unknown>'},hasFetchMore=${continuation.hasFetchMore}) fetchedRows=${nextRows.length}`
+                );
+            }
+
+            if (nextRows.length === 0 && continuation?.isDone !== false) {
+                break;
+            }
+        }
+
+        return { rows: additionalRows, rawResult: currentResult, continuation };
+    }
+
+    private async executeSqlOnJob(
         job: SqlJobLike,
         statements: string | string[],
+        source: 'shared' | 'dedicated',
         options?: { bindings?: unknown[]; rows?: number }
-    ): Promise<unknown> {
+    ): Promise<{ result: unknown; signature: JobExecuteSignature }> {
         const sqlWithBindings = Array.isArray(statements)
             ? statements.map(stmt => substituteBindings(stmt, options?.bindings))
             : substituteBindings(statements, options?.bindings);
@@ -372,41 +973,185 @@ export class CommandEntryJobManager {
         const execute = (job as any).execute.bind(job) as (...args: unknown[]) => Promise<unknown>;
         const requestedRows = options?.rows;
         if (isPositiveInteger(requestedRows)) {
-            this.debugLog(`[Cmd Entry] Requesting up to ${requestedRows} SQL rows from dedicated job.`);
-            try {
-                return await execute(sqlWithBindings, { rows: requestedRows });
-            } catch {
+            this.debugLog(`[Cmd Entry] Requesting up to ${requestedRows} SQL rows from ${source} job.`);
+
+            if (typeof sqlWithBindings === 'string' && typeof job.query === 'function') {
                 try {
-                    return await execute(sqlWithBindings, undefined, requestedRows);
-                } catch {
-                    return await execute(sqlWithBindings);
+                    const query = job.query(sqlWithBindings, { isTerseResults: false });
+                    const closeQuery = async (): Promise<void> => {
+                        if (typeof query.close !== 'function') {
+                            return;
+                        }
+                        try {
+                            await query.close();
+                        } catch {
+                            // Best effort close to avoid masking successful query results.
+                        }
+                    };
+
+                    const attachContinuationMethods = (payload: unknown): unknown => {
+                        if (!payload || typeof payload !== 'object') {
+                            return payload;
+                        }
+
+                        const response = payload as Record<string, unknown>;
+                        const fetchMoreBound = async (): Promise<unknown> => {
+                            const next = typeof query.fetchMore === 'function'
+                                ? await query.fetchMore(requestedRows)
+                                : await query.execute(requestedRows);
+                            const attached = attachContinuationMethods(next);
+                            const done = this.extractContinuationTuple(attached, source)?.isDone;
+                            if (done === true) {
+                                await closeQuery();
+                            }
+                            return attached;
+                        };
+
+                        response.fetchMore = fetchMoreBound as unknown;
+                        response.close = closeQuery as unknown;
+                        return response;
+                    };
+
+                    const result = attachContinuationMethods(await query.execute(requestedRows));
+                    const done = this.extractContinuationTuple(result, source)?.isDone;
+                    if (done === true) {
+                        await closeQuery();
+                    }
+
+                    this.debugLog(`[Cmd Entry][SQLDiag] ${source} execute signature=query.executeRows requestedRows=${requestedRows}`);
+                    return { result, signature: 'query.executeRows' };
+                } catch (queryError) {
+                    this.debugLog(`[Cmd Entry][SQLDiag] ${source} execute signature=query.executeRows rejected requestedRows=${requestedRows} error=${queryError instanceof Error ? queryError.message : String(queryError)}`);
+                }
+            }
+
+            try {
+                const result = await execute(sqlWithBindings, { rows: requestedRows });
+                this.debugLog(`[Cmd Entry][SQLDiag] ${source} execute signature=options.rows requestedRows=${requestedRows}`);
+                return { result, signature: 'options.rows' };
+            } catch (error) {
+                this.debugLog(`[Cmd Entry][SQLDiag] ${source} execute signature=options.rows rejected requestedRows=${requestedRows} error=${error instanceof Error ? error.message : String(error)}`);
+                try {
+                    const result = await execute(sqlWithBindings, undefined, requestedRows);
+                    this.debugLog(`[Cmd Entry][SQLDiag] ${source} execute signature=legacy.positionalRows requestedRows=${requestedRows}`);
+                    return { result, signature: 'legacy.positionalRows' };
+                } catch (legacyError) {
+                    this.debugLog(`[Cmd Entry][SQLDiag] ${source} execute signature=legacy.positionalRows rejected requestedRows=${requestedRows} error=${legacyError instanceof Error ? legacyError.message : String(legacyError)}`);
+                    const result = await execute(sqlWithBindings);
+                    this.debugLog(`[Cmd Entry][SQLDiag] ${source} execute signature=default.noRowsOption requestedRows=${requestedRows}`);
+                    return { result, signature: 'default.noRowsOption' };
                 }
             }
         }
 
-        return execute(sqlWithBindings);
+        if (typeof sqlWithBindings === 'string' && typeof job.query === 'function') {
+            try {
+                const query = job.query(sqlWithBindings, { isTerseResults: false });
+                const closeQuery = async (): Promise<void> => {
+                    if (typeof query.close !== 'function') {
+                        return;
+                    }
+                    try {
+                        await query.close();
+                    } catch {
+                        // Best effort close to avoid masking successful query results.
+                    }
+                };
+
+                const attachContinuationMethods = (payload: unknown): unknown => {
+                    if (!payload || typeof payload !== 'object') {
+                        return payload;
+                    }
+
+                    const response = payload as Record<string, unknown>;
+                    const fetchMoreBound = async (): Promise<unknown> => {
+                        const next = typeof query.fetchMore === 'function'
+                            ? await query.fetchMore()
+                            : await query.execute();
+                        const attached = attachContinuationMethods(next);
+                        const done = this.extractContinuationTuple(attached, source)?.isDone;
+                        if (done === true) {
+                            await closeQuery();
+                        }
+                        return attached;
+                    };
+
+                    response.fetchMore = fetchMoreBound as unknown;
+                    response.close = closeQuery as unknown;
+                    return response;
+                };
+
+                const result = attachContinuationMethods(await query.execute());
+                const done = this.extractContinuationTuple(result, source)?.isDone;
+                if (done === true) {
+                    await closeQuery();
+                }
+
+                this.debugLog(`[Cmd Entry][SQLDiag] ${source} execute signature=query.execute requestedRows=<none>`);
+                return { result, signature: 'query.execute' };
+            } catch (queryError) {
+                this.debugLog(`[Cmd Entry][SQLDiag] ${source} execute signature=query.execute rejected requestedRows=<none> error=${queryError instanceof Error ? queryError.message : String(queryError)}`);
+            }
+        }
+
+        const result = await execute(sqlWithBindings);
+        this.debugLog(`[Cmd Entry][SQLDiag] ${source} execute signature=default.noRowsOption requestedRows=<none>`);
+        return { result, signature: 'default.noRowsOption' };
+    }
+
+    private async executeSharedSql(
+        connection: IBMi,
+        statements: string | string[],
+        options?: { bindings?: unknown[]; rows?: number }
+    ): Promise<{ result: unknown; signature: JobExecuteSignature }> {
+        const sharedJob = (connection as any).sqlJob as SqlJobLike | undefined;
+        if (sharedJob) {
+            try {
+                return await this.executeSqlOnJob(sharedJob, statements, 'shared', options);
+            } catch (jobError) {
+                this.debugLog(`[Cmd Entry][SQLDiag] shared execute via sharedJob failed; falling back to connection.runSQL error=${jobError instanceof Error ? jobError.message : String(jobError)}`);
+            }
+        }
+
+        const sharedRunOptions = {
+            bindings: options?.bindings as never[] | undefined,
+            rows: options?.rows
+        };
+        const fallbackResult = await connection.runSQL(statements, sharedRunOptions);
+        this.debugLog(`[Cmd Entry][SQLDiag] shared execute signature=shared.connection.runSQL requestedRows=${isPositiveInteger(options?.rows) ? options?.rows : '<none>'}`);
+        return { result: fallbackResult, signature: 'shared.connection.runSQL' };
     }
 
     async runSQLWithDetails(
         connection: IBMi,
         statements: string | string[],
         options?: { bindings?: unknown[]; rows?: number; skipSyntaxCheck?: boolean }
-    ): Promise<{ rows: Record<string, unknown>[]; rawResult?: unknown }> {
+    ): Promise<RunSQLWithDetailsResult> {
+        this.logDedicatedRouteDecision('runSQLWithDetails.enter', connection);
+        const statementPreview = Array.isArray(statements) ? statements.join(' ; ') : statements;
+        this.output?.appendLine(`[Cmd Entry][runSQLWithDetails] route=${this.canUseDedicatedForConnection(connection) ? 'dedicated-preferred' : 'shared-only'} rows=${options?.rows ?? '<none>'} sql=${statementPreview}`);
         this.logRouteSnapshot('runSQL.enter', connection, `rows=${options?.rows ?? '<none>'}`);
 
-        const runOnSharedJob = async (reason: string): Promise<{ rows: Record<string, unknown>[]; rawResult?: unknown }> => {
+        const runOnSharedJob = async (reason: string): Promise<RunSQLWithDetailsResult> => {
             try {
-                const sharedResult = await connection.runSQL(statements, {
-                    bindings: options?.bindings as never[] | undefined,
-                    rows: options?.rows
-                });
-                return { rows: sharedResult as unknown as Record<string, unknown>[], rawResult: sharedResult };
+                const sharedExecution = await this.executeSharedSql(connection, statements, options);
+                const sharedResult = sharedExecution.result;
+                const rows = this.rowsFromExecutionResult(sharedResult);
+                const continuation = this.extractContinuationTuple(sharedResult, 'shared');
+                this.logContinuationJsonDump(`route=shared requestedRows=${isPositiveInteger(options?.rows) ? options?.rows : '<none>'}`, sharedResult);
+                const reportedRows = this.extractReportedRowCount(sharedResult);
+                this.debugLog(`[Cmd Entry][SQLDiag] route=shared signature=${sharedExecution.signature} requestedRows=${isPositiveInteger(options?.rows) ? options?.rows : '<none>'} extractedRows=${rows.length} reportedRows=${reportedRows ?? '<none>'} continuationFetchMore=${continuation?.hasFetchMore ?? false} isDone=${continuation?.isDone ?? '<unknown>'}`);
+                if (continuation) {
+                    this.debugLog(`[Cmd Entry] shared continuation tuple type=${continuation.type ?? '<none>'} id=${continuation.id ?? '<none>'} cont_id=${continuation.contId ?? '<none>'} is_done=${continuation.isDone ?? '<unknown>'} fetchMore=${continuation.hasFetchMore}`);
+                }
+                return { rows, rawResult: sharedResult, continuation };
             } finally {
                 this.observeSharedJobId(connection, reason);
             }
         };
 
         if (!this.canUseDedicatedForConnection(connection)) {
+            this.logDedicatedRouteDecision('runSQLWithDetails.route.shared', connection);
             this.logRouteSnapshot('runSQL.route.shared.dedicatedDisabled', connection);
             if (this.job) {
                 this.logRouteSnapshot('runSQL.route.shared.cleanupDedicated.beforeEnd', connection);
@@ -434,38 +1179,39 @@ export class CommandEntryJobManager {
             return runOnSharedJob('noDedicatedHandle');
         }
 
+        this.logDedicatedRouteDecision('runSQLWithDetails.route.dedicated', connection);
         this.logRouteSnapshot('runSQL.route.dedicated', connection);
 
         this.status = 'busy';
         try {
-            const result = await this.executeDedicatedSql(job, statements, options);
-            const rows = this.rowsFromExecutionResult(result);
+            const requestedRows = options?.rows;
+            const dedicatedExecution = await this.executeSqlOnJob(job, statements, 'dedicated', options);
+            const result = dedicatedExecution.result;
+            let rows = this.rowsFromExecutionResult(result);
+            let continuation = this.extractContinuationTuple(result, 'dedicated');
+            const reportedRows = this.extractReportedRowCount(result);
+
+            this.debugLog(`[Cmd Entry][SQLDiag] route=dedicated signature=${dedicatedExecution.signature} requestedRows=${isPositiveInteger(requestedRows) ? requestedRows : '<none>'} extractedRows=${rows.length} reportedRows=${reportedRows ?? '<none>'} continuationFetchMore=${continuation?.hasFetchMore ?? false} isDone=${continuation?.isDone ?? '<unknown>'}`);
+
+            if (continuation) {
+                this.debugLog(`[Cmd Entry] dedicated continuation tuple type=${continuation.type ?? '<none>'} id=${continuation.id ?? '<none>'} cont_id=${continuation.contId ?? '<none>'} is_done=${continuation.isDone ?? '<unknown>'} fetchMore=${continuation.hasFetchMore}`);
+            }
+
+            this.logContinuationJsonDump(`route=${dedicatedExecution.signature} requestedRows=${isPositiveInteger(requestedRows) ? requestedRows : '<none>'}`, result);
+
+            const shouldContinueToTarget = isPositiveInteger(requestedRows)
+                && rows.length > 0
+                && rows.length < requestedRows
+                && continuation?.hasFetchMore
+                && continuation.isDone !== true;
+
+            if (shouldContinueToTarget) {
+                const completed = await this.fetchAllDedicatedRowsByContinuation(result, rows, requestedRows);
+                rows = completed.rows;
+                continuation = completed.continuation;
+            }
 
             if (rows.length === 0 && result && typeof result === 'object') {
-                if ('fetchAll' in result && typeof (result as any).fetchAll === 'function') {
-                    try {
-                        const fetched = await (result as any).fetchAll();
-                        if (Array.isArray(fetched)) {
-                            this.debugLog(`[Cmd Entry] job.execute() result.fetchAll() returned ${fetched.length} rows`);
-                            return { rows: fetched as Record<string, unknown>[], rawResult: result };
-                        }
-                    } catch (e) {
-                        this.debugLog(`[Cmd Entry] result.fetchAll() failed: ${e instanceof Error ? e.message : String(e)}`);
-                    }
-                }
-
-                if ('getRows' in result && typeof (result as any).getRows === 'function') {
-                    try {
-                        const fetched = await (result as any).getRows();
-                        if (Array.isArray(fetched)) {
-                            this.debugLog(`[Cmd Entry] job.execute() result.getRows() returned ${fetched.length} rows`);
-                            return { rows: fetched as Record<string, unknown>[], rawResult: result };
-                        }
-                    } catch (e) {
-                        this.debugLog(`[Cmd Entry] result.getRows() failed: ${e instanceof Error ? e.message : String(e)}`);
-                    }
-                }
-
                 const resultKeys = Object.keys(result);
                 const resultMethods = resultKeys.filter(k => typeof (result as any)[k] === 'function');
                 this.debugLog(`[Cmd Entry] job.execute() result has keys: ${resultKeys.join(', ')}`);
@@ -475,11 +1221,11 @@ export class CommandEntryJobManager {
             }
 
             if (rows.length > 0) {
-                return { rows, rawResult: result };
+                return { rows, rawResult: result, continuation };
             }
 
             this.debugLog('[Cmd Entry] WARNING: Could not extract rows from result');
-            return { rows: [], rawResult: result };
+            return { rows: [], rawResult: result, continuation };
         } catch (error) {
             this.output?.appendLine(`[Cmd Entry] SQL execution failed: ${error instanceof Error ? error.message : String(error)}`);
             throw error;
@@ -509,8 +1255,6 @@ export class CommandEntryJobManager {
 
             const libraryList: string[] = [];
             const seen = new Set<string>();
-            const wildcardLibraryOrder: string[] = [];
-            const wildcardSeen = new Set<string>();
             let currentLibrary: string | undefined;
 
             for (const row of rows) {
@@ -522,14 +1266,6 @@ export class CommandEntryJobManager {
                 const type = this.readRowString(row, 'TYPE')?.trim().toUpperCase();
                 if (type === 'CURRENT') {
                     currentLibrary = schemaName;
-                }
-
-                // Preserve the IBM i sequence as returned by LIBRARY_LIST_INFO and
-                // de-duplicate by first occurrence across all portions (SYSTEM/CURRENT/PRODUCT/USER).
-                // This naturally enforces precedence by ordinal position, including PRODUCT duplicates.
-                if (!wildcardSeen.has(schemaName)) {
-                    wildcardSeen.add(schemaName);
-                    wildcardLibraryOrder.push(schemaName);
                 }
 
                 if (type === 'CURRENT') {
@@ -544,8 +1280,7 @@ export class CommandEntryJobManager {
 
             return {
                 currentLibrary: currentLibrary ?? fallback.currentLibrary,
-                libraryList: libraryList.length > 0 ? libraryList : fallback.libraryList,
-                wildcardLibraryOrder: wildcardLibraryOrder.length > 0 ? wildcardLibraryOrder : fallback.wildcardLibraryOrder
+                libraryList: libraryList.length > 0 ? libraryList : fallback.libraryList
             };
         } catch (error) {
             this.output?.appendLine(`[Cmd Entry] Failed to resolve job-aware library configuration (${error instanceof Error ? error.message : String(error)}). Falling back to connection config.`);
@@ -677,15 +1412,9 @@ export class CommandEntryJobManager {
                 .filter((entry): entry is string => Boolean(entry))
             : [];
 
-        const wildcardLibraryOrder = [...new Set([
-            ...libraryList,
-            ...(currentLibrary ? [currentLibrary] : [])
-        ])];
-
         return {
             currentLibrary,
-            libraryList,
-            wildcardLibraryOrder
+            libraryList
         };
     }
 

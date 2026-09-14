@@ -38,6 +38,7 @@ let state = {
     cmdName: '',
     cmdLabel: '',
     cmdComment: '',
+    showComments: false,
     hasProcessedFormData: false,
     hasBeenRevealed: false,
     controlsWired: false,
@@ -77,6 +78,55 @@ function updateCopyXmlButtonState() {
     copyBtn.title = hasXml
         ? 'Copy command XML to clipboard'
         : 'Command XML is not available for this prompt';
+}
+let commentToggleRetryCount = 0;
+function logCommentToggle(stage, showComments, details = {}) {
+    const level = showComments ? 'ON' : 'OFF';
+    const payload = { stage, level, showComments, ...details };
+    if (showComments) {
+        console.warn('[clPrompter][CommentToggle][ON]', payload);
+    }
+    else {
+        console.log('[clPrompter][CommentToggle][OFF]', payload);
+    }
+}
+function setCommentAreaVisibility(showComments) {
+    const commentGroup = document.getElementById('cmdCommentGroup');
+    const commentInput = document.getElementById('cmdComment');
+    logCommentToggle('setCommentAreaVisibility', showComments, {
+        readyState: document.readyState,
+        hasCommentGroup: !!commentGroup,
+        hasCommentInput: !!commentInput,
+        commentGroupId: commentGroup?.id,
+        commentInputId: commentInput?.id,
+        retryCount: commentToggleRetryCount
+    });
+    if (!commentGroup) {
+        if (commentToggleRetryCount < 10) {
+            commentToggleRetryCount += 1;
+            console.warn('[clPrompter][CommentToggle] commentGroup missing; retrying after next frame', {
+                readyState: document.readyState,
+                showComments,
+                retryCount: commentToggleRetryCount
+            });
+            requestAnimationFrame(() => setCommentAreaVisibility(showComments));
+        }
+        else {
+            console.warn('[clPrompter][CommentToggle] commentGroup still missing after retries', {
+                readyState: document.readyState,
+                showComments,
+                retryCount: commentToggleRetryCount
+            });
+        }
+        return;
+    }
+    commentToggleRetryCount = 0;
+    commentGroup.hidden = !showComments;
+    commentGroup.style.display = showComments ? 'grid' : 'none';
+    commentGroup.setAttribute('aria-hidden', showComments ? 'false' : 'true');
+    if (!showComments && commentInput) {
+        commentInput.value = '';
+    }
 }
 function requestCopyCommandXml() {
     if (!currentCommandXml.trim()) {
@@ -1604,7 +1654,7 @@ function configureTabOrder(focusFirst = true) {
     // Get all focusable input elements from the form in DOM order
     const formInputs = Array.from(form.querySelectorAll('input[type="text"], input[type="password"], textarea, select, .cbinput-input'));
     allInputs.push(...formInputs);
-    if (cmdComment)
+    if (state.showComments && cmdComment)
         allInputs.push(cmdComment);
     // Filter out hidden or disabled inputs
     const visibleInputs = allInputs.filter(input => {
@@ -1659,7 +1709,7 @@ function configureFocusIndicators() {
     const allInputs = [
         ...Array.from(form.querySelectorAll('input, textarea, .cbinput-input')),
         cmdLabel,
-        cmdComment
+        state.showComments ? cmdComment : null
     ].filter(el => el !== null);
     // Store currently focused element
     const currentlyFocused = document.activeElement;
@@ -4078,10 +4128,21 @@ function normalizeNewlinesInValues(values) {
  * In comparisons, an empty field ('' after trim) also equals a space literal.
  */
 function resolveHexLiteral(val) {
-    const m = val.match(/^X'([0-9A-Fa-f]{2})'$/);
+    const m = val.match(/^X'([0-9A-Fa-f]+)'$/);
     if (!m)
         return val;
-    const code = parseInt(m[1], 16);
+    const hex = m[1];
+    // Malformed odd-length literals are compared as-is.
+    if (hex.length % 2 !== 0)
+        return val;
+    // Any all-0x40 EBCDIC literal represents blank(s); normalize to single blank.
+    // This matches IBM i DEP semantics where X'40...', '' and ' ' are all blank.
+    if (/^(40)+$/i.test(hex))
+        return ' ';
+    // For single-byte literals, preserve existing behavior.
+    if (hex.length !== 2)
+        return val;
+    const code = parseInt(hex, 16);
     // EBCDIC 0x40 = space; treat all single-byte hex literals as their character
     return String.fromCharCode(code === 0x40 ? 0x20 : code);
 }
@@ -4400,10 +4461,18 @@ function evaluateDepConstraint(constraint, atSubmit = false) {
         let conditionMet;
         switch (constraint.ctlKwdRel) {
             case 'EQ':
-                conditionMet = compareDepValues(ctlVal, 'EQ', constraint.cmpVal ?? '');
+                {
+                    const cmpResolved = resolveHexLiteral(constraint.cmpVal ?? '');
+                    const ctlNorm = ctlVal === '' ? ' ' : ctlVal;
+                    conditionMet = compareDepValues(ctlNorm, 'EQ', cmpResolved);
+                }
                 break;
             case 'NE':
-                conditionMet = compareDepValues(ctlVal, 'NE', constraint.cmpVal ?? '');
+                {
+                    const cmpResolved = resolveHexLiteral(constraint.cmpVal ?? '');
+                    const ctlNorm = ctlVal === '' ? ' ' : ctlVal;
+                    conditionMet = compareDepValues(ctlNorm, 'NE', cmpResolved);
+                }
                 break;
             case 'SPCFD':
                 conditionMet = isFieldSpecified(constraint.ctlKwd);
@@ -4837,7 +4906,7 @@ function onSubmit(opts = {}) {
         values['label'] = state.cmdLabel.replace(/\r\n|\n|\r/g, ' ').trim();
     }
     // Include comment with delimiters if present (normalize newlines)
-    if (state.cmdComment && state.cmdComment.trim()) {
+    if (state.showComments && state.cmdComment && state.cmdComment.trim()) {
         const normalizedComment = state.cmdComment.replace(/\r\n|\n|\r/g, ' ').trim();
         values['comment'] = '/* ' + normalizedComment + ' */';
     }
@@ -4884,7 +4953,7 @@ function wirePrompterControls() {
         });
     }
     // Wire up comment input
-    if (commentInput) {
+    if (state.showComments && commentInput) {
         // Initialize with current state value (already stripped of delimiters)
         commentInput.value = state.cmdComment || '';
         // Listen for changes
@@ -4909,7 +4978,7 @@ function wirePrompterControls() {
         cancelBtn.addEventListener('click', () => onCancel('button'));
     }
     // Trap Shift+Tab on first input to wrap to comment field
-    if (labelInput && commentInput) {
+    if (state.showComments && labelInput && commentInput) {
         labelInput.addEventListener('keydown', (e) => {
             if (e.key === 'Tab' && e.shiftKey) {
                 e.preventDefault();
@@ -4967,14 +5036,22 @@ function wirePrompterControls() {
     // Using event delegation on the form so we don't need to re-wire after each render
     const depForm = document.getElementById('clForm');
     if (depForm) {
-        depForm.addEventListener('blur', () => {
+        const refreshDepAndPmtCtl = () => {
             const errors = evaluateAllDepConstraints();
             showDepErrorBanner(errors);
-        }, true); // capture phase catches all blur events inside the form
-        // PmtCtl visibility re-evaluation: re-check show/hide on any field blur
-        depForm.addEventListener('blur', () => {
             applyPmtCtlVisibility();
+        };
+        depForm.addEventListener('blur', () => {
+            refreshDepAndPmtCtl();
         }, true); // capture phase catches all blur events inside the form
+        // PmtCtl/Dep re-evaluation on edits: some controls do not trigger a useful blur
+        // timing, so also recalculate as values change.
+        depForm.addEventListener('change', () => {
+            refreshDepAndPmtCtl();
+        }, true);
+        depForm.addEventListener('input', () => {
+            refreshDepAndPmtCtl();
+        }, true);
     }
     // Wire "View all parameters" / "View basic parameters" toggle button
     const viewAllBtn = document.getElementById('viewAllParmsBtn');
@@ -5074,6 +5151,14 @@ window.addEventListener('message', event => {
         // Apply configured colors (if provided)
         const config = message.config;
         applyConfigStyles(config);
+        if (typeof message.showComments === 'boolean') {
+            state.showComments = !!message.showComments;
+            logCommentToggle('formData.message', state.showComments, {
+                cmdName: state.cmdName,
+                xmlLength: message.xml?.length ?? 0
+            });
+            setCommentAreaVisibility(state.showComments);
+        }
         // Store the convertParmValueToUpperCase setting
         if (config && typeof config.convertParmValueToUpperCase === 'boolean') {
             state.convertParmValueToUpperCase = config.convertParmValueToUpperCase;
@@ -5202,18 +5287,26 @@ window.addEventListener('message', event => {
     else if (message.type === 'setLabel') {
         // Handle label and comment message
         state.cmdLabel = message.label || '';
+        if (typeof message.showComments === 'boolean') {
+            state.showComments = !!message.showComments;
+            logCommentToggle('setLabel.message', state.showComments, {
+                cmdLabel: state.cmdLabel,
+                commentLength: String(message.comment || '').length
+            });
+        }
         // Strip delimiters from comment before storing in state
         const incomingComment = message.comment || '';
-        state.cmdComment = incomingComment ? incomingComment.replace(/^\/\*\s*/, '').replace(/\s*\*\/$/, '').trim() : '';
+        state.cmdComment = state.showComments && incomingComment ? incomingComment.replace(/^\/\*\s*/, '').replace(/\s*\*\/$/, '').trim() : '';
         debugLog('[clPrompter] Set cmdLabel to:', state.cmdLabel);
         debugLog('[clPrompter] Set cmdComment to:', state.cmdComment);
+        setCommentAreaVisibility(state.showComments);
         // Update the HTML inputs
         const labelInput = document.getElementById('cmdLabel');
         if (labelInput) {
             labelInput.value = state.cmdLabel;
         }
         const commentInput = document.getElementById('cmdComment');
-        if (commentInput) {
+        if (commentInput && state.showComments) {
             commentInput.value = state.cmdComment;
         }
         // If formData hasn't been processed yet, this is a label-only prompter
@@ -5257,14 +5350,18 @@ window.addEventListener('message', event => {
         vscode?.postMessage({ type: 'pong', hasProcessedFormData: state.hasProcessedFormData });
     }
     else if (message.type === 'reset') {
-        // Immediately hide body so the old command form never flashes when the panel is revealed
+        // Immediately hide body so the old command form never flashes when the panel is revealed.
+        // Also clear stale visibility flags so a prior prompt cannot leak its comment setting
+        // into a reused webview instance or a nested prompt.
         document.body.style.opacity = '0';
+        state.showComments = false;
         state.hasProcessedFormData = false;
         state.hasBeenRevealed = false;
         state.controlsWired = false;
         state.touchedFields.clear();
         currentCommandXml = '';
         updateCopyXmlButtonState();
+        setCommentAreaVisibility(false);
         const form = document.getElementById('clForm');
         if (form) {
             form.innerHTML = '';

@@ -268,7 +268,8 @@ export async function CLPrompter(
                         debugLog('[CLPrompter] User submitted, returning updated command:', result);
                         resolve(result);
                     }
-                }
+                },
+                false
             );
 
             // Ensure promise resolves if panel is disposed without submitting/cancelling

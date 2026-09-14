@@ -48,7 +48,6 @@
     var loadMoreBtn = document.getElementById('load-more');
     var loadAllBtn = document.getElementById('load-all');
     var rerunBtn = document.getElementById('rerun-sql');
-    var fetchStatus = document.getElementById('fetch-status');
     var resultMeta = document.getElementById('result-meta');
     var resultTitleNode = document.getElementById('result-title');
     var toggleSqlStmtBtn = document.getElementById('toggle-sql-stmt');
@@ -59,10 +58,8 @@
         return;
     }
 
-    function setStatus(text) {
-        if (fetchStatus) {
-            fetchStatus.textContent = text || '';
-        }
+    function setStatus() {
+        // Status thread intentionally omitted; keep only batch/paging summaries.
     }
 
     function setRerunBusy(isBusy) {
@@ -71,13 +68,13 @@
         }
         rerunBtn.disabled = !!isBusy;
         rerunBtn.setAttribute('aria-busy', isBusy ? 'true' : 'false');
-        rerunBtn.title = isBusy ? 'Refresh' : 'Refresh';
+        rerunBtn.title = t('refresh', 'Refresh');
     }
 
     if (toggleSqlStmtBtn && sqlStatement) {
         toggleSqlStmtBtn.addEventListener('click', function () {
             var isVisible = sqlStatement.classList.toggle('is-visible');
-            toggleSqlStmtBtn.textContent = isVisible ? 'Hide SQL Stmt' : 'View SQL Stmt';
+            toggleSqlStmtBtn.textContent = isVisible ? t('hideSqlStmt', 'Hide SQL Stmt') : t('viewSqlStmt', '<SQL>');
             toggleSqlStmtBtn.setAttribute('aria-expanded', isVisible ? 'true' : 'false');
         });
     }
@@ -87,6 +84,23 @@
     var hasMoreRows = !!initialPayload.hasMoreRows;
     var fetchSize = Number(initialPayload.fetchSize || 0);
     var rows = Array.isArray(initialPayload.rowCells) ? initialPayload.rowCells.slice() : [];
+    var l10n = (initialPayload.l10n && typeof initialPayload.l10n === 'object')
+        ? initialPayload.l10n
+        : {};
+
+    function t(key, fallback) {
+        var value = l10n[key];
+        return (typeof value === 'string' && value.length > 0) ? value : fallback;
+    }
+
+    function formatTemplate(template, tokens) {
+        var text = String(template || '');
+        var values = (tokens && typeof tokens === 'object') ? tokens : {};
+        return text.replace(/\{([a-zA-Z0-9_]+)\}/g, function (_match, token) {
+            var replacement = values[token];
+            return replacement === undefined || replacement === null ? '' : String(replacement);
+        });
+    }
 
     function renderResultTitle() {
         if (!resultTitleNode) {
@@ -112,6 +126,8 @@
     var rowOffsets = [];
     var rowHeights = [];
     var rerunInFlight = false;
+    var loadAllInProgress = false;
+    var stopLoadAllRequested = false;
     var pagingDiagEnabled = true;
 
     function logPagingDiag(reason) {
@@ -391,12 +407,10 @@
         if (pageSizeAuto) {
             var anchors = getAutoPageAnchors();
             pageIndex = getAutoPageIndexFromScrollAnchors(anchors);
-            var autoSize = getAutoStepForCurrentView(getCurrentTopRowIndex());
-            return 'Page ' + (pageIndex + 1) + ' of ' + totalPages + ' (' + rows.length + ' rows, page AUTO=' + autoSize + ')';
+            return 'Page ' + (pageIndex + 1) + ' of ' + totalPages;
         }
 
-        var effectiveSize = getEffectivePageSize();
-        return 'Page ' + (pageIndex + 1) + ' of ' + totalPages + ' (' + rows.length + ' rows, page ' + effectiveSize + ')';
+        return 'Page ' + (pageIndex + 1) + ' of ' + totalPages;
     }
 
     function getAutoPageIndexFromScrollAnchors(anchors) {
@@ -742,8 +756,8 @@
 
         if (resultMeta) {
             resultMeta.textContent = hasMoreRows
-                ? ('Loaded ' + rows.length + ' rows. More rows are available.')
-                : (rows.length + ' rows returned.');
+                ? formatTemplate(t('moreRowsAvailableTemplate', '{count} rows loaded. More available.'), { count: rows.length })
+                : formatTemplate(t('rowsReturnedTemplate', '{count} rows returned.'), { count: rows.length });
         }
         if (pageSummary) {
             pageSummary.textContent = buildPageSummaryText();
@@ -816,7 +830,10 @@
         pageIndex = 0;
         updateSortIndicators();
         renderRows({ scrollToTop: true });
-        setStatus('Sorted column ' + (colIndex + 1) + ' (' + sortDirection + ').');
+        setStatus(formatTemplate(t('sortedColumnTemplate', 'Sorted column {column} ({direction}).'), {
+            column: (colIndex + 1),
+            direction: sortDirection
+        }));
     }
 
     function applyActiveSort() {
@@ -878,7 +895,7 @@
                 var handle = document.createElement('span');
                 handle.className = 'col-resize-handle';
                 handle.setAttribute('aria-hidden', 'true');
-                handle.title = 'Drag to resize column';
+                handle.title = t('dragToResizeColumn', 'Drag to resize column');
                 header.appendChild(handle);
 
                 handle.addEventListener('mousedown', function (event) {
@@ -916,7 +933,9 @@
                             suppressSortUntil = Date.now() + 250;
                         }
                         saveWidths();
-                        setStatus('Resized column ' + (colIndex + 1) + '.');
+                        setStatus(formatTemplate(t('resizedColumnTemplate', 'Resized column {column}.'), {
+                            column: (colIndex + 1)
+                        }));
                     };
 
                     window.addEventListener('mousemove', onMove);
@@ -934,14 +953,24 @@
 
     function updateLoadButtons() {
         var canFetch = !!sessionId && !!hasMoreRows;
+        var nextRows = Number(fetchSize);
+        var hasValidNextRows = isFinite(nextRows) && nextRows > 0;
+        var loadMoreLabel = hasValidNextRows
+            ? formatTemplate(t('loadNextRowsTemplate', 'Load next {count} rows'), { count: Math.floor(nextRows) })
+            : t('loadMore', 'Load more');
         if (loadMoreBtn) {
             loadMoreBtn.hidden = !canFetch;
-            if (canFetch) {
-                loadMoreBtn.textContent = 'Load more';
-            }
+            loadMoreBtn.textContent = loadMoreLabel;
+            loadMoreBtn.title = loadMoreLabel;
+            loadMoreBtn.setAttribute('aria-label', loadMoreLabel);
+            loadMoreBtn.disabled = loadAllInProgress || !canFetch;
         }
         if (loadAllBtn) {
             loadAllBtn.hidden = !canFetch;
+            loadAllBtn.textContent = loadAllInProgress
+                ? (stopLoadAllRequested ? t('stoppingRequested', 'Stopping requested...') : t('stop', 'Stop'))
+                : t('loadAll', 'Load all');
+            loadAllBtn.disabled = !canFetch;
         }
     }
 
@@ -957,13 +986,25 @@
 
     if (loadMoreBtn) {
         loadMoreBtn.addEventListener('click', function () {
-            requestRows('loadMore', 'Loading next rows...');
+            requestRows('loadMore', t('loadingNextRows', 'Loading next rows...'));
         });
     }
 
     if (loadAllBtn) {
         loadAllBtn.addEventListener('click', function () {
-            requestRows('loadAll', 'Loading all remaining rows...');
+            if (!sessionId || !hasMoreRows) {
+                return;
+            }
+            if (loadAllInProgress) {
+                stopLoadAllRequested = true;
+                setStatus(t('stoppingRequested', 'Stopping requested...'));
+                updateLoadButtons();
+                if (vscode.postMessage) {
+                    vscode.postMessage({ type: 'stopLoadAll', sessionId: sessionId });
+                }
+                return;
+            }
+            requestRows('loadAll', t('loadingAllRemainingRows', 'Loading all remaining rows...'));
         });
     }
 
@@ -1081,12 +1122,12 @@
         rerunBtn.addEventListener('click', function () {
             var statement = sqlStatement ? String(sqlStatement.textContent || '').trim() : '';
             if (!statement) {
-                setStatus('No SQL statement available to rerun.');
+                setStatus(t('noSqlStatementToRerun', 'No SQL statement available to rerun.'));
                 return;
             }
             rerunInFlight = true;
             setRerunBusy(true);
-            setStatus('Rerunning SQL statement...');
+            setStatus(t('rerunningSqlStatement', 'Rerunning SQL statement...'));
             if (vscode.postMessage) {
                 vscode.postMessage({ type: 'rerunSql', statement: statement, resultTitle: resultTitle });
             }
@@ -1101,16 +1142,32 @@
 
         if (message.type === 'loadError') {
             setRerunBusy(false);
-            setStatus(message.message || 'Unable to load additional rows.');
+            setStatus(message.message || t('unableToLoadAdditionalRows', 'Unable to load additional rows.'));
             return;
         }
 
         if (message.type === 'sqlSessionClosed') {
             setRerunBusy(false);
+            loadAllInProgress = false;
+            stopLoadAllRequested = false;
             sessionId = '';
             hasMoreRows = false;
             updateLoadButtons();
-            setStatus(message.message || 'SQL result session is no longer available. Run the SQL statement again.');
+            setStatus(message.message || t('sqlSessionNoLongerAvailable', 'SQL result session is no longer available. Run the SQL statement again.'));
+            return;
+        }
+
+        if (message.type === 'loadAllState') {
+            loadAllInProgress = !!message.inProgress;
+            stopLoadAllRequested = !!message.stopRequested;
+            updateLoadButtons();
+            if (loadAllInProgress && stopLoadAllRequested) {
+                setStatus(t('stoppingRequested', 'Stopping requested...'));
+            } else if (message.message) {
+                setStatus(message.message);
+            } else if (typeof message.rowsLoaded === 'number') {
+                setStatus(formatTemplate(t('loadedRowsTemplate', 'Loaded {count} rows...'), { count: message.rowsLoaded }));
+            }
             return;
         }
 
@@ -1127,6 +1184,7 @@
         sessionId = payload.sessionId || '';
         hasMoreRows = !!payload.hasMoreRows;
         fetchSize = Number(payload.fetchSize || 0);
+        l10n = (payload.l10n && typeof payload.l10n === 'object') ? payload.l10n : l10n;
         renderResultTitle();
 
         if (sortColumnIndex >= 0) {
@@ -1138,9 +1196,15 @@
         renderRows({ preserveScroll: !wasRerun, scrollToTop: wasRerun });
         updateLoadButtons();
         if (wasRerun) {
-            setStatus('Result set refreshed (' + rows.length + ' rows currently loaded).');
+            setStatus(formatTemplate(t('resultSetRefreshedTemplate', 'Result set refreshed ({count} rows currently loaded).'), { count: rows.length }));
         } else {
-            setStatus(hasMoreRows ? 'Additional rows loaded.' : 'All rows loaded.');
+            if (loadAllInProgress && stopLoadAllRequested) {
+                setStatus(t('stoppingRequested', 'Stopping requested...'));
+            } else {
+                setStatus(hasMoreRows
+                    ? formatTemplate(t('additionalRowsLoadedTemplate', 'Additional rows loaded ({count} total).'), { count: rows.length })
+                    : t('allRowsLoaded', 'All rows loaded.'));
+            }
         }
     });
 
@@ -1166,7 +1230,6 @@
                 pageSummary.textContent = buildPageSummaryText();
             }
         });
-        setStatus('Sorting/resizing ready. headers=' + sortableHeaders.length + '.');
     } catch (error) {
         try {
             var details = (error && typeof error === 'object' && error.message)

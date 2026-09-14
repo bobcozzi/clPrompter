@@ -2,7 +2,7 @@ import IBMi from '@halcyontech/vscode-ibmi-types/api/IBMi';
 import * as vscode from 'vscode';
 import { CommandExecution, CommandExecutionMode, SqlColumnMetadata, determineOutcome, mapCommandMessages } from './commandEntryModel';
 import { getUDTFLibrary } from './components/hostFunctions';
-import { CommandEntryJobManager } from './commandEntryJobManager';
+import { CommandEntryJobManager, RunSQLWithDetailsResult, SqlContinuationTuple } from './commandEntryJobManager';
 import { detectCommandEntryPrefix } from './commandEntryPrefixes';
 import { buildCancelSqlJobCommand, CMD_RUN_SQL, normalizeSqlJobId } from './commandEntrySqlHelpers';
 import { getConnectionSqlSettings } from './commandEntrySqlSettings';
@@ -11,10 +11,11 @@ import { checkSQLBeforePaging, checkSQLForExecution } from './sqlSyntaxChecker';
 export { buildCancelSqlJobCommand, CMD_RUN_SQL, normalizeSqlJobId };
 
 const DEFAULT_SQL_RESULT_ROWS = 1000;
-const DEDICATED_SQL_PAGE_SIZE = 100;
+const DEDICATED_SQL_PAGE_SIZE = 200;
 const NOMAX_SENTINEL = Number.MAX_SAFE_INTEGER;
 const SCROLL_PREFETCH_ROWS = 200;
 const LOAD_ALL_MAX_ITERATIONS = 10000;
+const DISABLE_OFFSET_FALLBACK_ENV = 'CLPROMPTER_DEBUG_DISABLE_OFFSET_FALLBACK';
 
 interface SqlPagingSession {
     id: string;
@@ -27,9 +28,18 @@ interface SqlPagingSession {
     nextOffset: number;
     fetchSize: number;
     prefetchSize: number;
+    pagingMode: 'continuation' | 'offset';
+    continuation?: SqlContinuationTuple;
+    continuationRawResult?: unknown;
     hasMoreRows: boolean;
     createdAt: number;
     lastUsedAt: number;
+}
+
+interface OffsetFallbackDebugPolicy {
+    disabled: boolean;
+    configValue?: boolean;
+    envRaw: string;
 }
 
 function buildCmdRunSql(library: string): string {
@@ -199,11 +209,40 @@ function mergeColumnMetadata(
 }
 
 function extractSqlColumnMetadata(raw: unknown, fallbackNames: string[]): SqlColumnMetadata[] {
-    const metadata = Array.isArray(raw)
-        ? raw
-        : raw && typeof raw === 'object'
-            ? ((raw as { metadata?: unknown }).metadata ?? (raw as { columns?: unknown }).columns ?? [])
-            : [];
+    const collectMetadataEntries = (value: unknown): unknown[] => {
+        if (Array.isArray(value)) {
+            return value;
+        }
+
+        if (!value || typeof value !== 'object') {
+            return [];
+        }
+
+        const candidate = value as Record<string, unknown>;
+        const entries: unknown[] = [];
+
+        const push = (...items: unknown[]) => {
+            for (const item of items) {
+                if (Array.isArray(item)) {
+                    entries.push(...item);
+                }
+            }
+        };
+
+        push(candidate.columns, candidate.columnMetadata, candidate.metadata, candidate.fields, candidate.result);
+
+        const nestedMetadata = candidate.metadata && typeof candidate.metadata === 'object' && !Array.isArray(candidate.metadata)
+            ? candidate.metadata as Record<string, unknown>
+            : undefined;
+
+        if (nestedMetadata) {
+            push(nestedMetadata.columns, nestedMetadata.columnMetadata, nestedMetadata.fields, nestedMetadata.metadata);
+        }
+
+        return entries;
+    };
+
+    const metadata = collectMetadataEntries(raw);
 
     if (!Array.isArray(metadata) || metadata.length === 0) {
         return fallbackNames.map(name => ({ name, label: name }));
@@ -1061,11 +1100,52 @@ export class CommandEntryService {
             return;
         }
 
+        const closeContinuation = (this.activeSqlSession.continuationRawResult as { close?: () => Promise<void> | void } | undefined)?.close;
+        if (typeof closeContinuation === 'function') {
+            try {
+                await closeContinuation();
+            } catch (error) {
+                this.logSqlDiag(`closeSqlSession.continuationCloseFailed error=${error instanceof Error ? error.message : String(error)}`);
+            }
+        }
+
         this.activeSqlSession = undefined;
     }
 
     private createSessionId(): string {
         return `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+    }
+
+    private logSqlDiag(message: string): void {
+        this.jobManager?.logDiagnostic(`[Cmd Entry][SQLDiag] ${message}`);
+    }
+
+    private logSqlInfo(message: string): void {
+        this.jobManager?.logInfo(`[Cmd Entry][SQLPolicy] ${message}`);
+    }
+
+    private isOffsetFallbackDisabledForDiagnostics(): boolean {
+        return this.resolveOffsetFallbackDebugPolicy().disabled;
+    }
+
+    private resolveOffsetFallbackDebugPolicy(): OffsetFallbackDebugPolicy {
+        const config = vscode.workspace.getConfiguration('clPrompter');
+        const configValue = config.get<boolean | undefined>('cmdEntryDebugDisableOffsetFallback');
+        if (typeof configValue === 'boolean') {
+            return {
+                disabled: configValue,
+                configValue,
+                envRaw: String(process.env[DISABLE_OFFSET_FALLBACK_ENV] ?? '').trim()
+            };
+        }
+
+        const envRaw = String(process.env[DISABLE_OFFSET_FALLBACK_ENV] ?? '').trim();
+        const envValue = envRaw.toLowerCase();
+        return {
+            disabled: envValue === '1' || envValue === 'true' || envValue === 'yes' || envValue === 'on',
+            configValue,
+            envRaw
+        };
     }
 
     private buildConnectionKey(connection: IBMi): string {
@@ -1110,6 +1190,29 @@ export class CommandEntryService {
         return { rows: normalizedRows, metadata };
     }
 
+    private async runSqlRowsWithDetails(
+        connection: IBMi,
+        statement: string,
+        rows?: number,
+        options?: { skipSyntaxCheck?: boolean }
+    ): Promise<(RunSQLWithDetailsResult & { metadata?: SqlColumnMetadata[] })> {
+        if (!options?.skipSyntaxCheck) {
+            await checkSQLForExecution(connection, statement, this.jobManager);
+        }
+
+        if (this.jobManager) {
+            const detailed = await this.jobManager.runSQLWithDetails(connection, statement, { rows });
+            const metadata = extractSqlColumnMetadata(detailed.rawResult ?? detailed.rows, deriveSqlColumns(detailed.rows));
+            return { ...detailed, metadata };
+        }
+
+        const basic = await this.runSqlRows(connection, statement, rows, { skipSyntaxCheck: true });
+        return {
+            rows: basic.rows,
+            metadata: basic.metadata
+        };
+    }
+
     private getBackendFetchSize(targetRows: number): number {
         if (targetRows <= 0) {
             return 0;
@@ -1144,34 +1247,50 @@ export class CommandEntryService {
             return { rows: normalizedRows, metadata: extractSqlColumnMetadata(rawRows, deriveSqlColumns(normalizedRows)) };
         }
 
-        const rows: Record<string, unknown>[] = [];
-        let metadata: SqlColumnMetadata[] | undefined;
-        let offset = 0;
         const unlimited = maxRows === NOMAX_SENTINEL;
+        if (!unlimited) {
+            const limitedResult = await this.runSqlRowsWithDetails(connection, statement, maxRows, { skipSyntaxCheck: true });
+            return { rows: limitedResult.rows, metadata: limitedResult.metadata };
+        }
 
-        while (unlimited || rows.length < maxRows) {
-            const fetchRows = unlimited
-                ? DEDICATED_SQL_PAGE_SIZE
-                : Math.min(DEDICATED_SQL_PAGE_SIZE, maxRows - rows.length);
-            const pageSql = buildPagedSql(statement, offset, fetchRows);
-            const pageRows = await runCmdEntrySql(connection, this.jobManager, pageSql, { rows: fetchRows, skipSyntaxCheck: true });
-            const normalizedPage = Array.isArray(pageRows)
-                ? pageRows as Record<string, unknown>[]
-                : Array.isArray((pageRows as { data?: unknown[] }).data)
-                    ? (pageRows as { data: Record<string, unknown>[] }).data
-                    : Array.isArray((pageRows as { rows?: unknown[] }).rows)
-                        ? (pageRows as { rows: Record<string, unknown>[] }).rows
-                        : [];
-            rows.push(...normalizedPage);
-            if (!metadata && normalizedPage.length > 0) {
-                metadata = extractSqlColumnMetadata(pageRows, deriveSqlColumns(normalizedPage));
+        const initialResult = await this.runSqlRowsWithDetails(connection, statement, undefined, { skipSyntaxCheck: true });
+        const rows: Record<string, unknown>[] = [...initialResult.rows];
+        let metadata: SqlColumnMetadata[] | undefined = initialResult.metadata;
+
+        if (!initialResult.rawResult || !this.jobManager) {
+            return { rows, metadata };
+        }
+
+        let continuationResult = await this.jobManager.continueSQLFromResult(initialResult.rawResult, {
+            statement
+        });
+        let guardIterations = 0;
+        while (continuationResult.rows.length > 0) {
+            guardIterations += 1;
+            if (guardIterations > LOAD_ALL_MAX_ITERATIONS) {
+                throw new Error('SQL continuation stopped after too many iterations.');
             }
 
-            if (normalizedPage.length < fetchRows) {
+            rows.push(...continuationResult.rows);
+            if (!hasUsefulColumnMetadata(metadata)) {
+                const continuationMetadata = extractSqlColumnMetadata(
+                    continuationResult.rawResult ?? continuationResult.rows,
+                    deriveSqlColumns(continuationResult.rows)
+                );
+                if (hasUsefulColumnMetadata(continuationMetadata)) {
+                    metadata = continuationMetadata;
+                }
+            }
+
+            const hasMore = !!continuationResult.continuation?.hasFetchMore
+                && continuationResult.continuation?.isDone !== true;
+            if (!hasMore || !continuationResult.rawResult) {
                 break;
             }
 
-            offset += normalizedPage.length;
+            continuationResult = await this.jobManager.continueSQLFromResult(continuationResult.rawResult, {
+                statement
+            });
         }
 
         return { rows, metadata };
@@ -1222,7 +1341,10 @@ export class CommandEntryService {
             localOffset += pageRows.length;
 
             if (pageRows.length < backendRows) {
-                break;
+                const hasMoreAfterShortPage = await this.detectMoreRows(connection, sqlStatement, localOffset);
+                if (!hasMoreAfterShortPage) {
+                    break;
+                }
             }
         }
 
@@ -1248,9 +1370,14 @@ export class CommandEntryService {
         }
     ) {
         const columns = deriveSqlColumns(rows);
-        const catalogMetadata = await fetchColumnMetadataFromCatalog(connection, statement, columns, this.jobManager);
-        const metadataFromSql = hasUsefulColumnMetadata(options?.columnMetadata)
-            ? mergeColumnMetadata(columns, options?.columnMetadata, catalogMetadata)
+        const runtimeMetadata = hasUsefulColumnMetadata(options?.columnMetadata)
+            ? options?.columnMetadata
+            : undefined;
+        const catalogMetadata = runtimeMetadata
+            ? undefined
+            : await fetchColumnMetadataFromCatalog(connection, statement, columns, this.jobManager);
+        const metadataFromSql = runtimeMetadata
+            ? mergeColumnMetadata(columns, runtimeMetadata, catalogMetadata)
             : catalogMetadata;
         const finalMetadata = enrichMetadataWithInferredTypes(columns, metadataFromSql, rows);
         return {
@@ -1286,7 +1413,91 @@ export class CommandEntryService {
             throw new Error('SQL result session belongs to a different connection. Run the SQL statement again.');
         }
 
-        const fetchOnce = async (effectiveFetchSize: number): Promise<number> => {
+        const fetchOnce = async (effectiveFetchSize: number): Promise<{ fetched: number; continuationHasMore?: boolean; }> => {
+            if (session.pagingMode === 'continuation' && this.jobManager && session.continuationRawResult) {
+                const lastTuple = session.continuation;
+                const canInvokeFetchMore = !!lastTuple?.hasFetchMore;
+                const continuationUsable = this.jobManager.isContinuationUsable(lastTuple);
+                const disableOffsetFallback = this.isOffsetFallbackDisabledForDiagnostics();
+                this.logSqlInfo(`loadMore.start mode=continuation session=${session.id} nextOffset=${session.nextOffset} targetRows=${effectiveFetchSize} tuple(type=${lastTuple?.type ?? '<none>'},id=${lastTuple?.id ?? '<none>'},cont_id=${lastTuple?.contId ?? '<none>'},is_done=${lastTuple?.isDone ?? '<unknown>'},hasFetchMore=${canInvokeFetchMore}) disableOffsetFallback=${disableOffsetFallback}`);
+                this.logSqlDiag(`loadMore.begin mode=continuation session=${session.id} nextOffset=${session.nextOffset} targetRows=${effectiveFetchSize} hasFetchMore=${canInvokeFetchMore} continuationUsable=${continuationUsable} isDone=${lastTuple?.isDone ?? '<unknown>'} disableOffsetFallback=${disableOffsetFallback}`);
+
+                const continuationResult = continuationUsable
+                    ? await this.jobManager.continueSQLFromResult(session.continuationRawResult, {
+                        statement: session.statement,
+                        targetRows: effectiveFetchSize
+                    })
+                    : {
+                        rows: [] as Record<string, unknown>[],
+                        rawResult: session.continuationRawResult,
+                        continuation: lastTuple
+                    };
+
+                const pageRows = continuationResult.rows;
+                const pageMetadata = extractSqlColumnMetadata(
+                    continuationResult.rawResult ?? continuationResult.rows,
+                    deriveSqlColumns(pageRows)
+                );
+
+                if (!hasUsefulColumnMetadata(session.columnMetadata) && hasUsefulColumnMetadata(pageMetadata)) {
+                    session.columnMetadata = pageMetadata;
+                }
+
+                if (pageRows.length > 0) {
+                    session.rows.push(...pageRows);
+                    session.nextOffset += pageRows.length;
+                }
+
+                session.continuationRawResult = continuationResult.rawResult;
+                session.continuation = continuationResult.continuation;
+
+                let continuationHasMore = !!continuationResult.continuation
+                    && continuationResult.continuation.isDone !== true;
+
+                // Some providers expose continuation tuple metadata (is_done/id/cont_id)
+                // before a callable fetchMore appears. In that mismatch case, allow the
+                // session to keep moving via paged SQL as a safety fallback.
+                if (continuationHasMore && !canInvokeFetchMore && pageRows.length === 0) {
+                    if (disableOffsetFallback) {
+                        this.logSqlDiag('loadMore.fallbackSuppressed reason=continuationTupleWithoutFetchMore');
+                        this.logSqlInfo('loadMore.branch continuationStalled action=keepContinuationSession');
+                        return {
+                            fetched: 0,
+                            continuationHasMore: true
+                        };
+                    }
+
+                    this.logSqlDiag('loadMore.fallbackToOffset reason=continuationTupleWithoutFetchMore');
+                    this.logSqlInfo(`loadMore.branch action=offsetFallback nextOffset=${session.nextOffset} targetRows=${effectiveFetchSize}`);
+
+                    const fallbackPage = await this.fetchSqlChunk(connection, session.statement, session.nextOffset, effectiveFetchSize);
+                    const fallbackRows = fallbackPage.rows;
+                    if (!hasUsefulColumnMetadata(session.columnMetadata) && hasUsefulColumnMetadata(fallbackPage.metadata)) {
+                        session.columnMetadata = fallbackPage.metadata;
+                    }
+
+                    if (fallbackRows.length > 0) {
+                        session.rows.push(...fallbackRows);
+                        session.nextOffset += fallbackRows.length;
+                    }
+
+                    continuationHasMore = fallbackRows.length === effectiveFetchSize;
+                    this.logSqlDiag(`loadMore.end mode=offset-fallback fetched=${fallbackRows.length} nextOffset=${session.nextOffset} hasMore=${continuationHasMore}`);
+                    return {
+                        fetched: fallbackRows.length,
+                        continuationHasMore
+                    };
+                }
+
+                this.logSqlDiag(`loadMore.end mode=continuation fetched=${pageRows.length} nextOffset=${session.nextOffset} hasMore=${continuationHasMore}`);
+
+                return {
+                    fetched: pageRows.length,
+                    continuationHasMore
+                };
+            }
+
+            this.logSqlDiag(`loadMore.begin mode=offset session=${session.id} nextOffset=${session.nextOffset} targetRows=${effectiveFetchSize}`);
             const pageResult = await this.fetchSqlChunk(connection, session.statement, session.nextOffset, effectiveFetchSize);
             const pageRows = pageResult.rows;
             if (!hasUsefulColumnMetadata(session.columnMetadata) && hasUsefulColumnMetadata(pageResult.metadata)) {
@@ -1297,7 +1508,9 @@ export class CommandEntryService {
                 session.nextOffset += pageRows.length;
             }
 
-            return pageRows.length;
+            this.logSqlDiag(`loadMore.end mode=offset fetched=${pageRows.length} nextOffset=${session.nextOffset}`);
+
+            return { fetched: pageRows.length };
         };
 
         if (fetchAll) {
@@ -1309,9 +1522,16 @@ export class CommandEntryService {
                     throw new Error('Load all stopped after too many fetch iterations. Add ORDER BY to the SQL statement and try again.');
                 }
 
-                const fetched = await fetchOnce(session.fetchSize);
-                if (fetched === 0 || fetched < session.fetchSize) {
-                    session.hasMoreRows = false;
+                const outcome = await fetchOnce(session.fetchSize);
+                const fetched = outcome.fetched;
+                if (session.pagingMode === 'continuation') {
+                    session.hasMoreRows = !!outcome.continuationHasMore;
+                    if (session.hasMoreRows && fetched === 0) {
+                        this.logSqlInfo('loadAll.branch continuationStalled action=stopLoopKeepSession');
+                        break;
+                    }
+                } else {
+                    session.hasMoreRows = !(fetched === 0 || fetched < session.fetchSize);
                 }
             }
         } else {
@@ -1331,8 +1551,11 @@ export class CommandEntryService {
             const effectiveFetchSize = Number.isInteger(fetchRowsOverride) && (fetchRowsOverride as number) > 0
                 ? Math.min(fetchRowsOverride as number, session.fetchSize)
                 : session.fetchSize;
-            const fetched = await fetchOnce(effectiveFetchSize);
-            if (fetched === 0 || fetched < effectiveFetchSize) {
+            const outcome = await fetchOnce(effectiveFetchSize);
+            const fetched = outcome.fetched;
+            if (session.pagingMode === 'continuation') {
+                session.hasMoreRows = !!outcome.continuationHasMore;
+            } else if (fetched === 0) {
                 session.hasMoreRows = false;
             } else {
                 session.hasMoreRows = await this.detectMoreRows(connection, session.statement, session.nextOffset);
@@ -1378,6 +1601,10 @@ export class CommandEntryService {
                 const unlimited = maxRows === NOMAX_SENTINEL;
                 const normalizedSql = stripTrailingSemicolon(sqlStatement);
                 const userManagedRowLimiter = hasTopLevelUserRowLimiter(normalizedSql);
+                const fallbackPolicy = this.resolveOffsetFallbackDebugPolicy();
+                const disableOffsetFallback = fallbackPolicy.disabled;
+                this.logSqlInfo(`query.start disableOffsetFallback=${disableOffsetFallback} configValue=${fallbackPolicy.configValue === undefined ? '<unset>' : fallbackPolicy.configValue} env(${DISABLE_OFFSET_FALLBACK_ENV})=${fallbackPolicy.envRaw || '<empty>'} dedicatedUsable=${this.jobManager?.isDedicatedUsable(connection) ?? false}`);
+                this.logSqlDiag(`query.start dedicatedUsable=${this.jobManager?.isDedicatedUsable(connection) ?? false} maxRows=${maxRows === NOMAX_SENTINEL ? '*NOMAX' : maxRows} prefetchRows=${prefetchRows} unlimited=${unlimited} userManagedLimiter=${userManagedRowLimiter} disableOffsetFallback=${disableOffsetFallback}`);
                 let rows: Record<string, unknown>[];
                 let hasMoreRows = false;
                 let sessionId: string | undefined;
@@ -1396,36 +1623,118 @@ export class CommandEntryService {
                     columnMetadata = result.metadata;
                 } else {
                     const prefetchSize = Math.min(maxRows, prefetchRows);
-                    const initialChunk = await this.fetchSqlChunk(connection, normalizedSql, 0, prefetchSize);
-                    rows = initialChunk.rows;
-                    columnMetadata = initialChunk.metadata;
-                    if (rows.length === prefetchSize) {
-                        hasMoreRows = await this.detectMoreRows(connection, normalizedSql, rows.length);
-                    }
+                    if (this.jobManager) {
+                        const initialChunk = await this.runSqlRowsWithDetails(connection, normalizedSql, prefetchSize);
+                        rows = initialChunk.rows;
+                        columnMetadata = initialChunk.metadata;
+                        this.logSqlDiag(`query.firstChunk rows=${rows.length} requested=${prefetchSize} continuationType=${initialChunk.continuation?.type ?? '<none>'} hasFetchMore=${initialChunk.continuation?.hasFetchMore ?? false} isDone=${initialChunk.continuation?.isDone ?? '<unknown>'} contId=${initialChunk.continuation?.contId ?? '<none>'} id=${initialChunk.continuation?.id ?? '<none>'}`);
+                        this.logSqlInfo(`query.firstChunk rows=${rows.length} requested=${prefetchSize} tuple(type=${initialChunk.continuation?.type ?? '<none>'},id=${initialChunk.continuation?.id ?? '<none>'},cont_id=${initialChunk.continuation?.contId ?? '<none>'},is_done=${initialChunk.continuation?.isDone ?? '<unknown>'},hasFetchMore=${initialChunk.continuation?.hasFetchMore ?? false})`);
+                        const continuationAvailable = !!initialChunk.rawResult
+                            && this.jobManager.isContinuationUsable(initialChunk.continuation);
+                        this.logSqlInfo(`query.continuationDecision rawResult=${!!initialChunk.rawResult} continuationAvailable=${continuationAvailable} reason=${continuationAvailable ? `continuation-usable (id=${initialChunk.continuation?.id ?? '<none>'},cont_id=${initialChunk.continuation?.contId ?? '<none>'},is_done=${initialChunk.continuation?.isDone ?? '<unknown>'},hasFetchMore=${initialChunk.continuation?.hasFetchMore ?? false})` : `continuation-unusable (id=${initialChunk.continuation?.id ?? '<none>'},cont_id=${initialChunk.continuation?.contId ?? '<none>'},is_done=${initialChunk.continuation?.isDone ?? '<unknown>'},hasFetchMore=${initialChunk.continuation?.hasFetchMore ?? false})`}`);
+                        hasMoreRows = continuationAvailable;
 
-                    if (hasMoreRows) {
-                        const session: SqlPagingSession = {
-                            id: this.createSessionId(),
-                            connectionKey: this.buildConnectionKey(connection),
-                            statement: normalizedSql,
-                            resultTitle: options?.resultTitle,
-                            rows: [...rows],
-                            columnMetadata,
-                            columns: deriveSqlColumns(rows),
-                            nextOffset: rows.length,
-                            fetchSize: maxRows,
-                            prefetchSize,
-                            hasMoreRows: true,
-                            createdAt: Date.now(),
-                            lastUsedAt: Date.now()
-                        };
-                        this.activeSqlSession = session;
-                        sessionId = session.id;
+                        if (continuationAvailable) {
+                            const session: SqlPagingSession = {
+                                id: this.createSessionId(),
+                                connectionKey: this.buildConnectionKey(connection),
+                                statement: normalizedSql,
+                                resultTitle: options?.resultTitle,
+                                rows: [...rows],
+                                columnMetadata,
+                                columns: deriveSqlColumns(rows),
+                                nextOffset: rows.length,
+                                // Reuse the prefetch setting as sqlmore chunk size.
+                                fetchSize: prefetchSize,
+                                prefetchSize,
+                                pagingMode: 'continuation',
+                                continuation: initialChunk.continuation,
+                                continuationRawResult: initialChunk.rawResult,
+                                hasMoreRows: true,
+                                createdAt: Date.now(),
+                                lastUsedAt: Date.now()
+                            };
+                            this.activeSqlSession = session;
+                            sessionId = session.id;
+                            this.logSqlDiag(`query.branch continuation session=${session.id} hasMore=${hasMoreRows} nextOffset=${session.nextOffset}`);
+                        } else {
+                            if (disableOffsetFallback) {
+                                this.logSqlDiag('query.branch no-continuation with fallback disabled');
+                                this.logSqlInfo('query.branch continuationUnavailable action=stopWithoutOffsetFallback');
+                            }
+
+                            // Dedicated mode can still return short first pages without a callable
+                            // continuation function. Keep progressive loading via OFFSET fallback.
+                            hasMoreRows = !disableOffsetFallback && rows.length === prefetchSize;
+                            if (!disableOffsetFallback && !hasMoreRows && rows.length > 0) {
+                                hasMoreRows = await this.detectMoreRows(connection, normalizedSql, rows.length);
+                                this.logSqlDiag(`query.probe short-first-page offset=${rows.length} hasMore=${hasMoreRows}`);
+                                this.logSqlInfo(`query.probe shortFirstPage offset=${rows.length} hasMore=${hasMoreRows}`);
+                            }
+
+                            if (hasMoreRows) {
+                                const session: SqlPagingSession = {
+                                    id: this.createSessionId(),
+                                    connectionKey: this.buildConnectionKey(connection),
+                                    statement: normalizedSql,
+                                    resultTitle: options?.resultTitle,
+                                    rows: [...rows],
+                                    columnMetadata,
+                                    columns: deriveSqlColumns(rows),
+                                    nextOffset: rows.length,
+                                    fetchSize: maxRows,
+                                    prefetchSize,
+                                    pagingMode: 'offset',
+                                    hasMoreRows: true,
+                                    createdAt: Date.now(),
+                                    lastUsedAt: Date.now()
+                                };
+                                this.activeSqlSession = session;
+                                sessionId = session.id;
+                                this.logSqlDiag(`query.branch offset-fallback session=${session.id} hasMore=${hasMoreRows} nextOffset=${session.nextOffset}`);
+                                this.logSqlInfo(`query.branch action=offsetFallback session=${session.id} nextOffset=${session.nextOffset}`);
+                            }
+                        }
+                    } else {
+                        const initialChunk = await this.fetchSqlChunk(connection, normalizedSql, 0, prefetchSize);
+                        rows = initialChunk.rows;
+                        columnMetadata = initialChunk.metadata;
+                        // Shared fallback mode still probes with OFFSET pagination.
+                        hasMoreRows = rows.length === prefetchSize;
+                        if (!hasMoreRows && rows.length > 0) {
+                            hasMoreRows = await this.detectMoreRows(connection, normalizedSql, rows.length);
+                            this.logSqlDiag(`query.probe shared short-first-page offset=${rows.length} hasMore=${hasMoreRows}`);
+                        }
+
+                        if (hasMoreRows) {
+                            const session: SqlPagingSession = {
+                                id: this.createSessionId(),
+                                connectionKey: this.buildConnectionKey(connection),
+                                statement: normalizedSql,
+                                resultTitle: options?.resultTitle,
+                                rows: [...rows],
+                                columnMetadata,
+                                columns: deriveSqlColumns(rows),
+                                nextOffset: rows.length,
+                                fetchSize: maxRows,
+                                prefetchSize,
+                                pagingMode: 'offset',
+                                hasMoreRows: true,
+                                createdAt: Date.now(),
+                                lastUsedAt: Date.now()
+                            };
+                            this.activeSqlSession = session;
+                            sessionId = session.id;
+                            this.logSqlDiag(`query.branch shared-offset session=${session.id} hasMore=${hasMoreRows} nextOffset=${session.nextOffset}`);
+                        }
                     }
                 }
 
                 const rowCount = rows.length;
                 const rowLabel = rowCount === 1 ? 'row' : 'rows';
+                const effectiveRowsPerFetch = hasMoreRows ? Math.min(maxRows, prefetchRows) : maxRows;
+                this.logSqlInfo(`query.end rows=${rowCount} hasMore=${hasMoreRows} sessionId=${sessionId ?? '<none>'}`);
+                this.logSqlDiag(`query.end rows=${rowCount} hasMore=${hasMoreRows} sessionId=${sessionId ?? '<none>'} fetchSize=${(unlimited || userManagedRowLimiter) ? '<none>' : effectiveRowsPerFetch}`);
                 return {
                     id: id ?? `${started}-${Math.random().toString(36).slice(2, 8)}`,
                     command,
@@ -1443,8 +1752,8 @@ export class CommandEntryService {
                             : unlimited
                                 ? `${rowCount} ${rowLabel} returned (*NOMAX)`
                                 : hasMoreRows
-                                    ? `${rowCount} ${rowLabel} returned (prefetched ${rowCount}; rows per fetch ${maxRows})`
-                                    : `${rowCount} ${rowLabel} returned (rows per fetch ${maxRows})`,
+                                    ? `${rowCount} ${rowLabel} returned (prefetched ${rowCount}; rows per fetch ${effectiveRowsPerFetch})`
+                                    : `${rowCount} ${rowLabel} returned (rows per fetch ${effectiveRowsPerFetch})`,
                         sentTimestamp: toIsoTimestamp(startedDate),
                         sentFromProgram: '',
                         sentFromStmt: '',
@@ -1460,7 +1769,7 @@ export class CommandEntryService {
                     sqlResult: await this.buildSqlResultPayload(connection, normalizedSql, rows, {
                         sessionId,
                         hasMoreRows,
-                        fetchSize: (unlimited || userManagedRowLimiter) ? undefined : maxRows,
+                        fetchSize: (unlimited || userManagedRowLimiter) ? undefined : effectiveRowsPerFetch,
                         prefetchSize: (unlimited || userManagedRowLimiter) ? undefined : Math.min(maxRows, prefetchRows),
                         columnMetadata,
                         resultTitle: options?.resultTitle

@@ -2,7 +2,7 @@
   "name": "clprompter",
   "displayName": "%displayName%",
   "description": "%description%",
-  "version": "1.0.33",
+  "version": "1.0.34",
   "author": {
     "name": "Bob Cozzi",
     "url": "https://github.com/bobcozzi"
@@ -224,7 +224,7 @@
         "clPrompter.cmdEntrySqlFetchRowLimit": {
           "order": 104,
           "type": "integer",
-          "default": 1000,
+          "default": 500,
           "minimum": 1,
           "description": "%contributes.configuration.properties.clPrompter.cmdEntrySqlFetchRowLimit.description%"
         },
@@ -240,6 +240,12 @@
           "type": "boolean",
           "default": false,
           "description": "%contributes.configuration.properties.clPrompter.cmdEntryDebugLogging.description%"
+        },
+        "clPrompter.cmdEntryDebugDisableOffsetFallback": {
+          "order": 105.5,
+          "type": "boolean",
+          "default": true,
+          "description": "%contributes.configuration.properties.clPrompter.cmdEntryDebugDisableOffsetFallback.description%"
         },
         "clPrompter.cmdEntryMessageDetails": {
           "order": 106,
@@ -495,19 +501,19 @@
           "group": "navigation@1"
         },
         {
-          "command": "clprompter.codeSnippet.refresh",
-          "when": "view == clprompter.codeSnippetManagerView",
-          "group": "navigation@5"
-        },
-        {
           "command": "clprompter.codeSnippet.moreActions",
           "when": "view == clprompter.codeSnippetManagerView",
-          "group": "navigation@6"
+          "group": "navigation@2"
+        },
+        {
+          "command": "clprompter.codeSnippet.refresh",
+          "when": "view == clprompter.codeSnippetManagerView",
+          "group": "manage@1"
         },
         {
           "command": "clprompter.closeCodeSnippetManager",
           "when": "view == clprompter.codeSnippetManagerView",
-          "group": "navigation@9"
+          "group": "manage@2"
         }
       ],
       "view/item/context": [

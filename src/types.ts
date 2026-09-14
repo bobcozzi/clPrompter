@@ -166,6 +166,7 @@ export interface FormDataMessage {
   valToMapToMap?: { [kwd: string]: { [val: string]: string } }; // Val→MapTo for Dep evaluation
   defaultValMap?: { [kwd: string]: string };   // Keyword → default display value (Dft attribute)
   pmtCtlMap?: PmtCtlMap;                       // Prompt-control visibility rules per keyword
+  showComments?: boolean;
 }
 
 export interface SubmitMessage {
@@ -192,6 +193,7 @@ export interface PrompterState {
   cmdName: string;
   cmdLabel: string;
   cmdComment: string;
+  showComments: boolean;
   hasProcessedFormData: boolean;
   hasBeenRevealed: boolean;      // true only after the final reveal RAF fires (body opacity → 1)
   controlsWired: boolean;

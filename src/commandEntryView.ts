@@ -5,7 +5,7 @@ import { CommandEntryJobManager } from './commandEntryJobManager';
 import { CommandEntryHistory, CommandExecutionMode } from './commandEntryModel';
 import { detectCommandEntryPrefix } from './commandEntryPrefixes';
 import { CommandEntryService } from './commandEntryService';
-import { updateConnectionSqlSettings } from './commandEntrySqlSettings';
+import { getConnectionSqlSettings, updateConnectionSqlSettings } from './commandEntrySqlSettings';
 import { configureSqlResultPanelAssets, notifySqlResultSessionClosed, setSqlResultPanelRequestHandler, showSqlResultPanel } from './sqlResultPanel';
 
 const HISTORY_KEY = 'commandEntry.history';
@@ -16,6 +16,8 @@ const SQL_SNIPPETS_ORDER_KEY = 'commandEntry.sqlSnippets.order';
 const SQL_SNIPPETS_HIDDEN_BUILTINS_KEY = 'commandEntry.sqlSnippets.hiddenBuiltins';
 const SQL_SNIPPETS_DEFAULTS_MERGED_VERSION_KEY = 'commandEntry.sqlSnippets.defaultsMergedVersion';
 const SQL_SNIPPETS_MAX = 200;
+const COMMAND_PICKER_MIN_ROWS_LIMIT = 5000;
+const COMMAND_PICKER_MAX_ROWS_LIMIT = 25000;
 const CMD_ENTRY_HELP_PANEL_TYPE = 'clprompter.commandEntryHelp';
 const CMD_ENTRY_HELP_PANEL_TITLE = 'CL Command Entry Help';
 export const DEFAULT_CODE_SNIPPET_GROUPS = ['Job Info', 'Admin', 'SPOOLED Files'] as const;
@@ -643,7 +645,7 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
 
     private async handleSqlResultPanelRequest(
         request:
-            | { type: 'loadMore' | 'loadAll' | 'prefetch' | 'closeSession'; sessionId: string }
+            | { type: 'loadMore' | 'loadAll' | 'stopLoadAll' | 'prefetch' | 'closeSession'; sessionId: string }
             | { type: 'rerunSql'; statement: string; resultTitle?: string }
     ) {
         if (request.type === 'rerunSql') {
@@ -669,6 +671,10 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
 
         if (request.type === 'closeSession') {
             await this.service.closeSqlSession(request.sessionId);
+            return undefined;
+        }
+
+        if (request.type === 'stopLoadAll') {
             return undefined;
         }
 
@@ -706,7 +712,7 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
                     sqlJobId: this.lastPostedSqlJobId,
                     dedicatedJobEnabled: this.jobManager.isDedicatedUsable(this.getConnection()),
                     remoteMapepireEnabled: this.jobManager.isRemoteMapepireServerEnabled(this.getConnection()),
-                    useSharedSqlJob: !this.jobManager.isDedicatedEnabled(this.getConnection()),
+                    useSharedSqlJob: !this.jobManager.isDedicatedUsable(this.getConnection()),
                     canStartNewJob: this.jobManager.isDedicatedUsable(this.getConnection()),
                     canCancelSqlJob: this.jobManager.isDedicatedUsable(this.getConnection()),
                     messageDetailsMode: this.messageDetailsMode(),
@@ -1184,29 +1190,110 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
         const selectCommand = /^([^\s]*)\*/.exec(selectSource);
         if (selectCommand !== null) {
             this.post({ type: 'notice', message: vscode.l10n.t("Selecting command...") });
-            const [name, library] = connection.upperCaseName(selectCommand[1]).split('/').reverse();
+            const rawSelectName = String(selectCommand[1] || '').trim();
+            const normalizedSelectName = rawSelectName.includes('/')
+                ? connection.upperCaseName(rawSelectName)
+                : rawSelectName.toUpperCase();
+            const [name, library] = normalizedSelectName.split('/').reverse();
 
             if (name.length > 10) {
                 this.post({ type: 'notice', message: vscode.l10n.t("{0} is not a valid command name", name) });
             }
 
-            const routedConfig = await this.jobManager.getConfig(connection);
-            // Use precomputed wildcard order from LIBRARY_LIST_INFO so first ordinal occurrence wins
-            // across SYSTEM/CURRENT/PRODUCT/USER entries.
-            const libraries = library
-                ? [library]
-                : (routedConfig.wildcardLibraryOrder && routedConfig.wildcardLibraryOrder.length > 0
-                    ? routedConfig.wildcardLibraryOrder
-                    : [...routedConfig.libraryList, ...(routedConfig.currentLibrary ? [routedConfig.currentLibrary] : [])]);
-            const uniqueLibraries = [...new Set(libraries.map((lib) => String(lib || '').trim()).filter(Boolean))];
-            const query = goCommandName !== undefined
-                ? uniqueLibraries
-                    .map((lib, index) => `select ${index} as LIB_ORD, OBJLIB, OBJNAME, OBJTEXT, COALESCE(NULLIF(TRIM(OBJTEXT), ''), OBJNAME) as SORTTEXT from table(QSYS2.OBJECT_STATISTICS('${lib}', 'CMD', '${name}*'))`)
-                    .join(' union all ') + ' order by SORTTEXT, LIB_ORD, OBJLIB, OBJNAME'
-                : uniqueLibraries
-                    .map((lib, index) => `select ${index} as LIB_ORD, OBJLIB, OBJNAME, OBJTEXT from table(QSYS2.OBJECT_STATISTICS('${lib}', 'CMD', '${name}*'))`)
-                    .join(' union all ') + ' order by LIB_ORD, OBJNAME';
-            const suggestions = (await this.jobManager.runSQL(connection, query)).map(row => ({ library: String(row.OBJLIB), name: String(row.OBJNAME), text: row.OBJTEXT !== null ? String(row.OBJTEXT) : undefined }));
+            const lookupLibrary = library || '*LIBL';
+            const baseQuery = goCommandName !== undefined
+                ? `select OBJLIB, OBJNAME, OBJTEXT, COALESCE(NULLIF(TRIM(OBJTEXT), ''), OBJNAME) as SORTTEXT from table(QSYS2.OBJECT_STATISTICS('${lookupLibrary}', 'CMD', '${name}*')) order by SORTTEXT, OBJLIB, OBJNAME`
+                : `select OBJLIB, OBJNAME, OBJTEXT from table(QSYS2.OBJECT_STATISTICS('${lookupLibrary}', 'CMD', '${name}*'))`;
+            const wildcardRowLimit = this.resolveWildcardLookupRowLimit(connection);
+            const pageSize = Math.min(500, wildcardRowLimit);
+            this.output.appendLine(`[Cmd Entry][WildcardLookup] mode=${goCommandName !== undefined ? 'GO_CMD' : 'GENERIC'} lookupLibrary=${lookupLibrary} pattern=${name}* rowLimit=${wildcardRowLimit} pageSize=${pageSize}`);
+
+            const seen = new Set<string>();
+            const collected: Array<{ library: string; name: string; text: string | undefined }> = [];
+            const toCommandRows = (rows: Record<string, unknown>[]) => rows
+                .map(row => ({ library: String(row.OBJLIB), name: String(row.OBJNAME), text: row.OBJTEXT !== null ? String(row.OBJTEXT) : undefined }));
+            const appendUniqueRows = (rows: Array<{ library: string; name: string; text: string | undefined }>): number => {
+                let added = 0;
+                for (const row of rows) {
+                    if (collected.length >= wildcardRowLimit) {
+                        break;
+                    }
+                    const key = `${row.library}/${row.name}`;
+                    if (seen.has(key)) {
+                        continue;
+                    }
+                    seen.add(key);
+                    collected.push(row);
+                    added += 1;
+                }
+                return added;
+            };
+
+            let offset = 0;
+            let stagnantIterations = 0;
+            let pageResult = await this.jobManager.runSQLWithDetails(connection, `${baseQuery} OFFSET ${offset} ROWS FETCH NEXT ${Math.min(pageSize, wildcardRowLimit)} ROWS ONLY`, { rows: Math.min(pageSize, wildcardRowLimit) });
+            let continuation = pageResult.continuation;
+            let pageRows = toCommandRows(pageResult.rows);
+
+            this.output.appendLine(`[Cmd Entry][WildcardLookupTuple] initialTuple=${continuation ? `type=${continuation.type ?? '<none>'} id=${continuation.id ?? '<none>'} cont_id=${continuation.contId ?? '<none>'} is_done=${continuation.isDone ?? '<unknown>'} fetchMore=${continuation.hasFetchMore} source=${continuation.source}` : 'not_present'}`);
+
+            while (pageRows.length > 0 && collected.length < wildcardRowLimit) {
+                const uniqueAdded = appendUniqueRows(pageRows);
+                if (uniqueAdded === 0) {
+                    stagnantIterations += 1;
+                    if (stagnantIterations >= 2) {
+                        this.output.appendLine('[Cmd Entry][WildcardLookup] stopping pagination after repeated duplicate-only pages.');
+                        break;
+                    }
+                } else {
+                    stagnantIterations = 0;
+                }
+
+                if (collected.length >= wildcardRowLimit) {
+                    break;
+                }
+
+                if (continuation && continuation.hasFetchMore && continuation.isDone !== true) {
+                    const more = await this.jobManager.continueSQLFromResult(pageResult, { targetRows: wildcardRowLimit - collected.length });
+                    const moreRows = toCommandRows(more.rows);
+                    if (moreRows.length === 0) {
+                        break;
+                    }
+                    pageResult = {
+                        rows: more.rows,
+                        rawResult: more.rawResult ?? pageResult.rawResult,
+                        continuation: more.continuation ?? pageResult.continuation
+                    };
+                    continuation = more.continuation;
+                    pageRows = moreRows;
+                    continue;
+                }
+
+                offset += pageRows.length;
+                if (offset >= wildcardRowLimit) {
+                    break;
+                }
+
+                const nextFetchRows = Math.min(pageSize, wildcardRowLimit - collected.length);
+                if (nextFetchRows <= 0) {
+                    break;
+                }
+
+                pageResult = await this.jobManager.runSQLWithDetails(connection, `${baseQuery} OFFSET ${offset} ROWS FETCH NEXT ${nextFetchRows} ROWS ONLY`, { rows: nextFetchRows });
+                continuation = pageResult.continuation;
+                pageRows = toCommandRows(pageResult.rows);
+                if (pageRows.length === 0) {
+                    break;
+                }
+            }
+
+            const suggestions = collected;
+            const distinctLibraries = [...new Set(suggestions.map((entry) => entry.library))];
+
+            const librarySample = distinctLibraries.slice(0, 20).join(', ');
+            const firstSuggestionSample = suggestions.slice(0, 10).map((entry) => `${entry.library}/${entry.name}`).join(', ');
+            this.output.appendLine(`[Cmd Entry][WildcardLookupResult] mode=${goCommandName !== undefined ? 'GO_CMD' : 'GENERIC'} rows=${suggestions.length} distinctLibs=${distinctLibraries.length} libsSample=${librarySample || '<none>'}`);
+            this.output.appendLine(`[Cmd Entry][WildcardLookupResult] firstRows=${firstSuggestionSample || '<none>'}`);
 
             try {
                 if (suggestions.length > 0) {
@@ -2123,7 +2210,9 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
         const dedicatedJobEnabled = this.jobManager.isDedicatedUsable(connection);
         const remoteMapepireEnabled = this.jobManager.isRemoteMapepireServerEnabled(connection);
         const dedicatedReady = dedicatedJobEnabled;
-        const useSharedSqlJob = !this.jobManager.isDedicatedEnabled(connection);
+        // Use effective routing capability, not raw preference, so shared marker stays correct
+        // when dedicated mode is configured but gated off (for example, single-mode Mapepire).
+        const useSharedSqlJob = !this.jobManager.isDedicatedUsable(connection);
         this.post({
             type: 'jobCapabilities',
             dedicatedJobEnabled,
@@ -2155,6 +2244,15 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
         return String(value || '#3794FF').trim() || '#3794FF';
     }
 
+    private resolveWildcardLookupRowLimit(connection?: IBMi): number {
+        const settings = getConnectionSqlSettings(this.context, connection);
+        const configured = Number.isInteger(settings.fetchRowLimit) && settings.fetchRowLimit > 0
+            ? settings.fetchRowLimit
+            : COMMAND_PICKER_MIN_ROWS_LIMIT;
+        const effective = Math.max(configured, COMMAND_PICKER_MIN_ROWS_LIMIT);
+        return Math.min(effective, COMMAND_PICKER_MAX_ROWS_LIMIT);
+    }
+
     private sqlFetchLimitDisplay(): string {
         const config = vscode.workspace.getConfiguration('clPrompter');
         const limitEnabled = config.get<boolean | undefined>('cmdEntrySQLLimitFetch')
@@ -2166,7 +2264,7 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
             ?? config.get<number>('commandEntrySqlPrefetchRows', 200);
         const safePrefetchRows = Number.isInteger(prefetchRows) && prefetchRows > 0 ? prefetchRows : 200;
         if (!limitEnabled) {
-            return `SQL rows: *NOMAX (fetch all on run)`;
+            return vscode.l10n.t('SQL rows: *NOMAX (fetch all on run)');
         }
 
         const configuredRows = config.get<number | undefined>('cmdEntrySqlFetchRowLimit')
@@ -2174,7 +2272,7 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
             ?? config.get<number>('commandEntrySqlFetchLimitRows', 1000);
         const chunkRows = Number.isInteger(configuredRows) && configuredRows > 0 ? configuredRows : 1000;
         const effectivePrefetchRows = Math.min(chunkRows, safePrefetchRows);
-        return `SQL rows: rows/fetch ${chunkRows}, prefetch ${effectivePrefetchRows}`;
+        return vscode.l10n.t('SQL rows: cap {0}, continuation chunk {1}', String(chunkRows), String(effectivePrefetchRows));
     }
 
     private async initializeDedicatedJobIfNeeded(): Promise<void> {

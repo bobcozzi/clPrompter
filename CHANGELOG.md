@@ -4,11 +4,23 @@ All notable changes to this project are documented in this file.
 
 ## [Preview of CL Command Entry]
 
+## [1.0.34] - 2026-09-14
+
+### What's Improved
+- Command Entry SQL result retrieval through the Mapepire interface was refined for better accuracy and efficiency, including improved continuation-aware result handling.
+- Added foundational alignment for an upcoming Code for IBM i Connection Settings enhancement so SQL run from Command Entry and Code Snippets can surface better result-set column headings.
+- Users can no click-to-sort or click-to-resize columns in SQL results run from Command Entry or Code Snippets.
+
+### What's Fixed
+- Fixed dependency validation between parameters by normalizing IBM i hex blank literals used in `DEP` comparisons (for example `X'40...'`). This prevents false "one required but not both" errors when only one value is specified.
+- Improved PMTCTL conditional prompting responsiveness by re-evaluating prompt-control visibility during typing and value changes, not only on blur. Parameters controlled by PMTCTL now appear or hide immediately as controlling values are edited.
+- Corrected prompter comment-field behavior so comments are shown only in intended prompting contexts and remain hidden by default in all other contexts.
+
 ## [1.0.33] - 2026-09-13
 
 ### What's New
 - Command Entry now supports command selection from wildcard input, including generic command names `dsp*` or the IBM i style `GO CMD...`.
-- Wildcard command lookup (`WRK*`, `DSP*`, or `GO CMD...`) resolves command names from the active routed SQL job library context and follows IBM i library-list ordinal precedence across System, Current, Product, and User portions, with first occurrence winning for duplicate libraries. This applies to wildcard selection only; normal CL command execution routing is unchanged.
+- Wildcard command lookup (`WRK*`, `DSP*`, or `GO CMD...`) resolves command names using `QSYS2.OBJECT_STATISTICS` in the active routed SQL job context. This applies to wildcard selection only; normal CL command execution routing is unchanged.
 
 ### What's Fixed
 - Dismissing the command picker now restores focus to the command entry input.

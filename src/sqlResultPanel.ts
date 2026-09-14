@@ -4,9 +4,88 @@ import { SqlColumnMetadata, SqlResultPayload } from './commandEntryModel';
 const PANEL_TYPE = 'clprompter.sqlResults';
 const PANEL_TITLE = 'SQL Results';
 
+interface SqlResultPanelL10n {
+    sqlResultsTitle: string;
+    refresh: string;
+    top: string;
+    priorPage: string;
+    nextPage: string;
+    bottom: string;
+    pagingSize: string;
+    auto: string;
+    viewSqlStmt: string;
+    hideSqlStmt: string;
+    noRowsReturned: string;
+    loadMore: string;
+    loadAll: string;
+    loadMoreResultRows: string;
+    loadAllRemainingResultRows: string;
+    loadNextRowsTemplate: string;
+    loadingNextRows: string;
+    loadingAllRemainingRows: string;
+    stop: string;
+    stoppingRequested: string;
+    stoppedFetchAfterRowTemplate: string;
+    loadAllComplete: string;
+    loadedRowsTemplate: string;
+    moreRowsAvailableTemplate: string;
+    rowsReturnedTemplate: string;
+    noSqlStatementToRerun: string;
+    rerunningSqlStatement: string;
+    unableToLoadAdditionalRows: string;
+    sqlSessionNoLongerAvailable: string;
+    sortedColumnTemplate: string;
+    resizedColumnTemplate: string;
+    dragToResizeColumn: string;
+    resultSetRefreshedTemplate: string;
+    additionalRowsLoadedTemplate: string;
+    allRowsLoaded: string;
+}
+
+function getSqlResultPanelL10n(): SqlResultPanelL10n {
+    return {
+        sqlResultsTitle: vscode.l10n.t('SQL Results'),
+        refresh: vscode.l10n.t('Refresh'),
+        top: vscode.l10n.t('Top'),
+        priorPage: vscode.l10n.t('Prior page'),
+        nextPage: vscode.l10n.t('Next page'),
+        bottom: vscode.l10n.t('Bottom'),
+        pagingSize: vscode.l10n.t('Paging size'),
+        auto: vscode.l10n.t('Auto'),
+        viewSqlStmt: vscode.l10n.t('<SQL>'),
+        hideSqlStmt: vscode.l10n.t('Hide SQL Stmt'),
+        noRowsReturned: vscode.l10n.t('No rows returned.'),
+        loadMore: vscode.l10n.t('Load more'),
+        loadAll: vscode.l10n.t('Load all'),
+        loadMoreResultRows: vscode.l10n.t('Load more result rows'),
+        loadAllRemainingResultRows: vscode.l10n.t('Load all remaining result rows'),
+        loadNextRowsTemplate: vscode.l10n.t('Load next {count} rows', { count: '{count}' }),
+        loadingNextRows: vscode.l10n.t('Loading next rows...'),
+        loadingAllRemainingRows: vscode.l10n.t('Loading all remaining rows...'),
+        stop: vscode.l10n.t('Stop'),
+        stoppingRequested: vscode.l10n.t('Stopping requested...'),
+        stoppedFetchAfterRowTemplate: vscode.l10n.t('Stopped fetch after row {count}', { count: '{count}' }),
+        loadAllComplete: vscode.l10n.t('Load all complete.'),
+        loadedRowsTemplate: vscode.l10n.t('Loaded {count} rows...', { count: '{count}' }),
+        moreRowsAvailableTemplate: vscode.l10n.t('{count} rows loaded. More available.', { count: '{count}' }),
+        rowsReturnedTemplate: vscode.l10n.t('{count} rows returned.', { count: '{count}' }),
+        noSqlStatementToRerun: vscode.l10n.t('No SQL statement available to rerun.'),
+        rerunningSqlStatement: vscode.l10n.t('Rerunning SQL statement...'),
+        unableToLoadAdditionalRows: vscode.l10n.t('Unable to load additional rows.'),
+        sqlSessionNoLongerAvailable: vscode.l10n.t('SQL result session is no longer available. Run the SQL statement again.'),
+        sortedColumnTemplate: vscode.l10n.t('Sorted column {column} ({direction}).', { column: '{column}', direction: '{direction}' }),
+        resizedColumnTemplate: vscode.l10n.t('Resized column {column}.', { column: '{column}' }),
+        dragToResizeColumn: vscode.l10n.t('Drag to resize column'),
+        resultSetRefreshedTemplate: vscode.l10n.t('Result set refreshed ({count} rows currently loaded).', { count: '{count}' }),
+        additionalRowsLoadedTemplate: vscode.l10n.t('Additional rows loaded ({count} total).', { count: '{count}' }),
+        allRowsLoaded: vscode.l10n.t('All rows loaded.')
+    };
+}
+
 type SqlResultPanelRequest =
     | { type: 'loadMore'; sessionId: string }
     | { type: 'loadAll'; sessionId: string }
+    | { type: 'stopLoadAll'; sessionId: string }
     | { type: 'prefetch'; sessionId: string }
     | { type: 'rerunSql'; statement: string; resultTitle?: string }
     | { type: 'closeSession'; sessionId: string };
@@ -18,6 +97,9 @@ class SqlResultPanel {
     private requestHandler: SqlResultPanelRequestHandler | undefined;
     private activeSessionId: string | undefined;
     private activeResultTitle: string | undefined;
+    private loadAllInProgress = false;
+    private stopLoadAllRequested = false;
+    private readonly l10n = getSqlResultPanelL10n();
 
     setRequestHandler(handler: SqlResultPanelRequestHandler | undefined): void {
         this.requestHandler = handler;
@@ -54,12 +136,12 @@ class SqlResultPanel {
 
         this.activeSessionId = result.sessionId;
         this.activeResultTitle = result.resultTitle;
-        this.panel.title = `${PANEL_TITLE} (${result.rowCount})`;
+        this.panel.title = `${this.l10n.sqlResultsTitle} (${result.rowCount})`;
         const extensionUri = sqlResultPanelExtensionUri;
         const scriptUri = extensionUri
-            ? this.panel.webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'media', 'sqlResultPanel.js')).toString()
+            ? this.panel.webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'media', 'sqlResultSet.js')).toString()
             : '';
-        this.panel.webview.html = renderSqlResultHtml(result, this.panel.webview.cspSource, scriptUri);
+        this.panel.webview.html = renderSqlResultHtml(result, this.panel.webview.cspSource, scriptUri, this.l10n);
     }
 
     private update(result: SqlResultPayload): void {
@@ -69,9 +151,96 @@ class SqlResultPanel {
 
         this.activeSessionId = result.sessionId;
         this.activeResultTitle = result.resultTitle;
-        this.panel.title = `${PANEL_TITLE} (${result.rowCount})`;
-        const payload = buildClientPayload(result);
+        this.panel.title = `${this.l10n.sqlResultsTitle} (${result.rowCount})`;
+        const payload = buildClientPayload(result, this.l10n);
         void this.panel.webview.postMessage({ type: 'sqlResultReplace', payload });
+    }
+
+    private postLoadAllState(state: { inProgress: boolean; stopRequested?: boolean; rowsLoaded?: number; message?: string }): void {
+        if (!this.panel) {
+            return;
+        }
+
+        void this.panel.webview.postMessage({
+            type: 'loadAllState',
+            inProgress: state.inProgress,
+            stopRequested: state.stopRequested,
+            rowsLoaded: state.rowsLoaded,
+            message: state.message ?? ''
+        });
+    }
+
+    private async runProgressiveLoadAll(sessionId: string): Promise<void> {
+        if (!this.requestHandler || !this.panel) {
+            return;
+        }
+
+        if (this.loadAllInProgress) {
+            return;
+        }
+
+        this.loadAllInProgress = true;
+        this.stopLoadAllRequested = false;
+        this.postLoadAllState({ inProgress: true, stopRequested: false, message: this.l10n.loadingAllRemainingRows });
+
+        let lastRowsLoaded = 0;
+
+        try {
+            while (!this.stopLoadAllRequested) {
+                const updated = await this.requestHandler({ type: 'loadMore', sessionId });
+                if (!updated) {
+                    break;
+                }
+
+                this.update(updated);
+                lastRowsLoaded = updated.rowCount;
+
+                if (this.stopLoadAllRequested) {
+                    this.postLoadAllState({
+                        inProgress: true,
+                        stopRequested: true,
+                        rowsLoaded: updated.rowCount,
+                        message: this.l10n.stoppingRequested
+                    });
+                    break;
+                }
+
+                this.postLoadAllState({
+                    inProgress: true,
+                    stopRequested: this.stopLoadAllRequested,
+                    rowsLoaded: updated.rowCount,
+                    message: this.stopLoadAllRequested
+                        ? this.l10n.stoppingRequested
+                        : vscode.l10n.t(this.l10n.loadedRowsTemplate, { count: updated.rowCount })
+                });
+
+                if (!updated.hasMoreRows || !updated.sessionId) {
+                    break;
+                }
+
+                // Session IDs should remain stable; if they change, continue with the latest.
+                sessionId = updated.sessionId;
+
+                // Yield to the event loop so a pending stop message can be handled
+                // before scheduling another backend fetch.
+                await new Promise<void>((resolve) => setTimeout(resolve, 0));
+            }
+        } catch (error) {
+            const messageText = error instanceof Error ? error.message : String(error);
+            void this.panel.webview.postMessage({ type: 'loadError', message: messageText });
+        } finally {
+            const wasStopped = this.stopLoadAllRequested;
+            this.loadAllInProgress = false;
+            this.stopLoadAllRequested = false;
+            this.postLoadAllState({
+                inProgress: false,
+                stopRequested: false,
+                rowsLoaded: lastRowsLoaded,
+                message: wasStopped
+                    ? vscode.l10n.t(this.l10n.stoppedFetchAfterRowTemplate, { count: lastRowsLoaded })
+                    : this.l10n.loadAllComplete
+            });
+        }
     }
 
     markSessionClosed(message?: string): void {
@@ -85,7 +254,7 @@ class SqlResultPanel {
         void this.panel.webview.postMessage({
             type: 'sqlSessionClosed',
             sessionId,
-            message: message || 'SQL result session is no longer available. Run the SQL statement again.'
+            message: message || this.l10n.sqlSessionNoLongerAvailable
         });
     }
 
@@ -102,7 +271,7 @@ class SqlResultPanel {
         if (request.type === 'rerunSql') {
             const statement = String(request.statement || '').trim();
             if (!statement) {
-                throw new Error('No SQL statement was provided to rerun.');
+                throw new Error(vscode.l10n.t('No SQL statement was provided to rerun.'));
             }
 
             const updated = await this.requestHandler({
@@ -120,7 +289,18 @@ class SqlResultPanel {
             return;
         }
 
-        if (request.type !== 'loadMore' && request.type !== 'loadAll' && request.type !== 'prefetch') {
+        if (request.type === 'stopLoadAll') {
+            this.stopLoadAllRequested = true;
+            this.postLoadAllState({ inProgress: true, stopRequested: true, message: this.l10n.stoppingRequested });
+            return;
+        }
+
+        if (request.type === 'loadAll') {
+            void this.runProgressiveLoadAll(request.sessionId);
+            return;
+        }
+
+        if (request.type !== 'loadMore' && request.type !== 'prefetch') {
             return;
         }
 
@@ -155,10 +335,10 @@ export function notifySqlResultSessionClosed(message?: string): void {
     singletonPanel.markSessionClosed(message);
 }
 
-function renderSqlResultHtml(result: SqlResultPayload, cspSource: string, scriptUri: string): string {
+function renderSqlResultHtml(result: SqlResultPayload, cspSource: string, scriptUri: string, l10n: SqlResultPanelL10n): string {
     const columns = result.columns;
     const profiles = buildColumnProfiles(columns, result.rows, result.columnMetadata ?? []);
-    const initialPayload = buildClientPayload(result);
+    const initialPayload = buildClientPayload(result, l10n);
     const columnMetadataByName = new Map((result.columnMetadata ?? []).map((entry) => [normalizeColumnKey(entry.name), entry]));
     const colHeaders = columns.map((column, index) => {
         const profile = profiles[column];
@@ -175,7 +355,7 @@ function renderSqlResultHtml(result: SqlResultPayload, cspSource: string, script
         const headerHtml = renderColumnHeaderHtml(headerText);
         return `<th class="${classes.join(' ')}" data-col-index="${index}" title="${escapeHtml(tooltipText)}" aria-sort="none">${headerHtml}</th>`;
     }).join('');
-    const allHeaders = '<th class="align-right row-index-col">ROW</th>' + colHeaders;
+    const allHeaders = `<th class="align-right row-index-col">${escapeHtml(vscode.l10n.t('ROW'))}</th>` + colHeaders;
     const bootstrapPayloadJson = safeJsonForScript({
         initialColumns: columns,
         initialPayload
@@ -184,32 +364,31 @@ function renderSqlResultHtml(result: SqlResultPayload, cspSource: string, script
 
     const tableHtml = columns.length === 0
         ? `<div class="paging-toolbar" id="paging-toolbar">
-                    <button id="rerun-sql" type="button" title="Refresh" aria-label="Refresh">&#x25B6;</button>
+                    <button id="rerun-sql" type="button" title="${escapeHtml(l10n.refresh)}" aria-label="${escapeHtml(l10n.refresh)}">&#x25B6;</button>
                     <span class="toolbar-spacer"></span>
-                    <button id="toggle-sql-stmt" type="button" title="View SQL statement" aria-label="View SQL statement" aria-expanded="false">View SQL Stmt</button>
+                    <button id="toggle-sql-stmt" type="button" title="${escapeHtml(l10n.viewSqlStmt)}" aria-label="${escapeHtml(l10n.viewSqlStmt)}" aria-expanded="false">${escapeHtml(l10n.viewSqlStmt)}</button>
                 </div>
-                <p class="empty">No rows returned.</p>`
+                <p class="empty">${escapeHtml(l10n.noRowsReturned)}</p>`
         : `<div class="paging-toolbar" id="paging-toolbar">
-                    <button id="rerun-sql" type="button" title="Refresh" aria-label="Refresh">&#x25B6;</button>
-                    <button id="first-page" type="button" title="Top" aria-label="Top"><<</button>
-                    <button id="prev-page" type="button" title="Prior page" aria-label="Prior page"><</button>
+                    <button id="rerun-sql" type="button" title="${escapeHtml(l10n.refresh)}" aria-label="${escapeHtml(l10n.refresh)}">&#x25B6;</button>
+                    <button id="first-page" type="button" title="${escapeHtml(l10n.top)}" aria-label="${escapeHtml(l10n.top)}"><<</button>
+                    <button id="prev-page" type="button" title="${escapeHtml(l10n.priorPage)}" aria-label="${escapeHtml(l10n.priorPage)}"><</button>
                                 <span id="page-summary">Page 1 of 1</span>
-                    <button id="next-page" type="button" title="Next page" aria-label="Next page">></button>
-                    <button id="last-page" type="button" title="Bottom" aria-label="Bottom">>></button>
-                                <label for="page-size" title="Paging size">Paging Size:</label>
-                                <select id="page-size" title="Paging size" aria-label="Paging size">
-                                    <option value="AUTO" selected>Auto</option>
+                    <button id="next-page" type="button" title="${escapeHtml(l10n.nextPage)}" aria-label="${escapeHtml(l10n.nextPage)}">></button>
+                    <button id="last-page" type="button" title="${escapeHtml(l10n.bottom)}" aria-label="${escapeHtml(l10n.bottom)}">>></button>
+                                <label for="page-size" title="${escapeHtml(l10n.pagingSize)}">${escapeHtml(vscode.l10n.t('Paging Size:'))}</label>
+                                <select id="page-size" title="${escapeHtml(l10n.pagingSize)}" aria-label="${escapeHtml(l10n.pagingSize)}">
+                                    <option value="AUTO" selected>${escapeHtml(l10n.auto)}</option>
                                         <option value="25">25</option>
                                         <option value="50">50</option>
                                         <option value="100">100</option>
                                         <option value="250">250</option>
                                         <option value="500">500</option>
                                 </select>
-                            <button id="load-more" type="button" title="Load more result rows" aria-label="Load more result rows" hidden>Load more</button>
-                            <button id="load-all" type="button" title="Load all remaining result rows" aria-label="Load all remaining result rows" hidden>Load all</button>
-                    <span id="fetch-status" aria-live="polite">Initializing table features...</span>
+                            <button id="load-more" type="button" title="${escapeHtml(l10n.loadMoreResultRows)}" aria-label="${escapeHtml(l10n.loadMoreResultRows)}" hidden>${escapeHtml(l10n.loadMore)}</button>
+                            <button id="load-all" type="button" title="${escapeHtml(l10n.loadAllRemainingResultRows)}" aria-label="${escapeHtml(l10n.loadAllRemainingResultRows)}" hidden>${escapeHtml(l10n.loadAll)}</button>
                     <span class="toolbar-spacer"></span>
-                            <button id="toggle-sql-stmt" type="button" title="View SQL statement" aria-label="View SQL statement" aria-expanded="false">View SQL Stmt</button>
+                            <button id="toggle-sql-stmt" type="button" title="${escapeHtml(l10n.viewSqlStmt)}" aria-label="${escapeHtml(l10n.viewSqlStmt)}" aria-expanded="false">${escapeHtml(l10n.viewSqlStmt)}</button>
                         </div>
                 <p class="meta" id="result-meta"></p>
                     <div class="table-wrap"><table><thead><tr>${allHeaders}</tr></thead><tbody id="results-body">${initialBodyRowsHtml}</tbody></table></div>`;
@@ -291,8 +470,7 @@ function renderSqlResultHtml(result: SqlResultPayload, cspSource: string, script
             flex-wrap: wrap;
         }
         .paging-toolbar button,
-        .paging-toolbar select,
-        .fetch-toolbar button {
+        .paging-toolbar select {
             border: 1px solid var(--border);
             background: color-mix(in srgb, var(--bg) 92%, var(--fg) 8%);
             color: var(--fg);
@@ -323,15 +501,8 @@ function renderSqlResultHtml(result: SqlResultPayload, cspSource: string, script
             opacity: 0.45;
             cursor: default;
         }
-        .fetch-toolbar button:disabled {
-            opacity: 0.45;
-            cursor: default;
-        }
         #page-summary {
             min-width: 170px;
-            color: var(--muted);
-        }
-        #fetch-status {
             color: var(--muted);
         }
         .toolbar-spacer {
@@ -459,7 +630,7 @@ function renderSqlResultHtml(result: SqlResultPayload, cspSource: string, script
 </html>`;
 }
 
-function buildClientPayload(result: SqlResultPayload) {
+function buildClientPayload(result: SqlResultPayload, l10n: SqlResultPanelL10n) {
     const columns = result.columns;
     const profiles = buildColumnProfiles(columns, result.rows, result.columnMetadata ?? []);
     const rowCells = result.rows.map((row) => {
@@ -487,7 +658,8 @@ function buildClientPayload(result: SqlResultPayload) {
         hasMoreRows: !!result.hasMoreRows,
         fetchSize: result.fetchSize ?? 0,
         prefetchSize: result.prefetchSize ?? 0,
-        columnMetadata: result.columnMetadata ?? []
+        columnMetadata: result.columnMetadata ?? [],
+        l10n
     };
 }
 
