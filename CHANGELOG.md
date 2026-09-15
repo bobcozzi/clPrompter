@@ -4,6 +4,20 @@ All notable changes to this project are documented in this file.
 
 ## [Preview of CL Command Entry]
 
+## [1.0.36] - 2026-09-15
+
+### What's Improved
+- Command Entry startup visibility was refined so it no longer appears on cold startup when no IBM i connection is in use, while still appearing promptly once an IBM i connection is established.
+- Help text for Command Entry was refreshed for grammar, clarity, and current behavior.
+
+### What's Fixed
+- Restored dedicated/private SQL job auto-initialization on connection so distinct job mode works correctly after reconnect and startup transitions.
+- Corrected shared-job status marker behavior so the trailing `*` appears correctly when Command Entry is using the shared Code for IBM i SQL job.
+- Added a dedicated `Clear SQL Log Entries` action for Command Log entries, separate from SQL history clearing.
+- Removed the obsolete `X` clear button from the multiline Command Entry input.
+- Updated Command Entry menu wording and localization coverage, including `Clear All Log Messages` and other menu labels.
+- Updated Command Entry input placeholder text to `Enter CL command or SQL statement`.
+
 ## [1.0.35] - 2026-09-14
 
 ### What's Improved

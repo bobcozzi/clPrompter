@@ -2,7 +2,7 @@
   "name": "clprompter",
   "displayName": "%displayName%",
   "description": "%description%",
-  "version": "1.0.35",
+  "version": "1.0.36",
   "author": {
     "name": "Bob Cozzi",
     "url": "https://github.com/bobcozzi"
@@ -597,7 +597,7 @@
           "id": "clprompter.codeSnippetManagerView",
           "name": "%contributes.views.ibmi-explorer.0.name%",
           "icon": "images/clPrompter.png",
-          "when": "clprompter.commandEntryAvailable"
+          "when": "clprompter.commandEntrySnippetsAvailable"
         }
       ],
       "clprompterCommandEntryMain": [
@@ -606,7 +606,7 @@
           "name": "%contributes.views.clprompterCommandEntryMain.0.name%",
           "type": "webview",
           "icon": "images/clPrompter.png",
-          "when": "clprompter.commandEntryAvailable"
+          "when": "clprompter.commandEntryPanelAvailable"
         }
       ]
     }

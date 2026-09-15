@@ -704,33 +704,26 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
     private async receive(message: CommandEntryRequest): Promise<void> {
         switch (message.type) {
             case 'ready':
-                await this.context.workspaceState.update('clprompter.commandEntryTouchedThisSession', true);
-                await this.applyDefaultSnippetMergeOnVersionUpdateIfNeeded();
-                const skipStartupClearForVsCodeUpdate = this.clearHistoryOnFirstReady && await this.consumeSkipHistoryClearOnNextReady();
-                const clearHistoryOnStartup = this.clearHistoryOnFirstReady
-                    && this.clearHistoryOnStartupEnabled()
-                    && !skipStartupClearForVsCodeUpdate;
-                if (clearHistoryOnStartup) {
-                    await this.setHistory([]);
-                }
+                const clearInputOnStartup = this.clearInputOnFirstReady;
+                const firstReadyHistoryClearEligible = this.clearHistoryOnFirstReady;
                 this.lastPostedSqlJobId = this.currentSqlJobId();
                 this.post({
                     type: 'initialize',
                     connectionScopeKey: this.buildHistoryConnectionKey(),
-                    history: clearHistoryOnStartup ? [] : this.history(),
+                    history: this.history(),
                     running: this.running,
                     sqlJobId: this.lastPostedSqlJobId,
                     dedicatedJobEnabled: this.jobManager.isDedicatedUsable(this.getConnection()),
                     remoteMapepireEnabled: this.jobManager.isRemoteMapepireServerEnabled(this.getConnection()),
-                    useSharedSqlJob: !this.jobManager.isDedicatedUsable(this.getConnection()),
+                    useSharedSqlJob: this.isUsingSharedSqlJob(),
                     canStartNewJob: this.jobManager.isDedicatedUsable(this.getConnection()),
                     canCancelSqlJob: this.jobManager.isDedicatedUsable(this.getConnection()),
                     messageDetailsMode: this.messageDetailsMode(),
                     logSqlStatementsToCommandLog: this.logSqlStatementsToCommandLogEnabled(),
                     commandTextColor: this.commandEntryCommandTextColor(),
                     sqlStatementColor: this.commandEntrySqlStatementColor(),
-                    clearInputOnStartup: this.clearInputOnFirstReady,
-                    clearHistoryOnStartup
+                    clearInputOnStartup,
+                    clearHistoryOnStartup: false
                 });
                 this.clearInputOnFirstReady = false;
                 this.clearHistoryOnFirstReady = false;
@@ -750,6 +743,30 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
                 // dedicated sessions to start their own job as soon as Command Entry
                 // is live.
                 void this.initializeDedicatedJobIfNeeded();
+
+                // Run non-critical startup work after first paint.
+                void (async () => {
+                    try {
+                        await this.context.workspaceState.update('clprompter.commandEntryTouchedThisSession', true);
+                        await this.applyDefaultSnippetMergeOnVersionUpdateIfNeeded();
+
+                        const skipStartupClearForVsCodeUpdate = firstReadyHistoryClearEligible && await this.consumeSkipHistoryClearOnNextReady();
+                        const clearHistoryOnStartup = firstReadyHistoryClearEligible
+                            && this.clearHistoryOnStartupEnabled()
+                            && !skipStartupClearForVsCodeUpdate;
+
+                        if (clearHistoryOnStartup) {
+                            await this.setHistory([]);
+                            this.post({ type: 'clearResults' });
+                            this.post({ type: 'historyUpdated', history: [] });
+                            return;
+                        }
+
+                        this.post({ type: 'historyUpdated', history: this.history() });
+                    } catch (error) {
+                        this.output.appendLine(`[Cmd Entry] Deferred startup initialization warning: ${error instanceof Error ? error.message : String(error)}`);
+                    }
+                })();
                 break;
             case 'clear':
                 this.post({ type: 'clearResults' });
@@ -2205,14 +2222,21 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
         });
     }
 
+    private isUsingSharedSqlJob(connection = this.getConnection()): boolean {
+        const dedicatedUsable = this.jobManager.isDedicatedUsable(connection);
+        if (!dedicatedUsable) {
+            return true;
+        }
+
+        return !this.jobManager.hasActiveDedicatedJob(connection);
+    }
+
     private postJobCapabilities(): void {
         const connection = this.getConnection();
         const dedicatedJobEnabled = this.jobManager.isDedicatedUsable(connection);
         const remoteMapepireEnabled = this.jobManager.isRemoteMapepireServerEnabled(connection);
         const dedicatedReady = dedicatedJobEnabled;
-        // Use effective routing capability, not raw preference, so shared marker stays correct
-        // when dedicated mode is configured but gated off (for example, single-mode Mapepire).
-        const useSharedSqlJob = !this.jobManager.isDedicatedUsable(connection);
+        const useSharedSqlJob = this.isUsingSharedSqlJob(connection);
         this.post({
             type: 'jobCapabilities',
             dedicatedJobEnabled,
