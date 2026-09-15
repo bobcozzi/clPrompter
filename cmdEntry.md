@@ -20,12 +20,12 @@ Do not use it for:
 
 ## Open and Close
 
-In **VS Code Settings** (`Ctrl+,` or `Cmd+,`) search for `clPrompter` or specifically the `clPrompter.cmdEntryShow` entry. Then adjust when you'd like to have the Command Entry panel appear.
+In **VS Code Settings** (`Ctrl+,` or `Cmd+,`) search for `clPrompter` or specifically the `clPrompter.cmdEntryDisplay` entry.
 
-This setting controls when the CL Command Entry panel opens automatically:
+This setting is a true/false toggle:
 
-- `After IBM i Connection`
-- `No` (on demand only)
+- `true`: automatically display CL Command Entry after an IBM i connection is established
+- `false`: manual open only (use `CLPROMPTER: Open CL Command Entry`)
 
 Command Palette entries:
 

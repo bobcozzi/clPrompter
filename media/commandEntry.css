@@ -60,36 +60,11 @@ button {
     flex: 0 0 auto;
 }
 
-#clear-command {
-    position: absolute;
-    right: 3px;
-    top: 50%;
-    transform: translateY(-50%);
-    min-height: 16px;
-    width: 16px;
-    min-width: 16px;
-    padding: 0;
-    border: none;
-    border-radius: 50%;
-    background: transparent;
-    color: var(--vscode-descriptionForeground);
-    font-size: 12px;
-    line-height: 16px;
-    opacity: .72;
-    transition: opacity .12s ease, background-color .12s ease, color .12s ease;
-}
-
 @media (max-width: 640px) {
     .command-input-wrap {
         flex: 1 1 100%;
         min-width: 0;
     }
-}
-
-#clear-command:hover {
-    background: color-mix(in srgb, var(--vscode-descriptionForeground) 20%, transparent);
-    color: var(--vscode-input-foreground);
-    opacity: .95;
 }
 
 button:hover {
@@ -279,11 +254,6 @@ button[data-tooltip]:focus-visible::after {
     line-height: 1.2;
 }
 
-#clear-command:disabled {
-    opacity: 0;
-    pointer-events: none;
-}
-
 .mode-label {
     opacity: .75;
     font-size: .9em;
@@ -291,12 +261,6 @@ button[data-tooltip]:focus-visible::after {
 
 #message-severity-filter {
     min-width: 68px;
-}
-
-#clear-command:focus-visible {
-    opacity: 1;
-    outline: 1px solid var(--vscode-focusBorder);
-    outline-offset: 1px;
 }
 
 #status {

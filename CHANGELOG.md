@@ -9,7 +9,7 @@ All notable changes to this project are documented in this file.
 ### What's Improved
 - Command Entry resultset paging via the `>` and `<` buttons now works the way you would expect.
 - the time to run the sql statement on Command Entry is returned.
-- The buttons and reveal SQL have been made more user friendly.
+- The buttons, including the reveal SQL have been made more user friendly.
 
 
 ## [1.0.34] - 2026-09-14

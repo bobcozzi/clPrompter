@@ -324,38 +324,22 @@ export async function activate(context: vscode.ExtensionContext) {
     await vscode.commands.executeCommand('setContext', 'clprompter.connected', false);
     await setCommandEntryAvailable(false);
 
-    const getCommandEntryStartupMode = (): 'After Connection' | 'On Demand' => {
+    const isCommandEntryDisplayEnabled = (): boolean => {
         const config = vscode.workspace.getConfiguration('clPrompter');
-        const raw = String(
-            config.get<string | undefined>('cmdEntryShow')
-            ?? config.get<string>('showCLCommandEntry', 'After Connection')
-        );
-        const normalized = raw.trim().toLowerCase().replace(/\s+/g, ' ');
-
-        if (normalized === 'on demand' || normalized === 'on-demand' || normalized === 'no') {
-            return 'On Demand';
-        }
-        return 'After Connection';
+        return config.get<boolean>('cmdEntryDisplay', true);
     };
 
     const applyCommandEntryStartupVisibility = async (): Promise<void> => {
-        const startupMode = getCommandEntryStartupMode();
+        const displayEnabled = isCommandEntryDisplayEnabled();
         const hasConnection = !!code4i?.instance?.getConnection();
         const touchedThisSession = context.workspaceState.get<boolean>('clprompter.commandEntryTouchedThisSession', false);
 
-        const shouldBeAvailable = startupMode === 'After Connection'
+        const shouldBeAvailable = displayEnabled
             ? hasConnection
             : touchedThisSession;
         await setCommandEntryAvailable(shouldBeAvailable);
 
-        // Restore snippets as soon as Command Entry is made available on an active
-        // IBM i connection. This avoids waiting for the webview "ready" event,
-        // which only fires after the Command Entry tab is activated.
-        if (hasConnection && shouldBeAvailable) {
-            await vscode.commands.executeCommand('clprompter.codeSnippet.restoreVisibilityFromSetting');
-        }
-
-        if (startupMode === 'After Connection' && hasConnection && !touchedThisSession) {
+        if (displayEnabled && hasConnection && !touchedThisSession) {
             await context.workspaceState.update('clprompter.commandEntryTouchedThisSession', true);
         }
     };
@@ -457,8 +441,7 @@ export async function activate(context: vscode.ExtensionContext) {
     await applyCommandEntryStartupVisibility();
 
     context.subscriptions.push(vscode.workspace.onDidChangeConfiguration(event => {
-        if (!event.affectsConfiguration('clPrompter.cmdEntryShow')
-            && !event.affectsConfiguration('clPrompter.showCLCommandEntry')) {
+        if (!event.affectsConfiguration('clPrompter.cmdEntryDisplay')) {
             return;
         }
         void applyCommandEntryStartupVisibility();
@@ -662,8 +645,7 @@ export async function activate(context: vscode.ExtensionContext) {
             logMapepireConnectionDump(conn as any, 'connected-event');
         });
         code4i.instance.subscribe(context, 'connected', 'clPrompter-command-entry-startup-mode', () => {
-            const startupMode = getCommandEntryStartupMode();
-            if (startupMode === 'After Connection') {
+            if (isCommandEntryDisplayEnabled()) {
                 void applyCommandEntryStartupVisibility();
             }
         });
@@ -681,7 +663,6 @@ export async function activate(context: vscode.ExtensionContext) {
         // the case where the extension activates into an already-live session.
         code4i.instance.subscribe(context, 'disconnected', 'clPrompter-connected-context', () => {
             void vscode.commands.executeCommand('setContext', 'clprompter.connected', false);
-            void vscode.commands.executeCommand('setContext', 'clprompter.codeSnippetManagerVisible', false);
         });
         code4i.instance.subscribe(context, 'disconnected', 'clPrompter-command-entry-cleanup', () => {
             void (async () => {

@@ -18,6 +18,7 @@ const SQL_SNIPPETS_DEFAULTS_MERGED_VERSION_KEY = 'commandEntry.sqlSnippets.defau
 const SQL_SNIPPETS_MAX = 200;
 const COMMAND_PICKER_MIN_ROWS_LIMIT = 5000;
 const COMMAND_PICKER_MAX_ROWS_LIMIT = 25000;
+const COMMAND_PICKER_GENERIC_FETCH_ROWS_DEFAULT = 500;
 const CMD_ENTRY_HELP_PANEL_TYPE = 'clprompter.commandEntryHelp';
 const CMD_ENTRY_HELP_PANEL_TITLE = 'CL Command Entry Help';
 export const DEFAULT_CODE_SNIPPET_GROUPS = ['Job Info', 'Admin', 'SPOOLED Files'] as const;
@@ -32,12 +33,7 @@ type CommandEntryRequest =
     | { type: 'requestDisplayJoblog'; sqlJobId: string }
     | { type: 'requestSqlJobId' }
     | { type: 'requestCancelSqlJob' }
-    | { type: 'toggleSnippetsTreeView' }
     | { type: 'manageCodeSnippets' }
-    | { type: 'addCodeSnippet' }
-    | { type: 'refreshCodeSnippets' }
-    | { type: 'importCodeSnippets' }
-    | { type: 'exportCodeSnippets' }
     | { type: 'openCmdEntryHelp' }
     | { type: 'openCmdEntrySettings' }
     | { type: 'openSnippetsMenu' }
@@ -48,6 +44,7 @@ type CommandEntryRequest =
     | { type: 'useSharedSqlJob' }
     | { type: 'usePrivateSqlJob' }
     | { type: 'startNewJob' }
+    | { type: 'clearSqlLogMessages' }
     | { type: 'clearSqlHistoryAndMessages' }
     | { type: 'clearHistoryAndMessages' }
     | { type: 'clear' };
@@ -212,14 +209,14 @@ const BUILT_IN_SQL_SNIPPETS: ReadonlyArray<CommandEntrySqlSnippet> = [
         source: 'built-in'
     },
     {
-        id: 'builtin.active-jobs-slow',
-        label: 'Active Jobs (Detailed)',
+        id: 'builtin.active-jobs-usersbs',
+        label: 'Active Jobs (Fast)',
         stmt: [
             'SELECT aj.JOB_NAME, aj.SUBSYSTEM, aj.AUTHORIZATION_NAME as USER_NAME,',
             " trim(aj.FUNCTION_TYPE) concat '-' concat aj.FUNCTION as FUNCTION_INFO,",
-            ' JOB_STATUS, MEMORY_POOL, TEMPORARY_STORAGE, CPU_TIME, TOTAL_DISK_IO_COUNT',
-            ' , OUTPUT_QUEUE, JOB_USER_IDENTITY, PAGE_FAULTS, DATABASE_LOCK_WAITS, OPEN_FILES',
-            "FROM TABLE(QSYS2.ACTIVE_JOB_INFO(DETAILED_INFO => 'ALL', SUBSYSTEM_LIST_FILTER => '${userSBSList}')) aj",
+            ' JOB_STATUS, ',
+            ' MEMORY_POOL, TEMPORARY_STORAGE, CPU_TIME, TOTAL_DISK_IO_COUNT',
+            "FROM TABLE(QSYS2.ACTIVE_JOB_INFO(SUBSYSTEM_LIST_FILTER => '${userSBSList}')) aj",
             'ORDER BY ORDINAL_POSITION'
         ].join(' '),
         group: 'Admin',
@@ -227,13 +224,15 @@ const BUILT_IN_SQL_SNIPPETS: ReadonlyArray<CommandEntrySqlSnippet> = [
         source: 'built-in'
     },
     {
-        id: 'builtin.active-jobs-usersbs',
-        label: 'Active Jobs (Faster)',
+        id: 'builtin.active-jobs-full',
+        label: 'Active Jobs (Detailed)',
         stmt: [
             'SELECT aj.JOB_NAME, aj.SUBSYSTEM, aj.AUTHORIZATION_NAME as USER_NAME,',
             " trim(aj.FUNCTION_TYPE) concat '-' concat aj.FUNCTION as FUNCTION_INFO,",
-            ' JOB_STATUS, MEMORY_POOL, TEMPORARY_STORAGE, CPU_TIME, TOTAL_DISK_IO_COUNT',
-            "FROM TABLE(QSYS2.ACTIVE_JOB_INFO(SUBSYSTEM_LIST_FILTER => '${userSBSList}')) aj",
+            ' JOB_STATUS, JOB_ACTIVE_TIME as "Job Start Time",',
+            ' MEMORY_POOL, TEMPORARY_STORAGE, CPU_TIME, TOTAL_DISK_IO_COUNT',
+            ' , OUTPUT_QUEUE, JOB_USER_IDENTITY, PAGE_FAULTS, DATABASE_LOCK_WAITS, OPEN_FILES',
+            "FROM TABLE(QSYS2.ACTIVE_JOB_INFO(DETAILED_INFO => 'ALL', SUBSYSTEM_LIST_FILTER => '${userSBSList}')) aj",
             'ORDER BY ORDINAL_POSITION'
         ].join(' '),
         group: 'Admin',
@@ -246,8 +245,9 @@ const BUILT_IN_SQL_SNIPPETS: ReadonlyArray<CommandEntrySqlSnippet> = [
         stmt: [
             'SELECT aj.JOB_NAME, aj.SUBSYSTEM, aj.AUTHORIZATION_NAME as USER_NAME,',
             " trim(aj.FUNCTION_TYPE) concat '-' concat aj.FUNCTION as FUNCTION_INFO,",
-            ' JOB_STATUS, MEMORY_POOL, TEMPORARY_STORAGE, CPU_TIME, TOTAL_DISK_IO_COUNT',
-            "FROM TABLE(QSYS2.ACTIVE_JOB_INFO(SUBSYSTEM_LIST_FILTER => 'QINTER')) aj",
+            ' JOB_STATUS, JOB_ACTIVE_TIME as "Job Start Time",',
+            ' MEMORY_POOL, TEMPORARY_STORAGE, CPU_TIME, TOTAL_DISK_IO_COUNT',
+            "FROM TABLE(QSYS2.ACTIVE_JOB_INFO(DETAILED_INFO => 'ALL', SUBSYSTEM_LIST_FILTER => 'QINTER')) aj",
             'ORDER BY ORDINAL_POSITION'
         ].join(' '),
         group: 'Admin',
@@ -260,8 +260,9 @@ const BUILT_IN_SQL_SNIPPETS: ReadonlyArray<CommandEntrySqlSnippet> = [
         stmt: [
             'SELECT aj.JOB_NAME, aj.SUBSYSTEM, aj.AUTHORIZATION_NAME as USER_NAME,',
             " trim(aj.FUNCTION_TYPE) concat '-' concat aj.FUNCTION as FUNCTION_INFO,",
-            ' JOB_STATUS, MEMORY_POOL, TEMPORARY_STORAGE, CPU_TIME, TOTAL_DISK_IO_COUNT',
-            "FROM TABLE(QSYS2.ACTIVE_JOB_INFO(SUBSYSTEM_LIST_FILTER => 'QUSRWRK')) aj",
+            ' JOB_STATUS, JOB_ACTIVE_TIME as "Job Start Time",',
+            ' MEMORY_POOL, TEMPORARY_STORAGE, CPU_TIME, TOTAL_DISK_IO_COUNT',
+            "FROM TABLE(QSYS2.ACTIVE_JOB_INFO(DETAILED_INFO => 'ALL', SUBSYSTEM_LIST_FILTER => 'QUSRWRK')) aj",
             'ORDER BY ORDINAL_POSITION'
         ].join(' '),
         group: 'Admin',
@@ -274,8 +275,9 @@ const BUILT_IN_SQL_SNIPPETS: ReadonlyArray<CommandEntrySqlSnippet> = [
         stmt: [
             'SELECT aj.JOB_NAME, aj.SUBSYSTEM, aj.AUTHORIZATION_NAME as USER_NAME,',
             " trim(aj.FUNCTION_TYPE) concat '-' concat aj.FUNCTION as FUNCTION_INFO,",
-            ' JOB_STATUS, MEMORY_POOL, TEMPORARY_STORAGE, CPU_TIME, TOTAL_DISK_IO_COUNT',
-            "FROM TABLE(QSYS2.ACTIVE_JOB_INFO(SUBSYSTEM_LIST_FILTER => 'QHTTPSVR')) aj",
+            ' JOB_STATUS, JOB_ACTIVE_TIME as "Job Start Time",',
+            ' MEMORY_POOL, TEMPORARY_STORAGE, CPU_TIME, TOTAL_DISK_IO_COUNT',
+            "FROM TABLE(QSYS2.ACTIVE_JOB_INFO(DETAILED_INFO => 'ALL', SUBSYSTEM_LIST_FILTER => 'QHTTPSVR')) aj",
             'ORDER BY ORDINAL_POSITION'
         ].join(' '),
         group: 'Admin',
@@ -286,14 +288,25 @@ const BUILT_IN_SQL_SNIPPETS: ReadonlyArray<CommandEntrySqlSnippet> = [
         id: 'builtin.spooled-files-user',
         label: 'SPOOLED Files (User)',
         stmt: [
-            'SELECT SPOOLED_FILE_NAME AS SPLFNAME, SPOOLED_FILE_NUMBER AS SPLNBR, STATUS,',
-            '       QUALIFIED_JOB_NAME AS JOB, OUTPUT_PRIORITY AS OUTPTY, TOTAL_PAGES AS PAGES,',
-            '       COPIES, CREATION_TIMESTAMP AS CREATED, USER_DATA, FILE_AVAILABLE AS FILE_AVAIL,',
-            '       SIZE, FORM_TYPE, OUTPUT_QUEUE_LIBRARY AS OUTQ_LIB, OUTPUT_QUEUE AS OUTQ_NAME,',
-            '       ASP_NUMBER, SYSTEM',
-            "FROM TABLE(QSYS2.SPOOLED_FILE_INFO(USER_NAME => '${currentUser}' ))",
-            "WHERE SPOOLED_FILE_NAME <> 'QPRINT' AND JOB_NAME <> 'MAPEPIRE'",
-            'ORDER BY CREATION_TIMESTAMP'
+            'SELECT SPOOLED_FILE_NAME AS SPLFNAME,',
+            '    SPOOLED_FILE_NUMBER AS SPLNBR,',
+            '    STATUS,',
+            '    TOTAL_PAGES AS PAGES,',
+            '    JOB_USER AS USER_NAME,',
+            "    TRIM(OUTPUT_QUEUE_LIBRARY) CONCAT '/' CONCAT OUTPUT_QUEUE AS OUTPUT_QUEUE,",
+            '    QUALIFIED_JOB_NAME AS JOB,',
+            '    OUTPUT_PRIORITY AS OUTPTY,',
+            '    COPIES,',
+            '    CREATION_TIMESTAMP AS CREATED,',
+            '    USER_DATA,',
+            '    FILE_AVAILABLE AS FILE_AVAIL,',
+            '    SIZE,',
+            '    FORM_TYPE,',
+            '    ASP_NUMBER,',
+            '    SYSTEM AS "System Where Created"',
+            "FROM TABLE(QSYS2.SPOOLED_FILE_INFO(USER_NAME => '${currentUser}'))",
+            " WHERE SPOOLED_FILE_NAME <> 'QPRINT' AND JOB_NAME <> 'MAPEPIRE'",
+            " ORDER BY CREATION_TIMESTAMP"
         ].join(' '),
         group: 'SPOOLED Files',
         order: 20,
@@ -692,9 +705,6 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
         switch (message.type) {
             case 'ready':
                 await this.context.workspaceState.update('clprompter.commandEntryTouchedThisSession', true);
-                if (this.getConnection()) {
-                    await vscode.commands.executeCommand('clprompter.codeSnippet.restoreVisibilityFromSetting');
-                }
                 await this.applyDefaultSnippetMergeOnVersionUpdateIfNeeded();
                 const skipStartupClearForVsCodeUpdate = this.clearHistoryOnFirstReady && await this.consumeSkipHistoryClearOnNextReady();
                 const clearHistoryOnStartup = this.clearHistoryOnFirstReady
@@ -747,6 +757,9 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
             case 'clearHistoryAndMessages':
                 await this.clearHistoryAndMessagesWithConfirmation();
                 break;
+            case 'clearSqlLogMessages':
+                await this.clearSqlLogMessagesWithConfirmation();
+                break;
             case 'clearSqlHistoryAndMessages':
                 await this.clearSqlHistoryAndMessagesWithConfirmation();
                 break;
@@ -775,24 +788,8 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
             case 'openSnippetsMenu':
                 await this.openSnippetsMenu();
                 break;
-            case 'toggleSnippetsTreeView':
-                await vscode.commands.executeCommand('clprompter.toggleCodeSnippetsTreeView');
-                break;
             case 'manageCodeSnippets':
                 await vscode.commands.executeCommand('clprompter.manageCodeSnippets');
-                break;
-            case 'addCodeSnippet':
-                await vscode.commands.executeCommand('clprompter.manageCodeSnippets');
-                await vscode.commands.executeCommand('clprompter.codeSnippet.add');
-                break;
-            case 'refreshCodeSnippets':
-                await vscode.commands.executeCommand('clprompter.codeSnippet.refresh');
-                break;
-            case 'importCodeSnippets':
-                await this.importCodeSnippetsFromJson();
-                break;
-            case 'exportCodeSnippets':
-                await this.exportCodeSnippetsToJson();
                 break;
             case 'openCmdEntryHelp':
                 await this.openCmdEntryHelpPanel();
@@ -1054,7 +1051,7 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
         const sqlCount = sqlHistory.length;
 
         const choice = await vscode.window.showWarningMessage(
-            vscode.l10n.t('Clear SQL History entries and associated SQL messages?'),
+            vscode.l10n.t('Clear SQL history entries and associated SQL messages?'),
             {
                 modal: true,
                 detail: vscode.l10n.t('Only SQL-tagged entries are removed. CL command history and CL messages remain intact.')
@@ -1077,9 +1074,28 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
         this.post({
             type: 'notice',
             message: sqlCount > 0
-                ? vscode.l10n.t('Cleared {count} SQL history entries and SQL log messages.', { count: sqlCount })
-                : vscode.l10n.t('No SQL history entries were found. SQL log messages were cleared.')
+                ? vscode.l10n.t('Cleared {count} SQL history entries and associated SQL messages.', { count: sqlCount })
+                : vscode.l10n.t('No SQL history entries were found. SQL messages were cleared.')
         });
+    }
+
+    private async clearSqlLogMessagesWithConfirmation(): Promise<void> {
+        const choice = await vscode.window.showWarningMessage(
+            vscode.l10n.t('Clear SQL log entries from Command Log?'),
+            {
+                modal: true,
+                detail: vscode.l10n.t('Only SQL statements and associated SQL messages are removed from Command Log. History remains unchanged.')
+            },
+            'Yes',
+            'No'
+        );
+
+        if (choice !== 'Yes') {
+            return;
+        }
+
+        this.post({ type: 'clearSqlResults' });
+        this.post({ type: 'notice', message: vscode.l10n.t('SQL log entries were cleared from Command Log.') });
     }
 
     private async prompt(command: string): Promise<void> {
@@ -1205,8 +1221,8 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
                 ? `select OBJLIB, OBJNAME, OBJTEXT, COALESCE(NULLIF(TRIM(OBJTEXT), ''), OBJNAME) as SORTTEXT from table(QSYS2.OBJECT_STATISTICS('${lookupLibrary}', 'CMD', '${name}*')) order by SORTTEXT, OBJLIB, OBJNAME`
                 : `select OBJLIB, OBJNAME, OBJTEXT from table(QSYS2.OBJECT_STATISTICS('${lookupLibrary}', 'CMD', '${name}*'))`;
             const wildcardRowLimit = this.resolveWildcardLookupRowLimit(connection);
-            const pageSize = Math.min(500, wildcardRowLimit);
-            this.output.appendLine(`[Cmd Entry][WildcardLookup] mode=${goCommandName !== undefined ? 'GO_CMD' : 'GENERIC'} lookupLibrary=${lookupLibrary} pattern=${name}* rowLimit=${wildcardRowLimit} pageSize=${pageSize}`);
+            const fetchRows = this.resolveWildcardLookupFetchRows(wildcardRowLimit);
+            this.output.appendLine(`[Cmd Entry][WildcardLookup] mode=${goCommandName !== undefined ? 'GO_CMD' : 'GENERIC'} lookupLibrary=${lookupLibrary} pattern=${name}* rowLimit=${wildcardRowLimit} fetchRows=${fetchRows}`);
 
             const seen = new Set<string>();
             const collected: Array<{ library: string; name: string; text: string | undefined }> = [];
@@ -1229,9 +1245,8 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
                 return added;
             };
 
-            let offset = 0;
             let stagnantIterations = 0;
-            let pageResult = await this.jobManager.runSQLWithDetails(connection, `${baseQuery} OFFSET ${offset} ROWS FETCH NEXT ${Math.min(pageSize, wildcardRowLimit)} ROWS ONLY`, { rows: Math.min(pageSize, wildcardRowLimit) });
+            let pageResult = await this.jobManager.runSQLWithDetails(connection, baseQuery, { rows: fetchRows });
             let continuation = pageResult.continuation;
             let pageRows = toCommandRows(pageResult.rows);
 
@@ -1253,8 +1268,8 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
                     break;
                 }
 
-                if (continuation && continuation.hasFetchMore && continuation.isDone !== true) {
-                    const more = await this.jobManager.continueSQLFromResult(pageResult, { targetRows: wildcardRowLimit - collected.length });
+                if (this.jobManager.isContinuationUsable(continuation)) {
+                    const more = await this.jobManager.continueSQLFromResult(pageResult.rawResult ?? pageResult, { targetRows: wildcardRowLimit - collected.length, statement: baseQuery });
                     const moreRows = toCommandRows(more.rows);
                     if (moreRows.length === 0) {
                         break;
@@ -1269,22 +1284,7 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
                     continue;
                 }
 
-                offset += pageRows.length;
-                if (offset >= wildcardRowLimit) {
-                    break;
-                }
-
-                const nextFetchRows = Math.min(pageSize, wildcardRowLimit - collected.length);
-                if (nextFetchRows <= 0) {
-                    break;
-                }
-
-                pageResult = await this.jobManager.runSQLWithDetails(connection, `${baseQuery} OFFSET ${offset} ROWS FETCH NEXT ${nextFetchRows} ROWS ONLY`, { rows: nextFetchRows });
-                continuation = pageResult.continuation;
-                pageRows = toCommandRows(pageResult.rows);
-                if (pageRows.length === 0) {
-                    break;
-                }
+                break;
             }
 
             const suggestions = collected;
@@ -2253,6 +2253,14 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
         return Math.min(effective, COMMAND_PICKER_MAX_ROWS_LIMIT);
     }
 
+    private resolveWildcardLookupFetchRows(wildcardRowLimit: number): number {
+        const configured = vscode.workspace.getConfiguration('clPrompter').get<number>('cmdGenericCmdFetchBufferSize', COMMAND_PICKER_GENERIC_FETCH_ROWS_DEFAULT);
+        const normalized = Number.isInteger(configured) && configured > 0
+            ? configured
+            : COMMAND_PICKER_GENERIC_FETCH_ROWS_DEFAULT;
+        return Math.min(normalized, wildcardRowLimit);
+    }
+
     private sqlFetchLimitDisplay(): string {
         const config = vscode.workspace.getConfiguration('clPrompter');
         const limitEnabled = config.get<boolean | undefined>('cmdEntrySQLLimitFetch')
@@ -2502,8 +2510,7 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
                     <div class="command-row">
                         <label class="sr-only" for="command">CL command</label>
                         <div class="command-input-wrap">
-                            <textarea id="command" spellcheck="false" placeholder="Enter a CL command" aria-label="CL command" rows="2"></textarea>
-                            <button id="clear-command" type="button" aria-label="Clear command input" title="Clear command input">×</button>
+                            <textarea id="command" spellcheck="false" placeholder="${vscode.l10n.t('Enter CL command or SQL statement')}" aria-label="CL command" rows="2"></textarea>
                         </div>
                         <button id="run" type="button" aria-label="Run command" data-tooltip="Run command">Run</button>
                         <button id="prompt" type="button" aria-label="Prompt command" data-tooltip="Prompt command">Prompt</button>
@@ -2524,16 +2531,17 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
                         <div class="toolbar-menu-wrap">
                             <button id="toolbar-menu" type="button" aria-label="Open command menu" data-tooltip="Command menu" aria-haspopup="menu" aria-expanded="false">…</button>
                             <div id="toolbar-menu-list" class="toolbar-menu-list" role="menu" aria-hidden="true">
-                                <button id="menu-toggle-message-details" type="button" role="menuitem">Collapse Log Messages</button>
-                                <button id="menu-view-log" type="button" role="menuitem">View CL History</button>
-                                <button id="menu-clear-history" type="button" role="menuitem">Clear CL Cmd History</button>
-                                <button id="menu-clear-sql-log" type="button" role="menuitem">Clear SQL Stmt History</button>
-                                <button id="menu-toggle-sql-log" type="button" role="menuitem">Log SQL Statements</button>
-                                <button id="menu-clear-log" type="button" role="menuitem">Clear Log Messages</button>
-                                <button id="menu-use-shared-sql-job" type="button" role="menuitem">Use Shared SQL Job</button>
-                                <button id="menu-use-private-sql-job" type="button" role="menuitem">Use Private SQL Job</button>
-                                <button id="menu-start-new-job" type="button" role="menuitem">Reconnect Server Job</button>
-                                <button id="menu-cancel-sql-job" type="button" role="menuitem">Cancel Last SQL stmt</button>
+                                <button id="menu-toggle-message-details" type="button" role="menuitem">${vscode.l10n.t('Collapse Log Messages')}</button>
+                                <button id="menu-view-log" type="button" role="menuitem">${vscode.l10n.t('View CL History')}</button>
+                                <button id="menu-toggle-sql-log" type="button" role="menuitem">${vscode.l10n.t('Log SQL Statements')}</button>
+                                <button id="menu-clear-history" type="button" role="menuitem">${vscode.l10n.t('Clear CL Cmd History')}</button>
+                                <button id="menu-clear-sql-history" type="button" role="menuitem">${vscode.l10n.t('Clear SQL Stmt History')}</button>
+                                <button id="menu-clear-log" type="button" role="menuitem">${vscode.l10n.t('Clear All Log Messages')}</button>
+                                <button id="menu-clear-sql-log" type="button" role="menuitem">${vscode.l10n.t('Clear SQL Log Entries')}</button>
+                                <button id="menu-use-shared-sql-job" type="button" role="menuitem">${vscode.l10n.t('Use Shared SQL Job')}</button>
+                                <button id="menu-use-private-sql-job" type="button" role="menuitem">${vscode.l10n.t('Use Private SQL Job')}</button>
+                                <button id="menu-start-new-job" type="button" role="menuitem">${vscode.l10n.t('Reconnect Server Job')}</button>
+                                <button id="menu-cancel-sql-job" type="button" role="menuitem">${vscode.l10n.t('Cancel Last SQL stmt')}</button>
                             </div>
                         </div>
                         <button id="history-next" type="button" aria-label="Recall next command (F8)" data-tooltip="F8=Retrieve Next CL Cmd">↓</button>
@@ -2543,16 +2551,6 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
                             <option value="*LIMIT" title="Run as Limited USRPRF">Limit</option>
                             <option value="*CHECK" title="Syntax Check Only">Check</option>
                         </select>
-                        <div class="toolbar-menu-wrap">
-                            <button id="snippets" type="button" aria-label="Toggle code snippets tree view" data-tooltip="Toggle Code Snippets Tree View" aria-haspopup="menu" aria-expanded="false">{ }</button>
-                            <div id="snippets-menu-list" class="toolbar-menu-list" role="menu" aria-hidden="true">
-                                <button id="snippets-menu-toggle" type="button" role="menuitem">Toggle Code Snippets Tree View</button>
-                                <button id="snippets-menu-refresh" type="button" role="menuitem">Refresh Code Snippets</button>
-                                <button id="snippets-menu-import" type="button" role="menuitem">Import Code Snippets...</button>
-                                <button id="snippets-menu-export" type="button" role="menuitem">Export Code Snippets...</button>
-                                <button id="snippets-menu-add" type="button" role="menuitem">Add more...</button>
-                            </div>
-                        </div>
                         <button id="cmdentry-help" type="button" aria-label="Open Command Entry help" data-tooltip="Help">?</button>
                         <button id="cmdentry-settings" type="button" aria-label="Open Command Entry settings" data-tooltip="Cmd Entry Settings">⚙</button>
                     </div>

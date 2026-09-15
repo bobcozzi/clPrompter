@@ -172,12 +172,6 @@
         "category": "%contributes.commands.29.category%",
         "title": "%contributes.commands.29.title%",
         "icon": "images/icon-refresh.svg"
-      },
-      {
-        "command": "clprompter.codeSnippet.moreActions",
-        "category": "Code Snippet",
-        "title": "More Actions",
-        "icon": "$(ellipsis)"
       }
     ],
     "keybindings": [
@@ -195,19 +189,11 @@
           "default": true,
           "description": "%contributes.configuration.properties.clPrompter.enableF4Key.description%"
         },
-        "clPrompter.cmdEntryShow": {
+        "clPrompter.cmdEntryDisplay": {
           "order": 100,
-          "type": "string",
-          "default": "After Connection",
-          "enum": [
-            "After Connection",
-            "On Demand"
-          ],
-          "enumDescriptions": [
-            "%contributes.configuration.properties.clPrompter.cmdEntryShow.enumDescriptions.0%",
-            "%contributes.configuration.properties.clPrompter.cmdEntryShow.enumDescriptions.1%"
-          ],
-          "description": "%contributes.configuration.properties.clPrompter.cmdEntryShow.description%"
+          "type": "boolean",
+          "default": true,
+          "description": "%contributes.configuration.properties.clPrompter.cmdEntryDisplay.description%"
         },
         "clPrompter.cmdEntrySQLUseSharedJob": {
           "order": 101,
@@ -235,17 +221,18 @@
           "minimum": 1,
           "description": "%contributes.configuration.properties.clPrompter.cmdEntrySqlFirstPageRowsToFetch.description%"
         },
+        "clPrompter.cmdGenericCmdFetchBufferSize": {
+          "order": 103.5,
+          "type": "integer",
+          "default": 500,
+          "minimum": 1,
+          "description": "%contributes.configuration.properties.clPrompter.cmdGenericCmdFetchBufferSize.description%"
+        },
         "clPrompter.cmdEntryDebugLogging": {
           "order": 105,
           "type": "boolean",
           "default": false,
           "description": "%contributes.configuration.properties.clPrompter.cmdEntryDebugLogging.description%"
-        },
-        "clPrompter.cmdEntryDebugDisableOffsetFallback": {
-          "order": 105.5,
-          "type": "boolean",
-          "default": true,
-          "description": "%contributes.configuration.properties.clPrompter.cmdEntryDebugDisableOffsetFallback.description%"
         },
         "clPrompter.cmdEntryMessageDetails": {
           "order": 106,
@@ -340,12 +327,6 @@
             "%contributes.configuration.properties.clPrompter.cmdEntryCodeSnippetTreeClickAction.enumDescriptions.2%"
           ],
           "description": "%contributes.configuration.properties.clPrompter.cmdEntryCodeSnippetTreeClickAction.description%"
-        },
-        "clPrompter.cmdEntrySnippetsVisible": {
-          "order": 113.25,
-          "type": "boolean",
-          "default": false,
-          "description": "%contributes.configuration.properties.clPrompter.cmdEntrySnippetsVisible.description%"
         },
         "clPrompter.kwdColor": {
           "type": "string",
@@ -501,19 +482,39 @@
           "group": "navigation@1"
         },
         {
-          "command": "clprompter.codeSnippet.moreActions",
-          "when": "view == clprompter.codeSnippetManagerView",
-          "group": "navigation@2"
-        },
-        {
           "command": "clprompter.codeSnippet.refresh",
           "when": "view == clprompter.codeSnippetManagerView",
           "group": "manage@1"
         },
         {
-          "command": "clprompter.closeCodeSnippetManager",
+          "command": "clprompter.codeSnippet.add",
           "when": "view == clprompter.codeSnippetManagerView",
           "group": "manage@2"
+        },
+        {
+          "command": "clprompter.codeSnippet.edit",
+          "when": "view == clprompter.codeSnippetManagerView && clprompter.codeSnippetSelected",
+          "group": "manage@3"
+        },
+        {
+          "command": "clprompter.codeSnippet.delete",
+          "when": "view == clprompter.codeSnippetManagerView && clprompter.codeSnippetSelected",
+          "group": "manage@4"
+        },
+        {
+          "command": "clprompter.codeSnippet.import",
+          "when": "view == clprompter.codeSnippetManagerView",
+          "group": "manage@5"
+        },
+        {
+          "command": "clprompter.codeSnippet.export",
+          "when": "view == clprompter.codeSnippetManagerView",
+          "group": "manage@6"
+        },
+        {
+          "command": "clprompter.closeCodeSnippetManager",
+          "when": "view == clprompter.codeSnippetManagerView",
+          "group": "manage@7"
         }
       ],
       "view/item/context": [
@@ -596,7 +597,7 @@
           "id": "clprompter.codeSnippetManagerView",
           "name": "%contributes.views.ibmi-explorer.0.name%",
           "icon": "images/clPrompter.png",
-          "when": "clprompter.codeSnippetManagerVisible"
+          "when": "clprompter.commandEntryAvailable"
         }
       ],
       "clprompterCommandEntryMain": [

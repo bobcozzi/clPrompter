@@ -114,20 +114,20 @@
 
 <body>
     <main>
-        <h1>CL Command Entry Reference</h1>
-        <p class="summary">Use this page as an operational reference for CL Command Entry and Code Snippets.</p>
+        <h1>CL Command Entry Help</h1>
 
         <nav aria-label="Section index">
-            <a href="#panel-overview">Panel Overview</a>
+            <a href="#panel-overview">Command Entry Panel Overview</a>
             <a href="#command-input">Command Input</a>
-            <a href="#results-log">Results and Message Log</a>
+            <a href="#results-joblog">Results and Message Log</a>
+            <a href="#command-history-log">History Log (Logging Statements)</a>
             <a href="#sql-results">SQL Results Window</a>
             <a href="#snippets">Code Snippets</a>
             <a href="#job-controls">SQL Job Controls</a>
         </nav>
 
         <section id="panel-overview">
-            <h2>Panel Overview</h2>
+            <h2>Command Entry Panel Overview</h2>
             <figure>
                 <img src="{{IMG_CMDENTRY_FULL_PANEL}}" alt="CL Command Entry full panel layout">
                 <figcaption>CL Command Entry with command input, action controls, message log, and status area.
@@ -138,52 +138,88 @@
         <section id="command-input">
             <h2>Command Input</h2>
             <ul>
-                <li>Enter a CL command in the command input area and use Run to execute it.</li>
-                <li>Use Prompt or F4 to open the prompter.</li>
+                <li>Enter a CL command or SQL statement into the input area and press Enter or Run to execute it.
+                </li>
+                <li>Press F4 or select Prompt to invoke the CL prompter (CL commands only).</li>
                 <li>You can also invoke prompting by placing <code>?</code> before the command name.</li>
-                <li>Use F9 and F8 to step backward and forward through command history.</li>
-                <li>The clear button in the input field clears only the current input text.</li>
+                <li>Use F9 and F8 to retrieve prior CL or SQL statements from the history log.</li>
+                <li>The Up and Down Arrow keys may be used instead of F9 and F8, respectively.</li>
             </ul>
         </section>
 
-        <section id="results-log">
-            <h2>Results and Message Log</h2>
+        <section id="command-history-log">
+            <h2>Command/Statement History Log</h2>
             <ul>
-                <li>Each command execution is added to the log with timestamp and elapsed time.</li>
-                <li>Messages are grouped by execution and can be collapsed or expanded.</li>
-                <li>The SEV selector filters displayed messages by minimum severity.</li>
-                <li>Use the toolbar menu to clear log content or clear stored history entries.</li>
+                <li>Each CL command, and optionally each SQL statement that is run, is recorded in the history log.</li>
+                <li>From the Command Entry input area, you may use the retrieve functions (F8/F9 or arrow Up/Down) to
+                    retrieve prior CL commands or SQL statements.</li>
+                <li>You can control whether SQL statements are recorded in the history log in Settings.</li>
+                <li>The History Log can be cleared of all prior CL commands, all prior SQL statements, or both.</li>
+            </ul>
+        </section>
+
+        <section id="results-joblog">
+            <h2>Results and Message Log (<i>Joblog</i>)</h2>
+            <ul>
+                <li>Each command execution is added to the log that appears below the input area. Each entry has
+                    a timestamp and elapsed time.</li>
+                <li>Messages from that execution are listed below the command or SQL statement.</li>
+                <li>Messages may be collapsed or expanded using F10 or the "Collapse" menu option.</li>
+                <li>Individual commands and their messages may also be collapsed or expanded to reveal second-level
+                    message text and from/to program information.</li>
+                <li>The SEV selector can be used to filter out messages below the specified severity.</li>
+                <li>You can control whether SQL statements in addition to CL commands are logged, via settings.</li>
             </ul>
         </section>
 
         <section id="sql-results">
             <h2>SQL Results Window</h2>
             <ul>
-                <li>SQL statements open in a dedicated results window with sortable columns.</li>
-                <li>Use page controls to navigate loaded rows and fetch additional rows when available.</li>
-                <li>Use View SQL Stmt to display or hide the executed SQL statement.</li>
-                <li>Use Refresh in the results window to rerun the current SQL statement.</li>
+                <li>SQL statements open in a dedicated results tab/view.</li>
+                <li>Each column in the result set may be sorted or resized.</li>
+                <li>Page controls provide simple navigation to the next/prior page and the top/bottom of the result set.
+                </li>
+                <li>An &lt;SQL&gt; button can be used to reveal the full SQL statement that produced the results.</li>
+                <li>A Refresh button allows the statement to be run again.</li>
+                <li>Column heading hover text provides more details about column/field attributes.</li>
             </ul>
         </section>
 
         <section id="snippets">
             <h2>Code Snippets</h2>
+            <p>Code snippets provide a fast way to run pre-written SQL statements. Initially, we include several
+                snippets
+                that mirror tasks such as Work Active Jobs, SPOOLED Files lists, and Display Library List.</p>
             <ul>
                 <li>Code Snippets provide reusable SQL statements for common tasks.</li>
                 <li>Built-in snippets are grouped by category and can be run directly.</li>
-                <li>User snippets can be created, edited, reordered, imported, and exported.</li>
-                <li>Snippet execution behavior for history and log retention follows Command Entry settings.</li>
-                <li>The Snippets tree view can be toggled from the Command Entry panel.</li>
+                <li>In future releases, user-written code snippets can be created, edited, reordered, imported, and
+                    exported.</li>
+                <li>To run a Code Snippet, click on the snippet in the tree view sidebar, then press the Run button.
+                </li>
+                <li>A custom setting allows you to set the action that occurs when you click on the snippet. For
+                    example,
+                    you can set the action to NOOP (the default) so nothing happens, or you can set it to "Run" to
+                    automatically run that code snippet when it is clicked.</li>
             </ul>
         </section>
 
         <section id="job-controls">
             <h2>SQL Job Controls</h2>
+            <p>Command Entry can use its own SQL job or share the same job as the Code for IBM i extension. The
+                preference is to use its own dedicated job.</p>
+            <p>This dedicated job support is available only when Mapepire is used in server mode. Although we can
+                internally create a distinct job when Mapepire is not used in server mode, JVM startup time makes that
+                configuration impractical, so we have disabled it in the so-called "single-user" mode.</p>
             <ul>
-                <li>The status area displays the current SQL job identifier.</li>
-                <li>Use the SQL job menu to copy the job ID or display joblog for that job.</li>
-                <li>Where supported, you can switch between shared and private SQL job modes.</li>
-                <li>Reconnect Server Job starts a new dedicated SQL server job for Command Entry.</li>
+                <li>The Command Entry status line contains the active SQL job being used by Command Entry.</li>
+                <li>To view the joblog for the SQL job, simply double-click on the job ID in that status line.</li>
+                <li>Use your Connection Settings and CL Prompter settings to control which mode (shared or dedicated
+                    job) to use.</li>
+                <li>A "Reconnect Server Job" menu option allows you to reconnect to the IBM i host, similar to how ACS
+                    RUNSQL
+                    Scripts Reconnect performs. This applies only to the dedicated SQL job and does not work when the
+                    Code for IBM i SQL job is being shared.</li>
             </ul>
         </section>
     </main>
