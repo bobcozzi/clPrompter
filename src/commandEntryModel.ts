@@ -60,6 +60,7 @@ export interface SqlResultPayload {
     hasMoreRows?: boolean;
     fetchSize?: number;
     prefetchSize?: number;
+    autoColumnViewForSingleRow?: boolean;
 }
 
 export interface CommandEntryHistory {

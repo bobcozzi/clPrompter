@@ -47,6 +47,15 @@
         return (typeof value === 'string' && value.length > 0) ? value : fallback;
     }
 
+    function escapeHtml(value) {
+        return String(value)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/\"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+    }
+
     var tbody = document.getElementById('results-body');
     var firstBtn = document.getElementById('first-page');
     var prevBtn = document.getElementById('prev-page');
@@ -62,6 +71,11 @@
     var toggleSqlStmtBtn = document.getElementById('toggle-sql-stmt');
     var sqlStatement = document.getElementById('sql-statement');
     var tableWrap = document.querySelector('.table-wrap');
+    var singleRowWrap = document.getElementById('single-row-wrap');
+    var singleRowBody = document.getElementById('single-row-body');
+    var singleRowColIdHeader = document.getElementById('single-row-col-id-header');
+    var singleRowDataHeader = document.getElementById('single-row-data-header');
+    var toggleSingleRowLayoutBtn = document.getElementById('toggle-single-row-layout');
     var currentElapsedMs = Number(initialPayload.elapsedMs || 0);
 
     if (!tbody) {
@@ -137,6 +151,7 @@
     var resultTitle = String(initialPayload.resultTitle || '').trim();
     var hasMoreRows = !!initialPayload.hasMoreRows;
     var fetchSize = Number(initialPayload.fetchSize || 0);
+    var autoColumnViewForSingleRow = !!initialPayload.autoColumnViewForSingleRow;
     var rows = Array.isArray(initialPayload.rowCells) ? initialPayload.rowCells.slice() : [];
 
     function formatTemplate(template, tokens) {
@@ -171,6 +186,9 @@
 
     var sortColumnIndex = -1;
     var sortDirection = 'asc';
+    var singleRowVerticalMode = false;
+    var singleRowSortColumnIndex = -1;
+    var singleRowSortDirection = 'asc';
     var suppressSortUntil = 0;
     var minColumnWidthPx = 80;
     var pageSize = 50;
@@ -837,6 +855,149 @@
         button.setAttribute('aria-disabled', isDisabled ? 'true' : 'false');
     }
 
+    function updateSingleRowToggleButton() {
+        if (!toggleSingleRowLayoutBtn) {
+            return;
+        }
+
+        var canToggle = rows.length === 1;
+        if (!canToggle) {
+            singleRowVerticalMode = false;
+            toggleSingleRowLayoutBtn.hidden = true;
+            toggleSingleRowLayoutBtn.setAttribute('aria-pressed', 'false');
+            toggleSingleRowLayoutBtn.textContent = t('columnViewButton', '<column view>');
+            toggleSingleRowLayoutBtn.title = t('switchToColumnView', 'Switch to column view');
+            toggleSingleRowLayoutBtn.setAttribute('data-tooltip', toggleSingleRowLayoutBtn.title);
+            toggleSingleRowLayoutBtn.setAttribute('aria-label', toggleSingleRowLayoutBtn.title);
+            return;
+        }
+
+        toggleSingleRowLayoutBtn.hidden = false;
+        toggleSingleRowLayoutBtn.setAttribute('aria-pressed', singleRowVerticalMode ? 'true' : 'false');
+        if (singleRowVerticalMode) {
+            toggleSingleRowLayoutBtn.textContent = t('rowViewButton', '<row view>');
+            toggleSingleRowLayoutBtn.title = t('switchToRowView', 'Switch to row view');
+        } else {
+            toggleSingleRowLayoutBtn.textContent = t('columnViewButton', '<column view>');
+            toggleSingleRowLayoutBtn.title = t('switchToColumnView', 'Switch to column view');
+        }
+        toggleSingleRowLayoutBtn.setAttribute('data-tooltip', toggleSingleRowLayoutBtn.title);
+        toggleSingleRowLayoutBtn.setAttribute('aria-label', toggleSingleRowLayoutBtn.title);
+    }
+
+    function updateSingleRowSortIndicators() {
+        var headers = [singleRowColIdHeader, singleRowDataHeader];
+        for (var i = 0; i < headers.length; i++) {
+            var header = headers[i];
+            if (!header) {
+                continue;
+            }
+            var isActive = i === singleRowSortColumnIndex;
+            header.classList.toggle('is-sorted', isActive);
+            header.classList.toggle('is-desc', isActive && singleRowSortDirection === 'desc');
+            header.setAttribute('aria-sort', isActive ? (singleRowSortDirection === 'desc' ? 'descending' : 'ascending') : 'none');
+        }
+    }
+
+    function getSingleRowEntries() {
+        if (rows.length !== 1 || !Array.isArray(rows[0])) {
+            return [];
+        }
+
+        var sourceCells = rows[0];
+        var entries = [];
+        for (var colIndex = 0; colIndex < initialColumns.length; colIndex++) {
+            entries.push({
+                index: colIndex,
+                columnId: String(initialColumns[colIndex] || ''),
+                cell: sourceCells[colIndex] || {}
+            });
+        }
+        return entries;
+    }
+
+    function sortSingleRowEntries(entries) {
+        if (!Array.isArray(entries) || entries.length === 0 || singleRowSortColumnIndex < 0) {
+            return entries;
+        }
+
+        var dir = singleRowSortDirection === 'desc' ? -1 : 1;
+        entries.sort(function (a, b) {
+            var cmp = 0;
+            if (singleRowSortColumnIndex === 0) {
+                var left = String(a.columnId || '').toUpperCase();
+                var right = String(b.columnId || '').toUpperCase();
+                if (left < right) { cmp = -1; }
+                else if (left > right) { cmp = 1; }
+            } else {
+                cmp = compareForSort(a.cell, b.cell);
+            }
+            if (cmp !== 0) {
+                return cmp * dir;
+            }
+            return a.index - b.index;
+        });
+
+        return entries;
+    }
+
+    function sortSingleRowByColumn(colIndex) {
+        if (rows.length !== 1 || (colIndex !== 0 && colIndex !== 1)) {
+            return;
+        }
+
+        if (singleRowSortColumnIndex === colIndex) {
+            singleRowSortDirection = singleRowSortDirection === 'asc' ? 'desc' : 'asc';
+        } else {
+            singleRowSortColumnIndex = colIndex;
+            singleRowSortDirection = 'asc';
+        }
+
+        renderSingleRowVertical();
+        updateSingleRowSortIndicators();
+    }
+
+    function renderSingleRowVertical() {
+        if (!singleRowBody) {
+            return;
+        }
+
+        if (rows.length !== 1 || !Array.isArray(rows[0])) {
+            singleRowBody.innerHTML = '';
+            updateSingleRowSortIndicators();
+            return;
+        }
+
+        var entries = sortSingleRowEntries(getSingleRowEntries());
+        var html = '';
+        for (var i = 0; i < entries.length; i++) {
+            var entry = entries[i];
+            var cell = entry.cell || {};
+            var classNames = [];
+            if (cell.alignClass) {
+                classNames.push(cell.alignClass);
+            }
+            if (cell.cellClass) {
+                classNames.push(cell.cellClass);
+            }
+            var classAttr = classNames.length > 0 ? ' class="' + classNames.join(' ') + '"' : '';
+            var cellHtml = (typeof cell.html === 'string') ? cell.html : '';
+            html += '<tr><td>' + escapeHtml(entry.columnId) + '</td><td' + classAttr + '>' + cellHtml + '</td></tr>';
+        }
+        singleRowBody.innerHTML = html;
+        updateSingleRowSortIndicators();
+    }
+
+    function applySingleRowLayoutVisibility() {
+        var showVertical = singleRowVerticalMode && rows.length === 1;
+        if (singleRowWrap) {
+            singleRowWrap.hidden = !showVertical;
+        }
+        if (tableWrap) {
+            tableWrap.hidden = showVertical;
+        }
+    }
+
     function updatePageButtons() {
         if (pageSizeAuto && tableWrap && rowOffsets.length > 0) {
             rebuildRowOffsets();
@@ -888,6 +1049,9 @@
             html += '<tr><td class="align-right row-index-col">' + (i + 1) + '</td>' + tds + '</tr>';
         }
         tbody.innerHTML = html;
+        renderSingleRowVertical();
+        updateSingleRowToggleButton();
+        applySingleRowLayoutVisibility();
 
         rebuildRowOffsets();
         updateAutoPagingSpacer();
@@ -1006,7 +1170,7 @@
         return 0;
     }
 
-    var sortableHeaders = document.querySelectorAll('thead th.sortable-col[data-col-index]');
+    var sortableHeaders = document.querySelectorAll('#table-wrap thead th.sortable-col[data-col-index]');
 
     function updateSortIndicators() {
         for (var i = 0; i < sortableHeaders.length; i++) {
@@ -1087,6 +1251,29 @@
                 });
             })(sortableHeaders[i]);
         }
+
+        var bindSingleHeaderSort = function (header, colIndex) {
+            if (!header) {
+                return;
+            }
+            header.addEventListener('click', function (event) {
+                if (event) {
+                    event.preventDefault();
+                    event.stopPropagation();
+                }
+                sortSingleRowByColumn(colIndex);
+            });
+            header.addEventListener('keydown', function (event) {
+                if (!event || (event.key !== 'Enter' && event.key !== ' ')) {
+                    return;
+                }
+                event.preventDefault();
+                sortSingleRowByColumn(colIndex);
+            });
+        };
+
+        bindSingleHeaderSort(singleRowColIdHeader, 0);
+        bindSingleHeaderSort(singleRowDataHeader, 1);
     }
 
     function attachResizeHandlers() {
@@ -1388,6 +1575,21 @@
         });
     }
 
+    if (toggleSingleRowLayoutBtn) {
+        toggleSingleRowLayoutBtn.addEventListener('click', function (event) {
+            if (event) {
+                event.preventDefault();
+                event.stopPropagation();
+            }
+            if (rows.length !== 1) {
+                return;
+            }
+            singleRowVerticalMode = !singleRowVerticalMode;
+            updateSingleRowToggleButton();
+            applySingleRowLayoutVisibility();
+        });
+    }
+
     window.addEventListener('message', function (event) {
         var message = event.data;
         if (!message) {
@@ -1438,8 +1640,10 @@
         sessionId = payload.sessionId || '';
         hasMoreRows = !!payload.hasMoreRows;
         fetchSize = Number(payload.fetchSize || 0);
+        autoColumnViewForSingleRow = !!payload.autoColumnViewForSingleRow;
         currentElapsedMs = Number(payload.elapsedMs || 0);
         l10n = (payload.l10n && typeof payload.l10n === 'object') ? payload.l10n : l10n;
+        singleRowVerticalMode = autoColumnViewForSingleRow && rows.length === 1;
         updatePagingButtonTitles();
         renderResultTitle();
 
@@ -1472,6 +1676,7 @@
         attachResizeHandlers();
         applyWidths();
         renderResultTitle();
+        singleRowVerticalMode = autoColumnViewForSingleRow && rows.length === 1;
         renderRows({ scrollToTop: true });
         updateSortIndicators();
         updateLoadButtons();

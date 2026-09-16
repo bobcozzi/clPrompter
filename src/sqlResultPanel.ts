@@ -46,6 +46,12 @@ interface SqlResultPanelL10n {
     resultSetRefreshedTemplate: string;
     additionalRowsLoadedTemplate: string;
     allRowsLoaded: string;
+    switchToRowView: string;
+    switchToColumnView: string;
+    rowViewButton: string;
+    columnViewButton: string;
+    columnIdHeader: string;
+    dataHeader: string;
 }
 
 function getSqlResultPanelL10n(): SqlResultPanelL10n {
@@ -87,7 +93,13 @@ function getSqlResultPanelL10n(): SqlResultPanelL10n {
         dragToResizeColumn: vscode.l10n.t('Drag to resize column'),
         resultSetRefreshedTemplate: vscode.l10n.t('Result set refreshed ({count} rows currently loaded).', { count: '{count}' }),
         additionalRowsLoadedTemplate: vscode.l10n.t('Additional rows loaded ({count} total).', { count: '{count}' }),
-        allRowsLoaded: vscode.l10n.t('All rows loaded.')
+        allRowsLoaded: vscode.l10n.t('All rows loaded.'),
+        switchToRowView: vscode.l10n.t('Switch to row view'),
+        switchToColumnView: vscode.l10n.t('Switch to column view'),
+        rowViewButton: vscode.l10n.t('<row view>'),
+        columnViewButton: vscode.l10n.t('<column view>'),
+        columnIdHeader: vscode.l10n.t('Column ID'),
+        dataHeader: vscode.l10n.t('Data')
     };
 }
 
@@ -121,6 +133,10 @@ class SqlResultPanel {
 
     setRequestHandler(handler: SqlResultPanelRequestHandler | undefined): void {
         this.requestHandler = handler;
+    }
+
+    dispose(): void {
+        this.panel?.dispose();
     }
 
     show(result: SqlResultPayload): void {
@@ -353,6 +369,10 @@ export function notifySqlResultSessionClosed(message?: string): void {
     singletonPanel.markSessionClosed(message);
 }
 
+export function closeSqlResultPanel(): void {
+    singletonPanel.dispose();
+}
+
 function renderSqlResultHtml(result: SqlResultPayload, cspSource: string, scriptUri: string, l10n: SqlResultPanelL10n): string {
     const columns = result.columns;
     const profiles = buildColumnProfiles(columns, result.rows, result.columnMetadata ?? []);
@@ -381,8 +401,11 @@ function renderSqlResultHtml(result: SqlResultPayload, cspSource: string, script
     const initialBodyRowsHtml = renderRowCellsHtml(initialPayload.rowCells);
 
     const sqlHeaderHtml = `<div class="result-header">
+                <div class="result-header-actions">
+                    <button id="toggle-sql-stmt" type="button" title="${escapeHtml(l10n.showFullSqlStatement)}" data-tooltip="${escapeHtml(l10n.showFullSqlStatement)}" aria-label="${escapeHtml(l10n.showFullSqlStatement)}" aria-expanded="false">${escapeHtml(l10n.viewSqlStmt)}</button>
+                    <button id="toggle-single-row-layout" type="button" title="${escapeHtml(l10n.switchToColumnView)}" data-tooltip="${escapeHtml(l10n.switchToColumnView)}" aria-label="${escapeHtml(l10n.switchToColumnView)}" aria-pressed="false" hidden>${escapeHtml(l10n.columnViewButton)}</button>
+                </div>
                 <h3 class="result-title${result.resultTitle ? '' : ' is-hidden'}" id="result-title">${result.resultTitle ? escapeHtml(result.resultTitle) : ''}</h3>
-                <button id="toggle-sql-stmt" type="button" title="${escapeHtml(l10n.showFullSqlStatement)}" data-tooltip="${escapeHtml(l10n.showFullSqlStatement)}" aria-label="${escapeHtml(l10n.showFullSqlStatement)}" aria-expanded="false">${escapeHtml(l10n.viewSqlStmt)}</button>
             </div>`;
     const sqlStatementHtml = `<pre class="sql" id="sql-statement">${escapeHtml(result.statement)}</pre>`;
     const tableHtml = columns.length === 0
@@ -399,7 +422,8 @@ function renderSqlResultHtml(result: SqlResultPayload, cspSource: string, script
                     <span class="toolbar-spacer"></span>
                         </div>
                 <p class="meta" id="result-meta"></p>
-                    <div class="table-wrap"><table><thead><tr>${allHeaders}</tr></thead><tbody id="results-body">${initialBodyRowsHtml}</tbody></table></div>`;
+                    <div class="single-row-wrap" id="single-row-wrap" hidden><table class="single-row-table"><thead><tr><th id="single-row-col-id-header" class="sortable-col" data-col-index="0" aria-sort="none" role="button" tabindex="0">${escapeHtml(l10n.columnIdHeader)}</th><th id="single-row-data-header" class="sortable-col" data-col-index="1" aria-sort="none" role="button" tabindex="0">${escapeHtml(l10n.dataHeader)}</th></tr></thead><tbody id="single-row-body"></tbody></table></div>
+                    <div class="table-wrap" id="table-wrap"><table><thead><tr>${allHeaders}</tr></thead><tbody id="results-body">${initialBodyRowsHtml}</tbody></table></div>`;
 
     const sqlResultsScriptTag = scriptUri
         ? `<script src="${scriptUri}"></script>`
@@ -451,6 +475,7 @@ function buildClientPayload(result: SqlResultPayload, l10n: SqlResultPanelL10n) 
         hasMoreRows: !!result.hasMoreRows,
         fetchSize: result.fetchSize ?? 0,
         prefetchSize: result.prefetchSize ?? 0,
+        autoColumnViewForSingleRow: !!result.autoColumnViewForSingleRow,
         columnMetadata: result.columnMetadata ?? [],
         l10n
     };

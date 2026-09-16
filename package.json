@@ -2,7 +2,7 @@
   "name": "clprompter",
   "displayName": "%displayName%",
   "description": "%description%",
-  "version": "1.0.36",
+  "version": "1.0.37",
   "author": {
     "name": "Bob Cozzi",
     "url": "https://github.com/bobcozzi"
@@ -220,6 +220,12 @@
           "default": 200,
           "minimum": 1,
           "description": "%contributes.configuration.properties.clPrompter.cmdEntrySqlFirstPageRowsToFetch.description%"
+        },
+        "clPrompter.cmdEntryAutoColumnViewSingleRow": {
+          "order": 103.2,
+          "type": "boolean",
+          "default": false,
+          "description": "%contributes.configuration.properties.clPrompter.cmdEntryAutoColumnViewSingleRow.description%"
         },
         "clPrompter.cmdGenericCmdFetchBufferSize": {
           "order": 103.5,
@@ -624,7 +630,7 @@
     "build": "npm run compile && npm run compile-webview && npm run copy-assets && npm run copy-nls",
     "test:name-validation": "tsc src/test/testNameTypeValidation.ts --outDir out --module commonjs --target es2020 --esModuleInterop --skipLibCheck && node out/test/testNameTypeValidation.js",
     "test:api": "tsc src/testAPICall.ts --outDir out --module commonjs --target es2020 --esModuleInterop --skipLibCheck && node out/testAPICall.js",
-    "test:command-entry": "tsc src/test/testCommandEntry.ts --outDir out --module commonjs --target es2020 --esModuleInterop --skipLibCheck && node out/test/testCommandEntry.js",
+    "test:command-entry": "tsc src/test/testCommandEntry.ts --outDir out --module commonjs --target es2020 --esModuleInterop --skipLibCheck && node out/testCommandEntry.js",
     "test:dep-qual-default": "tsc src/test/testDepQualDefault.ts --outDir out --module commonjs --target es2020 --esModuleInterop --skipLibCheck && node out/test/testDepQualDefault.js"
   },
   "devDependencies": {

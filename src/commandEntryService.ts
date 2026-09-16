@@ -57,9 +57,9 @@ function extractSqlStatement(command: string): string | undefined {
         return statement || undefined;
     }
 
-    // Smart fallback: if SQL prefix is omitted, treat SELECT/VALUES/WITH as SQL.
+    // Smart fallback: if SQL prefix is omitted, treat SELECT/VALUES/WITH/SET as SQL.
     const trimmed = text.trim();
-    if (/^(SELECT|VALUES|WITH)\b/i.test(trimmed)) {
+    if (/^(SELECT|VALUES|WITH|SET)\b/i.test(trimmed)) {
         return trimmed;
     }
 
@@ -969,12 +969,26 @@ export class CommandEntryService {
         return `${connection.currentConnectionName}|${connection.currentUser}|${connection.currentHost}|${connection.currentPort}`;
     }
 
+    private async refreshManagedSessionState(connection: IBMi): Promise<void> {
+        if (!this.jobManager) {
+            return;
+        }
+
+        try {
+            await this.jobManager.refreshManagedSession(connection);
+        } catch (error) {
+            this.logSqlDiag(`managedSession.refreshFailed error=${error instanceof Error ? error.message : String(error)}`);
+        }
+    }
+
     private async runSqlRows(
         connection: IBMi,
         statement: string,
         rows?: number,
         options?: { skipSyntaxCheck?: boolean }
     ): Promise<{ rows: Record<string, unknown>[]; metadata?: SqlColumnMetadata[]; elapsedMs?: number }> {
+        await this.refreshManagedSessionState(connection);
+
         if (!options?.skipSyntaxCheck) {
             await checkSQLForExecution(connection, statement, this.jobManager);
         }
@@ -1028,6 +1042,8 @@ export class CommandEntryService {
         rows?: number,
         options?: { skipSyntaxCheck?: boolean }
     ): Promise<(RunSQLWithDetailsResult & { metadata?: SqlColumnMetadata[] })> {
+        await this.refreshManagedSessionState(connection);
+
         if (!options?.skipSyntaxCheck) {
             await checkSQLForExecution(connection, statement, this.jobManager);
         }
@@ -1046,6 +1062,8 @@ export class CommandEntryService {
     }
 
     private async runDedicatedSqlWithPaging(connection: IBMi, sqlStatement: string, maxRows: number): Promise<{ rows: Record<string, unknown>[]; metadata?: SqlColumnMetadata[]; elapsedMs?: number }> {
+        await this.refreshManagedSessionState(connection);
+
         if (!this.jobManager) {
             const result = await this.runSqlRows(connection, sqlStatement, maxRows === NOMAX_SENTINEL ? undefined : maxRows);
             return result;
@@ -1130,6 +1148,7 @@ export class CommandEntryService {
             elapsedMs?: number;
         }
     ) {
+        const autoColumnViewForSingleRow = getConnectionSqlSettings(this.context, connection).autoColumnViewForSingleRow;
         const columns = deriveSqlColumns(rows);
         const runtimeMetadata = hasUsefulColumnMetadata(options?.columnMetadata)
             ? options?.columnMetadata
@@ -1154,7 +1173,8 @@ export class CommandEntryService {
             hasMoreRows: options?.hasMoreRows,
             fetchSize: options?.fetchSize,
             prefetchSize: options?.prefetchSize,
-            elapsedMs: options?.elapsedMs
+            elapsedMs: options?.elapsedMs,
+            autoColumnViewForSingleRow
         };
     }
 

@@ -4,6 +4,19 @@ All notable changes to this project are documented in this file.
 
 ## [Preview of CL Command Entry]
 
+## [1.0.37] - 2026-09-16
+
+### What's Improved
+- Command Entry got a clearer connection settings experience and better handling for shared vs private SQL job behavior.
+- Initial SCHEMA and PATH settings are now easier to apply and persist more consistently for the active SQL job.
+- Command Entry menu and status messaging were refined for clearer job-state and action feedback.
+- SQL log and history management were cleaned up to reduce confusion and make clearing actions more predictable.
+
+### What's Fixed
+- Fixed the Apply Now flow so SCHEMA and PATH overrides work reliably together without conflicting behavior.
+- Tightened session context validation so invalid schema/path inputs are caught before they are applied.
+- Improved the default startup and reconnect flow around the active private SQL job so behavior is more consistent.
+
 ## [1.0.36] - 2026-09-15
 
 ### What's Improved

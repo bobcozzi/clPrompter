@@ -5,8 +5,9 @@
   const noConnectionText = 'no connection';
   const MENU_POSITION_DEBUG = true;
   const minTextareaRows = 2;
+  const defaultCommandRows = 3;
   const command = document.getElementById('command'), mode = document.getElementById('mode'), severityFilter = document.getElementById('message-severity-filter');
-  const run = document.getElementById('run'), prompt = document.getElementById('prompt'), cmdEntryHelp = document.getElementById('cmdentry-help'), cmdEntrySettings = document.getElementById('cmdentry-settings'), toolbarMenu = document.getElementById('toolbar-menu'), toolbarMenuList = document.getElementById('toolbar-menu-list'), menuViewLog = document.getElementById('menu-view-log'), menuClearLog = document.getElementById('menu-clear-log'), menuClearSqlLog = document.getElementById('menu-clear-sql-log'), menuClearSqlHistory = document.getElementById('menu-clear-sql-history'), menuToggleSqlLog = document.getElementById('menu-toggle-sql-log'), menuToggleMessageDetails = document.getElementById('menu-toggle-message-details'), menuUseSharedSqlJob = document.getElementById('menu-use-shared-sql-job'), menuUsePrivateSqlJob = document.getElementById('menu-use-private-sql-job'), menuStartNewJob = document.getElementById('menu-start-new-job'), menuCancelSqlJob = document.getElementById('menu-cancel-sql-job'), menuClearHistory = document.getElementById('menu-clear-history'), historyPrev = document.getElementById('history-prev'), historyNext = document.getElementById('history-next'), statusJobMenu = document.getElementById('status-job-menu'), statusJobMenuCopy = document.getElementById('status-job-menu-copy'), statusJobMenuDisplayJoblog = document.getElementById('status-job-menu-display-joblog');
+  const run = document.getElementById('run'), prompt = document.getElementById('prompt'), cmdEntryHelp = document.getElementById('cmdentry-help'), cmdEntrySettings = document.getElementById('cmdentry-settings'), toolbarMenu = document.getElementById('toolbar-menu'), toolbarMenuList = document.getElementById('toolbar-menu-list'), menuViewLog = document.getElementById('menu-view-log'), menuClearLog = document.getElementById('menu-clear-log'), menuClearSqlLog = document.getElementById('menu-clear-sql-log'), menuClearSqlHistory = document.getElementById('menu-clear-sql-history'), menuToggleSqlLog = document.getElementById('menu-toggle-sql-log'), menuToggleMessageDetails = document.getElementById('menu-toggle-message-details'), menuConnectionSettings = document.getElementById('menu-connection-settings'), menuUseSharedSqlJob = document.getElementById('menu-use-shared-sql-job'), menuUsePrivateSqlJob = document.getElementById('menu-use-private-sql-job'), menuStartNewJob = document.getElementById('menu-start-new-job'), menuCancelSqlJob = document.getElementById('menu-cancel-sql-job'), menuClearHistory = document.getElementById('menu-clear-history'), historyPrev = document.getElementById('history-prev'), historyNext = document.getElementById('history-next'), statusJobMenu = document.getElementById('status-job-menu'), statusJobMenuCopy = document.getElementById('status-job-menu-copy'), statusJobMenuDisplayJoblog = document.getElementById('status-job-menu-display-joblog');
   const statusText = document.getElementById('status-text'), statusJobId = document.getElementById('status-jobid'), results = document.getElementById('results');
   let historyIndex = -1, runningStartedAt, runningTimerId, runningStatusPrefix = 'Running…', historyDraft = '', sqlJobPollingId;
   let statusJobSingleClickTimer;
@@ -133,6 +134,17 @@
     state.executions = [];
     state.commandHeightPx = Number(state.commandHeightPx || 0);
     vscode.setState(state);
+  };
+  const truncateForDisplay = (value, maxChars = 132) => {
+    const text = String(value ?? '');
+    if (text.length <= maxChars) {
+      return text;
+    }
+    const trimmed = text.trimEnd();
+    if (trimmed.length <= maxChars) {
+      return trimmed;
+    }
+    return `${trimmed.slice(0, Math.max(0, maxChars - 1)).trimEnd()}…`;
   };
   const formatElapsed = ms => ms < 1000 ? `${ms} ms` : `${(ms / 1000).toFixed(1)} s`;
   const setStatusMessage = (message = '') => {
@@ -542,6 +554,7 @@
     const trimmed = text.trim();
     return trimmed ? `SQL: ${trimmed}` : text;
   };
+  const trimTrailingWhitespaceForRecall = value => String(value || '').replace(/[\t\f\v ]+$/g, '').replace(/(?:\r\n|\r|\n)+$/g, '');
   const areMessageDetailsShown = () => messageDetailsMode !== 'HIDE';
   const updateMessageDetailsMenuLabel = () => {
     if (!menuToggleMessageDetails) { return; }
@@ -624,15 +637,25 @@
     baseMinHeightPx = Math.max(measured, 1);
     return baseMinHeightPx;
   };
-  const resizeCommandInput = () => {
+  const resizeCommandInput = ({ respectRememberedHeight = true } = {}) => {
     const minHeight = measureBaseHeight();
     const rememberedHeight = Math.max(minHeight, Number(state.commandHeightPx || 0));
     command.rows = Math.max(minTextareaRows, lineCount(command.value));
     autoResizing = true;
     command.style.height = 'auto';
     const autoHeight = Math.max(minHeight, Math.ceil(command.scrollHeight));
-    command.style.height = `${Math.max(autoHeight, rememberedHeight)}px`;
+    const nextHeight = respectRememberedHeight ? Math.max(autoHeight, rememberedHeight) : autoHeight;
+    command.style.height = `${nextHeight}px`;
     autoResizing = false;
+  };
+  const resetCommandInputToDefaultSize = () => {
+    state.commandHeightPx = 0;
+    baseMinHeightPx = 0;
+    command.rows = defaultCommandRows;
+    autoResizing = true;
+    command.style.height = 'auto';
+    autoResizing = false;
+    save();
   };
   const recallPrevious = () => {
     if (!state.history.length) { return; }
@@ -666,11 +689,11 @@
     const historySqlHint = typeof item.isSql === 'boolean'
       ? item.isSql
       : (isSqlCommandText(item.command) || /^\s*(insert|update|delete|merge|call)\b/i.test(String(item.command || '')));
-    command.value = applySqlPrefixForRecall(item.command, historySqlHint);
+    command.value = trimTrailingWhitespaceForRecall(applySqlPrefixForRecall(item.command, historySqlHint));
     mode.value = item.mode;
     updateModeTooltip();
     save();
-    resizeCommandInput();
+    resizeCommandInput({ respectRememberedHeight: false });
     command.setSelectionRange(0, 0);
     command.focus();
   };
@@ -688,22 +711,23 @@
       const meta = `${new Date(execution.startedAt).toLocaleString()} · ${execution.mode} · ${formatElapsed(execution.elapsedMs)}`;
       const replayMarker = text('span', execution.collapsed ? '▶' : '▼', 'execution-replay');
       replayMarker.tabIndex = 0;
-      const commandEl = text('span', execution.command, 'execution-command');
+      const displayCommand = truncateForDisplay(execution.command, 132);
+      const commandEl = text('span', displayCommand, 'execution-command');
       const executionIsSql = !!execution.sqlResult
         || (execution.messages || []).some(message => String(message.messageId || '').trim().toUpperCase() === 'SQL0000')
         || isSqlCommandText(execution.command);
       if (executionIsSql) {
         commandEl.classList.add('execution-command-sql');
       }
-      commandEl.setAttribute('data-tooltip', 'Click=Recall, Double-Click=Copy');
+      commandEl.title = String(execution.command || '');
+      commandEl.setAttribute('data-tooltip', 'Click=Recall, Ctrl/Cmd+Click=Copy');
       commandEl.tabIndex = 0;
       attachHistoryHoverTooltip(commandEl);
-      let clickTimer;
-      const singleClickDelayMs = 140;
       const reuseCommand = () => {
-        command.value = applySqlPrefixForRecall(execution.command, executionIsSql);
+        command.value = trimTrailingWhitespaceForRecall(applySqlPrefixForRecall(execution.command, executionIsSql));
         save();
         setStatusMessage('Loaded command from history. Current run mode preserved.');
+        resizeCommandInput({ respectRememberedHeight: false });
         command.focus();
       };
       const toggleMessages = () => {
@@ -714,38 +738,21 @@
       const copyCommandToClipboard = () => {
         vscode.postMessage({ type: 'copyCommand', command: execution.command });
       };
-      const handleSingleClick = event => {
-        if (event.detail > 1) { return; }
-        if (clickTimer) {
-          clearTimeout(clickTimer);
+      const handleCommandClick = event => {
+        if (event.ctrlKey || event.metaKey) {
+          event.preventDefault();
+          event.stopPropagation();
+          copyCommandToClipboard();
+          return;
         }
-        clickTimer = setTimeout(() => {
-          clickTimer = undefined;
-          reuseCommand();
-        }, singleClickDelayMs);
+        if (event.detail !== 1) { return; }
+        reuseCommand();
       };
       const handleToggleClick = event => {
         event.preventDefault();
-        if (clickTimer) {
-          clearTimeout(clickTimer);
-          clickTimer = undefined;
-        }
         toggleMessages();
       };
-      const handleDoubleClick = event => {
-        event.preventDefault();
-        if (clickTimer) {
-          clearTimeout(clickTimer);
-          clickTimer = undefined;
-        }
-        const selection = window.getSelection();
-        if (selection) {
-          selection.removeAllRanges();
-        }
-        copyCommandToClipboard();
-      };
-      commandEl.addEventListener('click', handleSingleClick);
-      commandEl.addEventListener('dblclick', handleDoubleClick);
+      commandEl.addEventListener('click', handleCommandClick);
       commandEl.addEventListener('keydown', event => {
         if (event.key === 'Enter' || event.key === ' ') {
           event.preventDefault();
@@ -753,7 +760,6 @@
         }
       });
       replayMarker.addEventListener('click', handleToggleClick);
-      replayMarker.addEventListener('dblclick', handleDoubleClick);
       replayMarker.addEventListener('keydown', event => {
         if (event.key === 'Enter' || event.key === ' ') {
           event.preventDefault();
@@ -939,6 +945,9 @@
     vscode.postMessage({ type: 'prompt', command: normalized });
   }
   command.value = state.command || '';
+  state.commandHeightPx = 0;
+  command.rows = defaultCommandRows;
+  command.style.height = 'auto';
   mode.value = state.mode || '*RUN';
   updateModeTooltip();
   if (severityFilter) {
@@ -956,7 +965,6 @@
     });
     observer.observe(command);
   }
-  resizeCommandInput();
   command.addEventListener('input', () => { historyDraft = ''; historyIndex = -1; save(); resizeCommandInput(); });
   mode.addEventListener('change', () => { updateModeTooltip(); save(); restoreModeTooltip(); });
   mode.addEventListener('mousedown', () => { updateModeTooltip(); suppressModeTooltip(); });
@@ -1023,7 +1031,7 @@
   cmdEntrySettings?.addEventListener('click', event => {
     event.preventDefault();
     closeToolbarMenu();
-    vscode.postMessage({ type: 'openCmdEntrySettings' });
+    vscode.postMessage({ type: 'openClPrompterSettings' });
   });
   toolbarMenu?.addEventListener('click', event => {
     event.preventDefault();
@@ -1082,6 +1090,11 @@
     vscode.postMessage({ type: 'toggleSqlStatementsToCommandLog' });
     command.focus();
   });
+  menuConnectionSettings?.addEventListener('click', () => {
+    closeToolbarMenu();
+    vscode.postMessage({ type: 'openCmdEntrySettings' });
+    command.focus();
+  });
   menuUseSharedSqlJob?.addEventListener('click', () => {
     if (menuUseSharedSqlJob.disabled) {
       return;
@@ -1131,7 +1144,7 @@
       return;
     }
 
-    const menuItems = [menuViewLog, menuClearLog, menuClearSqlLog, menuClearSqlHistory, menuClearHistory, menuToggleSqlLog, menuToggleMessageDetails, menuUseSharedSqlJob, menuUsePrivateSqlJob, menuStartNewJob, menuCancelSqlJob]
+    const menuItems = [menuViewLog, menuClearLog, menuClearSqlLog, menuClearSqlHistory, menuClearHistory, menuToggleSqlLog, menuToggleMessageDetails, menuConnectionSettings, menuUseSharedSqlJob, menuUsePrivateSqlJob, menuStartNewJob, menuCancelSqlJob]
       .filter(item => item && !item.disabled);
     if (!menuItems.length) { return; }
     event.preventDefault();
@@ -1364,8 +1377,7 @@
         command.value = '';
         historyDraft = '';
         historyIndex = -1;
-        save();
-        resizeCommandInput();
+        resetCommandInputToDefaultSize();
         if (shouldAddToCommandEntryLog) {
           render({ pinNewest: true });
         }
@@ -1388,17 +1400,17 @@
         save();
         break;
       case 'setCommand':
-        command.value = message.command;
+        command.value = trimTrailingWhitespaceForRecall(message.command);
         save();
-        resizeCommandInput();
+        resizeCommandInput({ respectRememberedHeight: false });
         command.focus();
         break;
       case 'setCommandMode':
-        command.value = message.command;
+        command.value = trimTrailingWhitespaceForRecall(message.command);
         mode.value = message.mode || mode.value;
         updateModeTooltip();
         save();
-        resizeCommandInput();
+        resizeCommandInput({ respectRememberedHeight: false });
         command.focus();
         break;
       case 'clearResults':

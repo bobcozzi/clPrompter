@@ -5,8 +5,9 @@ import { CommandEntryJobManager } from './commandEntryJobManager';
 import { CommandEntryHistory, CommandExecutionMode } from './commandEntryModel';
 import { detectCommandEntryPrefix } from './commandEntryPrefixes';
 import { CommandEntryService } from './commandEntryService';
-import { getConnectionSqlSettings, updateConnectionSqlSettings } from './commandEntrySqlSettings';
-import { configureSqlResultPanelAssets, notifySqlResultSessionClosed, setSqlResultPanelRequestHandler, showSqlResultPanel } from './sqlResultPanel';
+import { BUILT_IN_SQL_SNIPPETS, CommandEntrySqlSnippet } from './commandEntrySnippets';
+import { buildImmediateSessionContextSql, buildStartupSqlForSessionOptions, getConnectionSqlSessionOptions, getConnectionSqlSettings, normalizeSchemaSessionContextValue, normalizeSessionContextValue, updateConnectionSqlSettings } from './commandEntrySqlSettings';
+import { closeSqlResultPanel, configureSqlResultPanelAssets, notifySqlResultSessionClosed, setSqlResultPanelRequestHandler, showSqlResultPanel } from './sqlResultPanel';
 
 const HISTORY_KEY = 'commandEntry.history';
 const MAX_HISTORY = 100;
@@ -36,6 +37,7 @@ type CommandEntryRequest =
     | { type: 'manageCodeSnippets' }
     | { type: 'openCmdEntryHelp' }
     | { type: 'openCmdEntrySettings' }
+    | { type: 'openClPrompterSettings' }
     | { type: 'openSnippetsMenu' }
     | { type: 'openSqlSnippetsMenu' }
     | { type: 'menuDebug'; phase: string; payload?: unknown }
@@ -50,17 +52,6 @@ type CommandEntryRequest =
     | { type: 'clear' };
 
 type MessageDetailsMode = 'SHOW' | 'HIDE';
-
-interface CommandEntrySqlSnippet {
-    id: string;
-    label: string;
-    stmt: string;
-    group: string;
-    order?: number;
-    source: 'built-in' | 'user';
-    createdAt?: string;
-    updatedAt?: string;
-}
 
 export interface CodeSnippetRecord {
     id: string;
@@ -105,215 +96,6 @@ interface SnippetTemplateContext {
     currentLibrary?: string;
     userSBSList?: string;
 }
-
-
-
-
-// Command Entry uses two distinct user-facing log terms:
-// History Log = recalled command history, and Joblog = the IBM i job message log.
-const BUILT_IN_SQL_SNIPPETS: ReadonlyArray<CommandEntrySqlSnippet> = [
-    {
-        id: 'builtin.lastest-joblog',
-        label: 'Joblog (last 200 msgs)',
-        stmt: [
-            'SELECT ORDINAL_POSITION as SEQNBR,',
-            '       MESSAGE_ID as MSGID, SEVERITY as SEV, ',
-            "       CASE UPPER(TRIM(MESSAGE_TYPE)) WHEN 'COMMAND' THEN '*CMD' WHEN 'COMPLETION' THEN '*COMP'",
-            "       WHEN 'DIAGNOSTIC' THEN '*DIAG' WHEN 'ESCAPE' THEN '*ESCAPE' WHEN 'INFORMATIONAL' THEN '*INFO'",
-            "       WHEN 'INQUIRY' THEN '*INQ' WHEN 'NOTIFY' THEN '*NOTIFY' WHEN 'REPLY' THEN '*RPY'",
-            "       WHEN 'REQUEST' THEN '*RQS' WHEN 'SCOPE' THEN '*SCOPE' WHEN 'SENDER' THEN '*SENDER'",
-            '       ELSE MESSAGE_TYPE END AS MSGTYPE,',
-            '       MESSAGE_TEXT, MESSAGE_SECOND_LEVEL_TEXT as MSG_SECOND_LVL,',
-            "   TRIM(from_library) CONCAT '/' CONCAT TRIM(from_program) CONCAT '(' CONCAT TRIM(from_instruction) CONCAT ')'",
-            '      AS "FROM_PGM(Stmt)",',
-            "   TRIM(to_library) CONCAT '/' CONCAT TRIM(to_program) CONCAT '(' CONCAT TRIM(to_instruction) CONCAT ')'",
-            '      AS "TO_PGM(Stmt)",',
-            '       QUALIFIED_JOB_NAME as JOB, MESSAGE_TIMESTAMP',
-            "FROM TABLE(QSYS2.JOBLOG_INFO('${sqlJobId}'))",
-            'ORDER BY ORDINAL_POSITION DESC FETCH FIRST 200 ROWS ONLY'
-        ].join(' '),
-        group: 'Job Info',
-        order: 10,
-        source: 'built-in'
-    },
-    {
-        id: 'builtin.full-joblog',
-        label: 'Joblog (full)',
-        stmt: [
-            'SELECT ORDINAL_POSITION as SEQNBR,',
-            '       MESSAGE_ID as MSGID, SEVERITY as SEV, ',
-            "       CASE UPPER(TRIM(MESSAGE_TYPE)) WHEN 'COMMAND' THEN '*CMD' WHEN 'COMPLETION' THEN '*COMP'",
-            "       WHEN 'DIAGNOSTIC' THEN '*DIAG' WHEN 'ESCAPE' THEN '*ESCAPE' WHEN 'INFORMATIONAL' THEN '*INFO'",
-            "       WHEN 'INQUIRY' THEN '*INQ' WHEN 'NOTIFY' THEN '*NOTIFY' WHEN 'REPLY' THEN '*RPY'",
-            "       WHEN 'REQUEST' THEN '*RQS' WHEN 'SCOPE' THEN '*SCOPE' WHEN 'SENDER' THEN '*SENDER'",
-            '       ELSE MESSAGE_TYPE END AS MSGTYPE,',
-            '       MESSAGE_TEXT, MESSAGE_SECOND_LEVEL_TEXT as MSG_SECOND_LVL,',
-            "   TRIM(from_library) CONCAT '/' CONCAT TRIM(from_program) CONCAT '(' CONCAT TRIM(from_instruction) CONCAT ')'",
-            '      AS "FROM_PGM(Stmt)",',
-            "   TRIM(to_library) CONCAT '/' CONCAT TRIM(to_program) CONCAT '(' CONCAT TRIM(to_instruction) CONCAT ')'",
-            '      AS "TO_PGM(Stmt)",',
-            '       QUALIFIED_JOB_NAME as JOB, MESSAGE_TIMESTAMP',
-            "FROM TABLE(QSYS2.JOBLOG_INFO('${sqlJobId}'))",
-            'ORDER BY ORDINAL_POSITION DESC'
-        ].join(' '),
-        group: 'Job Info',
-        order: 20,
-        source: 'built-in'
-    },
-    {
-        id: 'builtin.library-list',
-        label: 'Library List',
-        stmt: "SELECT * FROM QSYS2.LIBRARY_LIST_INFO",
-        group: 'Job Info',
-        order: 30,
-        source: 'built-in'
-    },
-    {
-        id: 'builtin.last-spooled-file',
-        label: 'Display Last SPOOLED File',
-        stmt: [
-            'WITH sf AS (',
-            'SELECT * FROM TABLE (qsys2.spooled_file_info(',
-            "     USER_NAME => '*CURRENT', job_name => '*ALL',",
-            "     STARTING_TIMESTAMP => current_date,",
-            "     ENDING_TIMESTAMP => current_timestamp)) SF",
-            '  ORDER BY sf.creation_timestamp DESC',
-            '  LIMIT 1',
-            ') ',
-            'SELECT sd.* FROM sf',
-            ',LATERAL (SELECT * FROM TABLE(systools.spooled_file_data(',
-            '           JOB_NAME => SF.QUALIFIED_JOB_NAME,',
-            '           SPOOLED_FILE_NAME => SF.SPOOLED_FILE_NAME,',
-            '           SPOOLED_FILE_NUMBER => SF.SPOOLED_FILE_NUMBER)) spd',
-            ') sd'
-        ].join(' '),
-        group: 'Job Info',
-        order: 90,
-        source: 'built-in'
-    },
-    {
-        id: 'builtin.job-splf-list',
-        label: 'SPOOLED Files (Job)',
-        stmt: [
-            'SELECT SPOOLED_FILE_NAME AS SPLFNAME, SPOOLED_FILE_NUMBER AS SPLNBR, STATUS,',
-            '       QUALIFIED_JOB_NAME AS JOB, OUTPUT_PRIORITY AS OUTPTY, TOTAL_PAGES AS PAGES,',
-            '       COPIES, CREATION_TIMESTAMP AS CREATED, USER_DATA, FILE_AVAILABLE AS FILE_AVAIL,',
-            '       SIZE, FORM_TYPE, OUTPUT_QUEUE_LIBRARY AS OUTQ_LIB, OUTPUT_QUEUE AS OUTQ_NAME,',
-            '       ASP_NUMBER, SYSTEM',
-            "FROM TABLE(QSYS2.SPOOLED_FILE_INFO(JOB_NAME => '${sqlJobId}' ))",
-            "WHERE (SPOOLED_FILE_NAME <> 'QPRINT' AND JOB_NAME <> 'MAPEPIRE')",
-            'ORDER BY CREATION_TIMESTAMP'
-        ].join(' '),
-        group: 'Job Info',
-        order: 100,
-        source: 'built-in'
-    },
-    {
-        id: 'builtin.active-jobs-usersbs',
-        label: 'Active Jobs (Fast)',
-        stmt: [
-            'SELECT aj.JOB_NAME, aj.SUBSYSTEM, aj.AUTHORIZATION_NAME as USER_NAME,',
-            " trim(aj.FUNCTION_TYPE) concat '-' concat aj.FUNCTION as FUNCTION_INFO,",
-            ' JOB_STATUS, ',
-            ' MEMORY_POOL, TEMPORARY_STORAGE, CPU_TIME, TOTAL_DISK_IO_COUNT',
-            "FROM TABLE(QSYS2.ACTIVE_JOB_INFO(SUBSYSTEM_LIST_FILTER => '${userSBSList}')) aj",
-            'ORDER BY ORDINAL_POSITION'
-        ].join(' '),
-        group: 'Admin',
-        order: 10,
-        source: 'built-in'
-    },
-    {
-        id: 'builtin.active-jobs-full',
-        label: 'Active Jobs (Detailed)',
-        stmt: [
-            'SELECT aj.JOB_NAME, aj.SUBSYSTEM, aj.AUTHORIZATION_NAME as USER_NAME,',
-            " trim(aj.FUNCTION_TYPE) concat '-' concat aj.FUNCTION as FUNCTION_INFO,",
-            ' JOB_STATUS, JOB_ACTIVE_TIME as "Job Start Time",',
-            ' MEMORY_POOL, TEMPORARY_STORAGE, CPU_TIME, TOTAL_DISK_IO_COUNT',
-            ' , OUTPUT_QUEUE, JOB_USER_IDENTITY, PAGE_FAULTS, DATABASE_LOCK_WAITS, OPEN_FILES',
-            "FROM TABLE(QSYS2.ACTIVE_JOB_INFO(DETAILED_INFO => 'ALL', SUBSYSTEM_LIST_FILTER => '${userSBSList}')) aj",
-            'ORDER BY ORDINAL_POSITION'
-        ].join(' '),
-        group: 'Admin',
-        order: 20,
-        source: 'built-in'
-    },
-    {
-        id: 'builtin.active-jobs-qinter',
-        label: 'Active Jobs sbs(QINTER)',
-        stmt: [
-            'SELECT aj.JOB_NAME, aj.SUBSYSTEM, aj.AUTHORIZATION_NAME as USER_NAME,',
-            " trim(aj.FUNCTION_TYPE) concat '-' concat aj.FUNCTION as FUNCTION_INFO,",
-            ' JOB_STATUS, JOB_ACTIVE_TIME as "Job Start Time",',
-            ' MEMORY_POOL, TEMPORARY_STORAGE, CPU_TIME, TOTAL_DISK_IO_COUNT',
-            "FROM TABLE(QSYS2.ACTIVE_JOB_INFO(DETAILED_INFO => 'ALL', SUBSYSTEM_LIST_FILTER => 'QINTER')) aj",
-            'ORDER BY ORDINAL_POSITION'
-        ].join(' '),
-        group: 'Admin',
-        order: 30,
-        source: 'built-in'
-    },
-    {
-        id: 'builtin.active-jobs-qusrwrk',
-        label: 'Active Jobs sbs(QUSRWRK)',
-        stmt: [
-            'SELECT aj.JOB_NAME, aj.SUBSYSTEM, aj.AUTHORIZATION_NAME as USER_NAME,',
-            " trim(aj.FUNCTION_TYPE) concat '-' concat aj.FUNCTION as FUNCTION_INFO,",
-            ' JOB_STATUS, JOB_ACTIVE_TIME as "Job Start Time",',
-            ' MEMORY_POOL, TEMPORARY_STORAGE, CPU_TIME, TOTAL_DISK_IO_COUNT',
-            "FROM TABLE(QSYS2.ACTIVE_JOB_INFO(DETAILED_INFO => 'ALL', SUBSYSTEM_LIST_FILTER => 'QUSRWRK')) aj",
-            'ORDER BY ORDINAL_POSITION'
-        ].join(' '),
-        group: 'Admin',
-        order: 40,
-        source: 'built-in'
-    },
-    {
-        id: 'builtin.active-jobs-qhttpsvr',
-        label: 'Active Jobs sbs(QHTTPSVR)',
-        stmt: [
-            'SELECT aj.JOB_NAME, aj.SUBSYSTEM, aj.AUTHORIZATION_NAME as USER_NAME,',
-            " trim(aj.FUNCTION_TYPE) concat '-' concat aj.FUNCTION as FUNCTION_INFO,",
-            ' JOB_STATUS, JOB_ACTIVE_TIME as "Job Start Time",',
-            ' MEMORY_POOL, TEMPORARY_STORAGE, CPU_TIME, TOTAL_DISK_IO_COUNT',
-            "FROM TABLE(QSYS2.ACTIVE_JOB_INFO(DETAILED_INFO => 'ALL', SUBSYSTEM_LIST_FILTER => 'QHTTPSVR')) aj",
-            'ORDER BY ORDINAL_POSITION'
-        ].join(' '),
-        group: 'Admin',
-        order: 50,
-        source: 'built-in'
-    },
-    {
-        id: 'builtin.spooled-files-user',
-        label: 'SPOOLED Files (User)',
-        stmt: [
-            'SELECT SPOOLED_FILE_NAME AS SPLFNAME,',
-            '    SPOOLED_FILE_NUMBER AS SPLNBR,',
-            '    STATUS,',
-            '    TOTAL_PAGES AS PAGES,',
-            '    JOB_USER AS USER_NAME,',
-            "    TRIM(OUTPUT_QUEUE_LIBRARY) CONCAT '/' CONCAT OUTPUT_QUEUE AS OUTPUT_QUEUE,",
-            '    QUALIFIED_JOB_NAME AS JOB,',
-            '    OUTPUT_PRIORITY AS OUTPTY,',
-            '    COPIES,',
-            '    CREATION_TIMESTAMP AS CREATED,',
-            '    USER_DATA,',
-            '    FILE_AVAILABLE AS FILE_AVAIL,',
-            '    SIZE,',
-            '    FORM_TYPE,',
-            '    ASP_NUMBER,',
-            '    SYSTEM AS "System Where Created"',
-            "FROM TABLE(QSYS2.SPOOLED_FILE_INFO(USER_NAME => '${currentUser}'))",
-            " WHERE SPOOLED_FILE_NAME <> 'QPRINT' AND JOB_NAME <> 'MAPEPIRE'",
-            " ORDER BY CREATION_TIMESTAMP"
-        ].join(' '),
-        group: 'SPOOLED Files',
-        order: 20,
-        source: 'built-in'
-    }
-];
-
 function isSqlCommandText(command: string): boolean {
     const text = String(command ?? '');
     const explicitPrefix = detectCommandEntryPrefix(text);
@@ -471,6 +253,7 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
     private clearHistoryOnFirstReady = true;
     private lastPostedSqlJobId: string | undefined;
     private cmdEntryHelpPanel: vscode.WebviewPanel | undefined;
+    private cmdEntrySettingsPanel: vscode.WebviewPanel | undefined;
     private readonly output: vscode.OutputChannel;
     private readonly jobManager: CommandEntryJobManager;
     private readonly service: CommandEntryService;
@@ -647,10 +430,13 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
     }
 
     async dispose(): Promise<void> {
-        await this.service.closeSqlSession();
+        this.cmdEntrySettingsPanel?.dispose();
+        this.cmdEntrySettingsPanel = undefined;
         setSqlResultPanelRequestHandler(undefined);
+        closeSqlResultPanel();
         this.cmdEntryHelpPanel?.dispose();
         this.cmdEntryHelpPanel = undefined;
+        await this.service.closeSqlSession();
         this.onDidChangeCodeSnippetsEmitter.dispose();
         await this.jobManager.dispose();
         this.output.dispose();
@@ -812,6 +598,9 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
                 await this.openCmdEntryHelpPanel();
                 break;
             case 'openCmdEntrySettings':
+                await this.openCmdEntrySettingsPanel();
+                break;
+            case 'openClPrompterSettings':
                 await vscode.commands.executeCommand('workbench.action.openSettings', 'clPrompter.cmdEntry');
                 break;
             case 'menuDebug': {
@@ -1406,7 +1195,12 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
             const sqlJobId = await this.jobManager.restartJob(connection);
             this.refreshSqlJobId(connection);
             this.postJobCapabilities();
-            this.post({ type: 'notice', message: sqlJobId ? vscode.l10n.t('Reconnected private SQL job {jobId}.', { jobId: sqlJobId }) : vscode.l10n.t('Reconnected private SQL job.') });
+            this.post({
+                type: 'notice',
+                message: sqlJobId
+                    ? vscode.l10n.t('SQL job connected: {jobId}.', { jobId: sqlJobId })
+                    : vscode.l10n.t('SQL job connected.')
+            });
         } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
             this.output.appendLine(`[Cmd Entry] Reconnect Server Job failed: ${message}`);
@@ -2468,6 +2262,512 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
         void this.setHistory([entry, ...history]);
     }
 
+    private async openCmdEntrySettingsPanel(): Promise<void> {
+        if (this.cmdEntrySettingsPanel) {
+            this.cmdEntrySettingsPanel.reveal(vscode.ViewColumn.Beside, true);
+            return;
+        }
+
+        const connection = this.getConnection();
+        this.cmdEntrySettingsPanel = vscode.window.createWebviewPanel(
+            'clprompter.commandEntrySettings',
+            vscode.l10n.t('Command Entry Connection Settings'),
+            vscode.ViewColumn.Beside,
+            {
+                enableScripts: true,
+                retainContextWhenHidden: true,
+                localResourceRoots: [
+                    vscode.Uri.joinPath(this.context.extensionUri, 'media'),
+                    vscode.Uri.joinPath(this.context.extensionUri, 'images')
+                ]
+            }
+        );
+
+        this.cmdEntrySettingsPanel.onDidDispose(() => {
+            this.cmdEntrySettingsPanel = undefined;
+        });
+
+        this.cmdEntrySettingsPanel.webview.onDidReceiveMessage(async (message: { type?: string; useSharedJob?: boolean; naming?: string; commit?: string; datfmt?: string; timfmt?: string; initialSchema?: string; initialPath?: string; autoColumnViewForSingleRow?: boolean }) => {
+            if (message.type === 'setSqlJobMode') {
+                await this.setSharedSqlJobMode(Boolean(message.useSharedJob), 'command');
+                if (this.cmdEntrySettingsPanel) {
+                    this.cmdEntrySettingsPanel.webview.html = await this.buildConnectionSettingsHtml(this.cmdEntrySettingsPanel.webview, connection);
+                }
+            }
+            if (message.type === 'saveCmdEntrySettings') {
+                const nextConnection = this.getConnection();
+                if (!nextConnection) {
+                    return;
+                }
+
+                const autoColumnViewForSingleRow = !!message.autoColumnViewForSingleRow;
+                await updateConnectionSqlSettings(this.context, nextConnection, {
+                    autoColumnViewForSingleRow
+                });
+
+                if (this.isUsingSharedSqlJob(nextConnection)) {
+                    this.post({ type: 'notice', message: vscode.l10n.t('Settings saved. Shared SQL job settings remain fixed by the active IBM i job.') });
+                    if (this.cmdEntrySettingsPanel) {
+                        this.cmdEntrySettingsPanel.webview.html = await this.buildConnectionSettingsHtml(this.cmdEntrySettingsPanel.webview, nextConnection);
+                    }
+                    return;
+                }
+
+                if (this.hasDisallowedSessionPrefix(message.initialSchema, 'schema')) {
+                    this.post({ type: 'notice', message: vscode.l10n.t('Initial SCHEMA does not accept SET PATH input.') });
+                    return;
+                }
+                if (this.hasDisallowedSessionPrefix(message.initialPath, 'path')) {
+                    this.post({ type: 'notice', message: vscode.l10n.t('Initial PATH does not accept SET SCHEMA input.') });
+                    return;
+                }
+
+                const normalizedSchema = this.normalizeInitialSchemaForSave(message.initialSchema);
+                if ((message.initialSchema ?? '').trim().length > 0 && !normalizedSchema) {
+                    this.post({ type: 'notice', message: vscode.l10n.t('Initial SCHEMA must be 128 characters or fewer, or *LIBL.') });
+                    return;
+                }
+                const normalizedPath = this.normalizeInitialPathForSave(message.initialPath);
+
+                const nextOptions = {
+                    naming: message.naming === 'system' ? 'system' as const : 'sql' as const,
+                    commit: message.commit || undefined,
+                    datfmt: message.datfmt || undefined,
+                    timfmt: message.timfmt || undefined,
+                    initialSchema: normalizedSchema,
+                    initialPath: normalizedPath,
+                };
+
+                await updateConnectionSqlSettings(this.context, nextConnection, {
+                    sessionOptions: {
+                        naming: nextOptions.naming,
+                        commit: nextOptions.commit,
+                        datfmt: nextOptions.datfmt,
+                        timfmt: nextOptions.timfmt,
+                        initialSchema: nextOptions.initialSchema,
+                        initialPath: nextOptions.initialPath,
+                    }
+                });
+                this.post({ type: 'notice', message: vscode.l10n.t('Settings saved.') });
+
+                if (this.cmdEntrySettingsPanel) {
+                    this.cmdEntrySettingsPanel.webview.html = await this.buildConnectionSettingsHtml(this.cmdEntrySettingsPanel.webview, nextConnection);
+                }
+            }
+
+            if (message.type === 'setSessionContextNow') {
+                const nextConnection = this.getConnection();
+                if (!nextConnection || !nextConnection.sqlRunnerAvailable()) {
+                    this.post({ type: 'notice', message: vscode.l10n.t('Not connected to IBM i, or the SQL runner is unavailable.') });
+                    return;
+                }
+
+                if (this.isUsingSharedSqlJob(nextConnection)) {
+                    this.post({ type: 'notice', message: vscode.l10n.t('Shared SQL job settings are fixed by the active IBM i job and cannot be changed here.') });
+                    return;
+                }
+
+                if (this.hasDisallowedSessionPrefix(message.initialSchema, 'schema')) {
+                    this.post({ type: 'notice', message: vscode.l10n.t('Initial SCHEMA does not accept SET PATH input.') });
+                    return;
+                }
+                if (this.hasDisallowedSessionPrefix(message.initialPath, 'path')) {
+                    this.post({ type: 'notice', message: vscode.l10n.t('Initial PATH does not accept SET SCHEMA input.') });
+                    return;
+                }
+
+                const normalizedSchema = this.normalizeInitialSchemaForSave(message.initialSchema);
+                if ((message.initialSchema ?? '').trim().length > 0 && !normalizedSchema) {
+                    this.post({ type: 'notice', message: vscode.l10n.t('Initial SCHEMA must be 128 characters or fewer, or *LIBL.') });
+                    return;
+                }
+                const normalizedPath = this.normalizeInitialPathForSave(message.initialPath);
+
+                const currentOptions = getConnectionSqlSessionOptions(nextConnection);
+                const sessionOptions = {
+                    naming: currentOptions.naming,
+                    commit: currentOptions.commit,
+                    datfmt: currentOptions.datfmt,
+                    timfmt: currentOptions.timfmt,
+                    initialSchema: normalizedSchema,
+                    initialPath: normalizedPath,
+                };
+
+                await updateConnectionSqlSettings(this.context, nextConnection, {
+                    sessionOptions
+                });
+
+                const statements = buildImmediateSessionContextSql(sessionOptions);
+                if (statements.length === 0) {
+                    this.post({ type: 'notice', message: vscode.l10n.t('No Initial SCHEMA/PATH override to apply.') });
+                    return;
+                }
+
+                try {
+                    for (const statement of statements) {
+                        await this.jobManager.runSQL(nextConnection, statement, { skipSyntaxCheck: true });
+                    }
+                    this.post({ type: 'notice', message: vscode.l10n.t('Session settings applied to the active SQL job.') });
+                } catch (error) {
+                    const failure = error instanceof Error ? error.message : String(error);
+                    this.post({ type: 'notice', message: vscode.l10n.t('Set Now failed: {failure}', { failure }) });
+                }
+
+                if (this.cmdEntrySettingsPanel) {
+                    this.cmdEntrySettingsPanel.webview.html = await this.buildConnectionSettingsHtml(this.cmdEntrySettingsPanel.webview, nextConnection);
+                }
+            }
+
+            if (message.type === 'closeCmdEntrySettings') {
+                this.cmdEntrySettingsPanel?.dispose();
+            }
+            if (message.type === 'reconnectPrivateSqlJob') {
+                const reconnectConnection = this.getConnection();
+                if (!reconnectConnection) {
+                    await this.startNewJob();
+                    return;
+                }
+
+                if (this.isUsingSharedSqlJob(reconnectConnection)) {
+                    this.post({ type: 'notice', message: vscode.l10n.t('Shared SQL job settings are fixed by the active IBM i job and cannot be changed here.') });
+                    return;
+                }
+
+                if (this.hasDisallowedSessionPrefix(message.initialSchema, 'schema')) {
+                    this.post({ type: 'notice', message: vscode.l10n.t('Initial SCHEMA does not accept SET PATH input.') });
+                    return;
+                }
+                if (this.hasDisallowedSessionPrefix(message.initialPath, 'path')) {
+                    this.post({ type: 'notice', message: vscode.l10n.t('Initial PATH does not accept SET SCHEMA input.') });
+                    return;
+                }
+
+                const normalizedSchema = this.normalizeInitialSchemaForSave(message.initialSchema);
+                if ((message.initialSchema ?? '').trim().length > 0 && !normalizedSchema) {
+                    this.post({ type: 'notice', message: vscode.l10n.t('Initial SCHEMA must be 128 characters or fewer, or *LIBL.') });
+                    return;
+                }
+                const normalizedPath = this.normalizeInitialPathForSave(message.initialPath);
+
+                await updateConnectionSqlSettings(this.context, reconnectConnection, {
+                    sessionOptions: {
+                        naming: message.naming === 'system' ? 'system' : 'sql',
+                        commit: message.commit || undefined,
+                        datfmt: message.datfmt || undefined,
+                        timfmt: message.timfmt || undefined,
+                        initialSchema: normalizedSchema,
+                        initialPath: normalizedPath,
+                    }
+                });
+
+                if (this.cmdEntrySettingsPanel) {
+                    this.cmdEntrySettingsPanel.webview.html = await this.buildConnectionSettingsHtml(
+                        this.cmdEntrySettingsPanel.webview,
+                        reconnectConnection,
+                        'reconnecting'
+                    );
+                }
+
+                try {
+                    await this.startNewJob();
+                    const refreshedConnection = this.getConnection();
+                    const refreshedJobId = refreshedConnection ? this.currentSqlJobId(refreshedConnection) : undefined;
+                    if (this.cmdEntrySettingsPanel) {
+                        this.cmdEntrySettingsPanel.webview.html = await this.buildConnectionSettingsHtml(
+                            this.cmdEntrySettingsPanel.webview,
+                            refreshedConnection ?? reconnectConnection,
+                            'success',
+                            refreshedJobId
+                        );
+                    }
+                } catch (error) {
+                    if (this.cmdEntrySettingsPanel) {
+                        this.cmdEntrySettingsPanel.webview.html = await this.buildConnectionSettingsHtml(
+                            this.cmdEntrySettingsPanel.webview,
+                            reconnectConnection,
+                            'failed'
+                        );
+                    }
+                    throw error;
+                }
+            }
+        });
+
+        this.cmdEntrySettingsPanel.webview.html = await this.buildConnectionSettingsHtml(this.cmdEntrySettingsPanel.webview, connection);
+    }
+
+    private readFirstColumnAsString(rows: Record<string, unknown>[] | undefined): string | undefined {
+        const firstRow = rows?.[0];
+        if (!firstRow) {
+            return undefined;
+        }
+
+        const firstValue = Object.values(firstRow)[0];
+        const normalized = String(firstValue ?? '').trim();
+        return normalized.length > 0 ? normalized : undefined;
+    }
+
+    private async resolveCurrentSchemaAndPath(connection?: IBMi): Promise<{ currentSchema?: string; currentPath?: string }> {
+        if (!connection) {
+            return {};
+        }
+
+        try {
+            const schemaRows = await this.jobManager.runSQL(connection, 'VALUES CURRENT SCHEMA', { skipSyntaxCheck: true });
+            const pathRows = await this.jobManager.runSQL(connection, 'VALUES CURRENT PATH', { skipSyntaxCheck: true });
+            return {
+                currentSchema: this.readFirstColumnAsString(schemaRows),
+                currentPath: this.readFirstColumnAsString(pathRows)
+            };
+        } catch {
+            return {};
+        }
+    }
+
+    private normalizeInitialSessionValue(value: string | undefined): string {
+        const trimmed = (value ?? '').trim();
+        return trimmed.length > 0 ? trimmed : '*LIBL';
+    }
+
+    private normalizeInitialSchemaForSave(value: string | undefined): string | undefined {
+        const normalized = normalizeSchemaSessionContextValue(value);
+        if (!normalized) {
+            return undefined;
+        }
+
+        return normalized.length <= 128 ? normalized : undefined;
+    }
+
+    private normalizeInitialPathForSave(value: string | undefined): string | undefined {
+        return normalizeSessionContextValue(value) ?? undefined;
+    }
+
+    private hasDisallowedSessionPrefix(value: string | undefined, field: 'schema' | 'path'): boolean {
+        const trimmed = (value ?? '').trim();
+        if (!trimmed) {
+            return false;
+        }
+
+        if (field === 'schema') {
+            return /^SET\s+PATH\b/i.test(trimmed);
+        }
+
+        return /^SET\s+(?:CURRENT\s+)?SCHEMA\b/i.test(trimmed);
+    }
+
+    private escapeHtmlAttribute(value: string): string {
+        return value
+            .replace(/&/g, '&amp;')
+            .replace(/"/g, '&quot;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;');
+    }
+
+    private async buildConnectionSettingsHtml(
+        webview: vscode.Webview,
+        connection = this.getConnection(),
+        reconnectStatus: 'idle' | 'reconnecting' | 'success' | 'failed' = 'idle',
+        reconnectJobId?: string
+    ): Promise<string> {
+        const isDedicatedUsable = this.jobManager.isDedicatedUsable(connection);
+        const remoteMapepireEnabled = this.jobManager.isRemoteMapepireServerEnabled(connection);
+        const useSharedJob = this.isUsingSharedSqlJob(connection);
+        const notAvailableLabel = vscode.l10n.t('Not available');
+        const currentSqlJobId = this.currentSqlJobId(connection) ?? notAvailableLabel;
+        const effectiveJobId = reconnectJobId ?? currentSqlJobId;
+        const sqlSettings = getConnectionSqlSettings(this.context, connection);
+        const sessionOptions = sqlSettings.sessionOptions;
+        const autoColumnViewForSingleRow = !!sqlSettings.autoColumnViewForSingleRow;
+        const modeSummary = remoteMapepireEnabled
+            ? (useSharedJob ? vscode.l10n.t('Shared SQL Job selected') : vscode.l10n.t('Private SQL Job selected'))
+            : vscode.l10n.t('Shared SQL Job selected (server mode unavailable)');
+        const sessionControlsDisabled = useSharedJob ? 'disabled' : '';
+        const mapepireStatusText = remoteMapepireEnabled
+            ? `${vscode.l10n.t('Mapepire')} <span class="server-badge">${vscode.l10n.t('SERVER')}</span> ${vscode.l10n.t('mode is available.')}`
+            : vscode.l10n.t('Mapepire server mode is unavailable. Command Entry falls back to the shared SQL job.');
+        const sessionReadOnlyNotice = useSharedJob
+            ? `<div class="small">${vscode.l10n.t('Shared SQL jobs use the active IBM i job settings and cannot be changed here.')}</div>`
+            : `<div class="small">${vscode.l10n.t('Private SQL jobs apply these settings when connecting to the IBM i system.')}</div>`;
+        const liveSessionContext = await this.resolveCurrentSchemaAndPath(connection);
+        const initialSchema = this.normalizeInitialSessionValue(sessionOptions.initialSchema ?? liveSessionContext.currentSchema);
+        const initialPath = this.normalizeInitialSessionValue(sessionOptions.initialPath ?? liveSessionContext.currentPath);
+        const initialSchemaEscaped = this.escapeHtmlAttribute(initialSchema);
+        const initialPathEscaped = this.escapeHtmlAttribute(initialPath);
+        const reconnectingLabel = vscode.l10n.t('Reconnecting...');
+        const reconnectSuccessLabel = vscode.l10n.t('Reconnect successful');
+        const reconnectButtonLabel = reconnectStatus === 'reconnecting'
+            ? reconnectingLabel
+            : reconnectStatus === 'success'
+                ? vscode.l10n.t('Reconnect successful. Job {jobId}', { jobId: effectiveJobId })
+                : vscode.l10n.t('Reconnect Server Job');
+        const reconnectButtonDisabled = reconnectStatus === 'reconnecting' || !isDedicatedUsable ? 'disabled' : '';
+        const reconnectStatusBlock = reconnectStatus === 'success'
+            ? `<div class="small success-message">${vscode.l10n.t('Reconnect successful. Job {jobId} is active.', { jobId: effectiveJobId })}</div>`
+            : reconnectStatus === 'failed'
+                ? `<div class="small error-message">${vscode.l10n.t('Reconnect failed. Try again in a moment.')}</div>`
+                : '';
+        const noOverrideLabel = vscode.l10n.t('(no override)');
+        const panelTitle = vscode.l10n.t('Command Entry Connection Settings');
+        const connectionTypeTitle = vscode.l10n.t('Connection Type');
+        const connectionSettingsTitle = vscode.l10n.t('Connection Settings');
+        const dynamicSettingsTitle = vscode.l10n.t('Dynamic Settings');
+        const sharedJobLabel = vscode.l10n.t('Shared SQL Job');
+        const privateJobLabel = vscode.l10n.t('Private SQL Job');
+        const namingLabel = vscode.l10n.t('Naming');
+        const commitLabel = vscode.l10n.t('COMMIT');
+        const datfmtLabel = vscode.l10n.t('DATFMT');
+        const timfmtLabel = vscode.l10n.t('TIMFMT');
+        const schemaLabel = vscode.l10n.t('Initial SCHEMA');
+        const pathLabel = vscode.l10n.t('Initial PATH');
+        const applyNowLabel = vscode.l10n.t('Apply current SCHEMA and PATH now');
+        const applyNowHelpText = vscode.l10n.t('Applies both values shown above to the active SQL job.');
+        const autoColumnViewLabel = vscode.l10n.t('Use Column View when result set size is 1 row');
+        const autoColumnViewHelpText = vscode.l10n.t('When enabled, an SQL run from Command Entry that returns exactly one row automatically switches to the custom Column View presentation.');
+        const saveLabel = vscode.l10n.t('Save');
+        const cancelLabel = vscode.l10n.t('Cancel');
+        const sqlJobIdLabel = vscode.l10n.t('SQL Job ID: {jobId}', { jobId: effectiveJobId });
+        const applyOnReconnectLabel = vscode.l10n.t('Connection settings are applied when connecting to the IBM i system.');
+        const connectionNameLabel = vscode.l10n.t('Connection:');
+        const notConnectedLabel = vscode.l10n.t('Not connected');
+        const unknownHostLabel = vscode.l10n.t('unknown host');
+        const liblPlaceholder = vscode.l10n.t('*LIBL');
+        const autoColumnViewChecked = autoColumnViewForSingleRow ? 'checked' : '';
+
+        return `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><style>
+            body { font-family: var(--vscode-font-family, sans-serif); background: var(--vscode-editor-background); color: var(--vscode-editor-foreground); margin: 0; padding: 20px; }
+            .panel { max-width: 540px; margin: 0 auto; }
+            h1 { margin: 0 0 12px; font-size: 1.2rem; }
+            .section { margin-top: 18px; padding: 12px 14px; border: 1px solid var(--vscode-panel-border); border-radius: 6px; background: var(--vscode-sideBar-background); }
+            .row { display: flex; align-items: center; gap: 12px; margin: 10px 0; }
+            .status { font-size: 12px; opacity: 0.8; }
+            label { display: flex; align-items: center; gap: 8px; }
+            input[type="radio"] { accent-color: var(--vscode-button-background); }
+            input, select, textarea, button { border: 1px solid var(--vscode-input-border, var(--vscode-panel-border)); background: var(--vscode-input-background); color: var(--vscode-input-foreground); border-radius: 4px; padding: 6px 10px; }
+            input[type="text"] { width: 100%; box-sizing: border-box; }
+            select:disabled { opacity: 0.6; cursor: not-allowed; }
+            input:disabled { opacity: 0.6; cursor: not-allowed; }
+            textarea { width: 100%; box-sizing: border-box; font-family: var(--vscode-editor-font-family, var(--vscode-font-family, monospace)); resize: vertical; }
+            textarea:disabled { opacity: 0.6; cursor: not-allowed; }
+            button { background: var(--vscode-button-background); color: var(--vscode-button-foreground); cursor: pointer; }
+            button.secondary { background: var(--vscode-button-secondaryBackground); color: var(--vscode-button-secondaryForeground); }
+            button[disabled] { opacity: 0.5; cursor: not-allowed; }
+            .small { font-size: 12px; opacity: 0.8; }
+                        .server-badge { font-weight: 700; color: var(--vscode-textLink-foreground, var(--vscode-foreground)); }
+                        .success-message { color: var(--vscode-testing-iconPassed, #2ea043); }
+                        .error-message { color: var(--vscode-testing-iconFailed, #f85149); }
+            .actions-row { justify-content: flex-end; }
+            .field { display: grid; grid-template-columns: 120px 1fr; gap: 10px; align-items: center; margin: 8px 0; }
+            .field-inline { display: flex; align-items: center; gap: 8px; width: 100%; }
+            .field-inline input, .field-inline textarea { flex: 1; }
+            .reset-button { width: 28px; min-width: 28px; height: 28px; padding: 0; border-radius: 999px; display: inline-flex; align-items: center; justify-content: center; font-size: 18px; line-height: 1; font-weight: 400; }
+                    </style></head><body><div class="panel"><h1>${panelTitle}</h1><div class="status">${connectionNameLabel} ${connection && connection.sqlRunnerAvailable() ? `${connection.currentConnectionName ?? notConnectedLabel} - ${connection.currentHost ?? unknownHostLabel} • ${effectiveJobId}` : notConnectedLabel}</div>
+                <div class="section">
+                                <div><strong>${connectionTypeTitle}</strong></div>
+          <div class="status">${modeSummary}</div>
+                      <div class="row"><label><input type="radio" name="sqlJobMode" value="shared" ${useSharedJob ? 'checked' : ''} ${remoteMapepireEnabled ? '' : 'disabled'}> ${sharedJobLabel}</label></div>
+                      <div class="row"><label><input type="radio" name="sqlJobMode" value="private" ${!useSharedJob ? 'checked' : ''} ${remoteMapepireEnabled ? '' : 'disabled'}> ${privateJobLabel}</label></div>
+                    <div class="small">${mapepireStatusText}</div>
+                </div>
+                <div class="section">
+                                <div><strong>${connectionSettingsTitle}</strong></div>
+                                <div class="small">${applyOnReconnectLabel}</div>
+                                <div class="field"><label for="session-naming">${namingLabel}</label><select id="session-naming" ${sessionControlsDisabled}><option value="sql" ${sessionOptions.naming === 'sql' ? 'selected' : ''}>*SQL</option><option value="system" ${sessionOptions.naming === 'system' ? 'selected' : ''}>*SYS</option></select></div>
+                                <div class="field"><label for="session-commit">${commitLabel}</label><select id="session-commit" ${sessionControlsDisabled}><option value="">${noOverrideLabel}</option><option value="*AUTO" ${sessionOptions.commit === '*AUTO' ? 'selected' : ''}>*AUTO</option><option value="*NONE" ${sessionOptions.commit === '*NONE' ? 'selected' : ''}>*NONE</option><option value="*CHG" ${sessionOptions.commit === '*CHG' ? 'selected' : ''}>*CHG</option><option value="*CS" ${sessionOptions.commit === '*CS' ? 'selected' : ''}>*CS</option><option value="*RR" ${sessionOptions.commit === '*RR' ? 'selected' : ''}>*RR</option></select></div>
+                                <div class="field"><label for="session-datfmt">${datfmtLabel}</label><select id="session-datfmt" ${sessionControlsDisabled}><option value="">${noOverrideLabel}</option><option value="*ISO" ${sessionOptions.datfmt === '*ISO' ? 'selected' : ''}>*ISO</option><option value="*USA" ${sessionOptions.datfmt === '*USA' ? 'selected' : ''}>*USA</option><option value="*EUR" ${sessionOptions.datfmt === '*EUR' ? 'selected' : ''}>*EUR</option><option value="*JIS" ${sessionOptions.datfmt === '*JIS' ? 'selected' : ''}>*JIS</option><option value="*MDY" ${sessionOptions.datfmt === '*MDY' ? 'selected' : ''}>*MDY</option><option value="*DMY" ${sessionOptions.datfmt === '*DMY' ? 'selected' : ''}>*DMY</option><option value="*YMD" ${sessionOptions.datfmt === '*YMD' ? 'selected' : ''}>*YMD</option></select></div>
+                                <div class="field"><label for="session-timfmt">${timfmtLabel}</label><select id="session-timfmt" ${sessionControlsDisabled}><option value="">${noOverrideLabel}</option><option value="*HMS" ${sessionOptions.timfmt === '*HMS' ? 'selected' : ''}>*HMS</option><option value="*ISO" ${sessionOptions.timfmt === '*ISO' ? 'selected' : ''}>*ISO</option><option value="*USA" ${sessionOptions.timfmt === '*USA' ? 'selected' : ''}>*USA</option><option value="*EUR" ${sessionOptions.timfmt === '*EUR' ? 'selected' : ''}>*EUR</option><option value="*JIS" ${sessionOptions.timfmt === '*JIS' ? 'selected' : ''}>*JIS</option></select></div>
+                    <div class="row"><button id="reconnect-private-job" ${reconnectButtonDisabled}>${reconnectButtonLabel}</button></div>
+                    ${reconnectStatusBlock}
+                                <div class="small">${sqlJobIdLabel}</div>
+        </div>
+        <div class="section">
+                                <div><strong>${dynamicSettingsTitle}</strong></div>
+          ${sessionReadOnlyNotice}
+                                <div class="field"><label for="session-initial-schema">${schemaLabel}</label><div class="field-inline"><input id="session-initial-schema" type="text" maxlength="128" value="${initialSchemaEscaped}" placeholder="${liblPlaceholder}" ${sessionControlsDisabled}><button type="button" class="reset-button" title="Reset to default value" aria-label="Reset to default value" data-reset-target="session-initial-schema">↻</button></div></div>
+                                <div class="field"><label for="session-initial-path">${pathLabel}</label><div class="field-inline"><textarea id="session-initial-path" rows="3" cols="80" placeholder="${liblPlaceholder}" ${sessionControlsDisabled}>${initialPathEscaped}</textarea><button type="button" class="reset-button" title="Reset to default value" aria-label="Reset to default value" data-reset-target="session-initial-path">↻</button></div></div>
+                                                    <div class="row"><button id="set-session-context-now" ${sessionControlsDisabled}>${applyNowLabel}</button></div>
+                                                    <div class="small">${applyNowHelpText}</div>
+        </div>
+        <div class="section">
+                    <div><strong>${vscode.l10n.t('Result View')}</strong></div>
+                    <div class="row"><label><input id="auto-column-view-single-row" type="checkbox" ${autoColumnViewChecked}> ${autoColumnViewLabel}</label></div>
+                    <div class="small">${autoColumnViewHelpText}</div>
+        </div>
+                <div class="section">
+                    <div class="row actions-row">
+                                    <button id="save-settings">${saveLabel}</button>
+                                    <button id="close-settings-panel" class="secondary">${cancelLabel}</button>
+                    </div>
+        </div>
+        <script>
+          const vscode = acquireVsCodeApi();
+          const radios = document.querySelectorAll('input[name="sqlJobMode"]');
+          for (const radio of radios) {
+            radio.addEventListener('change', () => {
+              const useSharedJob = radio.value === 'shared';
+              vscode.postMessage({ type: 'setSqlJobMode', useSharedJob });
+            });
+          }
+          const naming = document.getElementById('session-naming');
+          const commit = document.getElementById('session-commit');
+          const datfmt = document.getElementById('session-datfmt');
+          const timfmt = document.getElementById('session-timfmt');
+                    const initialSchema = document.getElementById('session-initial-schema');
+                    const initialPath = document.getElementById('session-initial-path');
+                    const autoColumnViewSingleRow = document.getElementById('auto-column-view-single-row');
+                    document.querySelectorAll('[data-reset-target]').forEach((resetButton) => {
+                        resetButton.addEventListener('click', () => {
+                            const target = resetButton.getAttribute('data-reset-target');
+                            const field = target === 'session-initial-schema' ? initialSchema : target === 'session-initial-path' ? initialPath : null;
+                            if (!field) {
+                                return;
+                            }
+                            field.value = '*LIBL';
+                            field.dispatchEvent(new Event('input', { bubbles: true }));
+                        });
+                    });
+                    const collectValues = () => ({
+                        naming: naming ? naming.value : 'sql',
+                        commit: commit ? commit.value : '',
+                        datfmt: datfmt ? datfmt.value : '',
+                        timfmt: timfmt ? timfmt.value : '',
+                        initialSchema: initialSchema ? initialSchema.value : '',
+                        initialPath: initialPath ? initialPath.value : '',
+                        autoColumnViewForSingleRow: autoColumnViewSingleRow ? !!autoColumnViewSingleRow.checked : false
+                    });
+          const reconnect = document.getElementById('reconnect-private-job');
+          reconnect?.addEventListener('click', () => {
+                        if (reconnect.disabled) {
+                            return;
+                        }
+                        reconnect.disabled = true;
+                        reconnect.textContent = '${reconnectingLabel}';
+                        vscode.postMessage({ type: 'reconnectPrivateSqlJob', ...collectValues() });
+          });
+
+                    const setNow = document.getElementById('set-session-context-now');
+                    setNow?.addEventListener('click', () => {
+                        if (setNow.disabled) {
+                            return;
+                        }
+                        vscode.postMessage({ type: 'setSessionContextNow', ...collectValues() });
+                    });
+
+                    const save = document.getElementById('save-settings');
+                    save?.addEventListener('click', () => {
+                        if (save.disabled) {
+                            return;
+                        }
+                        vscode.postMessage({ type: 'saveCmdEntrySettings', ...collectValues() });
+                    });
+
+                    const closePanel = document.getElementById('close-settings-panel');
+                    closePanel?.addEventListener('click', () => {
+                        vscode.postMessage({ type: 'closeCmdEntrySettings' });
+                    });
+        </script>
+        </div></body></html>`;
+    }
+
     private async openCmdEntryHelpPanel(): Promise<void> {
         if (this.cmdEntryHelpPanel) {
             this.cmdEntryHelpPanel.reveal(vscode.ViewColumn.Beside, true);
@@ -2534,7 +2834,7 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
                     <div class="command-row">
                         <label class="sr-only" for="command">CL command</label>
                         <div class="command-input-wrap">
-                            <textarea id="command" spellcheck="false" placeholder="${vscode.l10n.t('Enter CL command or SQL statement')}" aria-label="CL command" rows="2"></textarea>
+                            <textarea id="command" spellcheck="false" placeholder="${vscode.l10n.t('Enter CL command or SQL statement')}" aria-label="CL command" rows="3"></textarea>
                         </div>
                         <button id="run" type="button" aria-label="Run command" data-tooltip="Run command">Run</button>
                         <button id="prompt" type="button" aria-label="Prompt command" data-tooltip="Prompt command">Prompt</button>
@@ -2562,6 +2862,7 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
                                 <button id="menu-clear-sql-history" type="button" role="menuitem">${vscode.l10n.t('Clear SQL Stmt History')}</button>
                                 <button id="menu-clear-log" type="button" role="menuitem">${vscode.l10n.t('Clear All Log Messages')}</button>
                                 <button id="menu-clear-sql-log" type="button" role="menuitem">${vscode.l10n.t('Clear SQL Log Entries')}</button>
+                                <button id="menu-connection-settings" type="button" role="menuitem">${vscode.l10n.t('Connection Settings')}</button>
                                 <button id="menu-use-shared-sql-job" type="button" role="menuitem">${vscode.l10n.t('Use Shared SQL Job')}</button>
                                 <button id="menu-use-private-sql-job" type="button" role="menuitem">${vscode.l10n.t('Use Private SQL Job')}</button>
                                 <button id="menu-start-new-job" type="button" role="menuitem">${vscode.l10n.t('Reconnect Server Job')}</button>

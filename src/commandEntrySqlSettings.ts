@@ -1,11 +1,22 @@
 import * as vscode from 'vscode';
 import type IBMi from '@halcyontech/vscode-ibmi-types/api/IBMi';
 
+export type ConnectionSqlSessionOptions = {
+    naming?: 'sql' | 'system';
+    commit?: string;
+    datfmt?: string;
+    timfmt?: string;
+    initialSchema?: string;
+    initialPath?: string;
+};
+
 export type ConnectionSqlSettings = {
     useSharedJob: boolean;
     limitFetch: boolean;
     fetchRowLimit: number;
     firstPageRowsToFetch: number;
+    autoColumnViewForSingleRow: boolean;
+    sessionOptions: ConnectionSqlSessionOptions;
 };
 
 type ConnectionSqlSettingsOverride = Partial<ConnectionSqlSettings>;
@@ -14,7 +25,11 @@ const PRIMARY_CONNECTION_SETTINGS_KEY = 'cmdEntry';
 type CLCommandSettings = {
     sharedSQLJob?: boolean;
     sharedSqlJob?: boolean;
+    autoColumnViewForSingleRow?: boolean;
+    sqlSessionOptions?: ConnectionSqlSessionOptions;
 };
+
+type SessionContextTarget = 'schema' | 'path';
 
 function buildConnectionKey(connection?: IBMi): string | undefined {
     if (!connection) {
@@ -89,6 +104,125 @@ function readBooleanSetting(value: unknown): boolean | undefined {
     return undefined;
 }
 
+function normalizeSqlOptionValue(value: unknown): string | undefined {
+    if (typeof value !== 'string') {
+        return undefined;
+    }
+
+    const trimmed = value.trim();
+    if (!trimmed) {
+        return undefined;
+    }
+
+    const normalized = trimmed.toUpperCase();
+    return normalized.startsWith('*') ? normalized : `*${normalized}`;
+}
+
+function normalizeSessionContextValueForTarget(value: unknown, target: SessionContextTarget): string | undefined {
+    if (typeof value !== 'string') {
+        return undefined;
+    }
+
+    const trimmed = value.trim();
+    if (!trimmed) {
+        return undefined;
+    }
+
+    let effective = trimmed;
+
+    if (target === 'path' && /^SET\s+PATH\b/i.test(trimmed)) {
+        effective = trimmed.replace(/^SET\s+PATH\s*=?\s*/i, '');
+    } else if (target === 'schema' && /^SET\s+CURRENT\s+SCHEMA\b/i.test(trimmed)) {
+        effective = trimmed.replace(/^SET\s+CURRENT\s+SCHEMA\s*=?\s*/i, '');
+    } else if (target === 'schema' && /^SET\s+SCHEMA\b/i.test(trimmed)) {
+        effective = trimmed.replace(/^SET\s+SCHEMA\s*=?\s*/i, '');
+    }
+
+    const normalized = effective.trim();
+    if (!normalized) {
+        return undefined;
+    }
+
+    return normalized;
+}
+
+export function normalizeSessionContextValue(value: unknown): string | undefined {
+    return normalizeSessionContextValueForTarget(value, 'path');
+}
+
+export function normalizeSchemaSessionContextValue(value: unknown): string | undefined {
+    return normalizeSessionContextValueForTarget(value, 'schema');
+}
+
+function normalizeInitialSchemaValue(value: unknown): string | undefined {
+    const normalized = normalizeSchemaSessionContextValue(value);
+    if (!normalized) {
+        return undefined;
+    }
+
+    return normalized.length <= 128 ? normalized : undefined;
+}
+
+export function getDefaultConnectionSqlSessionOptions(): ConnectionSqlSessionOptions {
+    return {
+        naming: 'sql',
+        commit: undefined,
+        datfmt: undefined,
+        timfmt: undefined,
+        initialSchema: undefined,
+        initialPath: undefined,
+    };
+}
+
+export function getConnectionSqlSessionOptions(connection?: IBMi): ConnectionSqlSessionOptions {
+    const defaults = getDefaultConnectionSqlSessionOptions();
+    const commandSettings = readConnectionCommandSettings(connection);
+    const raw = commandSettings?.sqlSessionOptions ?? {};
+
+    const naming = raw.naming === 'system' ? 'system' : 'sql';
+    return {
+        naming,
+        commit: normalizeSqlOptionValue(raw.commit) ?? defaults.commit,
+        datfmt: normalizeSqlOptionValue(raw.datfmt) ?? defaults.datfmt,
+        timfmt: normalizeSqlOptionValue(raw.timfmt) ?? defaults.timfmt,
+        initialSchema: normalizeInitialSchemaValue(raw.initialSchema) ?? defaults.initialSchema,
+        initialPath: normalizeSessionContextValueForTarget(raw.initialPath, 'path') ?? defaults.initialPath,
+    };
+}
+
+export function toNormalizedSessionContextValue(value: unknown): string | undefined {
+    return normalizeSessionContextValue(value);
+}
+
+export function buildImmediateSessionContextSql(options?: ConnectionSqlSessionOptions): string[] {
+    if (!options) {
+        return [];
+    }
+
+    const statements: string[] = [];
+    const initialSchema = normalizeInitialSchemaValue(options.initialSchema);
+    if (initialSchema) {
+        const schemaValue = initialSchema.toUpperCase() === '*LIBL' ? 'DEFAULT' : initialSchema;
+        statements.push(`SET SCHEMA ${schemaValue}`);
+    }
+
+    const initialPath = normalizeSessionContextValueForTarget(options.initialPath, 'path');
+    if (initialPath) {
+        statements.push(`SET PATH ${initialPath}`);
+    }
+
+    return statements;
+}
+
+export function buildStartupSqlForSessionOptions(options?: ConnectionSqlSessionOptions): string[] {
+    const settings = { ...getDefaultConnectionSqlSessionOptions(), ...(options ?? {}) };
+    const statements: string[] = [];
+
+    statements.push(...buildImmediateSessionContextSql(settings));
+
+    return statements;
+}
+
 export function getDefaultConnectionSqlSettings(): ConnectionSqlSettings {
     const config = vscode.workspace.getConfiguration('clPrompter');
     return {
@@ -105,20 +239,25 @@ export function getDefaultConnectionSqlSettings(): ConnectionSqlSettings {
         firstPageRowsToFetch: config.get<number | undefined>('cmdEntrySqlFirstPageRowsToFetch')
             ?? config.get<number | undefined>('cmdEntrySqlPrefetchRows')
             ?? config.get<number>('commandEntrySqlPrefetchRows', 200),
+        autoColumnViewForSingleRow: config.get<boolean>('cmdEntryAutoColumnViewSingleRow', false),
+        sessionOptions: getDefaultConnectionSqlSessionOptions(),
     };
 }
 
-export function getConnectionSqlSettings(_context: vscode.ExtensionContext, connection?: IBMi): ConnectionSqlSettings {
+export function getConnectionSqlSettings(_context?: vscode.ExtensionContext, connection?: IBMi): ConnectionSqlSettings {
     const defaults = getDefaultConnectionSqlSettings();
     const commandSettings = readConnectionCommandSettings(connection);
     const useSharedOverride = readBooleanSetting(commandSettings?.sharedSQLJob)
         ?? readBooleanSetting(commandSettings?.sharedSqlJob);
+    const autoColumnViewForSingleRow = readBooleanSetting(commandSettings?.autoColumnViewForSingleRow);
 
     return {
         useSharedJob: useSharedOverride ?? defaults.useSharedJob,
         limitFetch: defaults.limitFetch,
         fetchRowLimit: defaults.fetchRowLimit,
         firstPageRowsToFetch: defaults.firstPageRowsToFetch,
+        autoColumnViewForSingleRow: autoColumnViewForSingleRow ?? defaults.autoColumnViewForSingleRow,
+        sessionOptions: getConnectionSqlSessionOptions(connection),
     };
 }
 
@@ -130,9 +269,16 @@ export async function updateConnectionSqlSettings(
     const config = readConnectionConfig(connection);
     if (connection && config) {
         const existing = readConnectionCommandSettings(connection) ?? {};
+        const nextSessionOptions = {
+            ...existing.sqlSessionOptions,
+            ...(partial.sessionOptions ?? {}),
+        };
+
         const next: CLCommandSettings = {
             ...existing,
             ...(typeof partial.useSharedJob === 'boolean' ? { sharedSQLJob: partial.useSharedJob, sharedSqlJob: partial.useSharedJob } : {}),
+            ...(typeof partial.autoColumnViewForSingleRow === 'boolean' ? { autoColumnViewForSingleRow: partial.autoColumnViewForSingleRow } : {}),
+            ...(Object.keys(nextSessionOptions).length > 0 ? { sqlSessionOptions: nextSessionOptions } : {}),
         };
 
         const nextConfig = { ...config, [PRIMARY_CONNECTION_SETTINGS_KEY]: next } as Record<string, unknown>;
@@ -154,6 +300,8 @@ export async function clearConnectionSqlSettings(_context: vscode.ExtensionConte
             const nextCommandSettings = { ...(raw as CLCommandSettings) };
             delete nextCommandSettings.sharedSQLJob;
             delete nextCommandSettings.sharedSqlJob;
+            delete nextCommandSettings.autoColumnViewForSingleRow;
+            delete nextCommandSettings.sqlSessionOptions;
 
             if (Object.keys(nextCommandSettings).length === 0) {
                 delete nextConfig[PRIMARY_CONNECTION_SETTINGS_KEY];

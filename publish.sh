@@ -1,6 +1,10 @@
 #!/bin/bash
 set -euo pipefail
 
+# Publish workaround notes:
+# - Marketplace publish can intermittently hang/reject a burst of attempts after a recent failure.
+# - We add a short delay before the first Marketplace attempt and refresh the VSCE CLI before building the VSIX.
+
 PUBLISH_ONLY=false
 MP_ONLY=false
 OPENVSX_ONLY=false
@@ -113,7 +117,15 @@ else
   fi
 fi
 
-# Compile
+# Ensure the VSCE CLI used to create the VSIX is up to date before packaging.
+echo "🧰 Updating VSCE CLI..."
+if command -v npm >/dev/null 2>&1; then
+  npm install -g @vscode/vsce@latest || echo "⚠️  VSCE update check failed; continuing with the currently installed version."
+fi
+if command -v vsce >/dev/null 2>&1; then
+  vsce --version || true
+fi
+
 echo "🔨 Compiling..."
 npm run build || exit 1
 
@@ -238,6 +250,10 @@ PUBLISH_SUCCESS=true
 if [ "$OPENVSX_ONLY" = true ]; then
   echo "⏭️  Open VSX-only mode enabled: skipping VS Code Marketplace publish."
 else
+  MARKETPLACE_PUBLISH_DELAY_SECONDS="${MARKETPLACE_PUBLISH_DELAY_SECONDS:-12}"
+  echo "⏳ Waiting ${MARKETPLACE_PUBLISH_DELAY_SECONDS}s before starting the VS Code Marketplace publish to reduce transient publish hangs."
+  sleep "$MARKETPLACE_PUBLISH_DELAY_SECONDS"
+
   echo "📤 Publishing to VS Code Marketplace..."
   MAX_PUBLISH_ATTEMPTS="${MAX_PUBLISH_ATTEMPTS:-3}"
   PUBLISH_ATTEMPT_TIMEOUT_SECONDS="${PUBLISH_ATTEMPT_TIMEOUT_SECONDS:-180}"

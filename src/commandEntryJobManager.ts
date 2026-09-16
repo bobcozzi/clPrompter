@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import IBMi from '@halcyontech/vscode-ibmi-types/api/IBMi';
-import { getConnectionSqlSettings, getDefaultConnectionSqlSettings } from './commandEntrySqlSettings';
+import { buildStartupSqlForSessionOptions, getConnectionSqlSessionOptions, getConnectionSqlSettings, getDefaultConnectionSqlSettings } from './commandEntrySqlSettings';
 
 function isCommandEntryDebugLoggingEnabled(): boolean {
     const config = vscode.workspace.getConfiguration('clPrompter');
@@ -148,6 +148,8 @@ type MapepireLike = {
     newJob: (connection: IBMi, options?: { jdbc?: unknown; javaPath?: string }) => Promise<SqlJobLike>;
 };
 
+type JdbcOptionsLike = Record<string, unknown>;
+
 type JobExecuteSignature = 'query.executeRows' | 'query.execute' | 'options.rows' | 'legacy.positionalRows' | 'default.noRowsOption' | 'shared.connection.runSQL';
 
 export interface SqlContinuationTuple {
@@ -220,6 +222,111 @@ export interface EffectiveJobConfig {
     libraryList: string[];
 }
 
+export type SqlNamingMode = 'sql' | 'system';
+
+export interface ManagedSqlSessionState {
+    jobId?: string;
+    status: 'ready' | 'busy' | 'ended' | 'closed';
+    namingMode: SqlNamingMode;
+    currentSchema?: string;
+    defaultLibrary?: string;
+    libraryList: string[];
+    startupSql: string[];
+    connectionKey?: string;
+    lastUpdatedAt?: number;
+}
+
+export function resolveSqlNamingMode(value?: unknown): SqlNamingMode {
+    const normalized = String(value ?? '').trim().toLowerCase();
+    if (normalized === 'system') {
+        return 'system';
+    }
+    return 'sql';
+}
+
+export function collectStartupSqlHooks(source: unknown): string[] {
+    const readArray = (candidate: unknown): string[] => {
+        if (!Array.isArray(candidate)) {
+            return [];
+        }
+
+        return candidate
+            .map((entry) => String(entry ?? '').trim())
+            .filter((entry) => entry.length > 0);
+    };
+
+    const visited = new Set<string>();
+    const result: string[] = [];
+    const push = (candidate: unknown): void => {
+        if (!candidate) {
+            return;
+        }
+
+        const entries = Array.isArray(candidate) ? candidate : [candidate];
+        for (const entry of entries) {
+            if (typeof entry !== 'string') {
+                continue;
+            }
+            const trimmed = entry.trim();
+            if (!trimmed || visited.has(trimmed)) {
+                continue;
+            }
+            visited.add(trimmed);
+            result.push(trimmed);
+        }
+    };
+
+    const root = source as Record<string, unknown> | undefined;
+    if (root && typeof root === 'object') {
+        push(root.startupSql);
+        push(root.initSql);
+        push((root as Record<string, unknown>).cmdEntry && typeof (root as Record<string, unknown>).cmdEntry === 'object'
+            ? ((root as Record<string, unknown>).cmdEntry as Record<string, unknown>).startupSql
+            : undefined);
+        push((root as Record<string, unknown>).cmdEntry && typeof (root as Record<string, unknown>).cmdEntry === 'object'
+            ? ((root as Record<string, unknown>).cmdEntry as Record<string, unknown>).initSql
+            : undefined);
+        push((root as Record<string, unknown>).clPrompter && typeof (root as Record<string, unknown>).clPrompter === 'object'
+            ? ((root as Record<string, unknown>).clPrompter as Record<string, unknown>).startupSql
+            : undefined);
+        push((root as Record<string, unknown>).clPrompter && typeof (root as Record<string, unknown>).clPrompter === 'object'
+            ? ((root as Record<string, unknown>).clPrompter as Record<string, unknown>).initSql
+            : undefined);
+        push((root as Record<string, unknown>).clprompter && typeof (root as Record<string, unknown>).clprompter === 'object'
+            ? ((root as Record<string, unknown>).clprompter as Record<string, unknown>).startupSql
+            : undefined);
+        push((root as Record<string, unknown>).clprompter && typeof (root as Record<string, unknown>).clprompter === 'object'
+            ? ((root as Record<string, unknown>).clprompter as Record<string, unknown>).initSql
+            : undefined);
+        const nestedCmdEntry = (root as Record<string, unknown>).cmdEntry;
+        if (nestedCmdEntry && typeof nestedCmdEntry === 'object') {
+            push((nestedCmdEntry as Record<string, unknown>).startupSql);
+            push((nestedCmdEntry as Record<string, unknown>).initSql);
+        }
+        const nestedClPrompter = (root as Record<string, unknown>).clPrompter;
+        if (nestedClPrompter && typeof nestedClPrompter === 'object') {
+            const clPrompterEntry = nestedClPrompter as Record<string, unknown>;
+            push(clPrompterEntry.startupSql);
+            push(clPrompterEntry.initSql);
+            const deeper = clPrompterEntry.cmdEntry;
+            if (deeper && typeof deeper === 'object') {
+                push((deeper as Record<string, unknown>).startupSql);
+                push((deeper as Record<string, unknown>).initSql);
+            }
+        }
+    }
+
+    const directEntries = readArray(source);
+    for (const entry of directEntries) {
+        if (!visited.has(entry)) {
+            visited.add(entry);
+            result.push(entry);
+        }
+    }
+
+    return result;
+}
+
 type DedicatedRouteDecision = {
     dedicatedEnabled: boolean;
     dedicatedEnabledReason: string;
@@ -247,6 +354,12 @@ export class CommandEntryJobManager {
     private readonly observedSharedJobIds = new Map<string, string | undefined>();
     private readonly startupReconnectCompleted = new Set<string>();
     private status: DedicatedJobState['status'] = 'ended';
+    private managedSession: ManagedSqlSessionState = {
+        status: 'ended',
+        namingMode: 'sql',
+        libraryList: [],
+        startupSql: []
+    };
 
     constructor(
         private readonly output?: vscode.OutputChannel,
@@ -582,6 +695,112 @@ export class CommandEntryJobManager {
             jobId: this.dedicatedJobId,
             status: this.dedicatedJobId ? this.status : 'ended'
         };
+    }
+
+    getManagedSessionState(connection?: IBMi): ManagedSqlSessionState {
+        const resolvedConnectionKey = connection ? this.buildConnectionKey(connection) : this.connectionKey;
+        const base: ManagedSqlSessionState = {
+            ...this.managedSession,
+            connectionKey: resolvedConnectionKey ?? this.managedSession.connectionKey,
+            jobId: this.dedicatedJobId ?? this.managedSession.jobId,
+            status: this.status ?? this.managedSession.status,
+            namingMode: this.managedSession.namingMode ?? 'sql',
+            libraryList: this.managedSession.libraryList ?? [],
+            startupSql: this.managedSession.startupSql ?? []
+        };
+
+        if (!base.defaultLibrary && connection) {
+            const defaultConfig = this.connectionConfigFallback(connection);
+            base.defaultLibrary = defaultConfig.currentLibrary;
+        }
+
+        if (base.libraryList.length === 0 && connection) {
+            const defaultConfig = this.connectionConfigFallback(connection);
+            base.libraryList = defaultConfig.libraryList;
+        }
+
+        if (!base.currentSchema && connection) {
+            const schema = this.managedSession.currentSchema ?? this.getCurrentSchemaFromConnection(connection);
+            base.currentSchema = schema;
+        }
+
+        if (!base.jobId && connection) {
+            base.jobId = this.getObservedSharedJobId(connection) ?? sharedSqlJobIdForDisplay(connection);
+        }
+
+        this.managedSession = base;
+        return base;
+    }
+
+    private getCurrentSchemaFromConnection(connection?: IBMi): string | undefined {
+        if (!connection) {
+            return undefined;
+        }
+
+        const config = (connection as any).getConfig?.() as Record<string, unknown> | undefined;
+        const currentSchema = config && typeof config === 'object'
+            ? (config.currentSchema ?? config.current_schema ?? config.defaultSchema ?? config.default_schema)
+            : undefined;
+        return typeof currentSchema === 'string' && currentSchema.trim().length > 0
+            ? currentSchema.trim().toUpperCase()
+            : undefined;
+    }
+
+    private async resolveCurrentSchema(connection: IBMi): Promise<string | undefined> {
+        try {
+            const rows = await this.runSQL(connection, 'VALUES CURRENT SCHEMA', { skipSyntaxCheck: true });
+            const firstRow = rows?.[0];
+            const rawValue = firstRow ? Object.values(firstRow)[0] : undefined;
+            const value = typeof rawValue === 'string' ? rawValue.trim() : String(rawValue ?? '').trim();
+            return value ? value.toUpperCase() : undefined;
+        } catch {
+            return this.getCurrentSchemaFromConnection(connection);
+        }
+    }
+
+    private getDeclaredStartupSql(connection: IBMi): string[] {
+        const config = (connection as any)?.getConfig?.() as Record<string, unknown> | undefined;
+        const declared = collectStartupSqlHooks(config ?? {});
+        const sessionOptions = getConnectionSqlSessionOptions(connection);
+        const optionStatements = buildStartupSqlForSessionOptions(sessionOptions);
+        return [...declared, ...optionStatements].filter((statement) => statement.trim().length > 0);
+    }
+
+    private async runStartupSqlHooks(connection: IBMi): Promise<void> {
+        const startupSql = this.getDeclaredStartupSql(connection);
+        if (startupSql.length === 0) {
+            this.managedSession.startupSql = [];
+            return;
+        }
+
+        this.managedSession.startupSql = startupSql;
+        for (const statement of startupSql) {
+            try {
+                await this.runSQL(connection, statement, { skipSyntaxCheck: true });
+            } catch (error) {
+                this.output?.appendLine(`[Cmd Entry][StartupSql] failed statement=${statement.substring(0, 120)} error=${error instanceof Error ? error.message : String(error)}`);
+            }
+        }
+    }
+
+    async refreshManagedSession(connection: IBMi): Promise<ManagedSqlSessionState> {
+        const config = await this.getConfig(connection);
+        const currentSchema = await this.resolveCurrentSchema(connection);
+        const namingMode = resolveSqlNamingMode((connection as any)?.sqlJob?.getNamingMode?.() ?? (connection as any)?.getConfig?.()?.sqlNamingMode ?? (connection as any)?.getConfig?.()?.namingMode);
+        const state: ManagedSqlSessionState = {
+            jobId: this.dedicatedJobId ?? this.getObservedSharedJobId(connection) ?? sharedSqlJobIdForDisplay(connection),
+            status: this.job ? this.status : 'ended',
+            namingMode,
+            currentSchema: currentSchema ?? this.getCurrentSchemaFromConnection(connection),
+            defaultLibrary: config.currentLibrary,
+            libraryList: config.libraryList,
+            startupSql: this.managedSession.startupSql ?? this.getDeclaredStartupSql(connection),
+            connectionKey: this.buildConnectionKey(connection),
+            lastUpdatedAt: Date.now()
+        };
+
+        this.managedSession = state;
+        return state;
     }
 
     getDisplayJobId(connection?: IBMi): string | undefined {
@@ -1491,14 +1710,83 @@ export class CommandEntryJobManager {
         }
 
         this.debugLog('[Cmd Entry] Creating new Mapepire job...');
-        const jdbc = connection.getSqlJobJDBCOptions();
+        const jdbc = this.buildJdbcOptionsForDedicatedJob(connection);
         this.job = await mapepire.newJob(connection, { jdbc });
         this.connectionKey = key;
         this.status = 'ready';
 
+        try {
+            await this.runStartupSqlHooks(connection);
+        } catch (error) {
+            this.output?.appendLine(`[Cmd Entry][StartupSql] bootstrap failed error=${error instanceof Error ? error.message : String(error)}`);
+        }
+
         this.debugLog('[Cmd Entry] Reading private SQL job ID...');
         this.dedicatedJobId = await this.readDedicatedJobId(connection);
+        void this.refreshManagedSession(connection);
         this.output?.appendLine(`[Cmd Entry] Started private SQL job ${this.dedicatedJobId || '<unknown>'}.`);
+    }
+
+    private buildJdbcOptionsForDedicatedJob(connection: IBMi): JdbcOptionsLike {
+        const jdbc = { ...(connection.getSqlJobJDBCOptions() as JdbcOptionsLike || {}) };
+        const sessionOptions = getConnectionSqlSessionOptions(connection);
+
+        jdbc.naming = sessionOptions.naming === 'system' ? 'system' : 'sql';
+
+        const dateFormatMap: Record<string, string> = {
+            '*ISO': 'iso',
+            '*USA': 'usa',
+            '*EUR': 'eur',
+            '*JIS': 'jis',
+            '*MDY': 'mdy',
+            '*DMY': 'dmy',
+            '*YMD': 'ymd',
+        };
+        const timeFormatMap: Record<string, string> = {
+            '*HMS': 'hms',
+            '*ISO': 'iso',
+            '*USA': 'usa',
+            '*EUR': 'eur',
+            '*JIS': 'jis',
+        };
+
+        const mappedDate = sessionOptions.datfmt ? dateFormatMap[sessionOptions.datfmt] : undefined;
+        if (mappedDate) {
+            jdbc['date format'] = mappedDate;
+        }
+
+        const mappedTime = sessionOptions.timfmt ? timeFormatMap[sessionOptions.timfmt] : undefined;
+        if (mappedTime) {
+            jdbc['time format'] = mappedTime;
+        }
+
+        const commit = sessionOptions.commit;
+        if (commit) {
+            switch (commit) {
+                case '*AUTO':
+                    jdbc['auto commit'] = true;
+                    break;
+                case '*NONE':
+                    jdbc['auto commit'] = false;
+                    jdbc['transaction isolation'] = 'none';
+                    break;
+                case '*RR':
+                    jdbc['auto commit'] = true;
+                    jdbc['true autocommit'] = true;
+                    jdbc['transaction isolation'] = 'repeatable read';
+                    break;
+                case '*CHG':
+                case '*CS':
+                    jdbc['auto commit'] = true;
+                    jdbc['true autocommit'] = true;
+                    jdbc['transaction isolation'] = 'read committed';
+                    break;
+                default:
+                    break;
+            }
+        }
+
+        return jdbc;
     }
 
     private async maybeForceStartupReconnect(connection: IBMi, key: string): Promise<void> {

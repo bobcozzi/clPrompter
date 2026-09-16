@@ -115,10 +115,13 @@ export function checkSQLBeforePaging(sql: string): void {
 }
 
 export async function checkSQLForExecution(
-    connection: IBMi,
+    _connection: IBMi,
     sql: string,
-    sqlJobRunner?: SqlSyntaxCheckRunner
+    _sqlJobRunner?: SqlSyntaxCheckRunner
 ): Promise<void> {
+    // Runtime PREPARE-based validation was deprecated after the host started returning
+    // column metadata in the result payload. Local sanity checks are sufficient here;
+    // they catch malformed SQL without firing a backend PREPARE against the connection.
     checkSQLBeforePaging(sql);
 
     const statement = stripTrailingSemicolon(sql).trim();
@@ -126,53 +129,6 @@ export async function checkSQLForExecution(
         return;
     }
 
-    const preparedName = `CLPROMPTER_SQLCHK_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`.toUpperCase();
-    let prepareSucceeded = false;
-    const runOnThisConnection = async (sqlToCheck: string): Promise<void> => {
-        try {
-            await connection.runSQL(sqlToCheck, { bindings: [statement] });
-            prepareSucceeded = true;
-        } catch (error) {
-            if (isPrepareNotAllowedError(error)) {
-                return;
-            }
-            const message = error instanceof Error ? error.message : String(error);
-            throw new Error(`SQL syntax check failed before execution: ${message}`);
-        }
-    };
-
-    const runOnSelectedJob = async (): Promise<void> => {
-        if (!sqlJobRunner) {
-            await runOnThisConnection(`PREPARE ${preparedName} FROM ?`);
-            return;
-        }
-
-        try {
-            await sqlJobRunner.runSQL(connection, `PREPARE ${preparedName} FROM ?`, { bindings: [statement] });
-            prepareSucceeded = true;
-        } catch (error) {
-            if (isPrepareNotAllowedError(error)) {
-                return;
-            }
-            const message = error instanceof Error ? error.message : String(error);
-            throw new Error(`SQL syntax check failed before execution: ${message}`);
-        }
-    };
-
-    try {
-        await runOnSelectedJob();
-    } finally {
-        if (!prepareSucceeded) {
-            return;
-        }
-        try {
-            if (sqlJobRunner) {
-                await sqlJobRunner.runSQL(connection, `DEALLOCATE PREPARE ${preparedName}`);
-            } else {
-                await connection.runSQL(`DEALLOCATE PREPARE ${preparedName}`);
-            }
-        } catch {
-            // Ignore cleanup failures; prepared names are transient and the database will clean on disconnect.
-        }
-    }
+    // No network round trip is performed here. The SQL execution path itself remains the
+    // authoritative validation mechanism, while the host payload supplies column metadata.
 }

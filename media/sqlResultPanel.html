@@ -65,6 +65,13 @@
             flex: 0 0 auto;
         }
 
+        .result-header-actions {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            flex: 0 0 auto;
+        }
+
         .meta {
             margin: 0 0 10px;
             color: var(--muted);
@@ -86,6 +93,53 @@
             border-radius: 6px;
             overflow: auto;
             max-height: calc(100vh - 170px);
+        }
+
+        .single-row-wrap {
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            overflow: auto;
+            max-height: calc(100vh - 170px);
+            background: color-mix(in srgb, var(--bg) 96%, var(--fg) 4%);
+        }
+
+        .single-row-table {
+            width: max-content;
+            min-width: 0;
+            border-collapse: collapse;
+            table-layout: auto;
+        }
+
+        .single-row-table th,
+        .single-row-table td {
+            padding: 6px 8px;
+            vertical-align: top;
+            border-bottom: 1px solid var(--col-separator);
+            white-space: pre-wrap;
+            word-break: break-word;
+        }
+
+        .single-row-table th {
+            width: auto;
+            text-align: left;
+            font-weight: 600;
+            background: color-mix(in srgb, var(--bg) 90%, var(--fg) 10%);
+            position: sticky;
+            top: 0;
+            z-index: 2;
+            cursor: pointer;
+            user-select: none;
+        }
+
+        .single-row-table th.sortable-col.is-sorted::after {
+            content: ' \25B2';
+            font-size: 10px;
+            opacity: 0.9;
+            margin-left: 4px;
+        }
+
+        .single-row-table th.sortable-col.is-sorted.is-desc::after {
+            content: ' \25BC';
         }
 
         .paging-toolbar {
@@ -176,7 +230,7 @@
         }
 
         table {
-            width: max-content;
+            width: 100%;
             min-width: 100%;
             border-collapse: collapse;
             table-layout: auto;
@@ -260,7 +314,7 @@
             vertical-align: top;
             white-space: pre-wrap;
             word-break: break-word;
-            max-width: 440px;
+            max-width: 240px;
         }
 
         tbody td.sql-null-cell {
