@@ -913,6 +913,32 @@
         updatePageButtons();
     }
 
+    var INTEGER_TEXT_PATTERN = /^[-+]?\d+$/;
+
+    function tryParseBigInt(text) {
+        if (typeof text !== 'string') {
+            return null;
+        }
+
+        var trimmed = text.trim();
+        if (!INTEGER_TEXT_PATTERN.test(trimmed)) {
+            return null;
+        }
+
+        try {
+            var parsed = BigInt(trimmed);
+            var max = BigInt(Number.MAX_SAFE_INTEGER);
+            var min = BigInt(Number.MIN_SAFE_INTEGER);
+            if (parsed > max || parsed < min) {
+                return parsed;
+            }
+        } catch (_bigIntError) {
+            return null;
+        }
+
+        return null;
+    }
+
     function normalizeCell(cell) {
         if (!cell || typeof cell !== 'object') {
             return { kind: 'text', value: '' };
@@ -925,7 +951,14 @@
             var n = Number(cell.sortNumber);
             return isFinite(n) ? { kind: sortKind, value: n } : { kind: 'null', value: '' };
         }
-        return { kind: 'text', value: String(cell.sortText || '').toUpperCase() };
+
+        var rawText = String(cell.sortText || '');
+        var asBigInt = tryParseBigInt(rawText);
+        if (asBigInt !== null) {
+            return { kind: 'bigint', value: asBigInt };
+        }
+
+        return { kind: 'text', value: rawText.toUpperCase() };
     }
 
     function compareForSort(leftCell, rightCell) {
@@ -940,6 +973,30 @@
             if (left.value < right.value) { return -1; }
             if (left.value > right.value) { return 1; }
             return 0;
+        }
+
+        if (typeof left.value === 'bigint' && typeof right.value === 'bigint') {
+            if (left.value < right.value) { return -1; }
+            if (left.value > right.value) { return 1; }
+            return 0;
+        }
+
+        if (typeof left.value === 'bigint' && typeof right.value === 'number') {
+            if (Number.isInteger(right.value) && Number.isSafeInteger(right.value)) {
+                var rightBig = BigInt(right.value);
+                if (left.value < rightBig) { return -1; }
+                if (left.value > rightBig) { return 1; }
+                return 0;
+            }
+        }
+
+        if (typeof left.value === 'number' && typeof right.value === 'bigint') {
+            if (Number.isInteger(left.value) && Number.isSafeInteger(left.value)) {
+                var leftBig = BigInt(left.value);
+                if (leftBig < right.value) { return -1; }
+                if (leftBig > right.value) { return 1; }
+                return 0;
+            }
         }
 
         var lt = String(left.value);

@@ -429,13 +429,14 @@ function buildClientPayload(result: SqlResultPayload, l10n: SqlResultPanelL10n) 
             const profile = profiles[column];
             const alignClass = shouldRightAlign(profile.kind) ? 'align-right' : '';
             const cellClass = (row[column] === null || row[column] === undefined) ? 'sql-null-cell' : '';
+            const sortKeys = buildSortKeys(row[column], profile.kind);
             return {
                 alignClass,
                 cellClass,
                 html: formatCell(row[column], profile),
-                sortKind: profile.kind,
-                sortText: sortableTextValue(row[column]),
-                sortNumber: sortableNumericValue(row[column], profile.kind)
+                sortKind: sortKeys.sortKind,
+                sortText: sortKeys.sortText,
+                sortNumber: sortKeys.sortNumber
             };
         });
     });
@@ -524,6 +525,66 @@ function sortableNumericValue(value: unknown, kind: ColumnKind): number | undefi
     }
 
     return undefined;
+}
+
+interface CellSortKeys {
+    sortKind: ColumnKind;
+    sortText: string;
+    sortNumber: number | undefined;
+}
+
+const INTEGER_TEXT_PATTERN = /^[-+]?\d+$/;
+
+function shouldSortNumericTextAsText(text: string): boolean {
+    if (!INTEGER_TEXT_PATTERN.test(text)) {
+        return false;
+    }
+
+    try {
+        const parsed = BigInt(text);
+        const max = BigInt(Number.MAX_SAFE_INTEGER);
+        const min = BigInt(Number.MIN_SAFE_INTEGER);
+        return parsed > max || parsed < min;
+    } catch {
+        return true;
+    }
+}
+
+function buildSortKeys(value: unknown, preferredKind: ColumnKind): CellSortKeys {
+    const sortText = sortableTextValue(value);
+
+    if (preferredKind !== 'number') {
+        return {
+            sortKind: preferredKind,
+            sortText,
+            sortNumber: sortableNumericValue(value, preferredKind)
+        };
+    }
+
+    if (typeof value === 'string') {
+        const trimmed = value.trim();
+        if (shouldSortNumericTextAsText(trimmed)) {
+            return {
+                sortKind: 'text',
+                sortText,
+                sortNumber: undefined
+            };
+        }
+    }
+
+    if (typeof value === 'number' && Number.isInteger(value) && !Number.isSafeInteger(value)) {
+        return {
+            sortKind: 'text',
+            sortText,
+            sortNumber: undefined
+        };
+    }
+
+    return {
+        sortKind: preferredKind,
+        sortText,
+        sortNumber: sortableNumericValue(value, preferredKind)
+    };
 }
 
 function normalizeColumnKey(value: string | undefined): string {
