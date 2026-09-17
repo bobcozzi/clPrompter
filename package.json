@@ -2,7 +2,7 @@
   "name": "clprompter",
   "displayName": "%displayName%",
   "description": "%description%",
-  "version": "1.0.37",
+  "version": "1.0.38",
   "author": {
     "name": "Bob Cozzi",
     "url": "https://github.com/bobcozzi"
@@ -37,6 +37,7 @@
     "onLanguage:bnd",
     "onCommand:clPrompter.clPrompter",
     "onView:clprompter.commandEntryView.main",
+    "onView:clprompter.codeSnippetManagerView",
     "onCommand:clprompter.openCommandEntry",
     "onCommand:clprompter.manageCodeSnippets"
   ],
@@ -603,7 +604,7 @@
           "id": "clprompter.codeSnippetManagerView",
           "name": "%contributes.views.ibmi-explorer.0.name%",
           "icon": "images/clPrompter.png",
-          "when": "clprompter.commandEntrySnippetsAvailable"
+          "when": "clprompter.connected"
         }
       ],
       "clprompterCommandEntryMain": [

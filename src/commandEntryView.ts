@@ -985,6 +985,7 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
 
         const sourceType = options.sourceType ?? 'user';
         const isSql = isSqlCommandText(command);
+        const snippetsLogFailuresOnly = sourceType === 'snippet';
         const shouldAddToHistory = options.logToHistory ?? this.shouldAddToHistory(sourceType, isSql);
         const shouldAddToCommandEntryLog = options.logToCommandEntryLog ?? this.shouldAddToCommandEntryLog(sourceType, isSql);
         const commandForRecall = ensureSqlPrefixForRecall(command, isSql);
@@ -1000,7 +1001,7 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
                 type: 'execution',
                 execution: this.failed(command, mode, 'Not connected to IBM i, or the Code for IBM i SQL runner is unavailable.'),
                 addToHistory: shouldAddToHistory,
-                addToCommandEntryLog: shouldAddToCommandEntryLog
+                addToCommandEntryLog: snippetsLogFailuresOnly ? true : shouldAddToCommandEntryLog
             });
             return;
         }
@@ -1154,17 +1155,20 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
             if (executionForPost.sqlResult) {
                 showSqlResultPanel(executionForPost.sqlResult);
             }
+            const addToCommandEntryLog = snippetsLogFailuresOnly
+                ? Boolean(execution.failure)
+                : shouldAddToCommandEntryLog;
             this.post({
                 type: 'execution',
                 execution: executionForPost,
                 addToHistory: shouldAddToHistory,
-                addToCommandEntryLog: shouldAddToCommandEntryLog
+                addToCommandEntryLog
             });
             if (isSql) {
                 this.post({ type: 'focusInput' });
                 setTimeout(() => this.post({ type: 'focusInput' }), 75);
             }
-            if (isSql && !shouldAddToCommandEntryLog) {
+            if (isSql && !addToCommandEntryLog && !snippetsLogFailuresOnly) {
                 this.post({ type: 'notice', message: vscode.l10n.t('SQL execution was run, but logging to Command Entry Log is disabled by settings.') });
             }
         } finally {
@@ -2246,11 +2250,11 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
     }
 
     private shouldAddToCommandEntryLog(sourceType: 'user' | 'snippet' = 'user', isSql: boolean = false): boolean {
-        const config = vscode.workspace.getConfiguration('clPrompter');
-
         if (sourceType === 'snippet') {
-            return config.get<boolean>('cmdEntryRecordSnippetsToLog', false);
+            return false;
         }
+
+        const config = vscode.workspace.getConfiguration('clPrompter');
         if (isSql) {
             return config.get<boolean>('cmdEntryRecordSqlStmtsToLog', false);
         }

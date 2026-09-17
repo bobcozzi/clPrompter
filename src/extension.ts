@@ -341,10 +341,6 @@ export async function activate(context: vscode.ExtensionContext) {
         await vscode.commands.executeCommand('setContext', 'clprompter.commandEntryPanelAvailable', available);
     };
 
-    const setCommandEntrySnippetsAvailable = async (available: boolean): Promise<void> => {
-        await vscode.commands.executeCommand('setContext', 'clprompter.commandEntrySnippetsAvailable', available);
-    };
-
     const revealCommandEntryContainer = async (): Promise<void> => {
         await vscode.commands.executeCommand('workbench.view.extension.clprompterCommandEntryMain');
     };
@@ -361,7 +357,6 @@ export async function activate(context: vscode.ExtensionContext) {
     await vscode.commands.executeCommand('setContext', 'clprompter.ibmiLoaded', false);
     await vscode.commands.executeCommand('setContext', 'clprompter.connected', false);
     await setCommandEntryPanelAvailable(false);
-    await setCommandEntrySnippetsAvailable(false);
 
     const isCommandEntryDisplayEnabled = (): boolean => {
         const config = vscode.workspace.getConfiguration('clPrompter');
@@ -376,9 +371,7 @@ export async function activate(context: vscode.ExtensionContext) {
         // Mode A: auto-display when enabled and connected.
         // Mode B: when disabled, display only after explicit user open command.
         const shouldShowPanel = displayEnabled ? hasConnection : touchedThisSession;
-        const shouldShowSnippets = displayEnabled ? hasConnection : touchedThisSession;
         await setCommandEntryPanelAvailable(shouldShowPanel);
-        await setCommandEntrySnippetsAvailable(shouldShowSnippets);
     };
 
     const prioritizeCommandEntryPanelOnConnect = async (): Promise<void> => {
@@ -387,13 +380,11 @@ export async function activate(context: vscode.ExtensionContext) {
         const touchedThisSession = context.workspaceState.get<boolean>('clprompter.commandEntryTouchedThisSession', false);
 
         const shouldShowPanel = displayEnabled ? hasConnection : touchedThisSession;
-        const shouldShowSnippets = displayEnabled ? hasConnection : touchedThisSession;
 
         // Show the Command Entry panel first so the main UX appears ASAP after connect.
         await setCommandEntryPanelAvailable(shouldShowPanel);
 
         const timer = setTimeout(() => {
-            void setCommandEntrySnippetsAvailable(shouldShowSnippets);
             void applyCommandEntryStartupVisibility();
         }, 120);
         context.subscriptions.push({ dispose: () => clearTimeout(timer) });
@@ -483,7 +474,6 @@ export async function activate(context: vscode.ExtensionContext) {
         vscode.commands.registerCommand('clprompter.closeCommandEntry', async () => {
             await context.workspaceState.update('clprompter.commandEntryTouchedThisSession', false);
             await setCommandEntryPanelAvailable(false);
-            await setCommandEntrySnippetsAvailable(false);
             await vscode.commands.executeCommand('workbench.action.closePanel');
         }),
         vscode.commands.registerCommand('clprompter.runCommandEntry', () => commandEntry.requestRun()),

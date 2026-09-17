@@ -2,7 +2,11 @@
 
 All notable changes to this project are documented in this file.
 
-## [Preview of CL Command Entry]
+## [1.0.38] - 2026-09-17
+
+### What's Fixed
+- Bug fixes and enhancements to the Cmd Entry Code Snippets tree.
+- Bug fixes and ehhancements to logging Code Snippets only when an error occurs.
 
 ## [1.0.37] - 2026-09-16
 

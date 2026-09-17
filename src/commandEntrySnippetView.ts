@@ -556,64 +556,14 @@ export function registerCodeSnippetManagerView(
         showCollapseAll: true
     });
 
+    const removeViewCommand = `workbench.actions.treeView.${viewId}.removeView`;
+
     const hideView = async (): Promise<void> => {
-        const staticCandidates = [
-            `workbench.actions.treeView.${viewId}.removeView`,
-            `workbench.actions.treeView.${viewId}.hide`,
-            `workbench.actions.treeView.${viewId}.toggleVisibility`,
-            'workbench.action.toggleView',
-            'workbench.action.toggleVisibility',
-            'workbench.actions.treeView.toggleVisibility'
-        ];
-
-        const commands = await vscode.commands.getCommands(true);
-        const dynamicCandidates = commands
-            .filter((command) =>
-                command.includes('treeView')
-                && (command.includes('removeView') || command.includes('hide') || command.includes('toggleVisibility'))
-                && (command.includes(viewId) || command.includes('codeSnippetManagerView') || command.includes('clprompter'))
-            )
-            .sort();
-
-        const candidates = [...new Set([...staticCandidates, ...dynamicCandidates])];
-
-        const runWithVariants = async (command: string): Promise<boolean> => {
-            const variants: unknown[][] = [
-                [],
-                [viewId],
-                [{ id: viewId }],
-                [{ viewId }],
-                [{ treeViewId: viewId }],
-                [viewId, false],
-                [viewId, true],
-                [{ id: viewId }, false],
-                [{ id: viewId }, true]
-            ];
-
-            for (const args of variants) {
-                try {
-                    await vscode.commands.executeCommand(command, ...args);
-                } catch {
-                    continue;
-                }
-
-                if (!view.visible) {
-                    return true;
-                }
-            }
-
-            return false;
-        };
-
-        for (const command of candidates) {
-            const hid = await runWithVariants(command);
-            if (hid) {
-                return;
-            }
+        try {
+            await vscode.commands.executeCommand(removeViewCommand);
+        } catch {
+            void vscode.window.showInformationMessage(vscode.l10n.t('Unable to hide Command Entry Code Snippets from this build. Use VS Code View controls.'));
         }
-
-        // Keep behavior non-breaking on VS Code builds where no view-hide command is exposed.
-        void vscode.window.showInformationMessage(vscode.l10n.t('Unable to hide Command Entry Code Snippets from this build. Use VS Code View controls.'));
     };
 
     const showView = async (): Promise<void> => {
