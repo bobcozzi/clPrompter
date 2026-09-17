@@ -2,7 +2,7 @@
   "name": "clprompter",
   "displayName": "%displayName%",
   "description": "%description%",
-  "version": "1.0.38",
+  "version": "1.0.39",
   "author": {
     "name": "Bob Cozzi",
     "url": "https://github.com/bobcozzi"
@@ -131,7 +131,7 @@
         "command": "clprompter.codeSnippet.run",
         "category": "%contributes.commands.21.category%",
         "title": "%contributes.commands.21.title%",
-        "icon": "$(play)"
+        "icon": "$(debug-start)"
       },
       {
         "command": "clprompter.codeSnippet.viewFullStatement",

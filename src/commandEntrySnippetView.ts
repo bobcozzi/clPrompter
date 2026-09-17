@@ -544,11 +544,15 @@ function getAvailableGroups(commandEntry: CommandEntryViewProvider): string[] {
 
 export function registerCodeSnippetManagerView(
     context: vscode.ExtensionContext,
-    commandEntry: CommandEntryViewProvider
+    commandEntry: CommandEntryViewProvider,
+    debugLog?: (message: string) => void
 ): vscode.Disposable {
     const viewId = 'clprompter.codeSnippetManagerView';
     const provider = new CodeSnippetTreeDataProvider(commandEntry);
     const dnd = new CodeSnippetDragAndDropController(commandEntry, provider);
+    const log = (message: string): void => {
+        debugLog?.(`[Cmd Entry][SnippetTree] ${message}`);
+    };
 
     const view = vscode.window.createTreeView(viewId, {
         treeDataProvider: provider,
@@ -556,20 +560,27 @@ export function registerCodeSnippetManagerView(
         showCollapseAll: true
     });
 
+    log(`created view=${viewId} initialSnippets=${provider.getCache().length}`);
+
     const removeViewCommand = `workbench.actions.treeView.${viewId}.removeView`;
 
     const hideView = async (): Promise<void> => {
+        log(`hide requested visible=${view.visible}`);
         try {
             await vscode.commands.executeCommand(removeViewCommand);
+            log('hide command completed');
         } catch {
+            log('hide command failed in this VS Code build');
             void vscode.window.showInformationMessage(vscode.l10n.t('Unable to hide Command Entry Code Snippets from this build. Use VS Code View controls.'));
         }
     };
 
     const showView = async (): Promise<void> => {
+        log(`show requested visible=${view.visible}`);
         provider.refresh();
         await vscode.commands.executeCommand('workbench.view.extension.ibmi-explorer');
         await vscode.commands.executeCommand('workbench.action.openView', viewId, false);
+        log('show command completed');
     };
 
     const refresh = () => provider.refresh();
@@ -600,6 +611,7 @@ export function registerCodeSnippetManagerView(
         view,
         commandEntry.onDidChangeCodeSnippets(refresh),
         vscode.commands.registerCommand('clprompter.toggleCodeSnippetsTreeView', async () => {
+            log(`toggle invoked visible=${view.visible}`);
             if (view.visible) {
                 await hideView();
                 return;
@@ -607,9 +619,11 @@ export function registerCodeSnippetManagerView(
             await showView();
         }),
         vscode.commands.registerCommand('clprompter.manageCodeSnippets', async () => {
+            log('manageCodeSnippets invoked');
             await showView();
         }),
         vscode.commands.registerCommand('clprompter.closeCodeSnippetManager', async () => {
+            log('closeCodeSnippetManager invoked');
             await hideView();
         }),
         vscode.commands.registerCommand('clprompter.codeSnippet.refresh', () => provider.refresh()),
@@ -728,6 +742,7 @@ export function registerCodeSnippetManagerView(
     );
 
     view.onDidChangeVisibility((event) => {
+        log(`visibility changed visible=${event.visible}`);
         if (!event.visible) {
             void vscode.commands.executeCommand('setContext', 'clprompter.codeSnippetSelected', false);
             void vscode.commands.executeCommand('setContext', 'clprompter.codeSnippetUserSelected', false);

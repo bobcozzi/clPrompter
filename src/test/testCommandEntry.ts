@@ -33,8 +33,8 @@ function requireFromOut(moduleName: string): any {
 const { classifyMessage, determineOutcome, mapCommandMessages } = requireFromOut('commandEntryModel');
 const { detectCommandEntryPrefix } = requireFromOut('commandEntryPrefixes');
 const { buildCancelSqlJobCommand, CMD_RUN_SQL, normalizeSqlJobId } = requireFromOut('commandEntrySqlHelpers');
-const { collectStartupSqlHooks, resolveSqlNamingMode } = requireFromOut('commandEntryJobManager');
-const { buildImmediateSessionContextSql, normalizeSchemaSessionContextValue, normalizeSessionContextValue } = requireFromOut('commandEntrySqlSettings');
+const { collectRunAfterSqlJobInit, resolveSqlNamingMode } = requireFromOut('commandEntryJobManager');
+const { buildImmediateSessionContextSql, expandStartupScriptPlaceholders, normalizeSchemaSessionContextValue, normalizeSessionContextValue } = requireFromOut('commandEntrySqlSettings');
 const { checkSQLForExecution } = requireFromOut('sqlSyntaxChecker');
 
 const messages = mapCommandMessages([
@@ -57,8 +57,8 @@ assert.strictEqual(detectCommandEntryPrefix('SELECT * FROM QIWS.QCUSTCDT'), unde
 assert.strictEqual(resolveSqlNamingMode('sql'), 'sql');
 assert.strictEqual(resolveSqlNamingMode('system'), 'system');
 assert.strictEqual(resolveSqlNamingMode('SQL'), 'sql');
-assert.deepStrictEqual(collectStartupSqlHooks({ cmdEntry: { startupSql: ['SET OPTION NAMING = *SQL', 'VALUES 1'] } }), ['SET OPTION NAMING = *SQL', 'VALUES 1']);
-assert.deepStrictEqual(collectStartupSqlHooks({ clPrompter: { cmdEntry: { startupSql: ['SET SYSIBMADM.SELFCODES = 1'] } } }), ['SET SYSIBMADM.SELFCODES = 1']);
+assert.deepStrictEqual(collectRunAfterSqlJobInit({ cmdEntry: { runAfterSqlJobInit: ['SET OPTION NAMING = *SQL', 'VALUES 1'] } }), ['SET OPTION NAMING = *SQL', 'VALUES 1']);
+assert.deepStrictEqual(collectRunAfterSqlJobInit({ clPrompter: { cmdEntry: { runAfterSqlJobInit: ['SET SYSIBMADM.SELFCODES = 1'] } } }), ['SET SYSIBMADM.SELFCODES = 1']);
 assert.strictEqual(normalizeSchemaSessionContextValue('SET SCHEMA = MYLIB'), 'MYLIB');
 assert.strictEqual(normalizeSchemaSessionContextValue('SET CURRENT SCHEMA MYLIB'), 'MYLIB');
 assert.strictEqual(normalizeSessionContextValue('SET PATH = *LIBL, QTEMP'), '*LIBL, QTEMP');
@@ -71,6 +71,18 @@ assert.deepStrictEqual(
     buildImmediateSessionContextSql({ initialSchema: 'SET SCHEMA = APPDATA', initialPath: 'QGPL, QTEMP' }),
     ['SET SCHEMA APPDATA', 'SET PATH QGPL, QTEMP']
 );
+assert.deepStrictEqual(
+    buildRunAfterSqlJobInitDefaults({ setCurrentLibraryAfterConnect: true, currentLibrary: '*CURLIB' as any }),
+    ['SET PATH *LIBL', 'SET SCHEMA DEFAULT']
+);
+assert.deepStrictEqual(
+    buildRunAfterSqlJobInitDefaults({ setCurrentLibraryAfterConnect: true, currentLibrary: 'QGPL' }),
+    ['SET PATH *LIBL', 'SET SCHEMA DEFAULT', 'CHGCURLIB CURLIB(QGPL)']
+);
+assert.strictEqual(expandStartupScriptPlaceholders('CHGCURLIB CURLIB(&CURLIB)', 'COZTEST', ['QGPL', 'QTEMP']), 'CHGCURLIB CURLIB(COZTEST)');
+assert.strictEqual(expandStartupScriptPlaceholders('CHGLIBL LIBL(&LIBL)', 'COZTEST', ['QGPL', 'QTEMP']), 'CHGLIBL LIBL(QGPL QTEMP)');
+assert.strictEqual(expandStartupScriptPlaceholders('CHGCURLIB CURLIB(&CURLIB)', '', ['QGPL']), 'CHGCURLIB CURLIB(*CRTDFT)');
+assert.strictEqual(expandStartupScriptPlaceholders('CHGCURLIB PICKLES', 'COZTEST', ['QGPL']), 'CHGCURLIB PICKLES');
 
 (async () => {
     const connection = {

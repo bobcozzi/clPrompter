@@ -6,7 +6,7 @@ import { CommandEntryHistory, CommandExecutionMode } from './commandEntryModel';
 import { detectCommandEntryPrefix } from './commandEntryPrefixes';
 import { CommandEntryService } from './commandEntryService';
 import { BUILT_IN_SQL_SNIPPETS, CommandEntrySqlSnippet } from './commandEntrySnippets';
-import { buildImmediateSessionContextSql, buildStartupSqlForSessionOptions, getConnectionSqlSessionOptions, getConnectionSqlSettings, normalizeSchemaSessionContextValue, normalizeSessionContextValue, updateConnectionSqlSettings } from './commandEntrySqlSettings';
+import { buildImmediateSessionContextSql, buildRunAfterSqlJobInitDefaults, getConnectionSqlSessionOptions, getConnectionSqlSettings, normalizeSchemaSessionContextValue, normalizeSessionContextValue, updateConnectionSqlSettings } from './commandEntrySqlSettings';
 import { closeSqlResultPanel, configureSqlResultPanelAssets, notifySqlResultSessionClosed, setSqlResultPanelRequestHandler, showSqlResultPanel } from './sqlResultPanel';
 
 const HISTORY_KEY = 'commandEntry.history';
@@ -22,6 +22,7 @@ const COMMAND_PICKER_MAX_ROWS_LIMIT = 25000;
 const COMMAND_PICKER_GENERIC_FETCH_ROWS_DEFAULT = 500;
 const CMD_ENTRY_HELP_PANEL_TYPE = 'clprompter.commandEntryHelp';
 const CMD_ENTRY_HELP_PANEL_TITLE = 'CL Command Entry Help';
+const AUTO_INIT_FAILURE_COOLDOWN_MS = 15_000;
 export const DEFAULT_CODE_SNIPPET_GROUPS = ['Job Info', 'Admin', 'SPOOLED Files'] as const;
 
 type CommandEntryRequest =
@@ -252,6 +253,8 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
     private clearInputOnFirstReady = true;
     private clearHistoryOnFirstReady = true;
     private lastPostedSqlJobId: string | undefined;
+    private readonly autoInitInFlightConnectionKeys = new Set<string>();
+    private readonly autoInitLastFailureByConnectionKey = new Map<string, number>();
     private cmdEntryHelpPanel: vscode.WebviewPanel | undefined;
     private cmdEntrySettingsPanel: vscode.WebviewPanel | undefined;
     private readonly output: vscode.OutputChannel;
@@ -988,6 +991,17 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
         const snippetsLogFailuresOnly = sourceType === 'snippet';
         const shouldAddToHistory = options.logToHistory ?? this.shouldAddToHistory(sourceType, isSql);
         const shouldAddToCommandEntryLog = options.logToCommandEntryLog ?? this.shouldAddToCommandEntryLog(sourceType, isSql);
+        const shouldLogExecutionToCommandEntry = (execution: { outcome?: string; failure?: string }): boolean => {
+            const executionFailed = Boolean(execution.failure) || execution.outcome === 'error';
+            if (snippetsLogFailuresOnly) {
+                return executionFailed;
+            }
+            if (isSql) {
+                // Keep SQL noise low while still surfacing failures when SQL log preference is disabled.
+                return shouldAddToCommandEntryLog || executionFailed;
+            }
+            return shouldAddToCommandEntryLog;
+        };
         const commandForRecall = ensureSqlPrefixForRecall(command, isSql);
 
         await this.service.closeSqlSession();
@@ -997,11 +1011,12 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
 
         const connection = this.getConnection();
         if (!connection || !connection.sqlRunnerAvailable()) {
+            const failedExecution = this.failed(command, mode, 'Not connected to IBM i, or the Code for IBM i SQL runner is unavailable.');
             this.post({
                 type: 'execution',
-                execution: this.failed(command, mode, 'Not connected to IBM i, or the Code for IBM i SQL runner is unavailable.'),
+                execution: failedExecution,
                 addToHistory: shouldAddToHistory,
-                addToCommandEntryLog: snippetsLogFailuresOnly ? true : shouldAddToCommandEntryLog
+                addToCommandEntryLog: shouldLogExecutionToCommandEntry(failedExecution)
             });
             return;
         }
@@ -1155,9 +1170,7 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
             if (executionForPost.sqlResult) {
                 showSqlResultPanel(executionForPost.sqlResult);
             }
-            const addToCommandEntryLog = snippetsLogFailuresOnly
-                ? Boolean(execution.failure)
-                : shouldAddToCommandEntryLog;
+            const addToCommandEntryLog = shouldLogExecutionToCommandEntry(execution);
             this.post({
                 type: 'execution',
                 execution: executionForPost,
@@ -2120,17 +2133,32 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
             return;
         }
 
+        const connectionKey = this.buildHistoryConnectionKey(connection);
+        if (this.autoInitInFlightConnectionKeys.has(connectionKey)) {
+            return;
+        }
+
+        const lastFailureAt = this.autoInitLastFailureByConnectionKey.get(connectionKey);
+        if (typeof lastFailureAt === 'number' && (Date.now() - lastFailureAt) < AUTO_INIT_FAILURE_COOLDOWN_MS) {
+            return;
+        }
+
         // Create the dedicated job automatically
+        this.autoInitInFlightConnectionKeys.add(connectionKey);
         try {
             this.output.appendLine(`[Cmd Entry] Auto-initializing private SQL job on panel startup...`);
             const sqlJobId = await this.jobManager.restartJob(connection);
             this.refreshSqlJobId(connection);
+            this.autoInitLastFailureByConnectionKey.delete(connectionKey);
             if (sqlJobId) {
                 this.output.appendLine(`[Cmd Entry] Auto-initialized private SQL job: ${sqlJobId}`);
             }
         } catch (error) {
             this.refreshSqlJobId(connection);
+            this.autoInitLastFailureByConnectionKey.set(connectionKey, Date.now());
             this.output.appendLine(`[Cmd Entry] Auto-initialization failed: ${error instanceof Error ? error.message : String(error)}`);
+        } finally {
+            this.autoInitInFlightConnectionKeys.delete(connectionKey);
         }
     }
 
@@ -2291,14 +2319,23 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
             this.cmdEntrySettingsPanel = undefined;
         });
 
-        this.cmdEntrySettingsPanel.webview.onDidReceiveMessage(async (message: { type?: string; useSharedJob?: boolean; naming?: string; commit?: string; datfmt?: string; timfmt?: string; initialSchema?: string; initialPath?: string; autoColumnViewForSingleRow?: boolean }) => {
+        try {
+            this.cmdEntrySettingsPanel.webview.html = await this.buildConnectionSettingsHtml(this.cmdEntrySettingsPanel.webview, connection);
+        } catch (error) {
+            const failure = error instanceof Error ? error.message : String(error);
+            this.output.appendLine(`[Cmd Entry] Connection settings panel fallback render: ${failure}`);
+            this.cmdEntrySettingsPanel.webview.html = `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><style>body{font-family:var(--vscode-font-family,sans-serif);background:var(--vscode-editor-background);color:var(--vscode-editor-foreground);padding:20px}p{margin:0 0 12px}.error{color:var(--vscode-testing-iconFailed,#f85149)}</style></head><body><h2>Command Entry Connection Settings</h2><p>Connection settings are unavailable while the IBM i Mapepire endpoint is unreachable.</p><p class="error">${this.escapeHtmlAttribute(failure)}</p></body></html>`;
+        }
+
+        this.cmdEntrySettingsPanel.webview.onDidReceiveMessage(async (message: { type?: string; useSharedJob?: boolean; naming?: string; commit?: string; autoCommit?: string; currentLibrary?: string; libraryList?: string; runAfterSqlJobInit?: string; datfmt?: string; timfmt?: string; initialSchema?: string; initialPath?: string; autoColumnViewForSingleRow?: boolean }) => {
             if (message.type === 'setSqlJobMode') {
                 await this.setSharedSqlJobMode(Boolean(message.useSharedJob), 'command');
                 if (this.cmdEntrySettingsPanel) {
                     this.cmdEntrySettingsPanel.webview.html = await this.buildConnectionSettingsHtml(this.cmdEntrySettingsPanel.webview, connection);
                 }
             }
-            if (message.type === 'saveCmdEntrySettings') {
+            if (message.type === 'saveCmdEntrySettings' || message.type === 'saveAndCloseCmdEntrySettings') {
+                const closeAfterSave = message.type === 'saveAndCloseCmdEntrySettings';
                 const nextConnection = this.getConnection();
                 if (!nextConnection) {
                     return;
@@ -2311,7 +2348,9 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
 
                 if (this.isUsingSharedSqlJob(nextConnection)) {
                     this.post({ type: 'notice', message: vscode.l10n.t('Settings saved. Shared SQL job settings remain fixed by the active IBM i job.') });
-                    if (this.cmdEntrySettingsPanel) {
+                    if (closeAfterSave) {
+                        this.cmdEntrySettingsPanel?.dispose();
+                    } else if (this.cmdEntrySettingsPanel) {
                         this.cmdEntrySettingsPanel.webview.html = await this.buildConnectionSettingsHtml(this.cmdEntrySettingsPanel.webview, nextConnection);
                     }
                     return;
@@ -2332,10 +2371,26 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
                     return;
                 }
                 const normalizedPath = this.normalizeInitialPathForSave(message.initialPath);
+                const normalizedCurrentLibrary = this.normalizeCurrentLibraryForSave(message.currentLibrary);
+                if ((message.currentLibrary ?? '').trim().length > 0 && !normalizedCurrentLibrary) {
+                    this.post({ type: 'notice', message: vscode.l10n.t('Current Library must be a valid IBM i library name (10 chars max) or *NONE or *CRTDFT.') });
+                    return;
+                }
+                const normalizedLibraryList = this.normalizeLibraryListForSave(message.libraryList);
+                if ((message.libraryList ?? '').trim().length > 0 && !normalizedLibraryList) {
+                    this.post({ type: 'notice', message: vscode.l10n.t('Library List must be a comma/space separated list of valid IBM i library names (max 10 chars each).') });
+                    return;
+                }
+                const normalizedRunAfterSqlJobInit = this.normalizeRunAfterSqlJobInitForSave(message.runAfterSqlJobInit);
 
                 const nextOptions = {
                     naming: message.naming === 'system' ? 'system' as const : 'sql' as const,
                     commit: message.commit || undefined,
+                    autoCommit: message.autoCommit === 'true' ? true : message.autoCommit === 'false' ? false : undefined,
+                    currentLibrary: normalizedCurrentLibrary,
+                    setCurrentLibraryAfterConnect: true,
+                    libraryList: normalizedLibraryList,
+                    runAfterSqlJobInit: normalizedRunAfterSqlJobInit,
                     datfmt: message.datfmt || undefined,
                     timfmt: message.timfmt || undefined,
                     initialSchema: normalizedSchema,
@@ -2346,6 +2401,11 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
                     sessionOptions: {
                         naming: nextOptions.naming,
                         commit: nextOptions.commit,
+                        autoCommit: nextOptions.autoCommit,
+                        currentLibrary: nextOptions.currentLibrary,
+                        setCurrentLibraryAfterConnect: nextOptions.setCurrentLibraryAfterConnect,
+                        libraryList: nextOptions.libraryList,
+                        runAfterSqlJobInit: nextOptions.runAfterSqlJobInit,
                         datfmt: nextOptions.datfmt,
                         timfmt: nextOptions.timfmt,
                         initialSchema: nextOptions.initialSchema,
@@ -2354,7 +2414,9 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
                 });
                 this.post({ type: 'notice', message: vscode.l10n.t('Settings saved.') });
 
-                if (this.cmdEntrySettingsPanel) {
+                if (closeAfterSave) {
+                    this.cmdEntrySettingsPanel?.dispose();
+                } else if (this.cmdEntrySettingsPanel) {
                     this.cmdEntrySettingsPanel.webview.html = await this.buildConnectionSettingsHtml(this.cmdEntrySettingsPanel.webview, nextConnection);
                 }
             }
@@ -2391,6 +2453,11 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
                 const sessionOptions = {
                     naming: currentOptions.naming,
                     commit: currentOptions.commit,
+                    autoCommit: currentOptions.autoCommit,
+                    currentLibrary: currentOptions.currentLibrary,
+                    setCurrentLibraryAfterConnect: currentOptions.setCurrentLibraryAfterConnect,
+                    libraryList: currentOptions.libraryList,
+                    runAfterSqlJobInit: currentOptions.runAfterSqlJobInit,
                     datfmt: currentOptions.datfmt,
                     timfmt: currentOptions.timfmt,
                     initialSchema: normalizedSchema,
@@ -2422,6 +2489,78 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
                 }
             }
 
+            if (message.type === 'getCurrentUserLibrarySettings') {
+                const connection = this.getConnection();
+                if (!connection || !connection.sqlRunnerAvailable()) {
+                    this.post({ type: 'notice', message: vscode.l10n.t('Not connected to IBM i, or the SQL runner is unavailable.') });
+                    return;
+                }
+                if (this.isUsingSharedSqlJob(connection)) {
+                    this.post({ type: 'notice', message: vscode.l10n.t('Shared SQL job settings are fixed by the active IBM i job and cannot be changed here.') });
+                    return;
+                }
+
+                try {
+                    const query = `SELECT
+  TRIM(CAST(U.CURRENT_LIBRARY_NAME AS CHAR(10))) AS CURLIB,
+  TRIM(
+    CASE
+      WHEN JDI.LIBRARY_LIST IS NULL THEN S.LIBL
+      WHEN JDI.LIBRARY_LIST = '*SYSVAL' THEN S.LIBL
+      ELSE JDI.LIBRARY_LIST
+    END
+  ) AS LIBRARY_LIST
+FROM TABLE (
+  QSYS2.ACTIVE_JOB_INFO(JOB_NAME_FILTER => '*', DETAILED_INFO => 'NONE')
+) J,
+LATERAL (
+  SELECT *
+  FROM TABLE (QSYS2.QSYUSRINFO(J.AUTHORIZATION_NAME)) USR
+) U,
+LATERAL (
+  SELECT *
+  FROM TABLE (
+    QSYS2.JOB_DESCRIPTION_INFO(
+      U.JOB_DESCRIPTION_NAME,
+      U.JOB_DESCRIPTION_LIBRARY_NAME
+    )
+  ) JDI
+) JDI,
+LATERAL (
+  SELECT CURRENT_CHARACTER_VALUE AS LIBL
+  FROM QSYS2.SYSTEM_VALUE_INFO
+  WHERE SYSTEM_VALUE_NAME = 'QUSRLIBL'
+) S
+WHERE J.AUTHORIZATION_NAME = CURRENT_USER
+FETCH FIRST 1 ROW ONLY`;
+                    const rows = await this.jobManager.runSQL(connection, query, { skipSyntaxCheck: true });
+                    const row = rows && rows.length > 0 ? rows[0] : undefined;
+                    const rawCurrentLibrary = typeof row?.CURLIB === 'string' ? row.CURLIB : typeof row?.curlib === 'string' ? row.curlib : undefined;
+                    const rawLibraryList = typeof row?.LIBRARY_LIST === 'string' ? row.LIBRARY_LIST : typeof row?.library_list === 'string' ? row.library_list : undefined;
+                    const currentLibraryValue = rawCurrentLibrary ? this.normalizeCurrentLibraryForSave(String(rawCurrentLibrary)) : undefined;
+                    const libraryListValue = rawLibraryList ? this.normalizeLibraryListForSave(String(rawLibraryList)) : undefined;
+
+                    const payload: { type: 'applyCurrentUserLibrarySettings'; currentLibrary?: string; libraryList?: string } = {
+                        type: 'applyCurrentUserLibrarySettings'
+                    };
+                    if (currentLibraryValue) {
+                        payload.currentLibrary = currentLibraryValue;
+                    }
+                    if (libraryListValue && libraryListValue.length > 0) {
+                        payload.libraryList = libraryListValue.join(', ');
+                    }
+
+                    if (!payload.currentLibrary && !payload.libraryList) {
+                        this.post({ type: 'notice', message: vscode.l10n.t('No usable current-user library settings were returned for this profile.') });
+                        return;
+                    }
+
+                    this.cmdEntrySettingsPanel?.webview.postMessage(payload);
+                } catch (error) {
+                    const failure = error instanceof Error ? error.message : String(error);
+                    this.post({ type: 'notice', message: vscode.l10n.t('Could not read current-user library settings: {failure}', { failure }) });
+                }
+            }
             if (message.type === 'closeCmdEntrySettings') {
                 this.cmdEntrySettingsPanel?.dispose();
             }
@@ -2452,11 +2591,27 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
                     return;
                 }
                 const normalizedPath = this.normalizeInitialPathForSave(message.initialPath);
+                const normalizedCurrentLibrary = this.normalizeCurrentLibraryForSave(message.currentLibrary);
+                if ((message.currentLibrary ?? '').trim().length > 0 && !normalizedCurrentLibrary) {
+                    this.post({ type: 'notice', message: vscode.l10n.t('Current Library must be a valid IBM i library name (10 chars max) or *NONE or *CRTDFT.') });
+                    return;
+                }
+                const normalizedLibraryList = this.normalizeLibraryListForSave(message.libraryList);
+                if ((message.libraryList ?? '').trim().length > 0 && !normalizedLibraryList) {
+                    this.post({ type: 'notice', message: vscode.l10n.t('Library List must be a comma/space separated list of valid IBM i library names (max 10 chars each).') });
+                    return;
+                }
+                const normalizedRunAfterSqlJobInit = this.normalizeRunAfterSqlJobInitForSave(message.runAfterSqlJobInit);
 
                 await updateConnectionSqlSettings(this.context, reconnectConnection, {
                     sessionOptions: {
                         naming: message.naming === 'system' ? 'system' : 'sql',
                         commit: message.commit || undefined,
+                        autoCommit: message.autoCommit === 'true' ? true : message.autoCommit === 'false' ? false : undefined,
+                        currentLibrary: normalizedCurrentLibrary,
+                        setCurrentLibraryAfterConnect: true,
+                        libraryList: normalizedLibraryList,
+                        runAfterSqlJobInit: normalizedRunAfterSqlJobInit,
                         datfmt: message.datfmt || undefined,
                         timfmt: message.timfmt || undefined,
                         initialSchema: normalizedSchema,
@@ -2546,6 +2701,80 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
         return normalizeSessionContextValue(value) ?? undefined;
     }
 
+    private normalizeCurrentLibraryForSave(value: string | undefined): string | undefined {
+        const trimmed = (value ?? '').trim();
+        if (!trimmed) {
+            return undefined;
+        }
+
+        const normalized = trimmed.toUpperCase();
+        if (normalized === '*NONE' || normalized === '*CRTDFT') {
+            return normalized;
+        }
+        if (normalized.length > 10 || !/^[A-Z0-9_$#@]+$/.test(normalized)) {
+            return undefined;
+        }
+
+        return normalized;
+    }
+
+    private normalizeLibraryListForSave(value: string | undefined): string[] | undefined {
+        const raw = (value ?? '').trim();
+        if (!raw) {
+            return undefined;
+        }
+
+        const tokens = raw.split(/[\s,]+/).filter(Boolean);
+        if (tokens.length === 0) {
+            return undefined;
+        }
+
+        const normalized: string[] = [];
+        const seen = new Set<string>();
+        for (const token of tokens) {
+            const item = this.normalizeRegularLibraryNameForSave(token);
+            if (!item) {
+                return undefined;
+            }
+            if (!seen.has(item)) {
+                seen.add(item);
+                normalized.push(item);
+            }
+        }
+
+        return normalized.length > 0 ? normalized : undefined;
+    }
+
+    private normalizeRegularLibraryNameForSave(value: string | undefined): string | undefined {
+        const normalized = (value ?? '').trim().toUpperCase();
+        if (!normalized || normalized.length > 10 || !/^[A-Z0-9_$#@]+$/.test(normalized)) {
+            return undefined;
+        }
+        return normalized;
+    }
+
+    private normalizeRunAfterSqlJobInitForSave(value: string | undefined): string[] | undefined {
+        const lines = String(value ?? '')
+            .split(/\r?\n/)
+            .map((entry) => entry.trim())
+            .filter((entry) => entry.length > 0);
+
+        if (lines.length === 0) {
+            return undefined;
+        }
+
+        const normalized: string[] = [];
+        const seen = new Set<string>();
+        for (const line of lines) {
+            if (!seen.has(line)) {
+                seen.add(line);
+                normalized.push(line);
+            }
+        }
+
+        return normalized;
+    }
+
     private hasDisallowedSessionPrefix(value: string | undefined, field: 'schema' | 'path'): boolean {
         const trimmed = (value ?? '').trim();
         if (!trimmed) {
@@ -2592,9 +2821,39 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
         const sessionReadOnlyNotice = useSharedJob
             ? `<div class="small">${vscode.l10n.t('Shared SQL jobs use the active IBM i job settings and cannot be changed here.')}</div>`
             : `<div class="small">${vscode.l10n.t('Private SQL jobs apply these settings when connecting to the IBM i system.')}</div>`;
-        const liveSessionContext = await this.resolveCurrentSchemaAndPath(connection);
+        let liveSessionContext: { currentSchema?: string; currentPath?: string } = {};
+        try {
+            liveSessionContext = await this.resolveCurrentSchemaAndPath(connection);
+        } catch {
+            liveSessionContext = {};
+        }
+
+        let effectiveConfig: { currentLibrary?: string; libraryList: string[] } | undefined;
+        if (connection) {
+            try {
+                effectiveConfig = await this.jobManager.getConfig(connection);
+            } catch {
+                effectiveConfig = undefined;
+            }
+        }
+        const currentLibrary = sessionOptions.currentLibrary ?? effectiveConfig?.currentLibrary ?? '';
+        const libraryList = (sessionOptions.libraryList ?? effectiveConfig?.libraryList ?? []).join(', ');
+        const setCurrentLibraryAfterConnect = sessionOptions.setCurrentLibraryAfterConnect !== false;
         const initialSchema = this.normalizeInitialSessionValue(sessionOptions.initialSchema ?? liveSessionContext.currentSchema);
         const initialPath = this.normalizeInitialSessionValue(sessionOptions.initialPath ?? liveSessionContext.currentPath);
+        const runAfterSqlJobInitDefaults = buildRunAfterSqlJobInitDefaults({
+            ...sessionOptions,
+            currentLibrary: currentLibrary || undefined,
+            setCurrentLibraryAfterConnect,
+            initialSchema,
+            initialPath
+        });
+        const runAfterSqlJobInitValue = (sessionOptions.runAfterSqlJobInit && sessionOptions.runAfterSqlJobInit.length > 0
+            ? sessionOptions.runAfterSqlJobInit
+            : runAfterSqlJobInitDefaults).join('\n');
+        const currentLibraryEscaped = this.escapeHtmlAttribute(currentLibrary);
+        const libraryListEscaped = this.escapeHtmlAttribute(libraryList);
+        const runAfterSqlJobInitEscaped = this.escapeHtmlAttribute(runAfterSqlJobInitValue);
         const initialSchemaEscaped = this.escapeHtmlAttribute(initialSchema);
         const initialPathEscaped = this.escapeHtmlAttribute(initialPath);
         const reconnectingLabel = vscode.l10n.t('Reconnecting...');
@@ -2619,6 +2878,11 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
         const privateJobLabel = vscode.l10n.t('Private SQL Job');
         const namingLabel = vscode.l10n.t('Naming');
         const commitLabel = vscode.l10n.t('COMMIT');
+        const autoCommitLabel = vscode.l10n.t('Auto Commit');
+        const currentLibraryLabel = vscode.l10n.t('Current Library');
+        const libraryListLabel = vscode.l10n.t('Library List');
+        const runAfterSqlJobInitLabel = vscode.l10n.t('Start up Script');
+        const runAfterSqlJobInitHelpText = vscode.l10n.t('One command per line. Supports SQL statements and CL commands. Use &curlib to insert the current library value and &libl to insert the library list value at runtime. Example: CHGCURLIB CURLIB(&curlib) and CHGLIBL LIBL(&libl). Runs only for private SQL jobs when connecting/reconnecting.');
         const datfmtLabel = vscode.l10n.t('DATFMT');
         const timfmtLabel = vscode.l10n.t('TIMFMT');
         const schemaLabel = vscode.l10n.t('Initial SCHEMA');
@@ -2627,6 +2891,7 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
         const applyNowHelpText = vscode.l10n.t('Applies both values shown above to the active SQL job.');
         const autoColumnViewLabel = vscode.l10n.t('Use Column View when result set size is 1 row');
         const autoColumnViewHelpText = vscode.l10n.t('When enabled, an SQL run from Command Entry that returns exactly one row automatically switches to the custom Column View presentation.');
+        const getCurrentUserSettingsLabel = vscode.l10n.t('Get from current user');
         const saveLabel = vscode.l10n.t('Save');
         const cancelLabel = vscode.l10n.t('Cancel');
         const sqlJobIdLabel = vscode.l10n.t('SQL Job ID: {jobId}', { jobId: effectiveJobId });
@@ -2663,6 +2928,8 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
             .field { display: grid; grid-template-columns: 120px 1fr; gap: 10px; align-items: center; margin: 8px 0; }
             .field-inline { display: flex; align-items: center; gap: 8px; width: 100%; }
             .field-inline input, .field-inline textarea { flex: 1; }
+            .startup-script-fieldset { border: 1px solid var(--vscode-panel-border); border-radius: 6px; margin: 12px 0 4px; padding: 10px 12px 8px; }
+            .startup-script-fieldset legend { padding: 0 6px; font-weight: 600; }
             .reset-button { width: 28px; min-width: 28px; height: 28px; padding: 0; border-radius: 999px; display: inline-flex; align-items: center; justify-content: center; font-size: 18px; line-height: 1; font-weight: 400; }
                     </style></head><body><div class="panel"><h1>${panelTitle}</h1><div class="status">${connectionNameLabel} ${connection && connection.sqlRunnerAvailable() ? `${connection.currentConnectionName ?? notConnectedLabel} - ${connection.currentHost ?? unknownHostLabel} • ${effectiveJobId}` : notConnectedLabel}</div>
                 <div class="section">
@@ -2677,6 +2944,15 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
                                 <div class="small">${applyOnReconnectLabel}</div>
                                 <div class="field"><label for="session-naming">${namingLabel}</label><select id="session-naming" ${sessionControlsDisabled}><option value="sql" ${sessionOptions.naming === 'sql' ? 'selected' : ''}>*SQL</option><option value="system" ${sessionOptions.naming === 'system' ? 'selected' : ''}>*SYS</option></select></div>
                                 <div class="field"><label for="session-commit">${commitLabel}</label><select id="session-commit" ${sessionControlsDisabled}><option value="">${noOverrideLabel}</option><option value="*AUTO" ${sessionOptions.commit === '*AUTO' ? 'selected' : ''}>*AUTO</option><option value="*NONE" ${sessionOptions.commit === '*NONE' ? 'selected' : ''}>*NONE</option><option value="*CHG" ${sessionOptions.commit === '*CHG' ? 'selected' : ''}>*CHG</option><option value="*CS" ${sessionOptions.commit === '*CS' ? 'selected' : ''}>*CS</option><option value="*RR" ${sessionOptions.commit === '*RR' ? 'selected' : ''}>*RR</option></select></div>
+                                <div class="field"><label for="session-auto-commit">${autoCommitLabel}</label><select id="session-auto-commit" ${sessionControlsDisabled}><option value="">${noOverrideLabel}</option><option value="true" ${sessionOptions.autoCommit === true ? 'selected' : ''}>true</option><option value="false" ${sessionOptions.autoCommit === false ? 'selected' : ''}>false</option></select></div>
+                                <div class="field"><label for="session-current-library">${currentLibraryLabel}</label><div class="field-inline"><input id="session-current-library" type="text" maxlength="10" value="${currentLibraryEscaped}" placeholder="QGPL or *NONE" ${sessionControlsDisabled}></div></div>
+                                <div class="field"><label for="session-library-list">${libraryListLabel}</label><textarea id="session-library-list" rows="2" cols="80" placeholder="QGPL, QTEMP" ${sessionControlsDisabled}>${libraryListEscaped}</textarea></div>
+                                <div class="row"><button id="session-load-current-user-settings" type="button" ${sessionControlsDisabled}>${getCurrentUserSettingsLabel}</button></div>
+                                <fieldset class="startup-script-fieldset">
+                                    <legend>${runAfterSqlJobInitLabel}</legend>
+                                    <div class="small">${runAfterSqlJobInitHelpText}</div>
+                                    <textarea id="session-run-after-sql-job-init" rows="4" cols="80" ${sessionControlsDisabled}>${runAfterSqlJobInitEscaped}</textarea>
+                                </fieldset>
                                 <div class="field"><label for="session-datfmt">${datfmtLabel}</label><select id="session-datfmt" ${sessionControlsDisabled}><option value="">${noOverrideLabel}</option><option value="*ISO" ${sessionOptions.datfmt === '*ISO' ? 'selected' : ''}>*ISO</option><option value="*USA" ${sessionOptions.datfmt === '*USA' ? 'selected' : ''}>*USA</option><option value="*EUR" ${sessionOptions.datfmt === '*EUR' ? 'selected' : ''}>*EUR</option><option value="*JIS" ${sessionOptions.datfmt === '*JIS' ? 'selected' : ''}>*JIS</option><option value="*MDY" ${sessionOptions.datfmt === '*MDY' ? 'selected' : ''}>*MDY</option><option value="*DMY" ${sessionOptions.datfmt === '*DMY' ? 'selected' : ''}>*DMY</option><option value="*YMD" ${sessionOptions.datfmt === '*YMD' ? 'selected' : ''}>*YMD</option></select></div>
                                 <div class="field"><label for="session-timfmt">${timfmtLabel}</label><select id="session-timfmt" ${sessionControlsDisabled}><option value="">${noOverrideLabel}</option><option value="*HMS" ${sessionOptions.timfmt === '*HMS' ? 'selected' : ''}>*HMS</option><option value="*ISO" ${sessionOptions.timfmt === '*ISO' ? 'selected' : ''}>*ISO</option><option value="*USA" ${sessionOptions.timfmt === '*USA' ? 'selected' : ''}>*USA</option><option value="*EUR" ${sessionOptions.timfmt === '*EUR' ? 'selected' : ''}>*EUR</option><option value="*JIS" ${sessionOptions.timfmt === '*JIS' ? 'selected' : ''}>*JIS</option></select></div>
                     <div class="row"><button id="reconnect-private-job" ${reconnectButtonDisabled}>${reconnectButtonLabel}</button></div>
@@ -2713,11 +2989,31 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
           }
           const naming = document.getElementById('session-naming');
           const commit = document.getElementById('session-commit');
+          const autoCommit = document.getElementById('session-auto-commit');
+          const currentLibrary = document.getElementById('session-current-library');
+          const libraryList = document.getElementById('session-library-list');
+          const loadCurrentUserSettingsButton = document.getElementById('session-load-current-user-settings');
+          const runAfterSqlJobInit = document.getElementById('session-run-after-sql-job-init');
           const datfmt = document.getElementById('session-datfmt');
           const timfmt = document.getElementById('session-timfmt');
                     const initialSchema = document.getElementById('session-initial-schema');
                     const initialPath = document.getElementById('session-initial-path');
                     const autoColumnViewSingleRow = document.getElementById('auto-column-view-single-row');
+                    loadCurrentUserSettingsButton?.addEventListener('click', () => {
+                        vscode.postMessage({ type: 'getCurrentUserLibrarySettings' });
+                    });
+                    window.addEventListener('message', (event) => {
+                        const message = event.data;
+                        if (!message || message.type !== 'applyCurrentUserLibrarySettings') {
+                            return;
+                        }
+                        if (currentLibrary && typeof message.currentLibrary === 'string') {
+                            currentLibrary.value = message.currentLibrary;
+                        }
+                        if (libraryList && typeof message.libraryList === 'string') {
+                            libraryList.value = message.libraryList;
+                        }
+                    });
                     document.querySelectorAll('[data-reset-target]').forEach((resetButton) => {
                         resetButton.addEventListener('click', () => {
                             const target = resetButton.getAttribute('data-reset-target');
@@ -2732,6 +3028,10 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
                     const collectValues = () => ({
                         naming: naming ? naming.value : 'sql',
                         commit: commit ? commit.value : '',
+                        autoCommit: autoCommit ? autoCommit.value : '',
+                        currentLibrary: currentLibrary ? currentLibrary.value : '',
+                        libraryList: libraryList ? libraryList.value : '',
+                        runAfterSqlJobInit: runAfterSqlJobInit ? runAfterSqlJobInit.value : '',
                         datfmt: datfmt ? datfmt.value : '',
                         timfmt: timfmt ? timfmt.value : '',
                         initialSchema: initialSchema ? initialSchema.value : '',
@@ -2766,7 +3066,7 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
 
                     const closePanel = document.getElementById('close-settings-panel');
                     closePanel?.addEventListener('click', () => {
-                        vscode.postMessage({ type: 'closeCmdEntrySettings' });
+                        vscode.postMessage({ type: 'saveAndCloseCmdEntrySettings', ...collectValues() });
                     });
         </script>
         </div></body></html>`;

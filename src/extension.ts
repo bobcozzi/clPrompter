@@ -398,6 +398,16 @@ export async function activate(context: vscode.ExtensionContext) {
         }
     };
 
+    const setConnectedContext = async (connected: boolean, reason: string): Promise<void> => {
+        await vscode.commands.executeCommand('setContext', 'clprompter.connected', connected);
+        commandEntryDebugLog(`[Cmd Entry][Context] clprompter.connected=${connected} reason=${reason}`);
+    };
+
+    const setIbmiLoadedContext = async (loaded: boolean, reason: string): Promise<void> => {
+        await vscode.commands.executeCommand('setContext', 'clprompter.ibmiLoaded', loaded);
+        commandEntryDebugLog(`[Cmd Entry][Context] clprompter.ibmiLoaded=${loaded} reason=${reason}`);
+    };
+
     const sharedJobManager = new CommandEntryJobManager(commandEntryOutput, context);
     const sharedCommandService = new CommandEntryService(sharedJobManager, context);
     sharedCommandEntryJobManager = sharedJobManager;
@@ -462,7 +472,7 @@ export async function activate(context: vscode.ExtensionContext) {
                 retainContextWhenHidden: true
             }
         }),
-        registerCodeSnippetManagerView(context, commandEntry),
+        registerCodeSnippetManagerView(context, commandEntry, commandEntryDebugLog),
         { dispose: () => { void commandEntry.dispose(); } },
         vscode.commands.registerCommand('clprompter.openCommandEntry', async () => {
             await context.workspaceState.update('clprompter.commandEntryTouchedThisSession', true);
@@ -501,7 +511,7 @@ export async function activate(context: vscode.ExtensionContext) {
         if (!baseExtension.isActive) {
             await baseExtension.activate();
         }
-        await vscode.commands.executeCommand('setContext', 'clprompter.ibmiLoaded', true);
+        await setIbmiLoadedContext(true, 'code-for-ibmi-activated');
         code4i = baseExtension.exports;
 
         // Register the CMD_HELP and CMD_XML UDTF components so Code for IBM i
@@ -686,7 +696,7 @@ export async function activate(context: vscode.ExtensionContext) {
         };
 
         code4i.instance.subscribe(context, 'connected', 'clPrompter-connected-context', () => {
-            void vscode.commands.executeCommand('setContext', 'clprompter.connected', true);
+            void setConnectedContext(true, 'ibmi-connected-event');
             void prioritizeCommandEntryPanelOnConnect();
             void commandEntry.handleConnectionAvailable(code4i?.instance?.getConnection(), { autoInitializeDedicatedJob: true });
         });
@@ -710,7 +720,7 @@ export async function activate(context: vscode.ExtensionContext) {
         // registered components at connect time). The manual call below handles only
         // the case where the extension activates into an already-live session.
         code4i.instance.subscribe(context, 'disconnected', 'clPrompter-connected-context', () => {
-            void vscode.commands.executeCommand('setContext', 'clprompter.connected', false);
+            void setConnectedContext(false, 'ibmi-disconnected-event');
         });
         code4i.instance.subscribe(context, 'disconnected', 'clPrompter-command-entry-cleanup', () => {
             void (async () => {
@@ -729,7 +739,7 @@ export async function activate(context: vscode.ExtensionContext) {
         // Start immediately if already connected when the extension activates.
         if (code4i.instance.getConnection()) {
             const initialConnection = code4i.instance.getConnection() as any;
-            void vscode.commands.executeCommand('setContext', 'clprompter.connected', true);
+            void setConnectedContext(true, 'activate-existing-connection');
             void commandEntry.handleConnectionAvailable(initialConnection, { autoInitializeDedicatedJob: true });
             void applyCommandEntryStartupVisibility();
             patchRunSQL(initialConnection);
@@ -749,8 +759,8 @@ export async function activate(context: vscode.ExtensionContext) {
             clpHelpCache.clear();
         });
     } else {
-        await vscode.commands.executeCommand('setContext', 'clprompter.ibmiLoaded', false);
-        await vscode.commands.executeCommand('setContext', 'clprompter.connected', false);
+        await setIbmiLoadedContext(false, 'code-for-ibmi-not-found');
+        await setConnectedContext(false, 'code-for-ibmi-not-found');
         vscode.window.showErrorMessage(vscode.l10n.t('Code for IBM i extension is not installed or not found.'));
     }
     try {

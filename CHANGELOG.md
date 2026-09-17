@@ -2,11 +2,12 @@
 
 All notable changes to this project are documented in this file.
 
-## [1.0.38] - 2026-09-17
+## [1.0.39] - 2026-09-17
 
 ### What's Fixed
 - Bug fixes and enhancements to the Cmd Entry Code Snippets tree.
 - Bug fixes and ehhancements to logging Code Snippets only when an error occurs.
+- Command Entry SQL Job connection panel now includes library list curlib.
 
 ## [1.0.37] - 2026-09-16
 

@@ -4,6 +4,11 @@ import type IBMi from '@halcyontech/vscode-ibmi-types/api/IBMi';
 export type ConnectionSqlSessionOptions = {
     naming?: 'sql' | 'system';
     commit?: string;
+    autoCommit?: boolean;
+    currentLibrary?: string;
+    setCurrentLibraryAfterConnect?: boolean;
+    libraryList?: string[];
+    runAfterSqlJobInit?: string[];
     datfmt?: string;
     timfmt?: string;
     initialSchema?: string;
@@ -118,6 +123,138 @@ function normalizeSqlOptionValue(value: unknown): string | undefined {
     return normalized.startsWith('*') ? normalized : `*${normalized}`;
 }
 
+function normalizeLibraryName(value: unknown): string | undefined {
+    if (typeof value !== 'string') {
+        return undefined;
+    }
+
+    const normalized = value.trim().toUpperCase();
+    if (!normalized) {
+        return undefined;
+    }
+
+    if (normalized.length > 10) {
+        return undefined;
+    }
+
+    if (!/^[A-Z0-9_$#@]+$/.test(normalized)) {
+        return undefined;
+    }
+
+    return normalized;
+}
+
+function normalizeCurrentLibraryValue(value: unknown): string | undefined {
+    if (typeof value !== 'string') {
+        return undefined;
+    }
+
+    const normalized = value.trim().toUpperCase();
+    if (!normalized) {
+        return undefined;
+    }
+
+    if (normalized === '*NONE' || normalized === '*CRTDFT' || normalized === '*CURRENT') {
+        return normalized;
+    }
+
+    const library = normalizeLibraryName(normalized);
+    if (library) {
+        return library;
+    }
+
+    return undefined;
+}
+
+function normalizeLibraryListToken(value: unknown): string | undefined {
+    if (typeof value !== 'string') {
+        return undefined;
+    }
+
+    const normalized = value.trim().toUpperCase();
+    if (!normalized) {
+        return undefined;
+    }
+
+    if (normalized === '*NONE' || normalized === '*EMPTY' || normalized === '*LIBL') {
+        return normalized;
+    }
+
+    const library = normalizeLibraryName(normalized);
+    if (library) {
+        return library;
+    }
+
+    return undefined;
+}
+
+function normalizeLibraryList(value: unknown): string[] | undefined {
+    const tokens = Array.isArray(value)
+        ? value.map(item => String(item ?? ''))
+        : typeof value === 'string'
+            ? value.split(/[\s,]+/)
+            : [];
+
+    if (tokens.length === 0) {
+        return undefined;
+    }
+
+    const normalized: string[] = [];
+    const seen = new Set<string>();
+    for (const token of tokens) {
+        const library = normalizeLibraryListToken(token);
+        if (!library || seen.has(library) || library === '*NONE' || library === '*EMPTY') {
+            continue;
+        }
+        seen.add(library);
+        normalized.push(library);
+    }
+
+    return normalized.length > 0 ? normalized : undefined;
+}
+
+export function expandStartupScriptPlaceholders(command: string, currentLibrary?: string, libraryList?: string[]): string {
+    if (!command || !command.trim()) {
+        return command;
+    }
+
+    const resolvedCurrentLibrary = normalizeCurrentLibraryValue(currentLibrary) ?? '*CRTDFT';
+    const resolvedLibraryList = normalizeLibraryList(libraryList) ?? ['*LIBL'];
+    const currentLibraryValue = resolvedCurrentLibrary === '*NONE' || resolvedCurrentLibrary === '*CRTDFT'
+        ? '*CRTDFT'
+        : resolvedCurrentLibrary;
+    const libraryListValue = resolvedLibraryList.length > 0 ? resolvedLibraryList.join(' ') : '*LIBL';
+
+    return command
+        .replace(/&CURLIB\b/gi, currentLibraryValue)
+        .replace(/&LIBL\b/gi, libraryListValue);
+}
+
+function normalizeRunAfterSqlJobInitValue(value: unknown): string[] | undefined {
+    const entries = Array.isArray(value)
+        ? value.map((item) => String(item ?? ''))
+        : typeof value === 'string'
+            ? value.split(/\r?\n/)
+            : [];
+
+    if (entries.length === 0) {
+        return undefined;
+    }
+
+    const normalized: string[] = [];
+    const seen = new Set<string>();
+    for (const entry of entries) {
+        const trimmed = entry.trim();
+        if (!trimmed || seen.has(trimmed)) {
+            continue;
+        }
+        seen.add(trimmed);
+        normalized.push(trimmed);
+    }
+
+    return normalized.length > 0 ? normalized : undefined;
+}
+
 function normalizeSessionContextValueForTarget(value: unknown, target: SessionContextTarget): string | undefined {
     if (typeof value !== 'string') {
         return undefined;
@@ -167,6 +304,11 @@ export function getDefaultConnectionSqlSessionOptions(): ConnectionSqlSessionOpt
     return {
         naming: 'sql',
         commit: undefined,
+        autoCommit: undefined,
+        currentLibrary: undefined,
+        setCurrentLibraryAfterConnect: true,
+        libraryList: undefined,
+        runAfterSqlJobInit: undefined,
         datfmt: undefined,
         timfmt: undefined,
         initialSchema: undefined,
@@ -183,6 +325,11 @@ export function getConnectionSqlSessionOptions(connection?: IBMi): ConnectionSql
     return {
         naming,
         commit: normalizeSqlOptionValue(raw.commit) ?? defaults.commit,
+        autoCommit: readBooleanSetting(raw.autoCommit) ?? defaults.autoCommit,
+        currentLibrary: normalizeCurrentLibraryValue(raw.currentLibrary) ?? defaults.currentLibrary,
+        setCurrentLibraryAfterConnect: readBooleanSetting(raw.setCurrentLibraryAfterConnect) ?? defaults.setCurrentLibraryAfterConnect,
+        libraryList: normalizeLibraryList(raw.libraryList) ?? defaults.libraryList,
+        runAfterSqlJobInit: normalizeRunAfterSqlJobInitValue(raw.runAfterSqlJobInit) ?? defaults.runAfterSqlJobInit,
         datfmt: normalizeSqlOptionValue(raw.datfmt) ?? defaults.datfmt,
         timfmt: normalizeSqlOptionValue(raw.timfmt) ?? defaults.timfmt,
         initialSchema: normalizeInitialSchemaValue(raw.initialSchema) ?? defaults.initialSchema,
@@ -215,10 +362,31 @@ export function buildImmediateSessionContextSql(options?: ConnectionSqlSessionOp
 }
 
 export function buildStartupSqlForSessionOptions(options?: ConnectionSqlSessionOptions): string[] {
-    const settings = { ...getDefaultConnectionSqlSessionOptions(), ...(options ?? {}) };
-    const statements: string[] = [];
+    return buildRunAfterSqlJobInitDefaults(options);
+}
 
-    statements.push(...buildImmediateSessionContextSql(settings));
+export function buildRunAfterSqlJobInitDefaults(options?: ConnectionSqlSessionOptions): string[] {
+    const settings = { ...getDefaultConnectionSqlSessionOptions(), ...(options ?? {}) };
+    const initialPath = normalizeSessionContextValueForTarget(settings.initialPath, 'path') ?? '*LIBL';
+    const schemaSource = normalizeInitialSchemaValue(settings.initialSchema) ?? '*LIBL';
+    const schemaValue = schemaSource.toUpperCase() === '*LIBL' ? 'DEFAULT' : schemaSource;
+
+    const statements: string[] = [
+        `SET PATH ${initialPath}`,
+        `SET SCHEMA ${schemaValue}`
+    ];
+
+    const libraryList = normalizeLibraryList(settings.libraryList) ?? [];
+    if (libraryList.length > 0) {
+        statements.push(`CHGLIBL LIBL(${libraryList.join(' ')})`);
+    }
+
+    if (settings.setCurrentLibraryAfterConnect) {
+        const currentLibrary = normalizeCurrentLibraryValue(settings.currentLibrary);
+        if (currentLibrary && currentLibrary !== '*NONE' && currentLibrary !== '*CRTDFT') {
+            statements.push(`CHGCURLIB CURLIB(${currentLibrary})`);
+        }
+    }
 
     return statements;
 }

@@ -541,7 +541,7 @@
   };
   const isSqlCommandText = (value) => {
     const text = String(value || '');
-    return /^\s*sql\s*:/i.test(text) || /^\s*(select|values)\b/i.test(text);
+    return /^\s*sql\s*:/i.test(text) || /^\s*(select|values|with|set)\b/i.test(text);
   };
   const applySqlPrefixForRecall = (value, isSqlHint) => {
     const text = String(value || '');
@@ -573,8 +573,8 @@
     const expand = areMessageDetailsShown();
     const buckets = ensureExecutionBuckets();
     Object.values(buckets).forEach(executions => {
-      executions.forEach(execution => {
-        execution.collapsed = !expand;
+      executions.forEach((execution, index) => {
+        execution.collapsed = !expand && index > 0;
       });
     });
   };
@@ -708,7 +708,24 @@
       article.className = `execution${isLatest ? ' latest' : ''}`;
       if (execution.collapsed) { article.classList.add('collapsed'); }
       const header = document.createElement('header');
-      const meta = `${new Date(execution.startedAt).toLocaleString()} · ${execution.mode} · ${formatElapsed(execution.elapsedMs)}`;
+      let errorSeverity = (execution.messages || [])
+        .filter(message => message.kind === 'error')
+        .reduce((maxSeverity, message) => Math.max(maxSeverity, Number(message.severity) || 0), 0);
+      if (execution.outcome === 'error' && errorSeverity === 0) {
+        errorSeverity = (execution.messages || [])
+          .reduce((maxSeverity, message) => Math.max(maxSeverity, Number(message.severity) || 0), 0);
+      }
+      const severityCode = String(Math.max(0, Math.min(99, errorSeverity))).padStart(2, '0');
+      const metaParts = [new Date(execution.startedAt).toLocaleString()];
+      if (execution.mode === '*CHECK') {
+        metaParts.push(execution.mode);
+      }
+      metaParts.push(formatElapsed(execution.elapsedMs));
+      const meta = metaParts.join(' · ');
+      const metaEl = text('span', meta, 'meta');
+      if (execution.outcome === 'error' && errorSeverity > 0) {
+        metaEl.append(text('span', ` · Sev ${severityCode}`, 'meta-severity-error'));
+      }
       const replayMarker = text('span', execution.collapsed ? '▶' : '▼', 'execution-replay');
       replayMarker.tabIndex = 0;
       const displayCommand = truncateForDisplay(execution.command, 132);
@@ -766,9 +783,9 @@
           toggleMessages();
         }
       });
-      header.append(replayMarker, commandEl, text('span', meta, 'meta'));
+      header.append(replayMarker, commandEl, metaEl);
       article.append(header);
-      if (execution.failure) article.append(text('div', execution.failure, 'failure'));
+      if (execution.failure && !execution.collapsed) article.append(text('div', execution.failure, 'failure'));
       if (!execution.collapsed) {
         const visibleMessages = (execution.messages || []).filter(message => Number(message.severity || 0) >= minSeverity);
         visibleMessages.forEach(message => {

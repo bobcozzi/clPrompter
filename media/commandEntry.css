@@ -339,11 +339,24 @@ button[data-tooltip]:focus-visible::after {
 }
 
 .execution {
-    margin: 7px 0;
-    padding: 7px;
+    margin: 2px 0 7px;
+    padding: 2px 7px 7px;
     border-left: 3px solid var(--vscode-editor-foreground);
     background: transparent;
     contain: layout style;
+}
+
+.execution:not(.latest) {
+    border-left: none;
+    background: color-mix(in srgb, var(--vscode-foreground) 6%, var(--vscode-editor-background));
+}
+
+.vscode-light .execution:not(.latest) {
+    background: color-mix(in srgb, var(--vscode-foreground) 5%, var(--vscode-editor-background));
+}
+
+.vscode-dark .execution:not(.latest) {
+    background: color-mix(in srgb, var(--vscode-foreground) 8%, var(--vscode-editor-background));
 }
 
 .execution.latest {
@@ -443,6 +456,10 @@ header {
 .message-meta {
     color: var(--vscode-descriptionForeground);
     font-size: .9em;
+}
+
+.meta-severity-error {
+    color: var(--vscode-testing-iconFailed, #f14c4c);
 }
 
 .message {

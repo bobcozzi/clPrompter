@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import IBMi from '@halcyontech/vscode-ibmi-types/api/IBMi';
-import { buildStartupSqlForSessionOptions, getConnectionSqlSessionOptions, getConnectionSqlSettings, getDefaultConnectionSqlSettings } from './commandEntrySqlSettings';
+import { buildRunAfterSqlJobInitDefaults, expandStartupScriptPlaceholders, getConnectionSqlSessionOptions, getConnectionSqlSettings, getDefaultConnectionSqlSettings } from './commandEntrySqlSettings';
 
 function isCommandEntryDebugLoggingEnabled(): boolean {
     const config = vscode.workspace.getConfiguration('clPrompter');
@@ -231,7 +231,7 @@ export interface ManagedSqlSessionState {
     currentSchema?: string;
     defaultLibrary?: string;
     libraryList: string[];
-    startupSql: string[];
+    runAfterSqlJobInit: string[];
     connectionKey?: string;
     lastUpdatedAt?: number;
 }
@@ -244,7 +244,7 @@ export function resolveSqlNamingMode(value?: unknown): SqlNamingMode {
     return 'sql';
 }
 
-export function collectStartupSqlHooks(source: unknown): string[] {
+export function collectRunAfterSqlJobInit(source: unknown): string[] {
     const readArray = (candidate: unknown): string[] => {
         if (!Array.isArray(candidate)) {
             return [];
@@ -278,40 +278,27 @@ export function collectStartupSqlHooks(source: unknown): string[] {
 
     const root = source as Record<string, unknown> | undefined;
     if (root && typeof root === 'object') {
-        push(root.startupSql);
-        push(root.initSql);
+        push(root.runAfterSqlJobInit);
         push((root as Record<string, unknown>).cmdEntry && typeof (root as Record<string, unknown>).cmdEntry === 'object'
-            ? ((root as Record<string, unknown>).cmdEntry as Record<string, unknown>).startupSql
-            : undefined);
-        push((root as Record<string, unknown>).cmdEntry && typeof (root as Record<string, unknown>).cmdEntry === 'object'
-            ? ((root as Record<string, unknown>).cmdEntry as Record<string, unknown>).initSql
+            ? ((root as Record<string, unknown>).cmdEntry as Record<string, unknown>).runAfterSqlJobInit
             : undefined);
         push((root as Record<string, unknown>).clPrompter && typeof (root as Record<string, unknown>).clPrompter === 'object'
-            ? ((root as Record<string, unknown>).clPrompter as Record<string, unknown>).startupSql
-            : undefined);
-        push((root as Record<string, unknown>).clPrompter && typeof (root as Record<string, unknown>).clPrompter === 'object'
-            ? ((root as Record<string, unknown>).clPrompter as Record<string, unknown>).initSql
+            ? ((root as Record<string, unknown>).clPrompter as Record<string, unknown>).runAfterSqlJobInit
             : undefined);
         push((root as Record<string, unknown>).clprompter && typeof (root as Record<string, unknown>).clprompter === 'object'
-            ? ((root as Record<string, unknown>).clprompter as Record<string, unknown>).startupSql
-            : undefined);
-        push((root as Record<string, unknown>).clprompter && typeof (root as Record<string, unknown>).clprompter === 'object'
-            ? ((root as Record<string, unknown>).clprompter as Record<string, unknown>).initSql
+            ? ((root as Record<string, unknown>).clprompter as Record<string, unknown>).runAfterSqlJobInit
             : undefined);
         const nestedCmdEntry = (root as Record<string, unknown>).cmdEntry;
         if (nestedCmdEntry && typeof nestedCmdEntry === 'object') {
-            push((nestedCmdEntry as Record<string, unknown>).startupSql);
-            push((nestedCmdEntry as Record<string, unknown>).initSql);
+            push((nestedCmdEntry as Record<string, unknown>).runAfterSqlJobInit);
         }
         const nestedClPrompter = (root as Record<string, unknown>).clPrompter;
         if (nestedClPrompter && typeof nestedClPrompter === 'object') {
             const clPrompterEntry = nestedClPrompter as Record<string, unknown>;
-            push(clPrompterEntry.startupSql);
-            push(clPrompterEntry.initSql);
+            push(clPrompterEntry.runAfterSqlJobInit);
             const deeper = clPrompterEntry.cmdEntry;
             if (deeper && typeof deeper === 'object') {
-                push((deeper as Record<string, unknown>).startupSql);
-                push((deeper as Record<string, unknown>).initSql);
+                push((deeper as Record<string, unknown>).runAfterSqlJobInit);
             }
         }
     }
@@ -358,7 +345,7 @@ export class CommandEntryJobManager {
         status: 'ended',
         namingMode: 'sql',
         libraryList: [],
-        startupSql: []
+        runAfterSqlJobInit: []
     };
 
     constructor(
@@ -706,7 +693,7 @@ export class CommandEntryJobManager {
             status: this.status ?? this.managedSession.status,
             namingMode: this.managedSession.namingMode ?? 'sql',
             libraryList: this.managedSession.libraryList ?? [],
-            startupSql: this.managedSession.startupSql ?? []
+            runAfterSqlJobInit: this.managedSession.runAfterSqlJobInit ?? []
         };
 
         if (!base.defaultLibrary && connection) {
@@ -758,27 +745,56 @@ export class CommandEntryJobManager {
         }
     }
 
-    private getDeclaredStartupSql(connection: IBMi): string[] {
+    private getRunAfterSqlJobInitStatements(connection: IBMi): string[] {
         const config = (connection as any)?.getConfig?.() as Record<string, unknown> | undefined;
-        const declared = collectStartupSqlHooks(config ?? {});
+        const declared = collectRunAfterSqlJobInit(config ?? {});
         const sessionOptions = getConnectionSqlSessionOptions(connection);
-        const optionStatements = buildStartupSqlForSessionOptions(sessionOptions);
-        return [...declared, ...optionStatements].filter((statement) => statement.trim().length > 0);
+        const defaults = buildRunAfterSqlJobInitDefaults(sessionOptions);
+        return (declared.length > 0 ? declared : defaults).filter((statement) => statement.trim().length > 0);
     }
 
-    private async runStartupSqlHooks(connection: IBMi): Promise<void> {
-        const startupSql = this.getDeclaredStartupSql(connection);
-        if (startupSql.length === 0) {
-            this.managedSession.startupSql = [];
+    private isLikelySqlStatement(statement: string): boolean {
+        const trimmed = statement.trim();
+        return /^(set|select|values|with|call|insert|update|delete|merge|begin|declare|create|alter|drop|grant|revoke|comment)\b/i.test(trimmed);
+    }
+
+    private async executeRunAfterSqlJobInitCommand(connection: IBMi, commandText: string): Promise<void> {
+        const command = stripTrailingSemicolon(commandText.trim());
+        if (!command) {
             return;
         }
 
-        this.managedSession.startupSql = startupSql;
-        for (const statement of startupSql) {
+        const sessionOptions = getConnectionSqlSessionOptions(connection);
+        const expandedCommand = expandStartupScriptPlaceholders(command, sessionOptions.currentLibrary, sessionOptions.libraryList);
+
+        if (this.isLikelySqlStatement(expandedCommand)) {
+            await this.runSQL(connection, expandedCommand, { skipSyntaxCheck: true });
+            return;
+        }
+
+        const cl = expandedCommand.replace(/^cl\s*:/i, '').trim();
+        const escaped = cl.replace(/'/g, "''");
+        await this.runSQL(connection, `CALL QSYS2.QCMDEXC('${escaped}')`, { skipSyntaxCheck: true });
+    }
+
+    private async runAfterSqlJobInitHooks(connection: IBMi): Promise<void> {
+        if (!this.canUseDedicatedForConnection(connection)) {
+            this.managedSession.runAfterSqlJobInit = [];
+            return;
+        }
+
+        const runAfterSqlJobInit = this.getRunAfterSqlJobInitStatements(connection);
+        if (runAfterSqlJobInit.length === 0) {
+            this.managedSession.runAfterSqlJobInit = [];
+            return;
+        }
+
+        this.managedSession.runAfterSqlJobInit = runAfterSqlJobInit;
+        for (const statement of runAfterSqlJobInit) {
             try {
-                await this.runSQL(connection, statement, { skipSyntaxCheck: true });
+                await this.executeRunAfterSqlJobInitCommand(connection, statement);
             } catch (error) {
-                this.output?.appendLine(`[Cmd Entry][StartupSql] failed statement=${statement.substring(0, 120)} error=${error instanceof Error ? error.message : String(error)}`);
+                this.output?.appendLine(`[Cmd Entry][RunAfterSqlJobInit] failed statement=${statement.substring(0, 120)} error=${error instanceof Error ? error.message : String(error)}`);
             }
         }
     }
@@ -794,7 +810,7 @@ export class CommandEntryJobManager {
             currentSchema: currentSchema ?? this.getCurrentSchemaFromConnection(connection),
             defaultLibrary: config.currentLibrary,
             libraryList: config.libraryList,
-            startupSql: this.managedSession.startupSql ?? this.getDeclaredStartupSql(connection),
+            runAfterSqlJobInit: this.managedSession.runAfterSqlJobInit ?? this.getRunAfterSqlJobInitStatements(connection),
             connectionKey: this.buildConnectionKey(connection),
             lastUpdatedAt: Date.now()
         };
@@ -1561,6 +1577,7 @@ export class CommandEntryJobManager {
             await this.cancelActive(connection);
             await this.endDedicatedJob();
             await this.ensureJob(connection);
+            await this.runAfterSqlJobInitHooks(connection);
             return this.dedicatedJobId;
         } catch (error) {
             this.output?.appendLine(`[Cmd Entry] Dedicated restart failed (${error instanceof Error ? error.message : String(error)}). Using shared SQL job.`);
@@ -1648,7 +1665,23 @@ export class CommandEntryJobManager {
         }
 
         const normalized = value.trim().toUpperCase();
-        return normalized.length > 0 ? normalized : undefined;
+        if (!normalized || normalized.length > 10) {
+            return undefined;
+        }
+
+        return /^[A-Z0-9_$#@]+$/.test(normalized) ? normalized : undefined;
+    }
+
+    private isSystemLibraryName(value: string | undefined): boolean {
+        if (!value) {
+            return false;
+        }
+
+        const library = value.trim().toUpperCase();
+        const systemLibraries = new Set([
+            'QSYS', 'QSYS2', 'QHLPSYS', 'QGPL', 'QTEMP', 'QUSRSYS', 'QUSR', 'QRECOVERY', 'QMQM'
+        ]);
+        return systemLibraries.has(library);
     }
 
     private connectionConfigFallback(connection: IBMi): EffectiveJobConfig {
@@ -1665,7 +1698,7 @@ export class CommandEntryJobManager {
             ? (config.libraryList as unknown[])
                 .filter((entry): entry is string => typeof entry === 'string')
                 .map((entry) => this.normalizeLibraryName(entry))
-                .filter((entry): entry is string => Boolean(entry))
+                .filter((entry): entry is string => Boolean(entry) && !this.isSystemLibraryName(entry))
             : [];
 
         return {
@@ -1716,7 +1749,7 @@ export class CommandEntryJobManager {
         this.status = 'ready';
 
         try {
-            await this.runStartupSqlHooks(connection);
+            await this.runAfterSqlJobInitHooks(connection);
         } catch (error) {
             this.output?.appendLine(`[Cmd Entry][StartupSql] bootstrap failed error=${error instanceof Error ? error.message : String(error)}`);
         }
@@ -1785,6 +1818,19 @@ export class CommandEntryJobManager {
                     break;
             }
         }
+
+        if (typeof sessionOptions.autoCommit === 'boolean') {
+            jdbc['auto commit'] = sessionOptions.autoCommit;
+            if (!sessionOptions.autoCommit) {
+                jdbc['true autocommit'] = false;
+            }
+        }
+
+        // Do not push user library settings into the JDBC bootstrap library list.
+        // We handle library-list and current-library changes as explicit post-connect
+        // CL commands so they can be safely resolved at runtime and skipped when empty.
+        void jdbc;
+        return jdbc;
 
         return jdbc;
     }
