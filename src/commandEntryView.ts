@@ -2418,7 +2418,7 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
             this.cmdEntrySettingsPanel.webview.html = `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><style>body{font-family:var(--vscode-font-family,sans-serif);background:var(--vscode-editor-background);color:var(--vscode-editor-foreground);padding:20px}p{margin:0 0 12px}.error{color:var(--vscode-testing-iconFailed,#f85149)}</style></head><body><h2>Command Entry Connection Settings</h2><p>Connection settings are unavailable while the IBM i Mapepire endpoint is unreachable.</p><p class="error">${this.escapeHtmlAttribute(failure)}</p></body></html>`;
         }
 
-        this.cmdEntrySettingsPanel.webview.onDidReceiveMessage(async (message: { type?: string; useSharedJob?: boolean; naming?: string; commit?: string; autoCommit?: string; extendedMetadata?: boolean; currentLibrary?: string; libraryList?: string; runAfterSqlJobInit?: string; datfmt?: string; timfmt?: string; initialSchema?: string; initialPath?: string; autoColumnViewForSingleRow?: boolean }) => {
+        this.cmdEntrySettingsPanel.webview.onDidReceiveMessage(async (message: { type?: string; useSharedJob?: boolean; naming?: string; commit?: string; autoCommit?: string; extendedMetadata?: boolean; runStartupScript?: boolean; currentLibrary?: string; libraryList?: string; runAfterSqlJobInit?: string; datfmt?: string; timfmt?: string; initialSchema?: string; initialPath?: string; autoColumnViewForSingleRow?: boolean; hasUnsavedChanges?: boolean }) => {
             if (message.type === 'setSqlJobMode') {
                 await this.setSharedSqlJobMode(Boolean(message.useSharedJob), 'command');
                 if (this.cmdEntrySettingsPanel) {
@@ -2438,47 +2438,51 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
                 });
 
                 if (this.isUsingSharedSqlJob(nextConnection)) {
-                    this.post({ type: 'notice', message: vscode.l10n.t('Settings saved. Shared SQL job settings remain fixed by the active IBM i job.') });
+                    const statusNotice = vscode.l10n.t('Settings saved. Shared SQL job settings remain fixed by the active IBM i job.');
+                    this.postNoticeText(statusNotice, true);
                     if (closeAfterSave) {
                         this.cmdEntrySettingsPanel?.dispose();
                     } else if (this.cmdEntrySettingsPanel) {
-                        this.cmdEntrySettingsPanel.webview.html = await this.buildConnectionSettingsHtml(this.cmdEntrySettingsPanel.webview, nextConnection);
+                        this.cmdEntrySettingsPanel.webview.html = await this.buildConnectionSettingsHtml(this.cmdEntrySettingsPanel.webview, nextConnection, 'idle', undefined, statusNotice);
                     }
                     return;
                 }
 
                 if (this.hasDisallowedSessionPrefix(message.initialSchema, 'schema')) {
-                    this.post({ type: 'notice', message: vscode.l10n.t('Initial SCHEMA does not accept SET PATH input.') });
+                    this.postNoticeText(vscode.l10n.t('Initial SCHEMA does not accept SET PATH input.'), true);
                     return;
                 }
                 if (this.hasDisallowedSessionPrefix(message.initialPath, 'path')) {
-                    this.post({ type: 'notice', message: vscode.l10n.t('Initial PATH does not accept SET SCHEMA input.') });
+                    this.postNoticeText(vscode.l10n.t('Initial PATH does not accept SET SCHEMA input.'), true);
                     return;
                 }
 
                 const normalizedSchema = this.normalizeInitialSchemaForSave(message.initialSchema);
                 if ((message.initialSchema ?? '').trim().length > 0 && !normalizedSchema) {
-                    this.post({ type: 'notice', message: vscode.l10n.t('Initial SCHEMA must be 128 characters or fewer, or *LIBL.') });
+                    this.postNoticeText(vscode.l10n.t('Initial SCHEMA must be 128 characters or fewer, or *LIBL.'), true);
                     return;
                 }
                 const normalizedPath = this.normalizeInitialPathForSave(message.initialPath);
                 const normalizedCurrentLibrary = this.normalizeCurrentLibraryForSave(message.currentLibrary);
                 if ((message.currentLibrary ?? '').trim().length > 0 && !normalizedCurrentLibrary) {
-                    this.post({ type: 'notice', message: vscode.l10n.t('Current Library must be a valid IBM i library name (10 chars max) or *NONE or *CRTDFT.') });
+                    this.postNoticeText(vscode.l10n.t('Current Library must be a valid IBM i library name (10 chars max) or *NONE or *CRTDFT.'), true);
                     return;
                 }
                 const normalizedLibraryList = this.normalizeLibraryListForSave(message.libraryList);
                 if ((message.libraryList ?? '').trim().length > 0 && !normalizedLibraryList) {
-                    this.post({ type: 'notice', message: vscode.l10n.t('Library List must be a comma/space separated list of valid IBM i library names (max 10 chars each).') });
+                    this.postNoticeText(vscode.l10n.t('Library List must be a comma/space separated list of valid IBM i library names (max 10 chars each).'), true);
                     return;
                 }
                 const normalizedRunAfterSqlJobInit = this.normalizeRunAfterSqlJobInitForSave(message.runAfterSqlJobInit);
+                const normalizedRunAfterSqlJobInitText = this.normalizeRunAfterSqlJobInitTextForSave(message.runAfterSqlJobInit);
 
                 const nextOptions = {
                     naming: message.naming === 'system' ? 'system' as const : 'sql' as const,
                     commit: message.commit || undefined,
-                    autoCommit: message.autoCommit === 'true' ? true : message.autoCommit === 'false' ? false : undefined,
+                    autoCommit: this.parseAutoCommitSelection(message.autoCommit),
                     extendedMetadata: typeof message.extendedMetadata === 'boolean' ? message.extendedMetadata : true,
+                    runStartupScript: typeof message.runStartupScript === 'boolean' ? message.runStartupScript : true,
+                    runAfterSqlJobInitText: normalizedRunAfterSqlJobInitText,
                     currentLibrary: normalizedCurrentLibrary,
                     setCurrentLibraryAfterConnect: true,
                     libraryList: normalizedLibraryList,
@@ -2495,6 +2499,8 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
                         commit: nextOptions.commit,
                         autoCommit: nextOptions.autoCommit,
                         extendedMetadata: nextOptions.extendedMetadata,
+                        runStartupScript: nextOptions.runStartupScript,
+                        runAfterSqlJobInitText: nextOptions.runAfterSqlJobInitText,
                         currentLibrary: nextOptions.currentLibrary,
                         setCurrentLibraryAfterConnect: nextOptions.setCurrentLibraryAfterConnect,
                         libraryList: nextOptions.libraryList,
@@ -2505,39 +2511,40 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
                         initialPath: nextOptions.initialPath,
                     }
                 });
-                this.post({ type: 'notice', message: vscode.l10n.t('Settings saved.') });
+                const settingsSavedNotice = vscode.l10n.t('Settings saved.');
+                this.postNoticeText(settingsSavedNotice, true);
 
                 if (closeAfterSave) {
                     this.cmdEntrySettingsPanel?.dispose();
                 } else if (this.cmdEntrySettingsPanel) {
-                    this.cmdEntrySettingsPanel.webview.html = await this.buildConnectionSettingsHtml(this.cmdEntrySettingsPanel.webview, nextConnection);
+                    this.cmdEntrySettingsPanel.webview.html = await this.buildConnectionSettingsHtml(this.cmdEntrySettingsPanel.webview, nextConnection, 'idle', undefined, settingsSavedNotice);
                 }
             }
 
             if (message.type === 'setSessionContextNow') {
                 const nextConnection = this.getConnection();
                 if (!nextConnection || !nextConnection.sqlRunnerAvailable()) {
-                    this.post({ type: 'notice', message: vscode.l10n.t('Not connected to IBM i, or the SQL runner is unavailable.') });
+                    this.postNoticeText(vscode.l10n.t('Not connected to IBM i, or the SQL runner is unavailable.'), true);
                     return;
                 }
 
                 if (this.isUsingSharedSqlJob(nextConnection)) {
-                    this.post({ type: 'notice', message: vscode.l10n.t('Shared SQL job settings are fixed by the active IBM i job and cannot be changed here.') });
+                    this.postNoticeText(vscode.l10n.t('Shared SQL job settings are fixed by the active IBM i job and cannot be changed here.'), true);
                     return;
                 }
 
                 if (this.hasDisallowedSessionPrefix(message.initialSchema, 'schema')) {
-                    this.post({ type: 'notice', message: vscode.l10n.t('Initial SCHEMA does not accept SET PATH input.') });
+                    this.postNoticeText(vscode.l10n.t('Initial SCHEMA does not accept SET PATH input.'), true);
                     return;
                 }
                 if (this.hasDisallowedSessionPrefix(message.initialPath, 'path')) {
-                    this.post({ type: 'notice', message: vscode.l10n.t('Initial PATH does not accept SET SCHEMA input.') });
+                    this.postNoticeText(vscode.l10n.t('Initial PATH does not accept SET SCHEMA input.'), true);
                     return;
                 }
 
                 const normalizedSchema = this.normalizeInitialSchemaForSave(message.initialSchema);
                 if ((message.initialSchema ?? '').trim().length > 0 && !normalizedSchema) {
-                    this.post({ type: 'notice', message: vscode.l10n.t('Initial SCHEMA must be 128 characters or fewer, or *LIBL.') });
+                    this.postNoticeText(vscode.l10n.t('Initial SCHEMA must be 128 characters or fewer, or *LIBL.'), true);
                     return;
                 }
                 const normalizedPath = this.normalizeInitialPathForSave(message.initialPath);
@@ -2548,6 +2555,8 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
                     commit: currentOptions.commit,
                     autoCommit: currentOptions.autoCommit,
                     extendedMetadata: currentOptions.extendedMetadata,
+                    runStartupScript: currentOptions.runStartupScript,
+                    runAfterSqlJobInitText: currentOptions.runAfterSqlJobInitText,
                     currentLibrary: currentOptions.currentLibrary,
                     setCurrentLibraryAfterConnect: currentOptions.setCurrentLibraryAfterConnect,
                     libraryList: currentOptions.libraryList,
@@ -2564,33 +2573,36 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
 
                 const statements = buildImmediateSessionContextSql(sessionOptions);
                 if (statements.length === 0) {
-                    this.post({ type: 'notice', message: vscode.l10n.t('No Initial SCHEMA/PATH override to apply.') });
+                    this.postNoticeText(vscode.l10n.t('No Initial SCHEMA/PATH override to apply.'), true);
                     return;
                 }
 
+                let sessionContextNotice = '';
                 try {
                     for (const statement of statements) {
                         await this.jobManager.runSQL(nextConnection, statement, { skipSyntaxCheck: true });
                     }
-                    this.post({ type: 'notice', message: vscode.l10n.t('Session settings applied to the active SQL job.') });
+                    sessionContextNotice = vscode.l10n.t('Session settings applied to the active SQL job.');
+                    this.postNoticeText(sessionContextNotice, true);
                 } catch (error) {
                     const failure = error instanceof Error ? error.message : String(error);
-                    this.post({ type: 'notice', message: vscode.l10n.t('Set Now failed: {failure}', { failure }) });
+                    sessionContextNotice = vscode.l10n.t('Set Now failed: {failure}', { failure });
+                    this.postNoticeText(sessionContextNotice, true);
                 }
 
                 if (this.cmdEntrySettingsPanel) {
-                    this.cmdEntrySettingsPanel.webview.html = await this.buildConnectionSettingsHtml(this.cmdEntrySettingsPanel.webview, nextConnection);
+                    this.cmdEntrySettingsPanel.webview.html = await this.buildConnectionSettingsHtml(this.cmdEntrySettingsPanel.webview, nextConnection, 'idle', undefined, sessionContextNotice);
                 }
             }
 
             if (message.type === 'getCurrentUserLibrarySettings') {
                 const connection = this.getConnection();
                 if (!connection || !connection.sqlRunnerAvailable()) {
-                    this.post({ type: 'notice', message: vscode.l10n.t('Not connected to IBM i, or the SQL runner is unavailable.') });
+                    this.postNoticeText(vscode.l10n.t('Not connected to IBM i, or the SQL runner is unavailable.'), true);
                     return;
                 }
                 if (this.isUsingSharedSqlJob(connection)) {
-                    this.post({ type: 'notice', message: vscode.l10n.t('Shared SQL job settings are fixed by the active IBM i job and cannot be changed here.') });
+                    this.postNoticeText(vscode.l10n.t('Shared SQL job settings are fixed by the active IBM i job and cannot be changed here.'), true);
                     return;
                 }
 
@@ -2645,26 +2657,26 @@ FETCH FIRST 1 ROW ONLY`;
                     }
 
                     if (!payload.currentLibrary && !payload.libraryList) {
-                        this.post({ type: 'notice', message: vscode.l10n.t('No usable current-user library settings were returned for this profile.') });
+                        this.postNoticeText(vscode.l10n.t('No usable current-user library settings were returned for this profile.'), true);
                         return;
                     }
 
                     this.cmdEntrySettingsPanel?.webview.postMessage(payload);
                 } catch (error) {
                     const failure = error instanceof Error ? error.message : String(error);
-                    this.post({ type: 'notice', message: vscode.l10n.t('Could not read current-user library settings: {failure}', { failure }) });
+                    this.postNoticeText(vscode.l10n.t('Could not read current-user library settings: {failure}', { failure }), true);
                 }
             }
             if (message.type === 'viewStartupScriptLog') {
                 const connection = this.getConnection();
                 if (!connection) {
-                    this.post({ type: 'notice', message: vscode.l10n.t('No IBM i connection is available for the startup script log.') });
+                    this.postNoticeText(vscode.l10n.t('No IBM i connection is available for the startup script log.'), true);
                     return;
                 }
 
                 const workspaceLogUri = this.jobManager.getStartupScriptLogUri(connection);
                 if (!workspaceLogUri) {
-                    this.post({ type: 'notice', message: vscode.l10n.t('The startup script log is unavailable in this environment.') });
+                    this.postNoticeText(vscode.l10n.t('The startup script log is unavailable in this environment.'), true);
                     return;
                 }
 
@@ -2672,10 +2684,21 @@ FETCH FIRST 1 ROW ONLY`;
                     await vscode.workspace.fs.stat(workspaceLogUri);
                     await this.openStartupScriptLogPanel(workspaceLogUri, connection.currentConnectionName ?? 'connection');
                 } catch {
-                    this.post({ type: 'notice', message: vscode.l10n.t('No startup script log has been generated yet for this connection.') });
+                    this.postNoticeText(vscode.l10n.t('No startup script log has been generated yet for this connection.'), true);
                 }
             }
             if (message.type === 'closeCmdEntrySettings') {
+                if (message.hasUnsavedChanges) {
+                    const exitWithoutSavingLabel = vscode.l10n.t('Exit without saving');
+                    const selection = await vscode.window.showWarningMessage(
+                        vscode.l10n.t('You have unsaved changes. Exit without saving?'),
+                        { modal: true },
+                        exitWithoutSavingLabel
+                    );
+                    if (selection !== exitWithoutSavingLabel) {
+                        return;
+                    }
+                }
                 this.cmdEntrySettingsPanel?.dispose();
             }
             if (message.type === 'reconnectPrivateSqlJob') {
@@ -2686,43 +2709,46 @@ FETCH FIRST 1 ROW ONLY`;
                 }
 
                 if (this.isUsingSharedSqlJob(reconnectConnection)) {
-                    this.post({ type: 'notice', message: vscode.l10n.t('Shared SQL job settings are fixed by the active IBM i job and cannot be changed here.') });
+                    this.postNoticeText(vscode.l10n.t('Shared SQL job settings are fixed by the active IBM i job and cannot be changed here.'), true);
                     return;
                 }
 
                 if (this.hasDisallowedSessionPrefix(message.initialSchema, 'schema')) {
-                    this.post({ type: 'notice', message: vscode.l10n.t('Initial SCHEMA does not accept SET PATH input.') });
+                    this.postNoticeText(vscode.l10n.t('Initial SCHEMA does not accept SET PATH input.'), true);
                     return;
                 }
                 if (this.hasDisallowedSessionPrefix(message.initialPath, 'path')) {
-                    this.post({ type: 'notice', message: vscode.l10n.t('Initial PATH does not accept SET SCHEMA input.') });
+                    this.postNoticeText(vscode.l10n.t('Initial PATH does not accept SET SCHEMA input.'), true);
                     return;
                 }
 
                 const normalizedSchema = this.normalizeInitialSchemaForSave(message.initialSchema);
                 if ((message.initialSchema ?? '').trim().length > 0 && !normalizedSchema) {
-                    this.post({ type: 'notice', message: vscode.l10n.t('Initial SCHEMA must be 128 characters or fewer, or *LIBL.') });
+                    this.postNoticeText(vscode.l10n.t('Initial SCHEMA must be 128 characters or fewer, or *LIBL.'), true);
                     return;
                 }
                 const normalizedPath = this.normalizeInitialPathForSave(message.initialPath);
                 const normalizedCurrentLibrary = this.normalizeCurrentLibraryForSave(message.currentLibrary);
                 if ((message.currentLibrary ?? '').trim().length > 0 && !normalizedCurrentLibrary) {
-                    this.post({ type: 'notice', message: vscode.l10n.t('Current Library must be a valid IBM i library name (10 chars max) or *NONE or *CRTDFT.') });
+                    this.postNoticeText(vscode.l10n.t('Current Library must be a valid IBM i library name (10 chars max) or *NONE or *CRTDFT.'), true);
                     return;
                 }
                 const normalizedLibraryList = this.normalizeLibraryListForSave(message.libraryList);
                 if ((message.libraryList ?? '').trim().length > 0 && !normalizedLibraryList) {
-                    this.post({ type: 'notice', message: vscode.l10n.t('Library List must be a comma/space separated list of valid IBM i library names (max 10 chars each).') });
+                    this.postNoticeText(vscode.l10n.t('Library List must be a comma/space separated list of valid IBM i library names (max 10 chars each).'), true);
                     return;
                 }
                 const normalizedRunAfterSqlJobInit = this.normalizeRunAfterSqlJobInitForSave(message.runAfterSqlJobInit);
+                const normalizedRunAfterSqlJobInitText = this.normalizeRunAfterSqlJobInitTextForSave(message.runAfterSqlJobInit);
 
                 await updateConnectionSqlSettings(this.context, reconnectConnection, {
                     sessionOptions: {
                         naming: message.naming === 'system' ? 'system' : 'sql',
                         commit: message.commit || undefined,
-                        autoCommit: message.autoCommit === 'true' ? true : message.autoCommit === 'false' ? false : undefined,
+                        autoCommit: this.parseAutoCommitSelection(message.autoCommit),
                         extendedMetadata: typeof message.extendedMetadata === 'boolean' ? message.extendedMetadata : true,
+                        runStartupScript: typeof message.runStartupScript === 'boolean' ? message.runStartupScript : true,
+                        runAfterSqlJobInitText: normalizedRunAfterSqlJobInitText,
                         currentLibrary: normalizedCurrentLibrary,
                         setCurrentLibraryAfterConnect: true,
                         libraryList: normalizedLibraryList,
@@ -2872,6 +2898,32 @@ FETCH FIRST 1 ROW ONLY`;
         return splitRunAfterSqlJobInitStatements(value);
     }
 
+    private parseAutoCommitSelection(value: string | undefined): boolean | undefined {
+        const normalized = String(value ?? '').trim().toUpperCase();
+        if (!normalized) {
+            return undefined;
+        }
+
+        if (normalized === '*AUTO' || normalized === '*YES' || normalized === 'TRUE') {
+            return true;
+        }
+
+        if (normalized === '*NO' || normalized === 'FALSE') {
+            return false;
+        }
+
+        return undefined;
+    }
+
+    private normalizeRunAfterSqlJobInitTextForSave(value: string | undefined): string | undefined {
+        if (typeof value !== 'string') {
+            return undefined;
+        }
+
+        const normalized = value.replace(/\r\n?/g, '\n');
+        return normalized.trim().length > 0 ? normalized : undefined;
+    }
+
     private hasDisallowedSessionPrefix(value: string | undefined, field: 'schema' | 'path'): boolean {
         const trimmed = (value ?? '').trim();
         if (!trimmed) {
@@ -2897,7 +2949,8 @@ FETCH FIRST 1 ROW ONLY`;
         webview: vscode.Webview,
         connection = this.getConnection(),
         reconnectStatus: 'idle' | 'reconnecting' | 'success' | 'failed' = 'idle',
-        reconnectJobId?: string
+        reconnectJobId?: string,
+        settingsStatusMessage = ''
     ): Promise<string> {
         const isDedicatedUsable = this.jobManager.isDedicatedUsable(connection);
         const remoteMapepireEnabled = this.jobManager.isRemoteMapepireServerEnabled(connection);
@@ -2917,7 +2970,7 @@ FETCH FIRST 1 ROW ONLY`;
             : vscode.l10n.t('Mapepire server mode is unavailable. Command Entry falls back to the shared SQL job.');
         const sessionReadOnlyNotice = useSharedJob
             ? `<div class="small">${vscode.l10n.t('Shared SQL jobs use the active IBM i job settings and cannot be changed here.')}</div>`
-            : `<div class="small">${vscode.l10n.t('Private SQL jobs apply these settings when connecting to the IBM i system.')}</div>`;
+            : `<div class="small">${vscode.l10n.t('Easily change the active SQL Job PATH and SCHEMA by modifying these settings and press Apply now.')}</div>`;
         let liveSessionContext: { currentSchema?: string; currentPath?: string } = {};
         try {
             liveSessionContext = await this.resolveCurrentSchemaAndPath(connection);
@@ -2945,14 +2998,16 @@ FETCH FIRST 1 ROW ONLY`;
             initialSchema,
             initialPath
         });
-        const runAfterSqlJobInitValue = (sessionOptions.runAfterSqlJobInit && sessionOptions.runAfterSqlJobInit.length > 0
-            ? sessionOptions.runAfterSqlJobInit
-            : runAfterSqlJobInitDefaults)
-            .map((statement) => {
-                const trimmed = statement.trim().replace(/;\s*$/, '');
-                return trimmed.length > 0 ? `${trimmed};` : trimmed;
-            })
-            .join('\n');
+        const runAfterSqlJobInitValue = sessionOptions.runAfterSqlJobInitText && sessionOptions.runAfterSqlJobInitText.trim().length > 0
+            ? sessionOptions.runAfterSqlJobInitText
+            : (sessionOptions.runAfterSqlJobInit && sessionOptions.runAfterSqlJobInit.length > 0
+                ? sessionOptions.runAfterSqlJobInit
+                : runAfterSqlJobInitDefaults)
+                .map((statement) => {
+                    const trimmed = statement.trim().replace(/;\s*$/, '');
+                    return trimmed.length > 0 ? `${trimmed};` : trimmed;
+                })
+                .join('\n');
         const currentLibraryEscaped = this.escapeHtmlAttribute(currentLibrary);
         const libraryListEscaped = this.escapeHtmlAttribute(libraryList);
         const runAfterSqlJobInitEscaped = this.escapeHtmlAttribute(runAfterSqlJobInitValue);
@@ -2971,11 +3026,11 @@ FETCH FIRST 1 ROW ONLY`;
             : reconnectStatus === 'failed'
                 ? `<div class="small error-message">${vscode.l10n.t('Reconnect failed. Try again in a moment.')}</div>`
                 : '';
-        const noOverrideLabel = vscode.l10n.t('(no override)');
+        const noOverrideLabel = '*SAME';
         const panelTitle = vscode.l10n.t('Command Entry Connection Settings');
         const connectionTypeTitle = vscode.l10n.t('Connection Type');
         const connectionSettingsTitle = vscode.l10n.t('Connection Settings');
-        const dynamicSettingsTitle = vscode.l10n.t('Dynamic Settings');
+        const dynamicSettingsTitle = vscode.l10n.t('SQL SCHEMA and PATH Settings');
         const sharedJobLabel = vscode.l10n.t('Shared SQL Job');
         const privateJobLabel = vscode.l10n.t('Private SQL Job');
         const namingLabel = vscode.l10n.t('Naming');
@@ -2986,21 +3041,24 @@ FETCH FIRST 1 ROW ONLY`;
         const currentLibraryLabel = vscode.l10n.t('Value for &CURLIB (current Library):');
         const libraryListLabel = vscode.l10n.t('Value for &LIBL (library list):');
         const runAfterSqlJobInitLabel = vscode.l10n.t('Start up Script');
+        const runStartupScriptLabel = vscode.l10n.t('Run startup script after connection is established');
+        const runStartupScriptHelpText = vscode.l10n.t('Disable this to keep the script text without executing it.');
         const runAfterSqlJobInitHelpText = vscode.l10n.t('Type the startup script using CL cmd or SQL stmt. Embed &CURLIB or &LIBL where needed (for example, CHGCURLIB &CURLIB). Terminate each stmt with a semicolon.');
         const viewStartupScriptLogLabel = vscode.l10n.t('View Last Startup Log');
-        const initialLibraryListTitle = vscode.l10n.t('Library List Variable Values');
+        const mapepireSqlJobSettingsTitle = vscode.l10n.t('Mapepire SQL Job Settings');
         const getCurrentUserSettingsHint = vscode.l10n.t('Retrieve Library List from User Profile now');
         const datfmtLabel = vscode.l10n.t('DATFMT');
         const timfmtLabel = vscode.l10n.t('TIMFMT');
-        const schemaLabel = vscode.l10n.t('Initial SCHEMA');
-        const pathLabel = vscode.l10n.t('Initial PATH');
-        const applyNowLabel = vscode.l10n.t('Apply current SCHEMA and PATH now');
+        const schemaLabel = vscode.l10n.t('SCHEMA');
+        const pathLabel = vscode.l10n.t('PATH');
+        const applyNowLabel = vscode.l10n.t('Apply now');
         const applyNowHelpText = vscode.l10n.t('Applies both values shown above to the active SQL job.');
         const autoColumnViewLabel = vscode.l10n.t('Use Column View when result set size is 1 row');
         const autoColumnViewHelpText = vscode.l10n.t('When enabled, an SQL run from Command Entry that returns exactly one row automatically switches to the custom Column View presentation.');
         const getCurrentUserSettingsLabel = vscode.l10n.t('Get from current user');
         const saveLabel = vscode.l10n.t('Save');
-        const cancelLabel = vscode.l10n.t('Cancel');
+        const exitLabel = vscode.l10n.t('Exit');
+        const unsavedExitPrompt = vscode.l10n.t('You have unsaved changes. Exit without saving?');
         const sqlJobIdLabel = vscode.l10n.t('SQL Job ID: {jobId}', { jobId: effectiveJobId });
         const applyOnReconnectLabel = vscode.l10n.t('Connection settings are applied when connecting to the IBM i system.');
         const connectionNameLabel = vscode.l10n.t('Connection:');
@@ -3009,6 +3067,8 @@ FETCH FIRST 1 ROW ONLY`;
         const liblPlaceholder = vscode.l10n.t('*LIBL');
         const autoColumnViewChecked = autoColumnViewForSingleRow ? 'checked' : '';
         const extendedMetadataChecked = sessionOptions.extendedMetadata !== false ? 'checked' : '';
+        const runStartupScriptChecked = sessionOptions.runStartupScript !== false ? 'checked' : '';
+        const settingsStatusEscaped = this.escapeHtmlAttribute(settingsStatusMessage);
 
         return `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><style>
             body { font-family: var(--vscode-font-family, sans-serif); background: var(--vscode-editor-background); color: var(--vscode-editor-foreground); margin: 0; padding: 20px; }
@@ -3054,25 +3114,27 @@ FETCH FIRST 1 ROW ONLY`;
                 <div class="section">
                                 <div><strong>${connectionSettingsTitle}</strong></div>
                                 <div class="small">${applyOnReconnectLabel}</div>
-                                <div class="field"><label for="session-naming">${namingLabel}</label><select id="session-naming" ${sessionControlsDisabled}><option value="sql" ${sessionOptions.naming === 'sql' ? 'selected' : ''}>*SQL</option><option value="system" ${sessionOptions.naming === 'system' ? 'selected' : ''}>*SYS</option></select></div>
-                                <div class="field"><label for="session-commit">${commitLabel}</label><select id="session-commit" ${sessionControlsDisabled}><option value="">${noOverrideLabel}</option><option value="*AUTO" ${sessionOptions.commit === '*AUTO' ? 'selected' : ''}>*AUTO</option><option value="*NONE" ${sessionOptions.commit === '*NONE' ? 'selected' : ''}>*NONE</option><option value="*CHG" ${sessionOptions.commit === '*CHG' ? 'selected' : ''}>*CHG</option><option value="*CS" ${sessionOptions.commit === '*CS' ? 'selected' : ''}>*CS</option><option value="*RR" ${sessionOptions.commit === '*RR' ? 'selected' : ''}>*RR</option></select></div>
-                                <div class="field"><label for="session-auto-commit">${autoCommitLabel}</label><select id="session-auto-commit" ${sessionControlsDisabled}><option value="">${noOverrideLabel}</option><option value="true" ${sessionOptions.autoCommit === true ? 'selected' : ''}>true</option><option value="false" ${sessionOptions.autoCommit === false ? 'selected' : ''}>false</option></select></div>
-                                <div class="row"><label><input id="session-extended-metadata" type="checkbox" ${extendedMetadataChecked} ${sessionControlsDisabled}> ${extendedMetadataLabel}</label></div>
-                                <div class="small">${extendedMetadataHelpText}</div>
                                 <fieldset class="settings-fieldset">
-                                    <legend>${initialLibraryListTitle}</legend>
-                                    <div class="field"><label for="session-current-library">${currentLibraryLabel}</label><div class="field-inline"><input id="session-current-library" type="text" maxlength="10" value="${currentLibraryEscaped}" placeholder="${vscode.l10n.t('QGPL or *NONE')}" ${sessionControlsDisabled}></div></div>
-                                    <div class="field"><label for="session-library-list">${libraryListLabel}</label><textarea id="session-library-list" rows="2" cols="80" placeholder="${vscode.l10n.t('QGPL, QTEMP')}" ${sessionControlsDisabled}>${libraryListEscaped}</textarea></div>
-                                    <div class="row"><button id="session-load-current-user-settings" type="button" ${sessionControlsDisabled}>${getCurrentUserSettingsLabel}</button><span class="small">${getCurrentUserSettingsHint}</span></div>
+                                    <legend>${mapepireSqlJobSettingsTitle}</legend>
+                                    <div class="field"><label for="session-naming">${namingLabel}</label><select id="session-naming" ${sessionControlsDisabled}><option value="sql" ${sessionOptions.naming === 'sql' ? 'selected' : ''}>*SQL</option><option value="system" ${sessionOptions.naming === 'system' ? 'selected' : ''}>*SYS</option></select></div>
+                                    <div class="field"><label for="session-commit">${commitLabel}</label><select id="session-commit" ${sessionControlsDisabled}><option value="">${noOverrideLabel}</option><option value="*AUTO" ${sessionOptions.commit === '*AUTO' ? 'selected' : ''}>*AUTO</option><option value="*NONE" ${sessionOptions.commit === '*NONE' ? 'selected' : ''}>*NONE</option><option value="*CHG" ${sessionOptions.commit === '*CHG' ? 'selected' : ''}>*CHG</option><option value="*CS" ${sessionOptions.commit === '*CS' ? 'selected' : ''}>*CS</option><option value="*RR" ${sessionOptions.commit === '*RR' ? 'selected' : ''}>*RR</option></select></div>
+                                    <div class="field"><label for="session-auto-commit">${autoCommitLabel}</label><select id="session-auto-commit" ${sessionControlsDisabled}><option value="">${noOverrideLabel}</option><option value="*AUTO" ${sessionOptions.autoCommit === true ? 'selected' : ''}>*AUTO</option><option value="*NO" ${sessionOptions.autoCommit === false ? 'selected' : ''}>*NO</option></select></div>
+                                    <div class="field"><label for="session-datfmt">${datfmtLabel}</label><select id="session-datfmt" ${sessionControlsDisabled}><option value="">${noOverrideLabel}</option><option value="*ISO" ${sessionOptions.datfmt === '*ISO' ? 'selected' : ''}>*ISO</option><option value="*USA" ${sessionOptions.datfmt === '*USA' ? 'selected' : ''}>*USA</option><option value="*EUR" ${sessionOptions.datfmt === '*EUR' ? 'selected' : ''}>*EUR</option><option value="*JIS" ${sessionOptions.datfmt === '*JIS' ? 'selected' : ''}>*JIS</option><option value="*MDY" ${sessionOptions.datfmt === '*MDY' ? 'selected' : ''}>*MDY</option><option value="*DMY" ${sessionOptions.datfmt === '*DMY' ? 'selected' : ''}>*DMY</option><option value="*YMD" ${sessionOptions.datfmt === '*YMD' ? 'selected' : ''}>*YMD</option></select></div>
+                                    <div class="field"><label for="session-timfmt">${timfmtLabel}</label><select id="session-timfmt" ${sessionControlsDisabled}><option value="">${noOverrideLabel}</option><option value="*HMS" ${sessionOptions.timfmt === '*HMS' ? 'selected' : ''}>*HMS</option><option value="*ISO" ${sessionOptions.timfmt === '*ISO' ? 'selected' : ''}>*ISO</option><option value="*USA" ${sessionOptions.timfmt === '*USA' ? 'selected' : ''}>*USA</option><option value="*EUR" ${sessionOptions.timfmt === '*EUR' ? 'selected' : ''}>*EUR</option><option value="*JIS" ${sessionOptions.timfmt === '*JIS' ? 'selected' : ''}>*JIS</option></select></div>
+                                    <div class="row"><label><input id="session-extended-metadata" type="checkbox" ${extendedMetadataChecked} ${sessionControlsDisabled}> ${extendedMetadataLabel}</label></div>
+                                    <div class="small">${extendedMetadataHelpText}</div>
                                 </fieldset>
                                 <fieldset class="startup-script-fieldset">
                                     <legend>${runAfterSqlJobInitLabel}</legend>
+                                    <div class="field"><label for="session-current-library">${currentLibraryLabel}</label><div class="field-inline"><input id="session-current-library" type="text" maxlength="10" value="${currentLibraryEscaped}" placeholder="${vscode.l10n.t('QGPL or *NONE')}" ${sessionControlsDisabled}></div></div>
+                                    <div class="field"><label for="session-library-list">${libraryListLabel}</label><textarea id="session-library-list" rows="2" cols="80" placeholder="${vscode.l10n.t('QGPL, QTEMP')}" ${sessionControlsDisabled}>${libraryListEscaped}</textarea></div>
+                                    <div class="row"><button id="session-load-current-user-settings" type="button" ${sessionControlsDisabled}>${getCurrentUserSettingsLabel}</button><span class="small">${getCurrentUserSettingsHint}</span></div>
+                                    <div class="row"><label><input id="session-run-startup-script" type="checkbox" ${runStartupScriptChecked} ${sessionControlsDisabled}> ${runStartupScriptLabel}</label></div>
+                                    <div class="small">${runStartupScriptHelpText}</div>
                                     <div class="small">${runAfterSqlJobInitHelpText}</div>
                                     <textarea id="session-run-after-sql-job-init" rows="4" cols="80" ${sessionControlsDisabled}>${runAfterSqlJobInitEscaped}</textarea>
                                     <div class="row"><button id="view-startup-script-log" type="button">${viewStartupScriptLogLabel}</button></div>
                                 </fieldset>
-                                <div class="field"><label for="session-datfmt">${datfmtLabel}</label><select id="session-datfmt" ${sessionControlsDisabled}><option value="">${noOverrideLabel}</option><option value="*ISO" ${sessionOptions.datfmt === '*ISO' ? 'selected' : ''}>*ISO</option><option value="*USA" ${sessionOptions.datfmt === '*USA' ? 'selected' : ''}>*USA</option><option value="*EUR" ${sessionOptions.datfmt === '*EUR' ? 'selected' : ''}>*EUR</option><option value="*JIS" ${sessionOptions.datfmt === '*JIS' ? 'selected' : ''}>*JIS</option><option value="*MDY" ${sessionOptions.datfmt === '*MDY' ? 'selected' : ''}>*MDY</option><option value="*DMY" ${sessionOptions.datfmt === '*DMY' ? 'selected' : ''}>*DMY</option><option value="*YMD" ${sessionOptions.datfmt === '*YMD' ? 'selected' : ''}>*YMD</option></select></div>
-                                <div class="field"><label for="session-timfmt">${timfmtLabel}</label><select id="session-timfmt" ${sessionControlsDisabled}><option value="">${noOverrideLabel}</option><option value="*HMS" ${sessionOptions.timfmt === '*HMS' ? 'selected' : ''}>*HMS</option><option value="*ISO" ${sessionOptions.timfmt === '*ISO' ? 'selected' : ''}>*ISO</option><option value="*USA" ${sessionOptions.timfmt === '*USA' ? 'selected' : ''}>*USA</option><option value="*EUR" ${sessionOptions.timfmt === '*EUR' ? 'selected' : ''}>*EUR</option><option value="*JIS" ${sessionOptions.timfmt === '*JIS' ? 'selected' : ''}>*JIS</option></select></div>
                     <div class="row"><button id="reconnect-private-job" ${reconnectButtonDisabled}>${reconnectButtonLabel}</button></div>
                     ${reconnectStatusBlock}
                                 <div class="small">${sqlJobIdLabel}</div>
@@ -3091,9 +3153,10 @@ FETCH FIRST 1 ROW ONLY`;
                     <div class="small">${autoColumnViewHelpText}</div>
         </div>
                 <div class="section">
+                    <div id="settings-status-line" class="small">${settingsStatusEscaped}</div>
                     <div class="row actions-row">
                                     <button id="save-settings">${saveLabel}</button>
-                                    <button id="close-settings-panel" class="secondary">${cancelLabel}</button>
+                                    <button id="close-settings-panel" class="secondary">${exitLabel}</button>
                     </div>
         </div>
         <script>
@@ -3109,6 +3172,7 @@ FETCH FIRST 1 ROW ONLY`;
           const commit = document.getElementById('session-commit');
           const autoCommit = document.getElementById('session-auto-commit');
           const extendedMetadata = document.getElementById('session-extended-metadata');
+          const runStartupScript = document.getElementById('session-run-startup-script');
           const currentLibrary = document.getElementById('session-current-library');
           const libraryList = document.getElementById('session-library-list');
           const loadCurrentUserSettingsButton = document.getElementById('session-load-current-user-settings');
@@ -3127,7 +3191,17 @@ FETCH FIRST 1 ROW ONLY`;
                     });
                     window.addEventListener('message', (event) => {
                         const message = event.data;
-                        if (!message || message.type !== 'applyCurrentUserLibrarySettings') {
+                        if (!message) {
+                            return;
+                        }
+                        if (message.type === 'settingsStatus') {
+                            const settingsStatusLine = document.getElementById('settings-status-line');
+                            if (settingsStatusLine && typeof message.message === 'string') {
+                                settingsStatusLine.textContent = message.message;
+                            }
+                            return;
+                        }
+                        if (message.type !== 'applyCurrentUserLibrarySettings') {
                             return;
                         }
                         if (currentLibrary && typeof message.currentLibrary === 'string') {
@@ -3153,6 +3227,7 @@ FETCH FIRST 1 ROW ONLY`;
                         commit: commit ? commit.value : '',
                         autoCommit: autoCommit ? autoCommit.value : '',
                         extendedMetadata: extendedMetadata ? !!extendedMetadata.checked : true,
+                        runStartupScript: runStartupScript ? !!runStartupScript.checked : true,
                         currentLibrary: currentLibrary ? currentLibrary.value : '',
                         libraryList: libraryList ? libraryList.value : '',
                         runAfterSqlJobInit: runAfterSqlJobInit ? runAfterSqlJobInit.value : '',
@@ -3162,6 +3237,9 @@ FETCH FIRST 1 ROW ONLY`;
                         initialPath: initialPath ? initialPath.value : '',
                         autoColumnViewForSingleRow: autoColumnViewSingleRow ? !!autoColumnViewSingleRow.checked : false
                     });
+                    const serializeValues = (values) => JSON.stringify(values);
+                    const initialValuesSnapshot = serializeValues(collectValues());
+                    const hasUnsavedChanges = () => serializeValues(collectValues()) !== initialValuesSnapshot;
           const reconnect = document.getElementById('reconnect-private-job');
           reconnect?.addEventListener('click', () => {
                         if (reconnect.disabled) {
@@ -3190,7 +3268,7 @@ FETCH FIRST 1 ROW ONLY`;
 
                     const closePanel = document.getElementById('close-settings-panel');
                     closePanel?.addEventListener('click', () => {
-                        vscode.postMessage({ type: 'saveAndCloseCmdEntrySettings', ...collectValues() });
+                        vscode.postMessage({ type: 'closeCmdEntrySettings', hasUnsavedChanges: hasUnsavedChanges() });
                     });
         </script>
         </div></body></html>`;
@@ -3317,6 +3395,13 @@ FETCH FIRST 1 ROW ONLY`;
     }
 
     private post(message: unknown): void { void this.view?.webview.postMessage(message); }
+
+    private postNoticeText(message: string, mirrorToSettingsStatus = false): void {
+        this.post({ type: 'notice', message });
+        if (mirrorToSettingsStatus) {
+            void this.cmdEntrySettingsPanel?.webview.postMessage({ type: 'settingsStatus', message });
+        }
+    }
 
     private safeOutputAppendLine(message: string): void {
         try {

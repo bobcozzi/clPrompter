@@ -6,6 +6,8 @@ export type ConnectionSqlSessionOptions = {
     commit?: string;
     autoCommit?: boolean;
     extendedMetadata?: boolean;
+    runStartupScript?: boolean;
+    runAfterSqlJobInitText?: string;
     currentLibrary?: string;
     setCurrentLibraryAfterConnect?: boolean;
     libraryList?: string[];
@@ -100,10 +102,10 @@ function readBooleanSetting(value: unknown): boolean | undefined {
     }
     if (typeof value === 'string') {
         const normalized = value.trim().toLowerCase();
-        if (normalized === 'true') {
+        if (normalized === 'true' || normalized === '*yes' || normalized === '*auto' || normalized === 'yes' || normalized === 'auto') {
             return true;
         }
-        if (normalized === 'false') {
+        if (normalized === 'false' || normalized === '*no' || normalized === 'no') {
             return false;
         }
     }
@@ -314,6 +316,15 @@ function normalizeRunAfterSqlJobInitValue(value: unknown): string[] | undefined 
     return splitRunAfterSqlJobInitStatements(value);
 }
 
+function normalizeRunAfterSqlJobInitText(value: unknown): string | undefined {
+    if (typeof value !== 'string') {
+        return undefined;
+    }
+
+    const normalizedNewlines = value.replace(/\r\n?/g, '\n');
+    return normalizedNewlines.trim().length > 0 ? normalizedNewlines : undefined;
+}
+
 function normalizeSessionContextValueForTarget(value: unknown, target: SessionContextTarget): string | undefined {
     if (typeof value !== 'string') {
         return undefined;
@@ -361,10 +372,12 @@ function normalizeInitialSchemaValue(value: unknown): string | undefined {
 
 export function getDefaultConnectionSqlSessionOptions(): ConnectionSqlSessionOptions {
     return {
-        naming: 'sql',
+        naming: 'system',
         commit: undefined,
         autoCommit: undefined,
         extendedMetadata: true,
+        runStartupScript: true,
+        runAfterSqlJobInitText: undefined,
         currentLibrary: undefined,
         setCurrentLibraryAfterConnect: true,
         libraryList: undefined,
@@ -381,12 +394,14 @@ export function getConnectionSqlSessionOptions(connection?: IBMi): ConnectionSql
     const commandSettings = readConnectionCommandSettings(connection);
     const raw = commandSettings?.sqlSessionOptions ?? {};
 
-    const naming = raw.naming === 'system' ? 'system' : 'sql';
+    const naming = raw.naming === 'sql' ? 'sql' : 'system';
     return {
         naming,
         commit: normalizeSqlOptionValue(raw.commit) ?? defaults.commit,
         autoCommit: readBooleanSetting(raw.autoCommit) ?? defaults.autoCommit,
         extendedMetadata: readBooleanSetting(raw.extendedMetadata) ?? defaults.extendedMetadata,
+        runStartupScript: readBooleanSetting(raw.runStartupScript) ?? defaults.runStartupScript,
+        runAfterSqlJobInitText: normalizeRunAfterSqlJobInitText(raw.runAfterSqlJobInitText),
         currentLibrary: normalizeCurrentLibraryValue(raw.currentLibrary) ?? defaults.currentLibrary,
         setCurrentLibraryAfterConnect: readBooleanSetting(raw.setCurrentLibraryAfterConnect) ?? defaults.setCurrentLibraryAfterConnect,
         libraryList: normalizeLibraryList(raw.libraryList) ?? defaults.libraryList,

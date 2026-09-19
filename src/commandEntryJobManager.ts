@@ -762,13 +762,16 @@ export class CommandEntryJobManager {
     private getRunAfterSqlJobInitStatements(connection: IBMi): string[] {
         const config = (connection as any)?.getConfig?.() as Record<string, unknown> | undefined;
         const sessionOptions = getConnectionSqlSessionOptions(connection);
+        const declaredFromSessionText = splitRunAfterSqlJobInitStatements(sessionOptions.runAfterSqlJobInitText ?? '');
         const declaredFromSessionOptions = (sessionOptions.runAfterSqlJobInit ?? [])
             .map((statement) => String(statement ?? '').trim())
             .filter((statement) => statement.length > 0);
         const declaredFromLegacyConfig = collectRunAfterSqlJobInit(config ?? {});
-        const declared = declaredFromSessionOptions.length > 0
-            ? declaredFromSessionOptions
-            : declaredFromLegacyConfig;
+        const declared = declaredFromSessionText && declaredFromSessionText.length > 0
+            ? declaredFromSessionText
+            : declaredFromSessionOptions.length > 0
+                ? declaredFromSessionOptions
+                : declaredFromLegacyConfig;
         const defaults = buildRunAfterSqlJobInitDefaults(sessionOptions);
         return (declared.length > 0 ? declared : defaults).filter((statement) => statement.trim().length > 0);
     }
@@ -1077,6 +1080,13 @@ export class CommandEntryJobManager {
 
     private async runAfterSqlJobInitHooks(connection: IBMi): Promise<void> {
         if (!this.canUseDedicatedForConnection(connection)) {
+            this.managedSession.runAfterSqlJobInit = [];
+            return;
+        }
+
+        const sessionOptions = getConnectionSqlSessionOptions(connection);
+        if (sessionOptions.runStartupScript === false) {
+            this.output?.appendLine('[Cmd Entry][RunAfterSqlJobInit] Startup script execution is disabled by connection settings.');
             this.managedSession.runAfterSqlJobInit = [];
             return;
         }
