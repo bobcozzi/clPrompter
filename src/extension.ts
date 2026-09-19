@@ -133,6 +133,24 @@ function debugLog(message: string): void {
     }
 }
 
+const TITLE_MENU_DEBUG_LOGS = true;
+function logCommandEntryTitleMenuState(): void {
+    if (!TITLE_MENU_DEBUG_LOGS) {
+        return;
+    }
+
+    console.log('[clPrompter][titleMenu] Command Entry title menu config:', {
+        view: 'clprompter.commandEntryView.main',
+        submenuId: 'clprompter.commandEntry.menu',
+        submenuTitle: '...',
+        helpCommand: 'clprompter.commandEntry.title.openHelp',
+        settingsCommand: 'clprompter.commandEntry.title.openSettings',
+        iconMode: 'none',
+        group: 'navigation@3',
+        note: 'This log confirms the manifest is loaded; blank rendering is a VS Code host issue if this appears.'
+    });
+}
+
 const ENABLE_F4_ACTION = 'Enable F4 Prompt';
 const OPEN_F4_SETTING_ACTION = 'Open F4 Setting';
 
@@ -392,9 +410,21 @@ export async function activate(context: vscode.ExtensionContext) {
 
     const commandEntryOutput = vscode.window.createOutputChannel('CLPROMPTER');
 
+    const safeOutputAppendLine = (message: string): void => {
+        try {
+            commandEntryOutput.appendLine(message);
+        } catch (error) {
+            // During extension-host shutdown/deactivation the channel may already be closed.
+            const text = error instanceof Error ? error.message : String(error);
+            if (!/channel has been closed/i.test(text)) {
+                console.warn(`[clPrompter] Output append failed: ${text}`);
+            }
+        }
+    };
+
     const commandEntryDebugLog = (message: string): void => {
         if (isCommandEntryDebugLoggingEnabled()) {
-            commandEntryOutput.appendLine(message);
+            safeOutputAppendLine(message);
         }
     };
 
@@ -466,6 +496,8 @@ export async function activate(context: vscode.ExtensionContext) {
         );
     };
 
+    logCommandEntryTitleMenuState();
+
     context.subscriptions.push(
         vscode.window.registerWebviewViewProvider(CommandEntryViewProvider.viewType, commandEntry, {
             webviewOptions: {
@@ -492,6 +524,19 @@ export async function activate(context: vscode.ExtensionContext) {
         vscode.commands.registerCommand('clprompter.startNewCommandEntryJob', () => commandEntry.requestStartNewJob()),
         vscode.commands.registerCommand('clprompter.useSharedCommandEntrySqlJob', () => commandEntry.requestUseSharedSqlJob()),
         vscode.commands.registerCommand('clprompter.usePrivateCommandEntrySqlJob', () => commandEntry.requestUsePrivateSqlJob()),
+        vscode.commands.registerCommand('clprompter.commandEntry.menu.viewHistory', () => commandEntry.requestViewHistory()),
+        vscode.commands.registerCommand('clprompter.commandEntry.menu.toggleMessageDetails', () => commandEntry.requestToggleMessageDetails()),
+        vscode.commands.registerCommand('clprompter.commandEntry.menu.toggleSqlLog', () => commandEntry.requestToggleSqlStatementsToCommandLog()),
+        vscode.commands.registerCommand('clprompter.commandEntry.menu.clearHistoryAndMessages', () => commandEntry.requestClearHistoryAndMessages()),
+        vscode.commands.registerCommand('clprompter.commandEntry.menu.clearSqlHistoryAndMessages', () => commandEntry.requestClearSqlHistoryAndMessages()),
+        vscode.commands.registerCommand('clprompter.commandEntry.menu.clearSqlLogMessages', () => commandEntry.requestClearSqlLogMessages()),
+        vscode.commands.registerCommand('clprompter.commandEntry.menu.openConnectionSettings', () => commandEntry.requestOpenConnectionSettings()),
+        vscode.commands.registerCommand('clprompter.commandEntry.menu.setRunModeRun', () => commandEntry.requestSetRunMode('*RUN')),
+        vscode.commands.registerCommand('clprompter.commandEntry.menu.setRunModeLimit', () => commandEntry.requestSetRunMode('*LIMIT')),
+        vscode.commands.registerCommand('clprompter.commandEntry.menu.setRunModeCheck', () => commandEntry.requestSetRunMode('*CHECK')),
+        vscode.commands.registerCommand('clprompter.commandEntry.title.openHelp', () => commandEntry.requestOpenHelp()),
+        vscode.commands.registerCommand('clprompter.commandEntry.title.openSettings', () => commandEntry.requestOpenSettings()),
+        vscode.commands.registerCommand('clprompter.commandEntry.title.openMoreActions', () => commandEntry.requestOpenConnectionSettings()),
         vscode.commands.registerCommand('clprompter.clearCommandEntry', () => commandEntry.clear()),
         vscode.commands.registerCommand('clprompter.exportCodeSnippets', () => commandEntry.requestExportCodeSnippets()),
         vscode.commands.registerCommand('clprompter.importCodeSnippets', () => commandEntry.requestImportCodeSnippets())
@@ -514,14 +559,34 @@ export async function activate(context: vscode.ExtensionContext) {
         await setIbmiLoadedContext(true, 'code-for-ibmi-activated');
         code4i = baseExtension.exports;
 
+        const safeRegisterCode4iComponent = (label: string, component: unknown): void => {
+            try {
+                code4i.componentRegistry.registerComponent(context, component as any);
+            } catch (error) {
+                console.error(`[clPrompter] registerComponent failed (${label}):`, error);
+            }
+        };
+
+        const safeSubscribeCode4iEvent = (
+            eventName: 'connected' | 'disconnected',
+            subscriptionId: string,
+            callback: () => void
+        ): void => {
+            try {
+                code4i.instance.subscribe(context, eventName, subscriptionId, callback);
+            } catch (error) {
+                console.error(`[clPrompter] subscribe failed event=${eventName} id=${subscriptionId}:`, error);
+            }
+        };
+
         // Register the CMD_HELP and CMD_XML UDTF components so Code for IBM i
         // automatically checks and installs/updates them on every NEW connection.
         const cmdHelpChecker = new CmdHelpChecker();
-        code4i.componentRegistry.registerComponent(context, cmdHelpChecker);
+        safeRegisterCode4iComponent('CmdHelpChecker', cmdHelpChecker);
         const cmdXmlChecker = new CmdXmlChecker();
-        code4i.componentRegistry.registerComponent(context, cmdXmlChecker);
+        safeRegisterCode4iComponent('CmdXmlChecker', cmdXmlChecker);
         const cmdRunChecker = new CmdRunChecker();
-        code4i.componentRegistry.registerComponent(context, cmdRunChecker);
+        safeRegisterCode4iComponent('CmdRunChecker', cmdRunChecker);
 
         // If the extension activates while a connection is already live (e.g. lazy
         // activation), the ComponentManager won't have called our component for the
@@ -695,23 +760,23 @@ export async function activate(context: vscode.ExtensionContext) {
             })();
         };
 
-        code4i.instance.subscribe(context, 'connected', 'clPrompter-connected-context', () => {
+        safeSubscribeCode4iEvent('connected', 'clPrompter-connected-context', () => {
             void setConnectedContext(true, 'ibmi-connected-event');
             void prioritizeCommandEntryPanelOnConnect();
             void commandEntry.handleConnectionAvailable(code4i?.instance?.getConnection(), { autoInitializeDedicatedJob: true });
         });
-        code4i.instance.subscribe(context, 'connected', 'clPrompter-mapepire-dump', () => {
+        safeSubscribeCode4iEvent('connected', 'clPrompter-mapepire-dump', () => {
             const conn = code4i?.instance?.getConnection();
             logMapepireConnectionDump(conn as any, 'connected-event');
         });
-        code4i.instance.subscribe(context, 'connected', 'clPrompter-command-entry-startup-mode', () => {
+        safeSubscribeCode4iEvent('connected', 'clPrompter-command-entry-startup-mode', () => {
             void prioritizeCommandEntryPanelOnConnect();
         });
-        code4i.instance.subscribe(context, 'connected', 'clPrompter-keepalive-start', startKeepAlive);
-        code4i.instance.subscribe(context, 'connected', 'clPrompter-prefetch', prefetch);
+        safeSubscribeCode4iEvent('connected', 'clPrompter-keepalive-start', startKeepAlive);
+        safeSubscribeCode4iEvent('connected', 'clPrompter-prefetch', prefetch);
         // Patch runSQL on every new connection so we can log what external SQL is
         // competing for the shared Mapepire job when we detect a "busy" SQLJob.
-        code4i.instance.subscribe(context, 'connected', 'clPrompter-patch-runsql', () => {
+        safeSubscribeCode4iEvent('connected', 'clPrompter-patch-runsql', () => {
             const conn = code4i?.instance?.getConnection();
             if (conn) { patchRunSQL(conn as any); }
         });
@@ -719,22 +784,22 @@ export async function activate(context: vscode.ExtensionContext) {
         // handles new connections automatically (it calls getRemoteState/update on all
         // registered components at connect time). The manual call below handles only
         // the case where the extension activates into an already-live session.
-        code4i.instance.subscribe(context, 'disconnected', 'clPrompter-connected-context', () => {
+        safeSubscribeCode4iEvent('disconnected', 'clPrompter-connected-context', () => {
             void setConnectedContext(false, 'ibmi-disconnected-event');
         });
-        code4i.instance.subscribe(context, 'disconnected', 'clPrompter-command-entry-cleanup', () => {
+        safeSubscribeCode4iEvent('disconnected', 'clPrompter-command-entry-cleanup', () => {
             void (async () => {
                 try {
                     await sharedCommandService.closeSqlSession();
                     await sharedJobManager.dispose();
                     commandEntry.refreshSqlJobId();
-                    commandEntryOutput.appendLine('[Cmd Entry] Disconnected: private SQL job and SQL session state cleaned up.');
+                    safeOutputAppendLine('[Cmd Entry] Disconnected: private SQL job and SQL session state cleaned up.');
                 } catch (error) {
-                    commandEntryOutput.appendLine(`[Cmd Entry] Disconnected cleanup warning: ${error instanceof Error ? error.message : String(error)}`);
+                    safeOutputAppendLine(`[Cmd Entry] Disconnected cleanup warning: ${error instanceof Error ? error.message : String(error)}`);
                 }
             })();
         });
-        code4i.instance.subscribe(context, 'disconnected', 'clPrompter-keepalive-stop', stopKeepAlive);
+        safeSubscribeCode4iEvent('disconnected', 'clPrompter-keepalive-stop', stopKeepAlive);
 
         // Start immediately if already connected when the extension activates.
         if (code4i.instance.getConnection()) {
@@ -753,7 +818,7 @@ export async function activate(context: vscode.ExtensionContext) {
         // Ensure the interval is cleared when the extension is deactivated.
         context.subscriptions.push({ dispose: stopKeepAlive });
 
-        code4i.instance.subscribe(context, 'disconnected', 'clPrompter-cache-clear', () => {
+        safeSubscribeCode4iEvent('disconnected', 'clPrompter-cache-clear', () => {
             clearCMDXMLCache();
             clpDocCache.clear();
             clpHelpCache.clear();

@@ -5,7 +5,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta http-equiv="Content-Security-Policy"
-        content="default-src 'none'; img-src {{CSP_SOURCE}} https: data:; style-src {{CSP_SOURCE}} 'unsafe-inline'; script-src {{CSP_SOURCE}};">
+        content="default-src 'none'; img-src {{CSP_SOURCE}} https: data:; style-src {{CSP_SOURCE}} 'unsafe-inline'; font-src {{CSP_SOURCE}} data:; script-src {{CSP_SOURCE}};">
+    <link rel="stylesheet" href="{{CODICON_SOURCE}}">
     <title>{{PANEL_TITLE}}</title>
     <style>
         :root {
@@ -73,8 +74,42 @@
         }
 
         .meta {
-            margin: 0 0 10px;
+            margin: 0;
             color: var(--muted);
+            min-width: 0;
+            flex: 1 1 auto;
+        }
+
+        .result-meta-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+            margin: 0 0 10px;
+            min-width: 0;
+        }
+
+        .result-meta-actions {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            flex: 0 0 auto;
+            white-space: nowrap;
+        }
+
+        .result-meta-actions .icon-button {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            min-width: 28px;
+            min-height: 26px;
+            padding: 3px 6px;
+            line-height: 1;
+        }
+
+        .result-meta-actions .icon-button .codicon {
+            font-size: 14px;
+            line-height: 1;
         }
 
         .result-title {
@@ -244,8 +279,42 @@
             gap: 0;
             line-height: 1.15;
             white-space: normal;
-            text-align: left;
             pointer-events: none;
+        }
+
+        .cell-context-menu {
+            position: fixed;
+            z-index: 2147483647;
+            min-width: 190px;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            background: color-mix(in srgb, var(--bg) 94%, var(--fg) 6%);
+            box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+            padding: 4px;
+            display: none;
+        }
+
+        .cell-context-menu.is-visible {
+            display: block;
+        }
+
+        .cell-context-menu button {
+            width: 100%;
+            text-align: left;
+            border: 0;
+            border-radius: 4px;
+            padding: 7px 9px;
+            margin: 0;
+            background: transparent;
+            color: var(--fg);
+            font: inherit;
+            cursor: pointer;
+        }
+
+        .cell-context-menu button:hover,
+        .cell-context-menu button:focus-visible {
+            outline: none;
+            background: color-mix(in srgb, var(--bg) 78%, var(--fg) 22%);
         }
 
         .stacked-header span {

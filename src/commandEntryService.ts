@@ -241,10 +241,34 @@ function extractSqlColumnMetadata(raw: unknown, fallbackNames: string[]): SqlCol
     return metadata.map((entry, index) => {
         const candidate = entry && typeof entry === 'object' ? entry as Record<string, unknown> : {};
         const rawName = String(
-            candidate.name ?? candidate.COLUMN_NAME ?? candidate.columnName ?? candidate.column_name ?? candidate.NAME ?? fallbackNames[index] ?? ''
+            candidate.name
+            ?? candidate.Name
+            ?? candidate.COLUMN_NAME
+            ?? candidate.columnName
+            ?? candidate.ColumnName
+            ?? candidate.column_name
+            ?? candidate.NAME
+            ?? fallbackNames[index]
+            ?? ''
         ).trim();
         const rawLabel = String(
-            candidate.label ?? candidate.COLUMN_LABEL ?? candidate.columnLabel ?? candidate.column_label ?? candidate.LABEL ?? candidate.heading ?? candidate.HEADING ?? ''
+            candidate.label
+            ?? candidate.Label
+            ?? candidate.lable
+            ?? candidate.Lable
+            ?? candidate.COLUMN_LABEL
+            ?? candidate.columnLabel
+            ?? candidate.ColumnLabel
+            ?? candidate.column_label
+            ?? candidate.LABEL
+            ?? candidate.COLUMN_HEADING
+            ?? candidate.columnHeading
+            ?? candidate.ColumnHeading
+            ?? candidate.column_heading
+            ?? candidate.heading
+            ?? candidate.Heading
+            ?? candidate.HEADING
+            ?? ''
         ).trim();
 
         const displaySize = toOptionalNumber(candidate.displaySize)

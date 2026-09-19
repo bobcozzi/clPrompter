@@ -2,6 +2,17 @@ import * as vscode from 'vscode';
 import { CodeSnippetRecord, CommandEntryViewProvider, DEFAULT_CODE_SNIPPET_GROUPS } from './commandEntryView';
 
 type TreeClickAction = 'Run' | 'View full statement' | 'No-op';
+const CODE_SNIPPET_NOOP_CLICK_COMMAND = 'clprompter.codeSnippet.noopClick';
+const SNIPPET_TREE_GROUP_STATE_KEY = 'commandEntry.snippetTree.groupState';
+
+function normalizeSnippetOrder(value: unknown): number | undefined {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed)) {
+        return undefined;
+    }
+    const normalized = Math.trunc(parsed);
+    return normalized >= 0 ? normalized : undefined;
+}
 
 function buildSnippetViewUri(label: string, language: 'sql' | 'clle'): vscode.Uri {
     const cleaned = label
@@ -36,7 +47,7 @@ function getTreeClickAction(): TreeClickAction {
     return 'Run';
 }
 
-function commandForTreeClickAction(action: TreeClickAction, snippet: CodeSnippetRecord): vscode.Command | undefined {
+function commandForTreeClickAction(action: TreeClickAction, snippet: CodeSnippetRecord): vscode.Command {
     switch (action) {
         case 'View full statement':
             return {
@@ -45,7 +56,11 @@ function commandForTreeClickAction(action: TreeClickAction, snippet: CodeSnippet
                 arguments: [snippet]
             };
         case 'No-op':
-            return undefined;
+            return {
+                command: CODE_SNIPPET_NOOP_CLICK_COMMAND,
+                title: 'Code Snippet: No-op',
+                arguments: [snippet]
+            };
         default:
             return {
                 command: 'clprompter.codeSnippet.run',
@@ -56,10 +71,9 @@ function commandForTreeClickAction(action: TreeClickAction, snippet: CodeSnippet
 }
 
 class GroupTreeItem extends vscode.TreeItem {
-    constructor(public readonly groupName: string, public readonly count: number) {
-        super(groupName, vscode.TreeItemCollapsibleState.Expanded);
+    constructor(public readonly groupName: string, collapsibleState: vscode.TreeItemCollapsibleState) {
+        super(groupName, collapsibleState);
         this.id = `group.${groupName}`;
-        this.description = `${count}`;
         this.contextValue = 'codeSnippetGroup';
     }
 }
@@ -107,7 +121,10 @@ class CodeSnippetTreeDataProvider implements vscode.TreeDataProvider<SnippetNode
     public readonly onDidChangeTreeData = this.onDidChangeTreeDataEmitter.event;
     private cache: CodeSnippetRecord[] = [];
 
-    constructor(private readonly commandEntry: CommandEntryViewProvider) {
+    constructor(
+        private readonly commandEntry: CommandEntryViewProvider,
+        private readonly resolveGroupCollapsedState: (groupName: string) => boolean | undefined
+    ) {
         this.cache = this.commandEntry.listCodeSnippets();
     }
 
@@ -134,6 +151,10 @@ class CodeSnippetTreeDataProvider implements vscode.TreeDataProvider<SnippetNode
         return [...seen];
     }
 
+    getCurrentGroupNames(): string[] {
+        return this.getGroupNames();
+    }
+
     getTreeItem(element: SnippetNode): vscode.TreeItem {
         return element;
     }
@@ -142,15 +163,35 @@ class CodeSnippetTreeDataProvider implements vscode.TreeDataProvider<SnippetNode
         if (!element) {
             const groups = this.getGroupNames();
             return groups.map((groupName) => {
-                const count = this.cache.filter((item) => item.group === groupName).length;
-                return new GroupTreeItem(groupName, count);
+                const isCollapsed = this.resolveGroupCollapsedState(groupName) === true;
+                return new GroupTreeItem(
+                    groupName,
+                    isCollapsed ? vscode.TreeItemCollapsibleState.Collapsed : vscode.TreeItemCollapsibleState.Expanded
+                );
             });
         }
 
         if (element instanceof GroupTreeItem) {
             const clickAction = getTreeClickAction();
-            return this.cache
-                .filter((snippet) => snippet.group === element.groupName)
+            const snippetsInGroup = this.cache.filter((snippet) => snippet.group === element.groupName);
+            const builtInSnippets = snippetsInGroup
+                .filter((snippet) => snippet.source === 'built-in')
+                .sort((left, right) => {
+                    const leftOrder = normalizeSnippetOrder(left.order);
+                    const rightOrder = normalizeSnippetOrder(right.order);
+                    if (leftOrder !== undefined || rightOrder !== undefined) {
+                        const leftValue = leftOrder ?? Number.MAX_SAFE_INTEGER;
+                        const rightValue = rightOrder ?? Number.MAX_SAFE_INTEGER;
+                        if (leftValue !== rightValue) {
+                            return leftValue - rightValue;
+                        }
+                    }
+
+                    return left.label.localeCompare(right.label, undefined, { sensitivity: 'base' });
+                });
+            const userSnippets = snippetsInGroup.filter((snippet) => snippet.source !== 'built-in');
+
+            return [...builtInSnippets, ...userSnippets]
                 .map((snippet) => new CodeSnippetTreeItem(snippet, clickAction));
         }
 
@@ -548,7 +589,25 @@ export function registerCodeSnippetManagerView(
     debugLog?: (message: string) => void
 ): vscode.Disposable {
     const viewId = 'clprompter.codeSnippetManagerView';
-    const provider = new CodeSnippetTreeDataProvider(commandEntry);
+    const rawGroupState = context.globalState.get<Record<string, unknown> | undefined>(SNIPPET_TREE_GROUP_STATE_KEY);
+    const groupCollapsedState = new Map<string, boolean>();
+    if (rawGroupState && typeof rawGroupState === 'object') {
+        for (const [groupName, state] of Object.entries(rawGroupState)) {
+            if (typeof state === 'boolean') {
+                groupCollapsedState.set(groupName, state);
+            }
+        }
+    }
+
+    const persistGroupState = async (): Promise<void> => {
+        const payload: Record<string, boolean> = {};
+        for (const [groupName, isCollapsed] of groupCollapsedState.entries()) {
+            payload[groupName] = isCollapsed;
+        }
+        await context.globalState.update(SNIPPET_TREE_GROUP_STATE_KEY, payload);
+    };
+
+    const provider = new CodeSnippetTreeDataProvider(commandEntry, (groupName) => groupCollapsedState.get(groupName));
     const dnd = new CodeSnippetDragAndDropController(commandEntry, provider);
     const log = (message: string): void => {
         debugLog?.(`[Cmd Entry][SnippetTree] ${message}`);
@@ -627,6 +686,9 @@ export function registerCodeSnippetManagerView(
             await hideView();
         }),
         vscode.commands.registerCommand('clprompter.codeSnippet.refresh', () => provider.refresh()),
+        vscode.commands.registerCommand(CODE_SNIPPET_NOOP_CLICK_COMMAND, () => {
+            // Intentionally no-op: keeps label click from toggling snippet preview expansion.
+        }),
         vscode.commands.registerCommand('clprompter.codeSnippet.add', () => {
             CodeSnippetEditorPanel.show(context, commandEntry, undefined, getAvailableGroups(commandEntry));
         }),
@@ -738,6 +800,18 @@ export function registerCodeSnippetManagerView(
         }),
         view.onDidChangeSelection(() => {
             void updateSelectionContexts();
+        }),
+        view.onDidExpandElement((event) => {
+            if (event.element instanceof GroupTreeItem) {
+                groupCollapsedState.set(event.element.groupName, false);
+                void persistGroupState();
+            }
+        }),
+        view.onDidCollapseElement((event) => {
+            if (event.element instanceof GroupTreeItem) {
+                groupCollapsedState.set(event.element.groupName, true);
+                void persistGroupState();
+            }
         })
     );
 

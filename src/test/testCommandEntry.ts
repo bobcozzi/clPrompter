@@ -33,8 +33,8 @@ function requireFromOut(moduleName: string): any {
 const { classifyMessage, determineOutcome, mapCommandMessages } = requireFromOut('commandEntryModel');
 const { detectCommandEntryPrefix } = requireFromOut('commandEntryPrefixes');
 const { buildCancelSqlJobCommand, CMD_RUN_SQL, normalizeSqlJobId } = requireFromOut('commandEntrySqlHelpers');
-const { collectRunAfterSqlJobInit, resolveSqlNamingMode } = requireFromOut('commandEntryJobManager');
-const { buildImmediateSessionContextSql, expandStartupScriptPlaceholders, normalizeSchemaSessionContextValue, normalizeSessionContextValue } = requireFromOut('commandEntrySqlSettings');
+const { collectRunAfterSqlJobInit, resolveRunAfterSqlJobInitMode, resolveSqlNamingMode } = requireFromOut('commandEntryJobManager');
+const { buildImmediateSessionContextSql, expandStartupScriptPlaceholders, normalizeSchemaSessionContextValue, normalizeSessionContextValue, splitRunAfterSqlJobInitStatements } = requireFromOut('commandEntrySqlSettings');
 const { checkSQLForExecution } = requireFromOut('sqlSyntaxChecker');
 
 const messages = mapCommandMessages([
@@ -59,6 +59,15 @@ assert.strictEqual(resolveSqlNamingMode('system'), 'system');
 assert.strictEqual(resolveSqlNamingMode('SQL'), 'sql');
 assert.deepStrictEqual(collectRunAfterSqlJobInit({ cmdEntry: { runAfterSqlJobInit: ['SET OPTION NAMING = *SQL', 'VALUES 1'] } }), ['SET OPTION NAMING = *SQL', 'VALUES 1']);
 assert.deepStrictEqual(collectRunAfterSqlJobInit({ clPrompter: { cmdEntry: { runAfterSqlJobInit: ['SET SYSIBMADM.SELFCODES = 1'] } } }), ['SET SYSIBMADM.SELFCODES = 1']);
+assert.deepStrictEqual(splitRunAfterSqlJobInitStatements('cl: dspjoblog;\nsql: values 1;'), ['cl: dspjoblog', 'sql: values 1']);
+assert.deepStrictEqual(splitRunAfterSqlJobInitStatements(["cl: dspjoblog;", 'values 1;']), ['cl: dspjoblog', 'values 1']);
+assert.deepStrictEqual(splitRunAfterSqlJobInitStatements("values 'a; b';"), ["values 'a; b'"]);
+assert.deepStrictEqual(splitRunAfterSqlJobInitStatements("select\n 1;\nvalues 2;"), ['select 1', 'values 2']);
+assert.deepStrictEqual(resolveRunAfterSqlJobInitMode('SQL: values 1'), { mode: 'sql', command: 'values 1' });
+assert.deepStrictEqual(resolveRunAfterSqlJobInitMode('CL: dspjoblog'), { mode: 'cl', command: 'dspjoblog' });
+assert.deepStrictEqual(resolveRunAfterSqlJobInitMode('values 1'), { mode: 'sql', command: 'values 1' });
+assert.deepStrictEqual(resolveRunAfterSqlJobInitMode('set path *libl'), { mode: 'sql', command: 'set path *libl' });
+assert.deepStrictEqual(resolveRunAfterSqlJobInitMode('dspjoblog'), { mode: 'cl', command: 'dspjoblog' });
 assert.strictEqual(normalizeSchemaSessionContextValue('SET SCHEMA = MYLIB'), 'MYLIB');
 assert.strictEqual(normalizeSchemaSessionContextValue('SET CURRENT SCHEMA MYLIB'), 'MYLIB');
 assert.strictEqual(normalizeSessionContextValue('SET PATH = *LIBL, QTEMP'), '*LIBL, QTEMP');

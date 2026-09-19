@@ -11,9 +11,17 @@ body {
 
 .command-row {
     display: flex;
-    align-items: center;
+    align-items: flex-start;
     gap: 6px;
     flex-wrap: wrap;
+}
+
+.severity-wrap {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    align-self: flex-start;
+    min-height: 24px;
 }
 
 .command-input-wrap {
@@ -155,7 +163,7 @@ button[data-tooltip]:focus-visible::after {
     position: absolute;
     top: calc(100% + 4px);
     right: 0;
-    z-index: 30;
+    z-index: 1000;
     min-width: 190px;
     max-width: min(260px, calc(100vw - 16px));
     box-sizing: border-box;
@@ -177,15 +185,6 @@ button[data-tooltip]:focus-visible::after {
     bottom: calc(100% + 4px);
 }
 
-.toolbar-menu-list.compact-grid {
-    min-width: 250px;
-    max-width: min(360px, calc(100vw - 16px));
-    display: grid;
-    grid-template-columns: repeat(var(--toolbar-menu-columns, 2), minmax(0, 1fr));
-    gap: 2px;
-    align-items: stretch;
-}
-
 .toolbar-menu-list button {
     text-align: left;
     border: none;
@@ -194,16 +193,6 @@ button[data-tooltip]:focus-visible::after {
     min-height: 22px;
     background: transparent;
     color: var(--vscode-foreground);
-}
-
-.toolbar-menu-list.compact-grid button {
-    min-height: 18px;
-    padding: 2px 6px;
-    font-size: 11px;
-    line-height: 1.15;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
 }
 
 .toolbar-menu-list button:hover,
@@ -215,6 +204,41 @@ button[data-tooltip]:focus-visible::after {
 .toolbar-menu-list button:disabled {
     opacity: 0.5;
     cursor: not-allowed;
+}
+
+.toolbar-submenu-wrap {
+    position: relative;
+}
+
+.toolbar-submenu-wrap>button {
+    width: 100%;
+}
+
+#menu-run-mode::after {
+    content: ' ▸';
+    opacity: 0.8;
+    float: right;
+}
+
+.toolbar-submenu-list {
+    position: fixed;
+    top: 0;
+    left: 0;
+    z-index: 1001;
+    min-width: 138px;
+    max-width: 220px;
+    box-sizing: border-box;
+    display: none;
+    flex-direction: column;
+    padding: 4px;
+    border-radius: 6px;
+    background: var(--vscode-editorHoverWidget-background, var(--vscode-editor-background));
+    border: 1px solid var(--vscode-editorHoverWidget-border, var(--vscode-contrastBorder, transparent));
+    box-shadow: 0 6px 14px color-mix(in srgb, #000 35%, transparent);
+}
+
+.toolbar-submenu-list.is-open {
+    display: flex;
 }
 
 #toolbar-menu:hover::after,
@@ -232,31 +256,11 @@ button[data-tooltip]:focus-visible::after {
     transform: none;
 }
 
-#mode-tooltip-wrap {
-    position: relative;
-    display: inline-flex;
-}
-
-#mode-tooltip-wrap:not(.tooltip-suppressed)[data-tooltip]:hover::after {
-    content: attr(data-tooltip);
-    position: absolute;
-    top: calc(100% + 6px);
-    right: 0;
-    white-space: nowrap;
-    padding: 2px 6px;
-    border-radius: 3px;
-    background: var(--vscode-editorHoverWidget-background, var(--vscode-editor-background));
-    color: var(--vscode-editorHoverWidget-foreground, var(--vscode-foreground));
-    border: 1px solid var(--vscode-editorHoverWidget-border, var(--vscode-contrastBorder, transparent));
-    z-index: 20;
-    pointer-events: none;
-    font-size: 11px;
-    line-height: 1.2;
-}
-
 .mode-label {
     opacity: .75;
     font-size: .9em;
+    line-height: 1;
+    margin-top: 0;
 }
 
 #message-severity-filter {

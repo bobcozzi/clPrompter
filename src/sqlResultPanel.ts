@@ -52,7 +52,21 @@ interface SqlResultPanelL10n {
     columnViewButton: string;
     columnIdHeader: string;
     dataHeader: string;
+    copyResultSet: string;
+    saveResultSet: string;
+    copyToClipboard: string;
+    copyToCommandEntry: string;
 }
+
+type ExportFormat = 'csv' | 'tsv' | 'json' | 'md';
+type DelimitedSeparator = ',' | '|' | '\t';
+
+type ExportSelection = {
+    format: ExportFormat;
+    separator?: DelimitedSeparator;
+    extension: string;
+    formatLabel: string;
+};
 
 function getSqlResultPanelL10n(): SqlResultPanelL10n {
     return {
@@ -99,7 +113,11 @@ function getSqlResultPanelL10n(): SqlResultPanelL10n {
         rowViewButton: vscode.l10n.t('<row view>'),
         columnViewButton: vscode.l10n.t('<column view>'),
         columnIdHeader: vscode.l10n.t('Column ID'),
-        dataHeader: vscode.l10n.t('Data')
+        dataHeader: vscode.l10n.t('Data'),
+        copyResultSet: vscode.l10n.t('Copy result set'),
+        saveResultSet: vscode.l10n.t('Save result set'),
+        copyToClipboard: vscode.l10n.t('Copy to Clipboard'),
+        copyToCommandEntry: vscode.l10n.t('Copy to Command Entry')
     };
 }
 
@@ -112,12 +130,20 @@ function readSqlResultTemplate(): string | undefined {
     }
 }
 
+function renderIconButton(id: string, title: string, iconName: string): string {
+    return `<button id="${id}" type="button" class="icon-button" title="${escapeHtml(title)}" data-tooltip="${escapeHtml(title)}" aria-label="${escapeHtml(title)}"><span class="codicon codicon-${escapeHtml(iconName)}" aria-hidden="true"></span></button>`;
+}
+
 type SqlResultPanelRequest =
     | { type: 'loadMore'; sessionId: string }
     | { type: 'loadAll'; sessionId: string }
     | { type: 'stopLoadAll'; sessionId: string }
     | { type: 'prefetch'; sessionId: string }
     | { type: 'rerunSql'; statement: string; resultTitle?: string }
+    | { type: 'copyResultSet'; columns: string[]; rows: string[][] }
+    | { type: 'saveResultSet'; columns: string[]; rows: string[][]; resultTitle?: string }
+    | { type: 'copyCellToClipboard'; value: string }
+    | { type: 'copyCellToCommandEntry'; value: string }
     | { type: 'closeSession'; sessionId: string };
 
 type SqlResultPanelRequestHandler = (request: SqlResultPanelRequest) => Promise<SqlResultPayload | undefined>;
@@ -130,6 +156,220 @@ class SqlResultPanel {
     private loadAllInProgress = false;
     private stopLoadAllRequested = false;
     private readonly l10n = getSqlResultPanelL10n();
+
+    private sanitizeExportBaseName(value?: string): string {
+        const base = String(value ?? '').trim().toLowerCase().replace(/[^a-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '');
+        return base || 'sql-results';
+    }
+
+    private escapeCsvCell(value: string): string {
+        if (/[,"\r\n]/.test(value)) {
+            return `"${value.replace(/"/g, '""')}"`;
+        }
+        return value;
+    }
+
+    private serializeDelimited(columns: string[], rows: string[][], delimiter: DelimitedSeparator): string {
+        const quoteCell = delimiter === ','
+            ? (value: string) => this.escapeCsvCell(value)
+            : (value: string) => this.escapeCsvCell(value);
+        const header = columns.map((column) => quoteCell(String(column ?? ''))).join(delimiter);
+        const body = rows.map((row) => columns.map((_column, index) => quoteCell(String((row && row[index]) ?? ''))).join(delimiter));
+        return [header, ...body].join('\n');
+    }
+
+    private serializeJson(columns: string[], rows: string[][]): string {
+        const payload = rows.map((row) => {
+            const entry: Record<string, string> = {};
+            for (let i = 0; i < columns.length; i += 1) {
+                entry[String(columns[i] ?? '')] = String((row && row[i]) ?? '');
+            }
+            return entry;
+        });
+        return JSON.stringify(payload, null, 2);
+    }
+
+    private escapeMarkdownCell(value: string): string {
+        return value.replace(/\|/g, '\\|').replace(/\r?\n/g, ' ');
+    }
+
+    private serializeMarkdown(columns: string[], rows: string[][]): string {
+        const header = `| ${columns.map((column) => this.escapeMarkdownCell(String(column ?? ''))).join(' | ')} |`;
+        const separator = `| ${columns.map(() => '---').join(' | ')} |`;
+        const body = rows.map((row) => `| ${columns.map((_column, index) => this.escapeMarkdownCell(String((row && row[index]) ?? ''))).join(' | ')} |`);
+        return [header, separator, ...body].join('\n');
+    }
+
+    private serializeResultSet(selection: ExportSelection, columns: string[], rows: string[][]): string {
+        switch (selection.format) {
+            case 'csv':
+                return this.serializeDelimited(columns, rows, selection.separator ?? ',');
+            case 'tsv':
+                return this.serializeDelimited(columns, rows, '\t');
+            case 'json':
+                return this.serializeJson(columns, rows);
+            case 'md':
+                return this.serializeMarkdown(columns, rows);
+            default:
+                return this.serializeDelimited(columns, rows, ',');
+        }
+    }
+
+    private async promptCsvSeparator(action: 'copy' | 'save'): Promise<ExportSelection | undefined> {
+        const pick = await vscode.window.showQuickPick<{
+            label: string;
+            description: string;
+            separator: DelimitedSeparator;
+            extension: string;
+            formatLabel: string;
+        }>([
+            {
+                label: vscode.l10n.t('Comma (,)'),
+                description: vscode.l10n.t('Standard CSV format'),
+                separator: ',',
+                extension: 'csv',
+                formatLabel: 'CSV'
+            },
+            {
+                label: vscode.l10n.t('Bar (|)'),
+                description: vscode.l10n.t('Pipe-separated values'),
+                separator: '|',
+                extension: 'psv',
+                formatLabel: 'CSV (|)'
+            },
+            {
+                label: vscode.l10n.t('Tab'),
+                description: vscode.l10n.t('Tab-separated values (best for copy/paste into Excel)'),
+                separator: '\t',
+                extension: 'tsv',
+                formatLabel: 'TSV'
+            }
+        ], {
+            title: action === 'copy' ? vscode.l10n.t('CSV Delimiter for Copy') : vscode.l10n.t('CSV Delimiter for Save'),
+            placeHolder: action === 'copy'
+                ? vscode.l10n.t('Choose a delimiter for copied CSV data')
+                : vscode.l10n.t('Choose a delimiter for saved CSV data')
+        });
+
+        if (!pick) {
+            return undefined;
+        }
+
+        return {
+            format: 'csv',
+            separator: pick.separator,
+            extension: pick.extension,
+            formatLabel: pick.formatLabel
+        };
+    }
+
+    private async promptExportFormat(action: 'copy' | 'save'): Promise<ExportSelection | undefined> {
+        const pick = await vscode.window.showQuickPick<{
+            label: string;
+            description: string;
+            format: ExportFormat;
+        }>([
+            { label: 'CSV', description: vscode.l10n.t('Delimited text with selectable separator'), format: 'csv' },
+            { label: 'JSON', description: vscode.l10n.t('JSON array of row objects'), format: 'json' },
+            { label: 'Markdown', description: vscode.l10n.t('Markdown table format'), format: 'md' },
+        ], {
+            title: action === 'copy' ? vscode.l10n.t('Copy Result Set Format') : vscode.l10n.t('Save Result Set Format'),
+            placeHolder: action === 'copy'
+                ? vscode.l10n.t('Choose a format to copy')
+                : vscode.l10n.t('Choose a format to save')
+        });
+
+        if (!pick) {
+            return undefined;
+        }
+
+        if (pick.format === 'csv') {
+            return this.promptCsvSeparator(action);
+        }
+
+        if (pick.format === 'json') {
+            return { format: 'json', extension: 'json', formatLabel: 'JSON' };
+        }
+
+        if (pick.format === 'md') {
+            return { format: 'md', extension: 'md', formatLabel: 'MD' };
+        }
+
+        return { format: 'csv', separator: ',', extension: 'csv', formatLabel: 'CSV' };
+    }
+
+    private normalizeColumns(value: unknown): string[] {
+        if (!Array.isArray(value)) {
+            return [];
+        }
+        return value.map((entry) => String(entry ?? ''));
+    }
+
+    private normalizeRows(value: unknown, columnCount: number): string[][] {
+        if (!Array.isArray(value)) {
+            return [];
+        }
+
+        return value
+            .filter((row): row is unknown[] => Array.isArray(row))
+            .map((row) => {
+                const normalized: string[] = [];
+                for (let i = 0; i < columnCount; i += 1) {
+                    normalized.push(String(row[i] ?? ''));
+                }
+                return normalized;
+            });
+    }
+
+    private async handleCopyResultSet(columnsInput: unknown, rowsInput: unknown): Promise<void> {
+        const columns = this.normalizeColumns(columnsInput);
+        const rows = this.normalizeRows(rowsInput, columns.length);
+        if (columns.length === 0) {
+            void vscode.window.showWarningMessage(vscode.l10n.t('No result columns available to copy.'));
+            return;
+        }
+
+        const selection = await this.promptExportFormat('copy');
+        if (!selection) {
+            return;
+        }
+
+        const text = this.serializeResultSet(selection, columns, rows);
+        await vscode.env.clipboard.writeText(text);
+        void vscode.window.showInformationMessage(vscode.l10n.t('Copied result set to clipboard as {format}.', { format: selection.formatLabel }));
+    }
+
+    private async handleSaveResultSet(columnsInput: unknown, rowsInput: unknown, resultTitleInput: unknown): Promise<void> {
+        const columns = this.normalizeColumns(columnsInput);
+        const rows = this.normalizeRows(rowsInput, columns.length);
+        if (columns.length === 0) {
+            void vscode.window.showWarningMessage(vscode.l10n.t('No result columns available to save.'));
+            return;
+        }
+
+        const selection = await this.promptExportFormat('save');
+        if (!selection) {
+            return;
+        }
+
+        const baseName = this.sanitizeExportBaseName(typeof resultTitleInput === 'string' ? resultTitleInput : this.activeResultTitle);
+        const defaultFileName = `${baseName}.${selection.extension}`;
+        const uri = await vscode.window.showSaveDialog({
+            saveLabel: vscode.l10n.t('Save Result Set'),
+            defaultUri: vscode.Uri.file(path.join(process.cwd(), defaultFileName)),
+            filters: {
+                [selection.formatLabel]: [selection.extension],
+                [vscode.l10n.t('All files')]: ['*']
+            }
+        });
+        if (!uri) {
+            return;
+        }
+
+        const content = this.serializeResultSet(selection, columns, rows);
+        await vscode.workspace.fs.writeFile(uri, Buffer.from(content, 'utf8'));
+        void vscode.window.showInformationMessage(vscode.l10n.t('Saved result set to {path}.', { path: uri.fsPath }));
+    }
 
     setRequestHandler(handler: SqlResultPanelRequestHandler | undefined): void {
         this.requestHandler = handler;
@@ -149,7 +389,10 @@ class SqlResultPanel {
                     enableScripts: true,
                     retainContextWhenHidden: true,
                     localResourceRoots: sqlResultPanelExtensionUri
-                        ? [vscode.Uri.joinPath(sqlResultPanelExtensionUri, 'media')]
+                        ? [
+                            vscode.Uri.joinPath(sqlResultPanelExtensionUri, 'media'),
+                            vscode.Uri.joinPath(sqlResultPanelExtensionUri, 'node_modules', '@vscode', 'codicons', 'dist')
+                        ]
                         : undefined
                 }
             );
@@ -175,7 +418,10 @@ class SqlResultPanel {
         const scriptUri = extensionUri
             ? this.panel.webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'media', 'sqlResultSet.js')).toString()
             : '';
-        this.panel.webview.html = renderSqlResultHtml(result, this.panel.webview.cspSource, scriptUri, this.l10n);
+        const codiconStylesheetUri = extensionUri
+            ? this.panel.webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'node_modules', '@vscode', 'codicons', 'dist', 'codicon.css')).toString()
+            : '';
+        this.panel.webview.html = renderSqlResultHtml(result, this.panel.webview.cspSource, scriptUri, codiconStylesheetUri, this.l10n);
     }
 
     private update(result: SqlResultPayload): void {
@@ -293,12 +539,42 @@ class SqlResultPanel {
     }
 
     private async handleMessage(message: unknown): Promise<void> {
-        if (!this.requestHandler || !this.panel || !message || typeof message !== 'object') {
+        if (!this.panel || !message || typeof message !== 'object') {
             return;
         }
 
-        const request = message as { type?: string; sessionId?: string; statement?: string; resultTitle?: string };
+        const request = message as { type?: string; sessionId?: string; statement?: string; resultTitle?: string; value?: string; columns?: unknown; rows?: unknown };
         if (!request.type) {
+            return;
+        }
+
+        if (request.type === 'copyResultSet') {
+            await this.handleCopyResultSet(request.columns, request.rows);
+            return;
+        }
+
+        if (request.type === 'saveResultSet') {
+            await this.handleSaveResultSet(request.columns, request.rows, request.resultTitle);
+            return;
+        }
+
+        if (!this.requestHandler) {
+            return;
+        }
+
+        if (request.type === 'copyCellToClipboard') {
+            await this.requestHandler({
+                type: 'copyCellToClipboard',
+                value: String(request.value ?? '')
+            });
+            return;
+        }
+
+        if (request.type === 'copyCellToCommandEntry') {
+            await this.requestHandler({
+                type: 'copyCellToCommandEntry',
+                value: String(request.value ?? '')
+            });
             return;
         }
 
@@ -373,7 +649,7 @@ export function closeSqlResultPanel(): void {
     singletonPanel.dispose();
 }
 
-function renderSqlResultHtml(result: SqlResultPayload, cspSource: string, scriptUri: string, l10n: SqlResultPanelL10n): string {
+function renderSqlResultHtml(result: SqlResultPayload, cspSource: string, scriptUri: string, codiconStylesheetUri: string, l10n: SqlResultPanelL10n): string {
     const columns = result.columns;
     const profiles = buildColumnProfiles(columns, result.rows, result.columnMetadata ?? []);
     const initialPayload = buildClientPayload(result, l10n);
@@ -421,7 +697,13 @@ function renderSqlResultHtml(result: SqlResultPayload, cspSource: string, script
                             <button id="load-all" type="button" title="${escapeHtml(l10n.loadAllRemainingResultRows)}" data-tooltip="${escapeHtml(l10n.loadAllRemainingResultRows)}" aria-label="${escapeHtml(l10n.loadAllRemainingResultRows)}" hidden>${escapeHtml(l10n.loadAll)}</button>
                     <span class="toolbar-spacer"></span>
                         </div>
-                <p class="meta" id="result-meta"></p>
+                <div class="result-meta-row">
+                    <p class="meta" id="result-meta"></p>
+                    <div class="result-meta-actions" aria-label="${escapeHtml(vscode.l10n.t('Result set actions'))}">
+                        ${renderIconButton('copy-result-set', l10n.copyResultSet, 'copy')}
+                        ${renderIconButton('save-result-set', l10n.saveResultSet, 'save')}
+                    </div>
+                </div>
                     <div class="single-row-wrap" id="single-row-wrap" hidden><table class="single-row-table"><thead><tr><th id="single-row-col-id-header" class="sortable-col" data-col-index="0" aria-sort="none" role="button" tabindex="0">${escapeHtml(l10n.columnIdHeader)}</th><th id="single-row-data-header" class="sortable-col" data-col-index="1" aria-sort="none" role="button" tabindex="0">${escapeHtml(l10n.dataHeader)}</th></tr></thead><tbody id="single-row-body"></tbody></table></div>
                     <div class="table-wrap" id="table-wrap"><table><thead><tr>${allHeaders}</tr></thead><tbody id="results-body">${initialBodyRowsHtml}</tbody></table></div>`;
 
@@ -436,11 +718,12 @@ function renderSqlResultHtml(result: SqlResultPayload, cspSource: string, script
 
     const template = readSqlResultTemplate();
     if (!template) {
-        return `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><title>${PANEL_TITLE}</title></head><body>${bodyHtml}</body></html>`;
+        return `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><link rel="stylesheet" href="${codiconStylesheetUri}"><title>${PANEL_TITLE}</title></head><body>${bodyHtml}</body></html>`;
     }
 
     return template
         .split('{{CSP_SOURCE}}').join(cspSource)
+        .split('{{CODICON_SOURCE}}').join(codiconStylesheetUri)
         .split('{{PANEL_TITLE}}').join(PANEL_TITLE)
         .split('{{BODY_HTML}}').join(bodyHtml);
 }
@@ -458,6 +741,7 @@ function buildClientPayload(result: SqlResultPayload, l10n: SqlResultPanelL10n) 
                 alignClass,
                 cellClass,
                 html: formatCell(row[column], profile),
+                rawText: sortableTextValue(row[column]),
                 sortKind: sortKeys.sortKind,
                 sortText: sortKeys.sortText,
                 sortNumber: sortKeys.sortNumber
@@ -481,12 +765,13 @@ function buildClientPayload(result: SqlResultPayload, l10n: SqlResultPanelL10n) 
     };
 }
 
-function renderRowCellsHtml(rowCells: Array<Array<{ alignClass?: string; cellClass?: string; html: string }>>): string {
+function renderRowCellsHtml(rowCells: Array<Array<{ alignClass?: string; cellClass?: string; html: string; rawText?: string }>>): string {
     return rowCells.map((cells, index) => {
         const tds = cells.map((cell) => {
             const classes = [cell.alignClass, cell.cellClass].filter(Boolean).join(' ');
             const classAttr = classes ? ` class="${classes}"` : '';
-            return `<td${classAttr}>${cell.html}</td>`;
+            const rawValueAttr = ` data-raw-value="${escapeHtml(cell.rawText ?? '')}"`;
+            return `<td${classAttr}${rawValueAttr}>${cell.html}</td>`;
         }).join('');
         return `<tr><td class="align-right row-index-col">${index + 1}</td>${tds}</tr>`;
     }).join('');

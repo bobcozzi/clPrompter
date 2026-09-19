@@ -2,6 +2,28 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.0.40] - 2026-09-20
+
+### What's New
+- The Command Entry toolbar has been redesigned and split between the Command Entry panel title bar and the original toolbar to reduce clutter and make actions easier to access.
+- When SQL is run in Command Entry, result-set data can now be copied to the clipboard or pasted into the Command Entry input area. This is useful when a result contains an executable SQL statement. For example, the updated spooled file list now includes a new column with an SQL statement for reading a spooled file entry. By right-clicking the cell and selecting Copy to Command Entry, that SQL statement is copied to the Command Entry input panel and can be run immediately, making it easier to find and view a spooled file. Note: we still use the legacy, slower IBM `SYSTOOLS.SPOOLED_FILE_DATA` approach for viewing spooled files. Providing alternate options for this feature is a future objective.
+- The Code Snippets tree view no longer auto-collapses or auto-expands.
+  - Clicking the title no longer triggers collapse/expand.
+  - Clicking the reveal triangle still does.
+  - Snippet ordering is now more intuitive.
+- New copy/save buttons appear above the SQL resulset data (on the right) to allow you to copy the results to the clipboard or save it as a file.
+  - Serveral copy/save format choices are supports, including delimited, JSON, and MD (markdown) formats.
+  - On the currently downloaded portion of the resulset is saved or copied. So if the entire set is desired, use the Load All button to get everything for those larger resultSets.
+- New Command Entry SQL Job startup script and log is available so you can run specific SQL or CL commands when initially connecting Command Entry to the host SQL job.
+  - Note this only runs for the dedicated/private SQL Job setting, and does not run when you use the shared SQL job option.
+  - Startup script entries now use a semicolon-terminated statement model, with explicit `SQL:` and `CL:` prefixes supported for clarity. The default is `CL:` when not specified or `SQL:` when `SET`, `VALUES` or `SELECT` are specified.
+
+### What's Fixed
+- Performance fixes and improvements.
+- Reduced development/debug logging.
+- The Command Entry Code Snippets tree no longer auto-expands when the title is clicked.
+- Refined localization safety in Command Entry so user-facing labels and notices remain translatable while IBM i command syntax, SQL statements, and object names such as `*LIBL`, `*NONE`, and `QGPL` stay literal and operationally correct.
+
 ## [1.0.39] - 2026-09-17
 
 ### What's Fixed

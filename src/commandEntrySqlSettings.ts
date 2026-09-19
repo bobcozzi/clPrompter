@@ -5,6 +5,7 @@ export type ConnectionSqlSessionOptions = {
     naming?: 'sql' | 'system';
     commit?: string;
     autoCommit?: boolean;
+    extendedMetadata?: boolean;
     currentLibrary?: string;
     setCurrentLibraryAfterConnect?: boolean;
     libraryList?: string[];
@@ -213,6 +214,85 @@ function normalizeLibraryList(value: unknown): string[] | undefined {
     return normalized.length > 0 ? normalized : undefined;
 }
 
+export function splitRunAfterSqlJobInitStatements(value: unknown): string[] | undefined {
+    const entries = Array.isArray(value)
+        ? value.map((item) => String(item ?? ''))
+        : typeof value === 'string'
+            ? [value]
+            : [];
+
+    if (entries.length === 0) {
+        return undefined;
+    }
+
+    const statements: string[] = [];
+    const seen = new Set<string>();
+
+    const pushStatement = (statement: string): void => {
+        const trimmed = statement.trim().replace(/;\s*$/, '').trim();
+        if (!trimmed || seen.has(trimmed)) {
+            return;
+        }
+        seen.add(trimmed);
+        statements.push(trimmed);
+    };
+
+    for (const entry of entries) {
+        let current = '';
+        let inSingleQuote = false;
+        let inDoubleQuote = false;
+
+        for (let index = 0; index < entry.length; index += 1) {
+            const char = entry[index];
+            const nextChar = entry[index + 1];
+
+            if ((char === '\r' || char === '\n') && !inSingleQuote && !inDoubleQuote) {
+                if (current.length > 0 && !/\s$/.test(current)) {
+                    current += ' ';
+                }
+                if (char === '\r' && nextChar === '\n') {
+                    index += 1;
+                }
+                continue;
+            }
+
+            if (char === '\'' && !inDoubleQuote) {
+                current += char;
+                if (inSingleQuote && nextChar === '\'') {
+                    current += nextChar;
+                    index += 1;
+                } else {
+                    inSingleQuote = !inSingleQuote;
+                }
+                continue;
+            }
+
+            if (char === '"' && !inSingleQuote) {
+                current += char;
+                if (inDoubleQuote && nextChar === '"') {
+                    current += nextChar;
+                    index += 1;
+                } else {
+                    inDoubleQuote = !inDoubleQuote;
+                }
+                continue;
+            }
+
+            if (char === ';' && !inSingleQuote && !inDoubleQuote) {
+                pushStatement(current);
+                current = '';
+                continue;
+            }
+
+            current += char;
+        }
+
+        pushStatement(current);
+    }
+
+    return statements.length > 0 ? statements : undefined;
+}
+
 export function expandStartupScriptPlaceholders(command: string, currentLibrary?: string, libraryList?: string[]): string {
     if (!command || !command.trim()) {
         return command;
@@ -231,28 +311,7 @@ export function expandStartupScriptPlaceholders(command: string, currentLibrary?
 }
 
 function normalizeRunAfterSqlJobInitValue(value: unknown): string[] | undefined {
-    const entries = Array.isArray(value)
-        ? value.map((item) => String(item ?? ''))
-        : typeof value === 'string'
-            ? value.split(/\r?\n/)
-            : [];
-
-    if (entries.length === 0) {
-        return undefined;
-    }
-
-    const normalized: string[] = [];
-    const seen = new Set<string>();
-    for (const entry of entries) {
-        const trimmed = entry.trim();
-        if (!trimmed || seen.has(trimmed)) {
-            continue;
-        }
-        seen.add(trimmed);
-        normalized.push(trimmed);
-    }
-
-    return normalized.length > 0 ? normalized : undefined;
+    return splitRunAfterSqlJobInitStatements(value);
 }
 
 function normalizeSessionContextValueForTarget(value: unknown, target: SessionContextTarget): string | undefined {
@@ -305,6 +364,7 @@ export function getDefaultConnectionSqlSessionOptions(): ConnectionSqlSessionOpt
         naming: 'sql',
         commit: undefined,
         autoCommit: undefined,
+        extendedMetadata: true,
         currentLibrary: undefined,
         setCurrentLibraryAfterConnect: true,
         libraryList: undefined,
@@ -326,6 +386,7 @@ export function getConnectionSqlSessionOptions(connection?: IBMi): ConnectionSql
         naming,
         commit: normalizeSqlOptionValue(raw.commit) ?? defaults.commit,
         autoCommit: readBooleanSetting(raw.autoCommit) ?? defaults.autoCommit,
+        extendedMetadata: readBooleanSetting(raw.extendedMetadata) ?? defaults.extendedMetadata,
         currentLibrary: normalizeCurrentLibraryValue(raw.currentLibrary) ?? defaults.currentLibrary,
         setCurrentLibraryAfterConnect: readBooleanSetting(raw.setCurrentLibraryAfterConnect) ?? defaults.setCurrentLibraryAfterConnect,
         libraryList: normalizeLibraryList(raw.libraryList) ?? defaults.libraryList,
@@ -378,13 +439,13 @@ export function buildRunAfterSqlJobInitDefaults(options?: ConnectionSqlSessionOp
 
     const libraryList = normalizeLibraryList(settings.libraryList) ?? [];
     if (libraryList.length > 0) {
-        statements.push(`CHGLIBL LIBL(${libraryList.join(' ')})`);
+        statements.push('CHGLIBL LIBL(&libl)');
     }
 
     if (settings.setCurrentLibraryAfterConnect) {
         const currentLibrary = normalizeCurrentLibraryValue(settings.currentLibrary);
         if (currentLibrary && currentLibrary !== '*NONE' && currentLibrary !== '*CRTDFT') {
-            statements.push(`CHGCURLIB CURLIB(${currentLibrary})`);
+            statements.push('CHGCURLIB CURLIB(&curlib)');
         }
     }
 

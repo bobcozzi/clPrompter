@@ -2,7 +2,7 @@
   "name": "clprompter",
   "displayName": "%displayName%",
   "description": "%description%",
-  "version": "1.0.39",
+  "version": "1.0.40",
   "author": {
     "name": "Bob Cozzi",
     "url": "https://github.com/bobcozzi"
@@ -173,6 +173,99 @@
         "category": "%contributes.commands.29.category%",
         "title": "%contributes.commands.29.title%",
         "icon": "images/icon-refresh.svg"
+      },
+      {
+        "command": "clprompter.commandEntry.menu.viewHistory",
+        "title": "View CL History"
+      },
+      {
+        "command": "clprompter.commandEntry.menu.toggleMessageDetails",
+        "title": "Show/Hide Message Details"
+      },
+      {
+        "command": "clprompter.commandEntry.menu.toggleSqlLog",
+        "title": "Log SQL Statements"
+      },
+      {
+        "command": "clprompter.commandEntry.menu.clearHistoryAndMessages",
+        "title": "Clear CL Cmd History"
+      },
+      {
+        "command": "clprompter.commandEntry.menu.clearSqlHistoryAndMessages",
+        "title": "Clear SQL Stmt History"
+      },
+      {
+        "command": "clprompter.commandEntry.menu.clearSqlLogMessages",
+        "title": "Clear SQL Log Entries"
+      },
+      {
+        "command": "clprompter.commandEntry.menu.openConnectionSettings",
+        "title": "Connection Settings"
+      },
+      {
+        "command": "clprompter.commandEntry.menu.setRunModeRun",
+        "title": "Run"
+      },
+      {
+        "command": "clprompter.commandEntry.menu.setRunModeLimit",
+        "title": "Limit"
+      },
+      {
+        "command": "clprompter.commandEntry.menu.setRunModeCheck",
+        "title": "Check"
+      },
+      {
+        "command": "clprompter.commandEntry.title.openHelp",
+        "title": "Command Entry Help",
+        "icon": "$(question)"
+      },
+      {
+        "command": "clprompter.commandEntry.title.openSettings",
+        "title": "Command Entry Settings",
+        "icon": "$(gear)"
+      },
+      {
+        "command": "clprompter.commandEntry.menu.openConnectionSettings",
+        "title": "Connection Settings"
+      },
+      {
+        "command": "clprompter.commandEntry.menu.toggleMessageDetails",
+        "title": "Show/Hide Message Details"
+      },
+      {
+        "command": "clprompter.commandEntry.menu.toggleSqlLog",
+        "title": "Log SQL Statements"
+      },
+      {
+        "command": "clprompter.commandEntry.menu.viewHistory",
+        "title": "View CL History"
+      },
+      {
+        "command": "clprompter.commandEntry.menu.clearHistoryAndMessages",
+        "title": "Clear CL Cmd History"
+      },
+      {
+        "command": "clprompter.commandEntry.menu.clearSqlHistoryAndMessages",
+        "title": "Clear SQL Stmt History"
+      },
+      {
+        "command": "clprompter.commandEntry.menu.clearSqlLogMessages",
+        "title": "Clear SQL Log Entries"
+      }
+    ],
+    "submenus": [
+      {
+        "id": "clprompter.commandEntry.menu",
+        "label": "Command Entry"
+      },
+      {
+        "id": "clprompter.commandEntry.menu.runMode",
+        "label": "Run Mode"
+      },
+      {
+        "id": "clprompter.commandEntry.settingsMenu",
+        "label": "Command Entry Settings",
+        "icon": "$(ellipsis)"
       }
     ],
     "keybindings": [
@@ -484,6 +577,23 @@
     "menus": {
       "view/title": [
         {
+          "command": "clprompter.commandEntry.title.openHelp",
+          "when": "view == clprompter.commandEntryView.main",
+          "group": "navigation@1"
+        },
+        {
+          "command": "clprompter.commandEntry.title.openSettings",
+          "when": "view == clprompter.commandEntryView.main",
+          "group": "navigation@2"
+        },
+        {
+          "submenu": "clprompter.commandEntry.settingsMenu",
+          "title": "...",
+          "icon": "$(ellipsis)",
+          "when": "view == clprompter.commandEntryView.main",
+          "group": "navigation@3"
+        },
+        {
           "command": "clprompter.codeSnippet.run",
           "when": "view == clprompter.codeSnippetManagerView && clprompter.codeSnippetSelected",
           "group": "navigation@1"
@@ -522,6 +632,104 @@
           "command": "clprompter.closeCodeSnippetManager",
           "when": "view == clprompter.codeSnippetManagerView",
           "group": "manage@7"
+        }
+      ],
+      "clprompter.commandEntry.menu": [
+        {
+          "command": "clprompter.commandEntry.menu.toggleMessageDetails",
+          "group": "1_state@1"
+        },
+        {
+          "submenu": "clprompter.commandEntry.menu.runMode",
+          "group": "1_state@2"
+        },
+        {
+          "command": "clprompter.commandEntry.menu.viewHistory",
+          "group": "2_history@1"
+        },
+        {
+          "command": "clprompter.commandEntry.menu.toggleSqlLog",
+          "group": "2_history@2"
+        },
+        {
+          "command": "clprompter.commandEntry.menu.clearHistoryAndMessages",
+          "group": "2_history@3"
+        },
+        {
+          "command": "clprompter.commandEntry.menu.clearSqlHistoryAndMessages",
+          "group": "2_history@4"
+        },
+        {
+          "command": "clprompter.clearCommandEntry",
+          "group": "2_history@5"
+        },
+        {
+          "command": "clprompter.commandEntry.menu.clearSqlLogMessages",
+          "group": "2_history@6"
+        },
+        {
+          "command": "clprompter.commandEntry.menu.openConnectionSettings",
+          "group": "3_connection@1"
+        },
+        {
+          "command": "clprompter.useSharedCommandEntrySqlJob",
+          "group": "3_connection@2"
+        },
+        {
+          "command": "clprompter.usePrivateCommandEntrySqlJob",
+          "group": "3_connection@3"
+        },
+        {
+          "command": "clprompter.startNewCommandEntryJob",
+          "group": "3_connection@4"
+        },
+        {
+          "command": "clprompter.cancelCommandEntry",
+          "group": "3_connection@5"
+        }
+      ],
+      "clprompter.commandEntry.settingsMenu": [
+        {
+          "command": "clprompter.commandEntry.menu.openConnectionSettings",
+          "group": "1_settings@1"
+        },
+        {
+          "command": "clprompter.commandEntry.menu.toggleMessageDetails",
+          "group": "1_settings@2"
+        },
+        {
+          "command": "clprompter.commandEntry.menu.toggleSqlLog",
+          "group": "1_settings@3"
+        },
+        {
+          "command": "clprompter.commandEntry.menu.viewHistory",
+          "group": "2_history@1"
+        },
+        {
+          "command": "clprompter.commandEntry.menu.clearHistoryAndMessages",
+          "group": "2_history@2"
+        },
+        {
+          "command": "clprompter.commandEntry.menu.clearSqlHistoryAndMessages",
+          "group": "2_history@3"
+        },
+        {
+          "command": "clprompter.commandEntry.menu.clearSqlLogMessages",
+          "group": "2_history@4"
+        }
+      ],
+      "clprompter.commandEntry.menu.runMode": [
+        {
+          "command": "clprompter.commandEntry.menu.setRunModeRun",
+          "group": "1_mode@1"
+        },
+        {
+          "command": "clprompter.commandEntry.menu.setRunModeLimit",
+          "group": "1_mode@2"
+        },
+        {
+          "command": "clprompter.commandEntry.menu.setRunModeCheck",
+          "group": "1_mode@3"
         }
       ],
       "view/item/context": [

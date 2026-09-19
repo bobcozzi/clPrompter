@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import IBMi from '@halcyontech/vscode-ibmi-types/api/IBMi';
-import { buildRunAfterSqlJobInitDefaults, expandStartupScriptPlaceholders, getConnectionSqlSessionOptions, getConnectionSqlSettings, getDefaultConnectionSqlSettings } from './commandEntrySqlSettings';
+import { buildRunAfterSqlJobInitDefaults, expandStartupScriptPlaceholders, getConnectionSqlSessionOptions, getConnectionSqlSettings, getDefaultConnectionSqlSettings, splitRunAfterSqlJobInitStatements } from './commandEntrySqlSettings';
+import { getUDTFLibrary } from './components/hostFunctions';
 
 function isCommandEntryDebugLoggingEnabled(): boolean {
     const config = vscode.workspace.getConfiguration('clPrompter');
@@ -93,6 +94,14 @@ function waitFor(ms: number): Promise<void> {
 
 const CANCEL_SQL_STATEMENT = 'CALL QSYS2.CANCEL_SQL(?)';
 const DEDICATED_FETCH_MORE_MAX_ITERATIONS = 10000;
+
+function buildCmdRunSql(library: string): string {
+    return `SELECT ORDINAL_POSITION, MSGID, MSGSEV, MSGTYPE, SENT_TIMESTAMP, MSGTEXT,
+SENT_BY_USER, SENT_FROM_PGM, SENT_FROM_STMT, SENT_FROM_MOD, SENT_FROM_PROC,
+SENT_TO_PGM, SENT_TO_STMT, SENT_TO_MOD, SENT_TO_PROC, SECLVLMSG
+FROM TABLE(${library}.CMD_RUN(?, ?))
+ORDER BY ORDINAL_POSITION`;
+}
 
 let connectionObjectSequence = 0;
 const connectionObjectIds = new WeakMap<object, number>();
@@ -236,6 +245,17 @@ export interface ManagedSqlSessionState {
     lastUpdatedAt?: number;
 }
 
+export interface StartupScriptLogEntry {
+    index: number;
+    statement: string;
+    expandedStatement: string;
+    status: 'success' | 'failed';
+    resultSummary: string;
+    message?: string;
+    messages?: string[];
+    executedAt: string;
+}
+
 export function resolveSqlNamingMode(value?: unknown): SqlNamingMode {
     const normalized = String(value ?? '').trim().toLowerCase();
     if (normalized === 'system') {
@@ -245,34 +265,16 @@ export function resolveSqlNamingMode(value?: unknown): SqlNamingMode {
 }
 
 export function collectRunAfterSqlJobInit(source: unknown): string[] {
-    const readArray = (candidate: unknown): string[] => {
-        if (!Array.isArray(candidate)) {
-            return [];
-        }
-
-        return candidate
-            .map((entry) => String(entry ?? '').trim())
-            .filter((entry) => entry.length > 0);
-    };
-
     const visited = new Set<string>();
     const result: string[] = [];
     const push = (candidate: unknown): void => {
-        if (!candidate) {
-            return;
-        }
-
-        const entries = Array.isArray(candidate) ? candidate : [candidate];
+        const entries = splitRunAfterSqlJobInitStatements(candidate) ?? [];
         for (const entry of entries) {
-            if (typeof entry !== 'string') {
+            if (visited.has(entry)) {
                 continue;
             }
-            const trimmed = entry.trim();
-            if (!trimmed || visited.has(trimmed)) {
-                continue;
-            }
-            visited.add(trimmed);
-            result.push(trimmed);
+            visited.add(entry);
+            result.push(entry);
         }
     };
 
@@ -303,15 +305,27 @@ export function collectRunAfterSqlJobInit(source: unknown): string[] {
         }
     }
 
-    const directEntries = readArray(source);
-    for (const entry of directEntries) {
-        if (!visited.has(entry)) {
-            visited.add(entry);
-            result.push(entry);
-        }
-    }
+    push(source);
 
     return result;
+}
+
+export function resolveRunAfterSqlJobInitMode(statement: string): { mode: 'sql' | 'cl'; command: string } {
+    const trimmed = String(statement ?? '').trim();
+    const sqlPrefix = trimmed.match(/^sql\s*:\s*(.*)$/i);
+    if (sqlPrefix) {
+        return { mode: 'sql', command: sqlPrefix[1].trim() };
+    }
+
+    const clPrefix = trimmed.match(/^cl\s*:\s*(.*)$/i);
+    if (clPrefix) {
+        return { mode: 'cl', command: clPrefix[1].trim() };
+    }
+
+    return {
+        mode: /^(set|values)\b/i.test(trimmed) ? 'sql' : 'cl',
+        command: trimmed
+    };
 }
 
 type DedicatedRouteDecision = {
@@ -747,34 +761,318 @@ export class CommandEntryJobManager {
 
     private getRunAfterSqlJobInitStatements(connection: IBMi): string[] {
         const config = (connection as any)?.getConfig?.() as Record<string, unknown> | undefined;
-        const declared = collectRunAfterSqlJobInit(config ?? {});
         const sessionOptions = getConnectionSqlSessionOptions(connection);
+        const declaredFromSessionOptions = (sessionOptions.runAfterSqlJobInit ?? [])
+            .map((statement) => String(statement ?? '').trim())
+            .filter((statement) => statement.length > 0);
+        const declaredFromLegacyConfig = collectRunAfterSqlJobInit(config ?? {});
+        const declared = declaredFromSessionOptions.length > 0
+            ? declaredFromSessionOptions
+            : declaredFromLegacyConfig;
         const defaults = buildRunAfterSqlJobInitDefaults(sessionOptions);
         return (declared.length > 0 ? declared : defaults).filter((statement) => statement.trim().length > 0);
     }
 
-    private isLikelySqlStatement(statement: string): boolean {
-        const trimmed = statement.trim();
-        return /^(set|select|values|with|call|insert|update|delete|merge|begin|declare|create|alter|drop|grant|revoke|comment)\b/i.test(trimmed);
+    private summarizeStartupScriptResult(result: unknown): string {
+        if (result === undefined || result === null) {
+            return 'No result returned.';
+        }
+
+        if (Array.isArray(result)) {
+            return `Rows returned: ${result.length}.`;
+        }
+
+        if (typeof result === 'object') {
+            const rows = this.rowsFromExecutionResult(result);
+            const reportedCount = this.extractReportedRowCount(result);
+            const elapsedMs = this.extractElapsedMs(result);
+            if (rows.length > 0 || reportedCount !== undefined) {
+                return `Rows returned: ${rows.length}${reportedCount !== undefined ? ` (reported: ${reportedCount})` : ''}${elapsedMs !== undefined ? `, elapsed: ${elapsedMs} ms` : ''}.`;
+            }
+            const keys = Object.keys(result as Record<string, unknown>);
+            if (keys.length > 0) {
+                return `Result keys: ${keys.slice(0, 8).join(', ')}${keys.length > 8 ? ', ...' : ''}.`;
+            }
+        }
+
+        return String(result).slice(0, 240) || 'Result processed.';
     }
 
-    private async executeRunAfterSqlJobInitCommand(connection: IBMi, commandText: string): Promise<void> {
+    private summarizeStartupCommandMessages(rows: Record<string, unknown>[]): {
+        outcome: 'success' | 'warning' | 'error';
+        messages: string[];
+        summary: string;
+    } {
+        const readValue = (row: Record<string, unknown>, ...keys: string[]): string => {
+            for (const key of keys) {
+                const value = row[key] ?? row[key.toUpperCase()] ?? row[key.toLowerCase()];
+                if (value !== undefined && value !== null) {
+                    return String(value).trim();
+                }
+            }
+            return '';
+        };
+
+        const orderedRows = [...rows].sort((a, b) => {
+            const left = Number(readValue(a, 'ORDINAL_POSITION')) || 0;
+            const right = Number(readValue(b, 'ORDINAL_POSITION')) || 0;
+            return left - right;
+        });
+
+        const messages: string[] = [];
+        let hasError = false;
+        let hasWarning = false;
+
+        for (const row of orderedRows) {
+            const msgId = readValue(row, 'MSGID');
+            const msgText = readValue(row, 'MSGTEXT', 'messageText', 'text');
+            const msgType = readValue(row, 'MSGTYPE').toUpperCase();
+            const severity = Number(readValue(row, 'MSGSEV')) || 0;
+
+            if (/ESCAPE|ERROR/.test(msgType) || severity >= 30) {
+                hasError = true;
+            } else if (/DIAG|WARNING/.test(msgType) || severity > 0) {
+                hasWarning = true;
+            }
+
+            if (msgId || msgText) {
+                messages.push(msgId ? `${msgId}: ${msgText}` : msgText);
+            }
+        }
+
+        const outcome: 'success' | 'warning' | 'error' = hasError
+            ? 'error'
+            : hasWarning
+                ? 'warning'
+                : 'success';
+
+        const summary = messages.length > 0
+            ? `Command messages returned: ${messages.length}.`
+            : 'Command completed.';
+
+        return { outcome, messages, summary };
+    }
+
+    private extractStartupScriptFailureMessages(error: unknown): string[] {
+        const results: string[] = [];
+        const seen = new Set<string>();
+        const visited = new Set<unknown>();
+
+        const push = (line: string): void => {
+            const trimmed = line.trim();
+            if (!trimmed || seen.has(trimmed)) {
+                return;
+            }
+            seen.add(trimmed);
+            results.push(trimmed);
+        };
+
+        const pushMessage = (id: string, text: string): void => {
+            const normalizedId = id.trim().toUpperCase();
+            const normalizedText = text.trim();
+            if (!normalizedId) {
+                return;
+            }
+            push(normalizedText ? `${normalizedId}: ${normalizedText}` : normalizedId);
+        };
+
+        const parseText = (text: string): void => {
+            const lines = text.split(/\r?\n/);
+            for (const line of lines) {
+                const trimmed = line.trim();
+                if (!trimmed) {
+                    continue;
+                }
+
+                const cpfMatch = trimmed.match(/\b([A-Z]{3}\d{4})\b\s*[:\-]?\s*(.*)$/i);
+                if (cpfMatch) {
+                    pushMessage(cpfMatch[1], cpfMatch[2] ?? '');
+                    continue;
+                }
+
+                const stateMatch = trimmed.match(/\bSQLSTATE\b\s*[:=]?\s*([A-Z0-9]{5})\b\s*[:\-]?\s*(.*)$/i);
+                if (stateMatch) {
+                    pushMessage(`SQLSTATE ${stateMatch[1]}`, stateMatch[2] ?? '');
+                }
+            }
+        };
+
+        const walk = (value: unknown): void => {
+            if (value === null || value === undefined) {
+                return;
+            }
+            if (visited.has(value)) {
+                return;
+            }
+
+            if (typeof value === 'string') {
+                parseText(value);
+                return;
+            }
+
+            if (Array.isArray(value)) {
+                visited.add(value);
+                for (const entry of value) {
+                    walk(entry);
+                }
+                return;
+            }
+
+            if (typeof value === 'object') {
+                visited.add(value);
+                const record = value as Record<string, unknown>;
+                const messageId = String(
+                    record.messageId
+                    ?? record.msgid
+                    ?? record.MSGID
+                    ?? record.id
+                    ?? ''
+                ).trim();
+                const messageText = String(
+                    record.messageText
+                    ?? record.msgtext
+                    ?? record.MSGTEXT
+                    ?? record.firstLevelText
+                    ?? record.text
+                    ?? record.message
+                    ?? ''
+                ).trim();
+
+                if (/^[A-Z]{3}\d{4}$/i.test(messageId)) {
+                    pushMessage(messageId, messageText);
+                }
+
+                const sqlState = String(record.sqlstate ?? record.sqlState ?? record.SQLSTATE ?? '').trim();
+                if (/^[A-Z0-9]{5}$/i.test(sqlState)) {
+                    pushMessage(`SQLSTATE ${sqlState}`, messageText);
+                }
+
+                parseText(messageText);
+
+                for (const key of ['messages', 'details', 'errors', 'diagnostics', 'causes', 'cause']) {
+                    if (key in record) {
+                        walk(record[key]);
+                    }
+                }
+            }
+        };
+
+        walk(error);
+        return results;
+    }
+
+    private sanitizeStartupScriptFileName(value: string | undefined): string {
+        const base = (value ?? 'connection')
+            .trim()
+            .replace(/[^A-Za-z0-9._-]+/g, '_')
+            .replace(/^_+|_+$/g, '')
+            .toLowerCase();
+        return base || 'connection';
+    }
+
+    public getStartupScriptLogUri(connection?: IBMi): vscode.Uri | undefined {
+        if (!this.context) {
+            return undefined;
+        }
+        const connectionName = connection?.currentConnectionName ?? 'connection';
+        const dir = vscode.Uri.joinPath(this.context.globalStorageUri, 'startup-script-logs');
+        return vscode.Uri.joinPath(dir, `${this.sanitizeStartupScriptFileName(connectionName)}_startup_script.md`);
+    }
+
+    private async writeStartupScriptLog(connection: IBMi, entries: StartupScriptLogEntry[], startedAt: string, completedAt: string): Promise<void> {
+        if (!this.context || entries.length === 0) {
+            return;
+        }
+
+        const targetUri = this.getStartupScriptLogUri(connection);
+        if (!targetUri) {
+            return;
+        }
+
+        const dirUri = vscode.Uri.joinPath(targetUri, '..');
+        await vscode.workspace.fs.createDirectory(dirUri);
+
+        const connectionName = connection.currentConnectionName || 'connection';
+        const hasFailures = entries.some((entry) => entry.status === 'failed');
+        const lifecycleEntries = [
+            '# Startup Log',
+            '',
+            `- Connection: ${connectionName}`,
+            '- Running startup script...',
+            `- Started: ${startedAt}`,
+            '',
+            ...entries.map((entry) => [
+                `### ${entry.index}. ${entry.statement}`,
+                '',
+                entry.expandedStatement !== entry.statement
+                    ? `- As run: \`${entry.expandedStatement}\``
+                    : '',
+                `- Status: ${entry.status === 'failed' ? 'Failed' : 'Succeeded'}`,
+                `- Time: ${entry.executedAt}`,
+                `- Result: ${entry.resultSummary}`,
+                ...(entry.messages && entry.messages.length > 0
+                    ? entry.messages.map((line) => `- Message: ${line}`)
+                    : (entry.message ? [`- Message: ${entry.message}`] : [])),
+                ''
+            ].filter((line) => line.length > 0).join('\n')),
+            '### Completion',
+            '',
+            hasFailures ? '- Completed startup script with errors.' : '- Completed startup script.',
+            ...(hasFailures ? [
+                '- Note: One or more startup statements failed.',
+                "- See the IBM i SQL Job's joblog for details or use the Cmd Entry Snippet's Job Log snippet if available."
+            ] : []),
+            `- Completed: ${completedAt}`,
+            ''
+        ];
+
+        const markdown = lifecycleEntries.join('\n');
+
+        await vscode.workspace.fs.writeFile(targetUri, new TextEncoder().encode(markdown));
+    }
+
+    private async executeRunAfterSqlJobInitCommand(connection: IBMi, commandText: string): Promise<{ status: 'success'; summary: string } | { status: 'failed'; summary: string; message: string; messages?: string[] }> {
         const command = stripTrailingSemicolon(commandText.trim());
         if (!command) {
-            return;
+            return { status: 'success', summary: 'Statement was blank and skipped.' };
         }
 
         const sessionOptions = getConnectionSqlSessionOptions(connection);
-        const expandedCommand = expandStartupScriptPlaceholders(command, sessionOptions.currentLibrary, sessionOptions.libraryList);
+        const resolved = resolveRunAfterSqlJobInitMode(command);
+        const expandedCommand = expandStartupScriptPlaceholders(resolved.command, sessionOptions.currentLibrary, sessionOptions.libraryList);
 
-        if (this.isLikelySqlStatement(expandedCommand)) {
-            await this.runSQL(connection, expandedCommand, { skipSyntaxCheck: true });
-            return;
+        try {
+            if (resolved.mode === 'sql') {
+                const result = await this.runSQL(connection, expandedCommand, { skipSyntaxCheck: true });
+                const summary = this.summarizeStartupScriptResult(result);
+                return { status: 'success', summary };
+            }
+
+            const cl = expandedCommand;
+            const udtfLibrary = getUDTFLibrary(connection);
+            const rows = await this.runSQL(connection, buildCmdRunSql(udtfLibrary), {
+                bindings: [cl, '*RUN'],
+                skipSyntaxCheck: true
+            });
+            const commandSummary = this.summarizeStartupCommandMessages(rows as Record<string, unknown>[]);
+            if (commandSummary.outcome === 'error') {
+                return {
+                    status: 'failed',
+                    summary: 'Execution failed.',
+                    message: commandSummary.messages[0] ?? 'Command failed.',
+                    messages: commandSummary.messages
+                };
+            }
+
+            return {
+                status: 'success',
+                summary: commandSummary.summary
+            };
+        } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            const messages = this.extractStartupScriptFailureMessages(error);
+            return { status: 'failed', summary: 'Execution failed.', message, messages };
         }
-
-        const cl = expandedCommand.replace(/^cl\s*:/i, '').trim();
-        const escaped = cl.replace(/'/g, "''");
-        await this.runSQL(connection, `CALL QSYS2.QCMDEXC('${escaped}')`, { skipSyntaxCheck: true });
     }
 
     private async runAfterSqlJobInitHooks(connection: IBMi): Promise<void> {
@@ -789,12 +1087,56 @@ export class CommandEntryJobManager {
             return;
         }
 
+        this.output?.appendLine('[Cmd Entry][RunAfterSqlJobInit] Running startup script...');
         this.managedSession.runAfterSqlJobInit = runAfterSqlJobInit;
-        for (const statement of runAfterSqlJobInit) {
+        const startupStartedAt = new Date().toISOString();
+        const logEntries: StartupScriptLogEntry[] = [];
+        for (const [index, statement] of runAfterSqlJobInit.entries()) {
+            const logEntry: StartupScriptLogEntry = {
+                index: index + 1,
+                statement,
+                expandedStatement: statement,
+                status: 'success',
+                resultSummary: 'Not executed.',
+                executedAt: new Date().toISOString()
+            };
+
             try {
-                await this.executeRunAfterSqlJobInitCommand(connection, statement);
+                const sessionOptions = getConnectionSqlSessionOptions(connection);
+                const expanded = expandStartupScriptPlaceholders(statement, sessionOptions.currentLibrary, sessionOptions.libraryList);
+                logEntry.expandedStatement = expanded;
+                const execution = await this.executeRunAfterSqlJobInitCommand(connection, statement);
+                logEntry.status = execution.status;
+                logEntry.resultSummary = execution.summary;
+                logEntry.message = execution.status === 'failed' ? execution.message : undefined;
+                logEntry.messages = execution.status === 'failed' ? execution.messages : undefined;
+
+                this.output?.appendLine(`[Cmd Entry][RunAfterSqlJobInit] ${index + 1}/${runAfterSqlJobInit.length} statement=${statement.substring(0, 140)} expanded=${expanded.substring(0, 140)} result=${execution.summary}${execution.status === 'failed' ? ` error=${execution.message}` : ''}`);
+                logEntries.push(logEntry);
             } catch (error) {
-                this.output?.appendLine(`[Cmd Entry][RunAfterSqlJobInit] failed statement=${statement.substring(0, 120)} error=${error instanceof Error ? error.message : String(error)}`);
+                const message = error instanceof Error ? error.message : String(error);
+                logEntry.status = 'failed';
+                logEntry.resultSummary = 'Execution failed.';
+                logEntry.message = message;
+                this.output?.appendLine(`[Cmd Entry][RunAfterSqlJobInit] failed statement=${statement.substring(0, 120)} error=${message}`);
+                logEntries.push(logEntry);
+            }
+        }
+
+        this.output?.appendLine('[Cmd Entry][RunAfterSqlJobInit] Completed startup script.');
+        const startupCompletedAt = new Date().toISOString();
+        await this.writeStartupScriptLog(connection, logEntries, startupStartedAt, startupCompletedAt);
+
+        const failedEntries = logEntries.filter((entry) => entry.status === 'failed');
+        if (failedEntries.length > 0) {
+            const actionLabel = vscode.l10n.t('View Startup Script Log');
+            const message = vscode.l10n.t('CL Cmd Entry SQL Job startup script failed.');
+            const choice = await vscode.window.showWarningMessage(message, actionLabel);
+            if (choice === actionLabel) {
+                const logUri = this.getStartupScriptLogUri(connection);
+                if (logUri) {
+                    await vscode.commands.executeCommand('vscode.open', logUri);
+                }
             }
         }
     }
@@ -1577,7 +1919,6 @@ export class CommandEntryJobManager {
             await this.cancelActive(connection);
             await this.endDedicatedJob();
             await this.ensureJob(connection);
-            await this.runAfterSqlJobInitHooks(connection);
             return this.dedicatedJobId;
         } catch (error) {
             this.output?.appendLine(`[Cmd Entry] Dedicated restart failed (${error instanceof Error ? error.message : String(error)}). Using shared SQL job.`);
@@ -1725,9 +2066,12 @@ export class CommandEntryJobManager {
             return;
         }
 
+        const shouldForceStartupReconnect = this.isRemoteMapepireServerEnabled(connection)
+            && !this.startupReconnectCompleted.has(key);
+
         this.debugLog('[Cmd Entry] Creating new private SQL job...');
         await this.endDedicatedJob();
-        await this.createDedicatedJob(connection, key);
+        await this.createDedicatedJob(connection, key, !shouldForceStartupReconnect);
 
         // In Mapepire server mode, a recycled host job may carry previous session state
         // (for example custom library list). Force one reconnect cycle per connection key
@@ -1735,7 +2079,7 @@ export class CommandEntryJobManager {
         await this.maybeForceStartupReconnect(connection, key);
     }
 
-    private async createDedicatedJob(connection: IBMi, key: string): Promise<void> {
+    private async createDedicatedJob(connection: IBMi, key: string, runStartupHooks = true): Promise<void> {
         this.debugLog('[Cmd Entry] Getting Mapepire component from connection...');
         const mapepire = await connection.getComponent('mapepire', { ignoreState: true }) as unknown as MapepireLike | undefined;
         if (!mapepire) {
@@ -1748,10 +2092,12 @@ export class CommandEntryJobManager {
         this.connectionKey = key;
         this.status = 'ready';
 
-        try {
-            await this.runAfterSqlJobInitHooks(connection);
-        } catch (error) {
-            this.output?.appendLine(`[Cmd Entry][StartupSql] bootstrap failed error=${error instanceof Error ? error.message : String(error)}`);
+        if (runStartupHooks) {
+            try {
+                await this.runAfterSqlJobInitHooks(connection);
+            } catch (error) {
+                this.output?.appendLine(`[Cmd Entry][StartupSql] bootstrap failed error=${error instanceof Error ? error.message : String(error)}`);
+            }
         }
 
         this.debugLog('[Cmd Entry] Reading private SQL job ID...');
@@ -1763,6 +2109,14 @@ export class CommandEntryJobManager {
     private buildJdbcOptionsForDedicatedJob(connection: IBMi): JdbcOptionsLike {
         const jdbc = { ...(connection.getSqlJobJDBCOptions() as JdbcOptionsLike || {}) };
         const sessionOptions = getConnectionSqlSessionOptions(connection);
+
+        // Honor explicit user choice from Command Entry connection settings.
+        if (typeof sessionOptions.extendedMetadata === 'boolean') {
+            jdbc['extended metadata'] = sessionOptions.extendedMetadata;
+        } else if (jdbc['extended metadata'] === undefined && jdbc.extendedMetadata === undefined) {
+            // Keep historical default behavior when no explicit override exists.
+            jdbc['extended metadata'] = true;
+        }
 
         jdbc.naming = sessionOptions.naming === 'system' ? 'system' : 'sql';
 
@@ -1829,9 +2183,6 @@ export class CommandEntryJobManager {
         // Do not push user library settings into the JDBC bootstrap library list.
         // We handle library-list and current-library changes as explicit post-connect
         // CL commands so they can be safely resolved at runtime and skipped when empty.
-        void jdbc;
-        return jdbc;
-
         return jdbc;
     }
 
@@ -1854,7 +2205,7 @@ export class CommandEntryJobManager {
         }
 
         await this.endDedicatedJob();
-        await this.createDedicatedJob(connection, key);
+        await this.createDedicatedJob(connection, key, true);
         this.output?.appendLine('[Cmd Entry] Startup reconnect cycle complete. Private SQL job environment reset.');
     }
 

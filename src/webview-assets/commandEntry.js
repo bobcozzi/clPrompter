@@ -1,15 +1,16 @@
 (() => {
   const state = vscode.getState() || { command: '', mode: '*RUN', filterSeverity: 0, history: [], executions: [], commandHeightPx: 0 };
+  const l10n = window.__clPrompterCommandEntryL10n || {};
   const maxExecutions = 30, maxMessages = 100;
   const defaultConnectionScopeKey = 'disconnected';
-  const noConnectionText = 'no connection';
+  const noConnectionText = l10n.noConnectionText || 'no connection';
   const MENU_POSITION_DEBUG = true;
   const minTextareaRows = 2;
   const defaultCommandRows = 3;
   const command = document.getElementById('command'), mode = document.getElementById('mode'), severityFilter = document.getElementById('message-severity-filter');
-  const run = document.getElementById('run'), prompt = document.getElementById('prompt'), cmdEntryHelp = document.getElementById('cmdentry-help'), cmdEntrySettings = document.getElementById('cmdentry-settings'), toolbarMenu = document.getElementById('toolbar-menu'), toolbarMenuList = document.getElementById('toolbar-menu-list'), menuViewLog = document.getElementById('menu-view-log'), menuClearLog = document.getElementById('menu-clear-log'), menuClearSqlLog = document.getElementById('menu-clear-sql-log'), menuClearSqlHistory = document.getElementById('menu-clear-sql-history'), menuToggleSqlLog = document.getElementById('menu-toggle-sql-log'), menuToggleMessageDetails = document.getElementById('menu-toggle-message-details'), menuConnectionSettings = document.getElementById('menu-connection-settings'), menuUseSharedSqlJob = document.getElementById('menu-use-shared-sql-job'), menuUsePrivateSqlJob = document.getElementById('menu-use-private-sql-job'), menuStartNewJob = document.getElementById('menu-start-new-job'), menuCancelSqlJob = document.getElementById('menu-cancel-sql-job'), menuClearHistory = document.getElementById('menu-clear-history'), historyPrev = document.getElementById('history-prev'), historyNext = document.getElementById('history-next'), statusJobMenu = document.getElementById('status-job-menu'), statusJobMenuCopy = document.getElementById('status-job-menu-copy'), statusJobMenuDisplayJoblog = document.getElementById('status-job-menu-display-joblog');
+  const run = document.getElementById('run'), prompt = document.getElementById('prompt'), cmdEntryHelp = document.getElementById('cmdentry-help'), cmdEntrySettings = document.getElementById('cmdentry-settings'), toolbarMenu = document.getElementById('toolbar-menu'), toolbarMenuList = document.getElementById('toolbar-menu-list'), menuViewLog = document.getElementById('menu-view-log'), menuClearLog = document.getElementById('menu-clear-log'), menuClearSqlLog = document.getElementById('menu-clear-sql-log'), menuClearSqlHistory = document.getElementById('menu-clear-sql-history'), menuToggleSqlLog = document.getElementById('menu-toggle-sql-log'), menuToggleMessageDetails = document.getElementById('menu-toggle-message-details'), menuConnectionSettings = document.getElementById('menu-connection-settings'), menuUseSharedSqlJob = document.getElementById('menu-use-shared-sql-job'), menuUsePrivateSqlJob = document.getElementById('menu-use-private-sql-job'), menuStartNewJob = document.getElementById('menu-start-new-job'), menuCancelSqlJob = document.getElementById('menu-cancel-sql-job'), menuClearHistory = document.getElementById('menu-clear-history'), menuRunMode = document.getElementById('menu-run-mode'), menuRunModeList = document.getElementById('menu-run-mode-list'), menuRunModeWrap = menuRunMode ? menuRunMode.closest('.toolbar-submenu-wrap') : null, menuRunModeRun = document.getElementById('menu-run-mode-run'), menuRunModeLimit = document.getElementById('menu-run-mode-limit'), menuRunModeCheck = document.getElementById('menu-run-mode-check'), historyPrev = document.getElementById('history-prev'), historyNext = document.getElementById('history-next'), statusJobMenu = document.getElementById('status-job-menu'), statusJobMenuCopy = document.getElementById('status-job-menu-copy'), statusJobMenuDisplayJoblog = document.getElementById('status-job-menu-display-joblog');
   const statusText = document.getElementById('status-text'), statusJobId = document.getElementById('status-jobid'), results = document.getElementById('results');
-  let historyIndex = -1, runningStartedAt, runningTimerId, runningStatusPrefix = 'Running…', historyDraft = '', sqlJobPollingId;
+  let historyIndex = -1, runningStartedAt, runningTimerId, runningStatusPrefix = l10n.runningStatusPrefix || 'Running…', historyDraft = '', sqlJobPollingId;
   let statusJobSingleClickTimer;
   let historyHoverTooltipEl;
   let dedicatedJobEnabled = false;
@@ -20,6 +21,7 @@
   let messageDetailsMode = 'SHOW';
   let logSqlStatementsToCommandLog = false;
   let baseMinHeightPx = 0, autoResizing = false;
+  let runModeSubmenuCloseTimer;
   const parseConnectionScopeKey = value => {
     const raw = String(value || '').trim().toLowerCase();
     if (!raw || raw === defaultConnectionScopeKey) {
@@ -120,11 +122,6 @@
     }
     document.documentElement.style.removeProperty('--clp-sql-log-color');
   };
-  // Wrap the mode select so we can render a custom CSS tooltip with fast hover behavior.
-  const modeTooltipWrap = document.createElement('span');
-  modeTooltipWrap.id = 'mode-tooltip-wrap';
-  mode.parentNode?.insertBefore(modeTooltipWrap, mode);
-  modeTooltipWrap.appendChild(mode);
   const save = () => {
     ensureExecutionBuckets();
     state.command = command.value;
@@ -160,8 +157,8 @@
     const isConnected = normalized.length > 0;
     const displayJobId = isConnected && useSharedSqlJob ? `${normalized}*` : normalized;
     const statusJobLabel = isConnected
-      ? `SQL job ID${useSharedSqlJob ? ' (shared job; trailing * marker shown)' : ''}. Click to copy, double-click to display joblog, right-click for menu.`
-      : 'No IBM i connection job detected. Connect to an IBM i server to enabled Command Entry.';
+      ? `${l10n.sqlJobIdLabel || 'SQL job ID'}${useSharedSqlJob ? ` ${l10n.sharedJobMarkerLabel || '(shared job; trailing * marker shown)'}` : ''}. ${l10n.clickToCopyDisplayJoblogLabel || 'Click to copy, double-click to display joblog, right-click for menu.'}`
+      : l10n.noConnectionJobDetectedLabel || 'No IBM i connection job detected. Connect to an IBM i server to enable Command Entry.';
     console.log('[Cmd Entry][WebviewJobId] setStatusJobId', { sqlJobId: normalized, displayJobId, isConnected, useSharedSqlJob });
     statusJobId.setAttribute('data-jobid-raw', normalized);
     statusJobId.textContent = displayJobId || noConnectionText;
@@ -216,20 +213,96 @@
     selection.removeAllRanges();
     selection.addRange(range);
   };
-  const updateModeTooltip = () => {
-    const selected = mode.options[mode.selectedIndex];
-    const help = selected?.title || 'Run mode';
-    modeTooltipWrap.setAttribute('data-tooltip', help);
-    mode.removeAttribute('title');
-    mode.setAttribute('aria-description', help);
+  const getRunModeLabel = value => {
+    if (value === '*LIMIT') {
+      return l10n.runModeLimitLabel || 'Limit';
+    }
+    if (value === '*CHECK') {
+      return l10n.runModeCheckLabel || 'Check';
+    }
+    return l10n.runModeRunLabel || 'Run';
   };
 
-  const suppressModeTooltip = () => {
-    modeTooltipWrap.classList.add('tooltip-suppressed');
+  const clearRunModeSubmenuCloseTimer = () => {
+    if (runModeSubmenuCloseTimer) {
+      clearTimeout(runModeSubmenuCloseTimer);
+      runModeSubmenuCloseTimer = undefined;
+    }
   };
 
-  const restoreModeTooltip = () => {
-    modeTooltipWrap.classList.remove('tooltip-suppressed');
+  const scheduleRunModeSubmenuClose = (delayMs = 160) => {
+    clearRunModeSubmenuCloseTimer();
+    runModeSubmenuCloseTimer = setTimeout(() => {
+      runModeSubmenuCloseTimer = undefined;
+      closeRunModeSubmenu();
+    }, delayMs);
+  };
+
+  const closeRunModeSubmenu = () => {
+    if (!menuRunModeList || !menuRunMode) {
+      return;
+    }
+    clearRunModeSubmenuCloseTimer();
+    menuRunModeList.classList.remove('is-open');
+    menuRunModeList.setAttribute('aria-hidden', 'true');
+    menuRunModeList.hidden = true;
+    menuRunModeList.style.maxHeight = '';
+    menuRunModeList.style.overflowY = '';
+    menuRunMode.setAttribute('aria-expanded', 'false');
+  };
+
+  const openRunModeSubmenu = () => {
+    if (!menuRunModeList || !menuRunMode) {
+      return;
+    }
+    clearRunModeSubmenuCloseTimer();
+    menuRunModeList.hidden = false;
+    menuRunModeList.classList.add('is-open');
+    menuRunModeList.setAttribute('aria-hidden', 'false');
+    menuRunMode.setAttribute('aria-expanded', 'true');
+    positionRunModeSubmenu();
+  };
+
+  const updateRunModeMenuLabels = () => {
+    if (menuRunMode) {
+      const label = getRunModeLabel(mode.value || '*RUN');
+      menuRunMode.textContent = `${l10n.runModePrefix || 'Run Mode'}: ${label}`;
+      menuRunMode.title = l10n.selectRunModeTitle || 'Select run mode';
+    }
+    if (menuRunModeRun) {
+      menuRunModeRun.textContent = `${mode.value === '*RUN' ? '✓ ' : ''}${l10n.runModeRunLabel || 'Run'}`;
+      menuRunModeRun.title = l10n.runModeRunTitle || 'Run CL command';
+    }
+    if (menuRunModeLimit) {
+      menuRunModeLimit.textContent = `${mode.value === '*LIMIT' ? '✓ ' : ''}${l10n.runModeLimitLabel || 'Limit'}`;
+      menuRunModeLimit.title = l10n.runModeLimitTitle || 'Run as limited user profile';
+    }
+    if (menuRunModeCheck) {
+      menuRunModeCheck.textContent = `${mode.value === '*CHECK' ? '✓ ' : ''}${l10n.runModeCheckLabel || 'Check'}`;
+      menuRunModeCheck.title = l10n.runModeCheckTitle || 'Syntax check only';
+    }
+  };
+
+  const setRunMode = nextMode => {
+    const normalized = String(nextMode || '*RUN').toUpperCase();
+    if (normalized !== '*RUN' && normalized !== '*LIMIT' && normalized !== '*CHECK') {
+      return;
+    }
+    mode.value = normalized;
+    updateRunModeMenuLabels();
+    save();
+  };
+
+  const getVisibleToolbarMenuItems = () => {
+    if (!toolbarMenuList) {
+      return [];
+    }
+    return Array.from(toolbarMenuList.querySelectorAll('button[role="menuitem"]')).filter(item => {
+      if (!item || item.disabled || item.hidden) {
+        return false;
+      }
+      return item.getClientRects().length > 0;
+    });
   };
 
   const hideHistoryHoverTooltip = () => {
@@ -294,9 +367,9 @@
   }
   const closeToolbarMenu = () => {
     if (!toolbarMenuList || !toolbarMenu) { return; }
+    closeRunModeSubmenu();
     toolbarMenuList.classList.remove('is-open');
     toolbarMenuList.classList.remove('flip-up');
-    toolbarMenuList.classList.remove('compact-grid');
     toolbarMenuList.style.position = '';
     toolbarMenuList.style.left = '';
     toolbarMenuList.style.top = '';
@@ -305,7 +378,6 @@
     toolbarMenuList.style.width = '';
     toolbarMenuList.style.maxHeight = '';
     toolbarMenuList.style.overflowY = '';
-    toolbarMenuList.style.removeProperty('--toolbar-menu-columns');
     toolbarMenuList.setAttribute('aria-hidden', 'true');
     toolbarMenu.setAttribute('aria-expanded', 'false');
   };
@@ -332,8 +404,6 @@
     if (!statusJobMenu) { return; }
     closeToolbarMenu();
     statusJobMenu.classList.remove('flip-up');
-    statusJobMenu.classList.remove('compact-grid');
-    statusJobMenu.style.removeProperty('--toolbar-menu-columns');
     statusJobMenu.classList.add('is-open');
     statusJobMenu.setAttribute('aria-hidden', 'false');
     statusJobMenu.setAttribute('data-jobid', sqlJobId);
@@ -375,61 +445,24 @@
     toolbarMenuList.classList.remove('flip-up');
 
     const anchorRect = toolbarMenu.getBoundingClientRect();
-    let menuRect = toolbarMenuList.getBoundingClientRect();
-    let naturalHeight = Math.ceil(toolbarMenuList.scrollHeight || menuRect.height);
-    let naturalWidth = Math.ceil(menuRect.width || 190);
+    const menuRect = toolbarMenuList.getBoundingClientRect();
+    const naturalHeight = Math.ceil(toolbarMenuList.scrollHeight || menuRect.height);
+    const naturalWidth = Math.ceil(menuRect.width || 190);
     const spaceBelow = Math.max(0, viewportHeight - anchorRect.bottom - gap - edgePadding);
     const spaceAbove = Math.max(0, anchorRect.top - gap - edgePadding);
     const fitsBelow = naturalHeight <= spaceBelow;
     const fitsAbove = naturalHeight <= spaceAbove;
 
-    // Prefer the side that fits naturally. If neither fits, prefer opening above to keep
-    // the menu away from the panel bottom as the viewport shrinks.
-    let shouldFlipUp;
-    if (fitsBelow) {
-      shouldFlipUp = false;
-    } else if (fitsAbove) {
-      shouldFlipUp = true;
-    } else {
-      shouldFlipUp = true;
-    }
+    // Side-aware behavior:
+    // - Open below when below can fully fit.
+    // - Else open above when above can fully fit.
+    // - If neither side fully fits, choose the side with more space.
+    const shouldFlipUp = fitsBelow
+      ? false
+      : (fitsAbove
+        ? true
+        : (spaceAbove > spaceBelow));
     toolbarMenuList.classList.toggle('flip-up', shouldFlipUp);
-
-    const maxViewportHeight = Math.max(24, Math.floor(viewportHeight - edgePadding * 2));
-    const constrainedFlipUp = shouldFlipUp && !fitsAbove;
-
-    // If neither side fits, switch to compact grid only when overflow is substantial.
-    // This keeps the normal one-column menu longer and avoids an early compact jump.
-    let compactGrid = false;
-    const bestSingleColumnSpace = Math.max(spaceAbove, spaceBelow);
-    const singleColumnOverflow = Math.max(0, naturalHeight - bestSingleColumnSpace);
-    const compactActivationOverflowPx = 28;
-    if (!fitsBelow && !fitsAbove && singleColumnOverflow >= compactActivationOverflowPx) {
-      toolbarMenuList.classList.add('compact-grid');
-      const itemCount = toolbarMenuList.querySelectorAll('button').length;
-      const compactRowHeight = 18;
-      const compactPaddingAndGap = 10;
-      const maxRowsThatFit = Math.max(1, Math.floor((maxViewportHeight - compactPaddingAndGap) / compactRowHeight));
-      const compactColumns = Math.max(2, Math.min(3, Math.ceil(itemCount / maxRowsThatFit)));
-      toolbarMenuList.style.setProperty('--toolbar-menu-columns', String(compactColumns));
-
-      menuRect = toolbarMenuList.getBoundingClientRect();
-      const compactHeight = Math.ceil(toolbarMenuList.scrollHeight || menuRect.height);
-      const compactWidth = Math.ceil(menuRect.width || naturalWidth);
-      compactGrid = true;
-      naturalHeight = compactHeight;
-      naturalWidth = compactWidth;
-    }
-
-    const sideAvailableHeight = Math.max(
-      24,
-      Math.floor(
-        shouldFlipUp
-          ? (constrainedFlipUp ? maxViewportHeight : spaceAbove)
-          : spaceBelow
-      )
-    );
-    const effectiveHeight = Math.max(24, Math.min(naturalHeight, sideAvailableHeight, maxViewportHeight));
 
     // Pin to viewport so parent layout/overflow cannot clip the menu.
     toolbarMenuList.style.position = 'fixed';
@@ -444,35 +477,12 @@
     toolbarMenuList.style.right = 'auto';
 
     const openTop = shouldFlipUp
-      ? ((constrainedFlipUp ? anchorRect.bottom : anchorRect.top) - gap - effectiveHeight)
-      : anchorRect.bottom + gap;
-    const clampedTop = Math.max(edgePadding, Math.min(openTop, viewportHeight - edgePadding - effectiveHeight));
-    toolbarMenuList.style.top = `${Math.round(clampedTop)}px`;
+      ? (anchorRect.top - gap - naturalHeight)
+      : (anchorRect.bottom + gap);
+    toolbarMenuList.style.top = `${Math.round(openTop)}px`;
     toolbarMenuList.style.bottom = 'auto';
 
-    if (naturalHeight > effectiveHeight) {
-      toolbarMenuList.style.maxHeight = `${effectiveHeight}px`;
-      toolbarMenuList.style.overflowY = 'auto';
-    }
-
-    // Final viewport clamp after actual layout (accounts for borders, padding, and scrollbars).
-    let finalRect = toolbarMenuList.getBoundingClientRect();
-    const viewportTopLimit = edgePadding;
-    const viewportBottomLimit = viewportHeight - edgePadding;
-
-    const overflowBottom = finalRect.bottom - viewportBottomLimit;
-    if (overflowBottom > 0) {
-      const adjustedTop = Math.max(viewportTopLimit, Math.round(clampedTop - overflowBottom));
-      toolbarMenuList.style.top = `${adjustedTop}px`;
-      finalRect = toolbarMenuList.getBoundingClientRect();
-    }
-
-    const overflowTop = viewportTopLimit - finalRect.top;
-    if (overflowTop > 0) {
-      const adjustedTop = Math.min(Math.round(viewportBottomLimit - finalRect.height), Math.round(finalRect.top + overflowTop));
-      toolbarMenuList.style.top = `${Math.max(viewportTopLimit, adjustedTop)}px`;
-      finalRect = toolbarMenuList.getBoundingClientRect();
-    }
+    const finalRect = toolbarMenuList.getBoundingClientRect();
 
     const clipping = {
       top: finalRect.top < 0,
@@ -494,16 +504,13 @@
         fitsAbove,
         fitsBelow,
         shouldFlipUp,
-        constrainedFlipUp,
-        compactGrid,
-        singleColumnOverflow: Math.round(singleColumnOverflow),
-        compactActivationOverflowPx,
-        sideAvailableHeight
+        spaceAbove,
+        spaceBelow
       },
       applied: {
         width: effectiveWidth,
-        height: effectiveHeight,
-        top: Math.round(clampedTop),
+        height: naturalHeight,
+        top: Math.round(openTop),
         left: Math.round(clampedLeft),
         maxHeight: toolbarMenuList.style.maxHeight || '<none>',
         overflowY: toolbarMenuList.style.overflowY || '<none>'
@@ -519,8 +526,59 @@
       clipping
     });
   };
+
+  const positionRunModeSubmenu = () => {
+    if (!menuRunModeList || !menuRunMode) {
+      return;
+    }
+    if (!menuRunModeList.classList.contains('is-open')) {
+      return;
+    }
+
+    const edgePadding = 8;
+    const gap = 0;
+    const viewportWidth = window.innerWidth || document.documentElement.clientWidth || 0;
+    const viewportHeight = window.innerHeight || document.documentElement.clientHeight || 0;
+
+    menuRunModeList.style.position = 'fixed';
+    menuRunModeList.style.left = '0px';
+    menuRunModeList.style.top = '0px';
+    menuRunModeList.style.maxHeight = '';
+    menuRunModeList.style.overflowY = '';
+
+    const anchorRect = menuRunMode.getBoundingClientRect();
+    const menuRect = menuRunModeList.getBoundingClientRect();
+    const naturalWidth = Math.ceil(menuRect.width || 138);
+    const naturalHeight = Math.ceil(menuRunModeList.scrollHeight || menuRect.height || 96);
+
+    const spaceBelow = Math.max(0, viewportHeight - anchorRect.top - edgePadding);
+    const spaceAbove = Math.max(0, anchorRect.bottom - edgePadding);
+    const fitsBelow = naturalHeight <= spaceBelow;
+    const fitsAbove = naturalHeight <= spaceAbove;
+    const openAbove = fitsBelow ? false : (fitsAbove ? true : (spaceAbove > spaceBelow));
+
+    const maxHeight = Math.max(24, Math.min(naturalHeight, openAbove ? spaceAbove : spaceBelow));
+    if (naturalHeight > maxHeight) {
+      menuRunModeList.style.maxHeight = `${Math.floor(maxHeight)}px`;
+      menuRunModeList.style.overflowY = 'auto';
+    }
+
+    const targetTop = openAbove
+      ? (anchorRect.bottom - Math.min(naturalHeight, maxHeight))
+      : anchorRect.top;
+    const clampedTop = Math.max(edgePadding, Math.min(targetTop, viewportHeight - edgePadding - Math.min(naturalHeight, maxHeight)));
+
+    const preferredLeft = anchorRect.left - gap - naturalWidth;
+    const clampedLeft = Math.max(edgePadding, Math.min(preferredLeft, viewportWidth - edgePadding - naturalWidth));
+
+    menuRunModeList.style.left = `${Math.round(clampedLeft)}px`;
+    menuRunModeList.style.top = `${Math.round(clampedTop)}px`;
+    menuRunModeList.style.right = 'auto';
+    menuRunModeList.style.bottom = 'auto';
+  };
   const openToolbarMenu = () => {
     if (!toolbarMenuList || !toolbarMenu) { return; }
+    updateRunModeMenuLabels();
     toolbarMenuList.classList.add('is-open');
     toolbarMenuList.setAttribute('aria-hidden', 'false');
     toolbarMenu.setAttribute('aria-expanded', 'true');
@@ -529,6 +587,7 @@
   const repositionToolbarMenuIfOpen = () => {
     if (!toolbarMenuList?.classList.contains('is-open')) { return; }
     positionToolbarMenu();
+    positionRunModeSubmenu();
   };
   const toggleToolbarMenu = () => {
     if (!toolbarMenuList || !toolbarMenu) { return; }
@@ -559,8 +618,8 @@
   const updateMessageDetailsMenuLabel = () => {
     if (!menuToggleMessageDetails) { return; }
     const showing = areMessageDetailsShown();
-    menuToggleMessageDetails.textContent = showing ? 'Collapse Message Details' : 'Expand Message Details';
-    menuToggleMessageDetails.title = showing ? 'Collapse command-level message details' : 'Expand command-level message details';
+    menuToggleMessageDetails.textContent = showing ? (l10n.hideMessageDetailsLabel || 'Hide Message Details') : (l10n.showMessageDetailsLabel || 'Show Message Details');
+    menuToggleMessageDetails.title = showing ? (l10n.hideMessageDetailsTitle || 'Hide command-level message details') : (l10n.showMessageDetailsTitle || 'Show command-level message details');
   };
   const updateSqlLoggingMenuLabel = () => {
     if (!menuToggleSqlLog) { return; }
@@ -575,6 +634,10 @@
     Object.values(buckets).forEach(executions => {
       executions.forEach((execution, index) => {
         execution.collapsed = !expand && index > 0;
+        (execution.messages || []).forEach(message => {
+          message.firstLevelExpanded = expand;
+          message.expanded = expand;
+        });
       });
     });
   };
@@ -678,7 +741,7 @@
     if (index < 0) {
       command.value = historyDraft;
       mode.value = state.mode || '*RUN';
-      updateModeTooltip();
+      updateRunModeMenuLabels();
       save();
       resizeCommandInput();
       command.setSelectionRange(0, 0);
@@ -691,7 +754,7 @@
       : (isSqlCommandText(item.command) || /^\s*(insert|update|delete|merge|call)\b/i.test(String(item.command || '')));
     command.value = trimTrailingWhitespaceForRecall(applySqlPrefixForRecall(item.command, historySqlHint));
     mode.value = item.mode;
-    updateModeTooltip();
+    updateRunModeMenuLabels();
     save();
     resizeCommandInput({ respectRememberedHeight: false });
     command.setSelectionRange(0, 0);
@@ -737,7 +800,7 @@
         commandEl.classList.add('execution-command-sql');
       }
       commandEl.title = String(execution.command || '');
-      commandEl.setAttribute('data-tooltip', 'Click=Recall, Ctrl/Cmd+Click=Copy');
+      commandEl.setAttribute('data-tooltip', l10n.commandCopyRecallTooltip || 'Click=Recall, Ctrl/Cmd+Click=Copy');
       commandEl.tabIndex = 0;
       attachHistoryHoverTooltip(commandEl);
       const reuseCommand = () => {
@@ -966,7 +1029,7 @@
   command.rows = defaultCommandRows;
   command.style.height = 'auto';
   mode.value = state.mode || '*RUN';
-  updateModeTooltip();
+  updateRunModeMenuLabels();
   if (severityFilter) {
     severityFilter.value = String(state.filterSeverity ?? 0);
   }
@@ -983,14 +1046,7 @@
     observer.observe(command);
   }
   command.addEventListener('input', () => { historyDraft = ''; historyIndex = -1; save(); resizeCommandInput(); });
-  mode.addEventListener('change', () => { updateModeTooltip(); save(); restoreModeTooltip(); });
-  mode.addEventListener('mousedown', () => { updateModeTooltip(); suppressModeTooltip(); });
-  mode.addEventListener('keydown', event => {
-    if (event.key === 'Enter' || event.key === ' ' || event.key === 'ArrowDown' || event.key === 'ArrowUp') {
-      suppressModeTooltip();
-    }
-  });
-  mode.addEventListener('blur', restoreModeTooltip);
+  mode.addEventListener('change', () => { updateRunModeMenuLabels(); save(); });
   if (severityFilter) severityFilter.addEventListener('change', () => { save(); render(); });
   command.addEventListener('keydown', event => {
     if (event.key === 'Home' || event.key === 'End') {
@@ -1149,6 +1205,78 @@
     vscode.postMessage({ type: 'clearHistoryAndMessages' });
     command.focus();
   });
+
+  menuRunModeWrap?.addEventListener('mouseenter', () => {
+    openRunModeSubmenu();
+  });
+
+  menuRunModeWrap?.addEventListener('mouseleave', () => {
+    scheduleRunModeSubmenuClose(180);
+  });
+
+  menuRunModeList?.addEventListener('mouseenter', () => {
+    clearRunModeSubmenuCloseTimer();
+  });
+
+  menuRunModeList?.addEventListener('mouseleave', () => {
+    scheduleRunModeSubmenuClose(180);
+  });
+
+  menuRunModeWrap?.addEventListener('focusin', () => {
+    openRunModeSubmenu();
+  });
+
+  menuRunModeWrap?.addEventListener('focusout', () => {
+    setTimeout(() => {
+      if (!menuRunModeWrap) {
+        return;
+      }
+      if (menuRunModeWrap.contains(document.activeElement)) {
+        return;
+      }
+      closeRunModeSubmenu();
+    }, 0);
+  });
+
+  menuRunMode?.addEventListener('click', event => {
+    event.preventDefault();
+    event.stopPropagation();
+    if (!menuRunModeList) {
+      return;
+    }
+    if (menuRunModeList.classList.contains('is-open')) {
+      closeRunModeSubmenu();
+      menuRunMode.focus();
+      return;
+    }
+    openRunModeSubmenu();
+    menuRunModeRun?.focus();
+  });
+
+  menuRunMode?.addEventListener('keydown', event => {
+    if (event.key !== 'ArrowRight') {
+      return;
+    }
+    event.preventDefault();
+    openRunModeSubmenu();
+    menuRunModeRun?.focus();
+  });
+
+  menuRunModeRun?.addEventListener('click', () => {
+    setRunMode('*RUN');
+    closeToolbarMenu();
+    command.focus();
+  });
+  menuRunModeLimit?.addEventListener('click', () => {
+    setRunMode('*LIMIT');
+    closeToolbarMenu();
+    command.focus();
+  });
+  menuRunModeCheck?.addEventListener('click', () => {
+    setRunMode('*CHECK');
+    closeToolbarMenu();
+    command.focus();
+  });
   toolbarMenuList?.addEventListener('keydown', event => {
     if (event.key === 'Escape') {
       event.preventDefault();
@@ -1161,8 +1289,7 @@
       return;
     }
 
-    const menuItems = [menuViewLog, menuClearLog, menuClearSqlLog, menuClearSqlHistory, menuClearHistory, menuToggleSqlLog, menuToggleMessageDetails, menuConnectionSettings, menuUseSharedSqlJob, menuUsePrivateSqlJob, menuStartNewJob, menuCancelSqlJob]
-      .filter(item => item && !item.disabled);
+    const menuItems = getVisibleToolbarMenuItems();
     if (!menuItems.length) { return; }
     event.preventDefault();
     const currentIndex = menuItems.indexOf(document.activeElement);
@@ -1173,6 +1300,32 @@
     }
     const prevIndex = (currentIndex - 1 + menuItems.length) % menuItems.length;
     menuItems[prevIndex].focus();
+  });
+
+  toolbarMenuList?.addEventListener('mousemove', event => {
+    const target = event.target;
+    if (!(target instanceof HTMLElement)) {
+      return;
+    }
+    if (target.closest('.toolbar-submenu-wrap')) {
+      return;
+    }
+    closeRunModeSubmenu();
+  });
+
+  menuRunModeList?.addEventListener('keydown', event => {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      closeRunModeSubmenu();
+      menuRunMode?.focus();
+      return;
+    }
+    if (event.key === 'ArrowLeft') {
+      event.preventDefault();
+      closeRunModeSubmenu();
+      menuRunMode?.focus();
+      return;
+    }
   });
   document.addEventListener('click', event => {
     const target = event.target;
@@ -1316,6 +1469,7 @@
           ? !!message.canCancelSqlJob
           : (dedicatedJobEnabled && remoteMapepireEnabled);
         updateMenuCapabilities();
+        updateRunModeMenuLabels();
         updateSqlLoggingMenuLabel();
         if (message.clearInputOnStartup) {
           command.value = '';
@@ -1425,9 +1579,13 @@
       case 'setCommandMode':
         command.value = trimTrailingWhitespaceForRecall(message.command);
         mode.value = message.mode || mode.value;
-        updateModeTooltip();
+        updateRunModeMenuLabels();
         save();
         resizeCommandInput({ respectRememberedHeight: false });
+        command.focus();
+        break;
+      case 'setMode':
+        setRunMode(message.mode || mode.value);
         command.focus();
         break;
       case 'clearResults':

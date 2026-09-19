@@ -66,6 +66,8 @@
     var loadMoreBtn = document.getElementById('load-more');
     var loadAllBtn = document.getElementById('load-all');
     var rerunBtn = document.getElementById('rerun-sql');
+    var copyResultSetBtn = document.getElementById('copy-result-set');
+    var saveResultSetBtn = document.getElementById('save-result-set');
     var resultMeta = document.getElementById('result-meta');
     var resultTitleNode = document.getElementById('result-title');
     var toggleSqlStmtBtn = document.getElementById('toggle-sql-stmt');
@@ -153,6 +155,129 @@
     var fetchSize = Number(initialPayload.fetchSize || 0);
     var autoColumnViewForSingleRow = !!initialPayload.autoColumnViewForSingleRow;
     var rows = Array.isArray(initialPayload.rowCells) ? initialPayload.rowCells.slice() : [];
+    var activeCellRawValue = '';
+
+    function getCellRawValue(cell) {
+        if (!cell || typeof cell !== 'object') {
+            return '';
+        }
+        if (typeof cell.rawText === 'string') {
+            return cell.rawText;
+        }
+        if (typeof cell.sortText === 'string') {
+            return cell.sortText;
+        }
+        return '';
+    }
+
+    function collectLoadedRowsForExport() {
+        var data = [];
+        for (var r = 0; r < rows.length; r++) {
+            var sourceRow = rows[r];
+            if (!Array.isArray(sourceRow)) {
+                continue;
+            }
+            var outRow = [];
+            for (var c = 0; c < initialColumns.length; c++) {
+                outRow.push(getCellRawValue(sourceRow[c]));
+            }
+            data.push(outRow);
+        }
+        return data;
+    }
+
+    var cellContextMenu = document.createElement('div');
+    cellContextMenu.className = 'cell-context-menu';
+    cellContextMenu.innerHTML = ''
+        + '<button type="button" data-action="copy-cell-clipboard"></button>'
+        + '<button type="button" data-action="copy-cell-command"></button>';
+    document.body.appendChild(cellContextMenu);
+
+    var copyClipboardBtn = cellContextMenu.querySelector('[data-action="copy-cell-clipboard"]');
+    var copyCommandEntryBtn = cellContextMenu.querySelector('[data-action="copy-cell-command"]');
+
+    function hideCellContextMenu() {
+        cellContextMenu.classList.remove('is-visible');
+    }
+
+    function showCellContextMenu(x, y) {
+        if (!copyClipboardBtn || !copyCommandEntryBtn) {
+            return;
+        }
+
+        copyClipboardBtn.textContent = t('copyToClipboard', 'Copy to Clipboard');
+        copyCommandEntryBtn.textContent = t('copyToCommandEntry', 'Copy to Command Entry');
+        cellContextMenu.style.left = '0px';
+        cellContextMenu.style.top = '0px';
+        cellContextMenu.classList.add('is-visible');
+
+        var menuRect = cellContextMenu.getBoundingClientRect();
+        var maxLeft = Math.max(4, window.innerWidth - menuRect.width - 4);
+        var maxTop = Math.max(4, window.innerHeight - menuRect.height - 4);
+        var nextLeft = Math.max(4, Math.min(x, maxLeft));
+        var nextTop = Math.max(4, Math.min(y, maxTop));
+        cellContextMenu.style.left = nextLeft + 'px';
+        cellContextMenu.style.top = nextTop + 'px';
+    }
+
+    function handleCellContextMenu(event) {
+        var target = event ? event.target : null;
+        if (!(target instanceof HTMLElement)) {
+            return;
+        }
+
+        var headerCell = target.closest('th');
+        if (headerCell) {
+            event.preventDefault();
+            event.stopPropagation();
+            hideCellContextMenu();
+            return;
+        }
+
+        var cell = target.closest('td');
+        if (!cell || cell.classList.contains('row-index-col')) {
+            return;
+        }
+
+        var rawValue = String(cell.getAttribute('data-raw-value') || '');
+
+        event.preventDefault();
+        event.stopPropagation();
+        activeCellRawValue = rawValue;
+        showCellContextMenu(event.clientX, event.clientY);
+    }
+
+    if (copyClipboardBtn) {
+        copyClipboardBtn.addEventListener('click', function () {
+            if (vscode.postMessage) {
+                vscode.postMessage({ type: 'copyCellToClipboard', value: activeCellRawValue });
+            }
+            hideCellContextMenu();
+        });
+    }
+
+    if (copyCommandEntryBtn) {
+        copyCommandEntryBtn.addEventListener('click', function () {
+            if (vscode.postMessage) {
+                vscode.postMessage({ type: 'copyCellToCommandEntry', value: activeCellRawValue });
+            }
+            hideCellContextMenu();
+        });
+    }
+
+    document.addEventListener('click', function (event) {
+        var target = event ? event.target : null;
+        if (target instanceof HTMLElement && target.closest('.cell-context-menu')) {
+            return;
+        }
+        hideCellContextMenu();
+    });
+
+    document.addEventListener('keydown', function (event) {
+        if (event && event.key === 'Escape') {
+            hideCellContextMenu();
+        }
+    });
 
     function formatTemplate(template, tokens) {
         var text = String(template || '');
@@ -1041,9 +1166,11 @@
                     if (cell.cellClass) {
                         classNames.push(cell.cellClass);
                     }
+                    classNames.push('sql-result-cell');
                     var alignClass = classNames.length > 0 ? ' class="' + classNames.join(' ') + '"' : '';
                     var cellHtml = (typeof cell.html === 'string') ? cell.html : '';
-                    tds += '<td' + alignClass + '>' + cellHtml + '</td>';
+                    var rawValueAttr = ' data-raw-value="' + escapeHtml(getCellRawValue(cell)) + '"';
+                    tds += '<td' + alignClass + rawValueAttr + '>' + cellHtml + '</td>';
                 }
             }
             html += '<tr><td class="align-right row-index-col">' + (i + 1) + '</td>' + tds + '</tr>';
@@ -1523,7 +1650,9 @@
     }
 
     if (tableWrap) {
+        tableWrap.addEventListener('contextmenu', handleCellContextMenu);
         tableWrap.addEventListener('scroll', function () {
+            hideCellContextMenu();
             syncPageIndexFromScroll();
             updatePageButtons();
             if (pageSummary) {
@@ -1534,6 +1663,7 @@
     }
 
     window.addEventListener('resize', function () {
+        hideCellContextMenu();
         refreshAutoPagingLayout('windowResize');
     });
 
@@ -1571,6 +1701,39 @@
             setStatus(t('rerunningSqlStatement', 'Rerunning SQL statement...'));
             if (vscode.postMessage) {
                 vscode.postMessage({ type: 'rerunSql', statement: statement, resultTitle: resultTitle });
+            }
+        });
+    }
+
+    if (copyResultSetBtn) {
+        copyResultSetBtn.addEventListener('click', function (event) {
+            if (event) {
+                event.preventDefault();
+                event.stopPropagation();
+            }
+            if (vscode.postMessage) {
+                vscode.postMessage({
+                    type: 'copyResultSet',
+                    columns: initialColumns,
+                    rows: collectLoadedRowsForExport()
+                });
+            }
+        });
+    }
+
+    if (saveResultSetBtn) {
+        saveResultSetBtn.addEventListener('click', function (event) {
+            if (event) {
+                event.preventDefault();
+                event.stopPropagation();
+            }
+            if (vscode.postMessage) {
+                vscode.postMessage({
+                    type: 'saveResultSet',
+                    resultTitle: resultTitle,
+                    columns: initialColumns,
+                    rows: collectLoadedRowsForExport()
+                });
             }
         });
     }
