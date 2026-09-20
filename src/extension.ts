@@ -71,6 +71,7 @@ let sharedCommandEntryJobManager: CommandEntryJobManager | undefined;
 let sharedCommandEntryViewProvider: CommandEntryViewProvider | undefined;
 const LAST_SEEN_VSCODE_VERSION_KEY = 'clprompter.lastSeenVsCodeVersion';
 const SKIP_HISTORY_CLEAR_ON_NEXT_READY_KEY = 'clprompter.skipHistoryClearOnNextReady';
+type CommandEntryRunMode = '*RUN' | '*LIMIT' | '*CHECK';
 
 /**
  * Helptext cache populated by the PASE-based prefetch.
@@ -374,6 +375,28 @@ export async function activate(context: vscode.ExtensionContext) {
     await context.globalState.update(LAST_SEEN_VSCODE_VERSION_KEY, currentVsCodeVersion);
     await vscode.commands.executeCommand('setContext', 'clprompter.ibmiLoaded', false);
     await vscode.commands.executeCommand('setContext', 'clprompter.connected', false);
+    let currentCommandEntryRunMode: CommandEntryRunMode = '*RUN';
+
+    const syncRunModeMenuContexts = async (mode: CommandEntryRunMode): Promise<void> => {
+        currentCommandEntryRunMode = mode;
+        await vscode.commands.executeCommand('setContext', 'clprompter.commandEntry.runMode.run', mode === '*RUN');
+        await vscode.commands.executeCommand('setContext', 'clprompter.commandEntry.runMode.limit', mode === '*LIMIT');
+        await vscode.commands.executeCommand('setContext', 'clprompter.commandEntry.runMode.check', mode === '*CHECK');
+    };
+
+    const syncCommandEntryMenuToggleContexts = async (): Promise<void> => {
+        const config = vscode.workspace.getConfiguration('clPrompter');
+        const logSqlStatements = config.get<boolean>('cmdEntryRecordSqlStmtsToLog', false);
+        const useSharedSqlJob = config.get<boolean | undefined>('cmdEntrySQLUseSharedJob')
+            ?? config.get<boolean | undefined>('cmdEntryUseSharedSQLJob')
+            ?? true;
+
+        await vscode.commands.executeCommand('setContext', 'clprompter.commandEntry.logSqlStatements', logSqlStatements);
+        await vscode.commands.executeCommand('setContext', 'clprompter.commandEntry.usePrivateSqlJob', !useSharedSqlJob);
+        await syncRunModeMenuContexts(currentCommandEntryRunMode);
+    };
+
+    await syncCommandEntryMenuToggleContexts();
     await setCommandEntryPanelAvailable(false);
 
     const isCommandEntryDisplayEnabled = (): boolean => {
@@ -522,18 +545,46 @@ export async function activate(context: vscode.ExtensionContext) {
         vscode.commands.registerCommand('clprompter.promptCommandEntry', () => commandEntry.requestPrompt()),
         vscode.commands.registerCommand('clprompter.cancelCommandEntry', () => commandEntry.requestCancel()),
         vscode.commands.registerCommand('clprompter.startNewCommandEntryJob', () => commandEntry.requestStartNewJob()),
-        vscode.commands.registerCommand('clprompter.useSharedCommandEntrySqlJob', () => commandEntry.requestUseSharedSqlJob()),
-        vscode.commands.registerCommand('clprompter.usePrivateCommandEntrySqlJob', () => commandEntry.requestUsePrivateSqlJob()),
+        vscode.commands.registerCommand('clprompter.useSharedCommandEntrySqlJob', () => {
+            void vscode.commands.executeCommand('setContext', 'clprompter.commandEntry.usePrivateSqlJob', false);
+            commandEntry.requestUseSharedSqlJob();
+        }),
+        vscode.commands.registerCommand('clprompter.usePrivateCommandEntrySqlJob', () => {
+            void vscode.commands.executeCommand('setContext', 'clprompter.commandEntry.usePrivateSqlJob', true);
+            commandEntry.requestUsePrivateSqlJob();
+        }),
         vscode.commands.registerCommand('clprompter.commandEntry.menu.viewHistory', () => commandEntry.requestViewHistory()),
         vscode.commands.registerCommand('clprompter.commandEntry.menu.toggleMessageDetails', () => commandEntry.requestToggleMessageDetails()),
-        vscode.commands.registerCommand('clprompter.commandEntry.menu.toggleSqlLog', () => commandEntry.requestToggleSqlStatementsToCommandLog()),
+        vscode.commands.registerCommand('clprompter.commandEntry.menu.toggleSqlLog', () => {
+            const config = vscode.workspace.getConfiguration('clPrompter');
+            const next = !config.get<boolean>('cmdEntryRecordSqlStmtsToLog', false);
+            void vscode.commands.executeCommand('setContext', 'clprompter.commandEntry.logSqlStatements', next);
+            commandEntry.requestToggleSqlStatementsToCommandLog();
+        }),
+        vscode.commands.registerCommand('clprompter.commandEntry.menu.toggleSqlLogChecked', () =>
+            vscode.commands.executeCommand('clprompter.commandEntry.menu.toggleSqlLog')),
         vscode.commands.registerCommand('clprompter.commandEntry.menu.clearHistoryAndMessages', () => commandEntry.requestClearHistoryAndMessages()),
         vscode.commands.registerCommand('clprompter.commandEntry.menu.clearSqlHistoryAndMessages', () => commandEntry.requestClearSqlHistoryAndMessages()),
         vscode.commands.registerCommand('clprompter.commandEntry.menu.clearSqlLogMessages', () => commandEntry.requestClearSqlLogMessages()),
         vscode.commands.registerCommand('clprompter.commandEntry.menu.openConnectionSettings', () => commandEntry.requestOpenConnectionSettings()),
-        vscode.commands.registerCommand('clprompter.commandEntry.menu.setRunModeRun', () => commandEntry.requestSetRunMode('*RUN')),
-        vscode.commands.registerCommand('clprompter.commandEntry.menu.setRunModeLimit', () => commandEntry.requestSetRunMode('*LIMIT')),
-        vscode.commands.registerCommand('clprompter.commandEntry.menu.setRunModeCheck', () => commandEntry.requestSetRunMode('*CHECK')),
+        vscode.commands.registerCommand('clprompter.commandEntry.menu.setRunModeRun', () => {
+            void syncRunModeMenuContexts('*RUN');
+            commandEntry.requestSetRunMode('*RUN');
+        }),
+        vscode.commands.registerCommand('clprompter.commandEntry.menu.setRunModeRunChecked', () =>
+            vscode.commands.executeCommand('clprompter.commandEntry.menu.setRunModeRun')),
+        vscode.commands.registerCommand('clprompter.commandEntry.menu.setRunModeLimit', () => {
+            void syncRunModeMenuContexts('*LIMIT');
+            commandEntry.requestSetRunMode('*LIMIT');
+        }),
+        vscode.commands.registerCommand('clprompter.commandEntry.menu.setRunModeLimitChecked', () =>
+            vscode.commands.executeCommand('clprompter.commandEntry.menu.setRunModeLimit')),
+        vscode.commands.registerCommand('clprompter.commandEntry.menu.setRunModeCheck', () => {
+            void syncRunModeMenuContexts('*CHECK');
+            commandEntry.requestSetRunMode('*CHECK');
+        }),
+        vscode.commands.registerCommand('clprompter.commandEntry.menu.setRunModeCheckChecked', () =>
+            vscode.commands.executeCommand('clprompter.commandEntry.menu.setRunModeCheck')),
         vscode.commands.registerCommand('clprompter.commandEntry.title.openHelp', () => commandEntry.requestOpenHelp()),
         vscode.commands.registerCommand('clprompter.commandEntry.title.openSettings', () => commandEntry.requestOpenSettings()),
         vscode.commands.registerCommand('clprompter.commandEntry.title.openMoreActions', () => commandEntry.requestOpenConnectionSettings()),
@@ -545,10 +596,17 @@ export async function activate(context: vscode.ExtensionContext) {
     await applyCommandEntryStartupVisibility();
 
     context.subscriptions.push(vscode.workspace.onDidChangeConfiguration(event => {
-        if (!event.affectsConfiguration('clPrompter.cmdEntryDisplay')) {
-            return;
+        const refreshMenuToggleContexts = event.affectsConfiguration('clPrompter.cmdEntryRecordSqlStmtsToLog')
+            || event.affectsConfiguration('clPrompter.cmdEntrySQLUseSharedJob')
+            || event.affectsConfiguration('clPrompter.cmdEntryUseSharedSQLJob');
+
+        if (refreshMenuToggleContexts) {
+            void syncCommandEntryMenuToggleContexts();
         }
-        void applyCommandEntryStartupVisibility();
+
+        if (event.affectsConfiguration('clPrompter.cmdEntryDisplay')) {
+            void applyCommandEntryStartupVisibility();
+        }
     }));
 
     baseExtension = extensions.getExtension<CodeForIBMi>("halcyontechltd.code-for-ibmi");

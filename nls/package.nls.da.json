@@ -9,7 +9,7 @@
     "contributes.commands.5.title": "CLPROMPTER: Kør befalingsinput",
     "contributes.commands.6.title": "CLPROMPTER: Bed om befalingsinput",
     "contributes.commands.7.title": "CLPROMPTER: ANNULLÉR sidste SQL",
-    "contributes.commands.8.title": "CLPROMPTER: Genopret serverjob for befalingsinput",
+    "contributes.commands.8.title": "Genopret serverjob for befalingsinput",
     "contributes.commands.9.title": "CLPROMPTER: Brug delt SQL-job (befalingsinput)",
     "contributes.commands.10.title": "CLPROMPTER: Brug privat SQL-job (befalingsinput)",
     "contributes.commands.11.title": "CLPROMPTER: Ryd resultater for befalingsinput",

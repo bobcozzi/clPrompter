@@ -2,7 +2,7 @@
 
 All notable changes to this project are documented in this file.
 
-## [1.0.41] - 2026-09-20
+## [1.0.42] - 2026-09-20
 
 ### What's New
 - The Command Entry toolbar has been redesigned and split between the Command Entry panel title bar and the original toolbar to reduce clutter and make actions easier to access.
@@ -16,9 +16,10 @@ All notable changes to this project are documented in this file.
   - On the currently downloaded portion of the resulset is saved or copied. So if the entire set is desired, use the Load All button to get everything for those larger resultSets.
 - New Command Entry SQL Job startup script and log is available so you can run specific SQL or CL commands when initially connecting Command Entry to the host SQL job.
   - Note this only runs for the dedicated/private SQL Job setting, and does not run when you use the shared SQL job option.
-  - Startup script entries now use a semicolon-terminated statement model, with explicit `SQL:` and `CL:` prefixes supported for clarity. The default is `CL:` when not specified or `SQL:` when `SET`, `VALUES` or `SELECT` are specified.
+  - Startup script entries use a semicolon-terminated statement model, with explicit `SQL:` and `CL:` prefixes supported for clarity. The default is `CL:` when not specified, expect when the statement is `SET`, `VALUES` or `SELECT` in that case `SQL:` is assumed.
 - Added `true autocommit` to command entry SQL Job settings configuration panel.
 - Restructured command entry SQL job settings configuration panel.
+- Updated helptext
 
 ### What's Fixed
 - Performance fixes and improvements.

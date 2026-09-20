@@ -9,7 +9,7 @@
     "contributes.commands.5.title": "CLPROMPTER: esegui input comandi",
     "contributes.commands.6.title": "CLPROMPTER: richiedi input comandi",
     "contributes.commands.7.title": "CLPROMPTER: ANNULLA l'ultimo SQL",
-    "contributes.commands.8.title": "CLPROMPTER: riconnetti il job server dell'input comandi",
+    "contributes.commands.8.title": "riconnetti il job server dell'input comandi",
     "contributes.commands.9.title": "CLPROMPTER: usa il job SQL condiviso (input comandi)",
     "contributes.commands.10.title": "CLPROMPTER: usa il job SQL privato (input comandi)",
     "contributes.commands.11.title": "CLPROMPTER: cancella i risultati dell'input comandi",

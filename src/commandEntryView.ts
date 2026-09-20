@@ -28,6 +28,7 @@ export const DEFAULT_CODE_SNIPPET_GROUPS = ['Job Info', 'Admin', 'SPOOLED Files'
 
 type CommandEntryRequest =
     | { type: 'ready' }
+    | { type: 'setRunMode'; mode: CommandExecutionMode }
     | { type: 'run'; command: string; mode: CommandExecutionMode }
     | { type: 'prompt'; command: string }
     | { type: 'requestHistoryPicker' }
@@ -251,6 +252,7 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
     private running = false;
     private activeExecutionId: string | undefined;
     private pendingCommandText: string | undefined;
+    private currentRunMode: CommandExecutionMode = '*RUN';
     private clearInputOnFirstReady = true;
     private clearHistoryOnFirstReady = true;
     private lastPostedSqlJobId: string | undefined;
@@ -345,6 +347,9 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
         this.view = view;
         view.webview.options = { enableScripts: true, localResourceRoots: [vscode.Uri.joinPath(this.context.extensionUri, 'media')] };
         view.webview.html = this.html(view.webview);
+        this.syncRunModeContext(this.currentRunMode);
+        this.syncSqlLoggingContext(this.logSqlStatementsToCommandLogEnabled());
+        this.syncPrivateSqlJobContext(!this.isUsingSharedSqlJob());
         view.webview.onDidReceiveMessage((message: CommandEntryRequest) => this.receive(message), undefined, this.context.subscriptions);
         view.onDidChangeVisibility(() => {
             if (!view.visible) {
@@ -394,8 +399,10 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
     requestOpenConnectionSettings(): void { void this.openCmdEntrySettingsPanel(); }
     requestOpenHelp(): void { void this.openCmdEntryHelpPanel(); }
     requestOpenSettings(): void { void vscode.commands.executeCommand('workbench.action.openSettings', 'clPrompter.cmdEntry'); }
-    requestSetRunMode(mode: '*RUN' | '*LIMIT' | '*CHECK'): void {
+    requestSetRunMode(mode: CommandExecutionMode): void {
+        this.syncRunModeContext(mode);
         this.post({ type: 'setMode', mode });
+        this.postRunModeNotice(mode);
         this.post({ type: 'focusInput' });
     }
     async executeCodeSnippetById(id: string): Promise<void> { await this.executeSnippet(id); }
@@ -531,6 +538,9 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
 
     private async receive(message: CommandEntryRequest): Promise<void> {
         switch (message.type) {
+            case 'setRunMode':
+                this.syncRunModeContext(message.mode);
+                break;
             case 'ready':
                 const clearInputOnStartup = this.clearInputOnFirstReady;
                 const firstReadyHistoryClearEligible = this.clearHistoryOnFirstReady;
@@ -541,6 +551,7 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
                     history: this.history(),
                     running: this.running,
                     sqlJobId: this.lastPostedSqlJobId,
+                    statusIdentity: this.currentStatusIdentity(),
                     dedicatedJobEnabled: this.jobManager.isDedicatedUsable(this.getConnection()),
                     remoteMapepireEnabled: this.jobManager.isRemoteMapepireServerEnabled(this.getConnection()),
                     useSharedSqlJob: this.isUsingSharedSqlJob(),
@@ -553,6 +564,7 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
                     clearInputOnStartup,
                     clearHistoryOnStartup: false
                 });
+                this.postRunModeNotice(this.currentRunMode);
                 this.clearInputOnFirstReady = false;
                 this.clearHistoryOnFirstReady = false;
 
@@ -673,9 +685,37 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
                 await this.startNewJob();
                 break;
             case 'run':
+                this.syncRunModeContext(message.mode);
                 await this.run(message.command, message.mode);
                 break;
         }
+    }
+
+    private syncRunModeContext(mode: CommandExecutionMode): void {
+        this.currentRunMode = mode;
+        void vscode.commands.executeCommand('setContext', 'clprompter.commandEntry.runMode', mode);
+        void vscode.commands.executeCommand('setContext', 'clprompter.commandEntry.runMode.run', mode === '*RUN');
+        void vscode.commands.executeCommand('setContext', 'clprompter.commandEntry.runMode.limit', mode === '*LIMIT');
+        void vscode.commands.executeCommand('setContext', 'clprompter.commandEntry.runMode.check', mode === '*CHECK');
+    }
+
+    private runModeDescription(mode: CommandExecutionMode): string {
+        if (mode === '*LIMIT') {
+            return 'limited user';
+        }
+        if (mode === '*CHECK') {
+            return 'syntax check only';
+        }
+        return 'run/execute';
+    }
+
+    private postRunModeNotice(mode: CommandExecutionMode): void {
+        this.post({
+            type: 'notice',
+            message: vscode.l10n.t('Mode set to {description}.', {
+                description: this.runModeDescription(mode)
+            })
+        });
     }
 
     private async setSharedSqlJobMode(useSharedJob: boolean, source: 'menu' | 'command'): Promise<void> {
@@ -729,7 +769,7 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
             const displaySqlJobId = resolvedSqlJobId ?? this.currentSqlJobId(connection) ?? '';
             this.safeOutputAppendLine(`[Cmd Entry] SQL job mode switch => useSharedJob=${useSharedJob} resolvedSqlJobId=${displaySqlJobId || '<none>'} currentSqlJobId=${this.currentSqlJobId(connection) || '<none>'}`);
             this.lastPostedSqlJobId = undefined;
-            this.post({ type: 'sqlJobId', sqlJobId: displaySqlJobId });
+            this.post({ type: 'sqlJobId', sqlJobId: displaySqlJobId, statusIdentity: this.currentStatusIdentity(connection) });
             this.postJobCapabilities();
             this.refreshSqlJobId(connection);
             this.post({
@@ -1192,6 +1232,7 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
             executionId: this.activeExecutionId,
             startedAt: Date.now(),
             sqlJobId,
+            statusIdentity: this.currentStatusIdentity(connection),
             statusMessage
         });
 
@@ -1268,7 +1309,7 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
             this.activeExecutionId = undefined;
             const latestSqlJobId = this.currentSqlJobId(connection);
             this.lastPostedSqlJobId = latestSqlJobId;
-            this.post({ type: 'running', running: false, sqlJobId: latestSqlJobId });
+            this.post({ type: 'running', running: false, sqlJobId: latestSqlJobId, statusIdentity: this.currentStatusIdentity(connection) });
             if (completionNotice) {
                 this.post({ type: 'notice', message: completionNotice });
             }
@@ -1286,7 +1327,7 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
         }
 
         if (!this.jobManager.isDedicatedUsable(connection)) {
-            this.post({ type: 'notice', message: vscode.l10n.t('Reconnect Server Job is only available when using Mapepire server mode and private SQL job mode.') });
+            this.post({ type: 'notice', message: vscode.l10n.t('Reconnect server job is only available when using Mapepire server mode and private SQL job mode.') });
             return;
         }
 
@@ -1302,8 +1343,8 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
             });
         } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
-            this.safeOutputAppendLine(`[Cmd Entry] Reconnect Server Job failed: ${message}`);
-            this.post({ type: 'notice', message: vscode.l10n.t('Reconnect Server Job failed: {message}', { message }) });
+            this.safeOutputAppendLine(`[Cmd Entry] Reconnect server job failed: ${message}`);
+            this.post({ type: 'notice', message: vscode.l10n.t('Reconnect server job failed: {message}', { message }) });
         }
     }
 
@@ -2096,10 +2137,20 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
     }
 
     private postSqlLoggingPreference(): void {
+        const enabled = this.logSqlStatementsToCommandLogEnabled();
+        this.syncSqlLoggingContext(enabled);
         this.post({
             type: 'sqlLoggingPreference',
-            logSqlStatementsToCommandLog: this.logSqlStatementsToCommandLogEnabled()
+            logSqlStatementsToCommandLog: enabled
         });
+    }
+
+    private syncSqlLoggingContext(enabled: boolean): void {
+        void vscode.commands.executeCommand('setContext', 'clprompter.commandEntry.logSqlStatements', enabled);
+    }
+
+    private syncPrivateSqlJobContext(enabled: boolean): void {
+        void vscode.commands.executeCommand('setContext', 'clprompter.commandEntry.usePrivateSqlJob', enabled);
     }
 
     private consumeSqlNotLoggedFeedbackAllowance(): boolean {
@@ -2139,6 +2190,7 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
         const remoteMapepireEnabled = this.jobManager.isRemoteMapepireServerEnabled(connection);
         const dedicatedReady = dedicatedJobEnabled;
         const useSharedSqlJob = this.isUsingSharedSqlJob(connection);
+        this.syncPrivateSqlJobContext(!useSharedSqlJob);
         this.post({
             type: 'jobCapabilities',
             dedicatedJobEnabled,
@@ -2270,6 +2322,7 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
 
     public refreshSqlJobId(connection = this.getConnection()): void {
         const sqlJobId = this.currentSqlJobId(connection);
+        const statusIdentity = this.currentStatusIdentity(connection);
         if (sqlJobId !== this.lastPostedSqlJobId) {
             this.safeOutputAppendLine(`[Cmd Entry] SQL job display ID changed: ${this.lastPostedSqlJobId || '<none>'} -> ${sqlJobId || '<none>'}`);
         }
@@ -2279,12 +2332,27 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
         if (debugEnabled) {
             console.log('[Cmd Entry][SqlJobDisplayRefresh] posting sqlJobId', {
                 sqlJobId: sqlJobId ?? '<none>',
+                statusIdentity: statusIdentity ?? '<none>',
                 connection: connection?.currentConnectionName ?? '<unknown>',
                 dedicatedEnabled: this.jobManager.isDedicatedEnabled(connection),
                 sharedJobId: connection?.getSqlJobId?.() ?? '<none>'
             });
         }
-        this.post({ type: 'sqlJobId', sqlJobId });
+        this.post({ type: 'sqlJobId', sqlJobId, statusIdentity });
+    }
+
+    private currentStatusIdentity(connection = this.getConnection()): string | undefined {
+        if (!connection) {
+            return undefined;
+        }
+
+        const user = String(connection.currentUser ?? (connection as any).username ?? '').trim();
+        const host = String(connection.currentHost ?? (connection as any).host ?? '').trim();
+        if (!user || !host) {
+            return undefined;
+        }
+
+        return `${user.toUpperCase()}@${host.toUpperCase()}`;
     }
 
     private buildHistoryConnectionKey(connection = this.getConnection()): string {
@@ -3038,7 +3106,7 @@ FETCH FIRST 1 ROW ONLY`;
             ? reconnectingLabel
             : reconnectStatus === 'success'
                 ? vscode.l10n.t('Reconnect successful. Job {jobId}', { jobId: effectiveJobId })
-                : vscode.l10n.t('Reconnect Server Job');
+                : vscode.l10n.t('Reconnect server job');
         const reconnectButtonDisabled = reconnectStatus === 'reconnecting' || !isDedicatedUsable ? 'disabled' : '';
         const reconnectStatusBlock = reconnectStatus === 'success'
             ? `<div class="small success-message">${vscode.l10n.t('Reconnect successful. Job {jobId} is active.', { jobId: effectiveJobId })}</div>`
@@ -3423,14 +3491,21 @@ FETCH FIRST 1 ROW ONLY`;
         const screenshotUri = webview.asWebviewUri(
             vscode.Uri.joinPath(this.context.extensionUri, 'images', 'cmdEntry_FullPanel.png')
         ).toString();
-
+        const cmdEntryPanel = webview.asWebviewUri(
+            vscode.Uri.joinPath(this.context.extensionUri, 'images', 'cmdEntry_Panel.png')
+        ).toString();
+        const cmdEntryCtrlMenu = webview.asWebviewUri(
+            vscode.Uri.joinPath(this.context.extensionUri, 'images', 'cmdEntry_Ctrl_Menu.png')
+        ).toString();
         try {
             const bytes = await vscode.workspace.fs.readFile(templateUri);
             const template = Buffer.from(bytes).toString('utf8');
             return template
                 .split('{{CSP_SOURCE}}').join(webview.cspSource)
                 .split('{{HELP_TITLE}}').join(CMD_ENTRY_HELP_PANEL_TITLE)
-                .split('{{IMG_CMDENTRY_FULL_PANEL}}').join(screenshotUri);
+                .split('{{IMG_CMDENTRY_FULL_PANEL}}').join(screenshotUri)
+                .split('{{IMG_CMDENTRY_CTRL_MENU}}').join(cmdEntryCtrlMenu)
+                .split('{{IMG_CMDENTRY_PANEL}}').join(cmdEntryPanel);
         } catch (error) {
             this.safeOutputAppendLine(`[Cmd Entry] Failed to load cmdEntry help template: ${error instanceof Error ? error.message : String(error)}`);
             return `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><title>${CMD_ENTRY_HELP_PANEL_TITLE}</title></head><body><h1>${CMD_ENTRY_HELP_PANEL_TITLE}</h1><p>Unable to load help content.</p></body></html>`;
@@ -3527,10 +3602,13 @@ FETCH FIRST 1 ROW ONLY`;
                     </div>
                     <div id="status" role="status" aria-live="polite">
                         <span id="status-text"></span>
+                        <span id="status-identity" aria-label="${vscode.l10n.t('Connection identity')}" hidden></span>
                         <span id="status-jobid" aria-label="${vscode.l10n.t('SQL job ID')}" title="${vscode.l10n.t('Click=Copy, Double-Click=Display Joblog')}" tabindex="0" hidden></span>
                         <div id="status-job-menu" class="toolbar-menu-list" role="menu" aria-hidden="true">
                             <button id="status-job-menu-copy" type="button" role="menuitem">${vscode.l10n.t('Copy job name')}</button>
                             <button id="status-job-menu-display-joblog" type="button" role="menuitem">${vscode.l10n.t('Display Joblog')}</button>
+                            <button id="status-job-menu-connection-settings" type="button" role="menuitem">${vscode.l10n.t('Connection Settings')}</button>
+                            <button id="status-job-menu-reconnect-server-job" type="button" role="menuitem">${vscode.l10n.t('Reconnect server job')}</button>
                         </div>
                     </div>
                     <section id="results" aria-label="Command results"></section>

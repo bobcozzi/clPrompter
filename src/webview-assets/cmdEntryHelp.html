@@ -106,6 +106,36 @@
             background: var(--bg);
         }
 
+        details {
+            margin: 0 0 8px;
+            padding: 8px 10px;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            background: color-mix(in srgb, var(--bg) 90%, var(--fg) 10%);
+        }
+
+        details[open] {
+            background: color-mix(in srgb, var(--bg) 86%, var(--fg) 14%);
+        }
+
+        summary {
+            cursor: pointer;
+            font-weight: 600;
+            color: var(--heading);
+        }
+
+        summary::marker {
+            color: var(--muted);
+        }
+
+        .menu-option-body {
+            margin: 8px 0 0;
+        }
+
+        .menu-option-body ul {
+            margin-top: 6px;
+        }
+
         code {
             font-family: var(--vscode-editor-font-family, monospace);
         }
@@ -117,7 +147,8 @@
         <h1>CL Command Entry Help</h1>
 
         <nav aria-label="Section index">
-            <a href="#panel-overview">Command Entry Panel Overview</a>
+            <a href="#fullscreen-overview">Command Entry Overview</a>
+            <a href="#panel-overview">Command Entry Panel</a>
             <a href="#command-input">Command Input</a>
             <a href="#results-joblog">Results and Message Log</a>
             <a href="#command-history-log">History Log (Logging Statements)</a>
@@ -126,7 +157,7 @@
             <a href="#job-controls">SQL Job Controls</a>
         </nav>
 
-        <section id="panel-overview">
+        <section id="fullscreen-overview">
             <h2>Command Entry Panel Overview</h2>
             <figure>
                 <img src="{{IMG_CMDENTRY_FULL_PANEL}}" alt="CL Command Entry full panel layout">
@@ -146,11 +177,130 @@
                 <li>The Up and Down Arrow keys may be used instead of F9 and F8, respectively.</li>
             </ul>
         </section>
+        <section id="panel-overview">
+            <h2>Command Entry Panel Highlights</h2>
+            <figure>
+                <img src="{{IMG_CMDENTRY_PANEL}}" alt="CL Command Entry panel">
+                <figcaption>CL Command Entry panel with command input, actions, message log, and toolbar.
+                </figcaption>
+            </figure>
+        </section>
+        <section id="ctrl-menu">
+            <h2>Command Entry Control Menu</h2>
+            <figure>
+                <img src="{{IMG_CMDENTRY_CTRL_MENU}}" alt="CL Command Entry control menu">
+                <figcaption>CL Command Entry control menu
+                </figcaption>
+            </figure>
+            <ul>
+                <li>
+                    <details>
+                        <summary>Show/Hide Message Details</summary>
+                        <div class="menu-option-body">Toggle the detailed message information for each CL command in the
+                            local joblog. This is similar to the F10=Detailed messages option on the IBM i Command Entry
+                            screen.
+                        </div>
+                    </details>
+                </li>
+                <li>
+                    <details>
+                        <summary>View CL History</summary>
+                        <div class="menu-option-body">Open the history panel to review previously run CL commands and
+                            any logged SQL statements. By default this history is shared across all IBM i connections,
+                            but it can be scoped to the active connection in Command Entry settings.</div>
+                    </details>
+                </li>
+                <li>
+                    <details>
+                        <summary>Clear CL Cmd History</summary>
+                        <div class="menu-option-body">Clears the CL Command History immediately. All history is removed
+                            from the history log for this connection or everything if History is not scoped to the
+                            Connection.</div>
+                    </details>
+                </li>
+                <li>
+                    <details>
+                        <summary>Clear SQL Stmt History</summary>
+                        <div class="menu-option-body">Clears the SQL Statement History immediately. Only SQL statement
+                            history is removed from the history log for this connection or everything if History is not
+                            scoped to the
+                            Connection.</div>
+                    </details>
+                </li>
+                <li>
+                    <details>
+                        <summary>Clear All Log Entries</summary>
+                        <div class="menu-option-body">Clears the CL commands and their associated messages from the
+                            Command Entry joblog (the log that appears below Command Entry input area).
+                            input.</div>
+                    </details>
+                </li>
+                <li>
+                    <details>
+                        <summary>Clear SQL Log Entries</summary>
+                        <div class="menu-option-body">Clears all SQL statements and their associated messages from the
+                            Command Entry joblog (the log that appears below Command Entry input area).</div>
+                    </details>
+                </li>
+                <li>
+                    <details>
+                        <summary>Log SQL Statements</summary>
+                        <div class="menu-option-body">Toggles whether or not SQL statements run on Command Entry are
+                            recorded in the Command entry joblog. Note that when an error occurs on an SQL statement it
+                            is logged regardless of this setting in order to report that error.
+                        </div>
+                    </details>
+                </li>
+                <li>
+                    <details>
+                        <summary>Run Mode</summary>
+                        <div class="menu-option-body">This setting allows to you run or only syntax check CL
+                            commands. The valid choices include:</div>
+                        <ul>
+                            <li><strong>Run</strong> - Run commands normally</li>
+                            <li><strong>Limit</strong> - Run commands as a *LIMITTED user profile.</li>
+                            <li><strong>Check</strong> - Syntax checking-only.</li>
+                        </ul>
+                    </details>
+                </li>
+                <li>
+                    <details>
+                        <summary>Connection Settings...</summary>
+                        <div class="menu-option-body">Opens the Settings panel that controls the active IBM i
+                            SQL Job connection settings. This includes the type of job (shared or private). If a Private
+                            SQL Job is selected, then additional options are provided, including: startup settings,
+                            a Script to run after connection is established, SET PATH/SCHEMA, and a pivot option.</div>
+                    </details>
+                </li>
+                <li>
+                    <details>
+                        <summary>Reconnect Server Job</summary>
+                        <div class="menu-option-body">Used when a private/dedicated SQL Job is used by Command Entry. It
+                            will force a mini-end/restart of the SQL Job. We call this "reconnect". It will attempt to
+                            reconnect to the same SQL Job and its attribute will be as if it were a new job. If it
+                            cannot reconnect, then a new SQL Job is created and attached.</div>
+                    </details>
+                </li>
+                <li>
+                    <details>
+                        <summary>Cancel Last SQL Statement</summary>
+                        <div class="menu-option-body">If you run an SQL statement from Command Entry and that SQL
+                            statement is running too long and you want to cancel it, this option can be used to attempt
+                            that cancellation. It is not guarantted to cancel it but it will attempt to do so.
+                            Technically this option could also work with a long running CL command but in practice I
+                            have never seen it successfully cancel a CL command.</div>
+                    </details>
+                </li>
+            </ul>
+        </section>
 
         <section id="command-history-log">
             <h2>Command/Statement History Log</h2>
             <ul>
                 <li>Each CL command, and optionally each SQL statement that is run, is recorded in the history log.</li>
+                <li>By default, the history is shared across all IBM i connections.</li>
+                <li>If you enable the connection-scoped history setting in Command Entry settings, each connection keeps
+                    its own separate history.</li>
                 <li>From the Command Entry input area, you may use the retrieve functions (F8/F9 or arrow Up/Down) to
                     retrieve prior CL commands or SQL statements.</li>
                 <li>You can control whether SQL statements are recorded in the history log in Settings.</li>

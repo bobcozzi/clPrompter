@@ -1,4 +1,4 @@
-export type CommandExecutionMode = '*RUN' | '*LIMIT';
+export type CommandExecutionMode = '*RUN' | '*LIMIT' | '*CHECK';
 export type CommandMessageKind = 'info' | 'warning' | 'error';
 
 export interface CommandMessage {

@@ -9,7 +9,7 @@
     "contributes.commands.5.title": "CLPROMPTER: Befehleingabe ausführen",
     "contributes.commands.6.title": "CLPROMPTER: Befehleingabe abfragen",
     "contributes.commands.7.title": "CLPROMPTER: letztes SQL ABBRECHEN",
-    "contributes.commands.8.title": "CLPROMPTER: Server-Job der Befehleingabe erneut verbinden",
+    "contributes.commands.8.title": "Server-Job der Befehleingabe erneut verbinden",
     "contributes.commands.9.title": "CLPROMPTER: Gemeinsamen SQL-Job verwenden (Befehleingabe)",
     "contributes.commands.10.title": "CLPROMPTER: Privaten SQL-Job verwenden (Befehleingabe)",
     "contributes.commands.11.title": "CLPROMPTER: Ergebnisse der Befehleingabe löschen",

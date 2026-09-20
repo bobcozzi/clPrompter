@@ -8,8 +8,8 @@
   const minTextareaRows = 2;
   const defaultCommandRows = 3;
   const command = document.getElementById('command'), mode = document.getElementById('mode'), severityFilter = document.getElementById('message-severity-filter');
-  const run = document.getElementById('run'), prompt = document.getElementById('prompt'), cmdEntryHelp = document.getElementById('cmdentry-help'), cmdEntrySettings = document.getElementById('cmdentry-settings'), toolbarMenu = document.getElementById('toolbar-menu'), toolbarMenuList = document.getElementById('toolbar-menu-list'), menuViewLog = document.getElementById('menu-view-log'), menuClearLog = document.getElementById('menu-clear-log'), menuClearSqlLog = document.getElementById('menu-clear-sql-log'), menuClearSqlHistory = document.getElementById('menu-clear-sql-history'), menuToggleSqlLog = document.getElementById('menu-toggle-sql-log'), menuToggleMessageDetails = document.getElementById('menu-toggle-message-details'), menuConnectionSettings = document.getElementById('menu-connection-settings'), menuUseSharedSqlJob = document.getElementById('menu-use-shared-sql-job'), menuUsePrivateSqlJob = document.getElementById('menu-use-private-sql-job'), menuStartNewJob = document.getElementById('menu-start-new-job'), menuCancelSqlJob = document.getElementById('menu-cancel-sql-job'), menuClearHistory = document.getElementById('menu-clear-history'), menuRunMode = document.getElementById('menu-run-mode'), menuRunModeList = document.getElementById('menu-run-mode-list'), menuRunModeWrap = menuRunMode ? menuRunMode.closest('.toolbar-submenu-wrap') : null, menuRunModeRun = document.getElementById('menu-run-mode-run'), menuRunModeLimit = document.getElementById('menu-run-mode-limit'), menuRunModeCheck = document.getElementById('menu-run-mode-check'), historyPrev = document.getElementById('history-prev'), historyNext = document.getElementById('history-next'), statusJobMenu = document.getElementById('status-job-menu'), statusJobMenuCopy = document.getElementById('status-job-menu-copy'), statusJobMenuDisplayJoblog = document.getElementById('status-job-menu-display-joblog');
-  const statusText = document.getElementById('status-text'), statusJobId = document.getElementById('status-jobid'), results = document.getElementById('results');
+  const run = document.getElementById('run'), prompt = document.getElementById('prompt'), cmdEntryHelp = document.getElementById('cmdentry-help'), cmdEntrySettings = document.getElementById('cmdentry-settings'), toolbarMenu = document.getElementById('toolbar-menu'), toolbarMenuList = document.getElementById('toolbar-menu-list'), menuViewLog = document.getElementById('menu-view-log'), menuClearLog = document.getElementById('menu-clear-log'), menuClearSqlLog = document.getElementById('menu-clear-sql-log'), menuClearSqlHistory = document.getElementById('menu-clear-sql-history'), menuToggleSqlLog = document.getElementById('menu-toggle-sql-log'), menuToggleMessageDetails = document.getElementById('menu-toggle-message-details'), menuConnectionSettings = document.getElementById('menu-connection-settings'), menuUseSharedSqlJob = document.getElementById('menu-use-shared-sql-job'), menuUsePrivateSqlJob = document.getElementById('menu-use-private-sql-job'), menuStartNewJob = document.getElementById('menu-start-new-job'), menuCancelSqlJob = document.getElementById('menu-cancel-sql-job'), menuClearHistory = document.getElementById('menu-clear-history'), menuRunMode = document.getElementById('menu-run-mode'), menuRunModeList = document.getElementById('menu-run-mode-list'), menuRunModeWrap = menuRunMode ? menuRunMode.closest('.toolbar-submenu-wrap') : null, menuRunModeRun = document.getElementById('menu-run-mode-run'), menuRunModeLimit = document.getElementById('menu-run-mode-limit'), menuRunModeCheck = document.getElementById('menu-run-mode-check'), historyPrev = document.getElementById('history-prev'), historyNext = document.getElementById('history-next'), statusJobMenu = document.getElementById('status-job-menu'), statusJobMenuCopy = document.getElementById('status-job-menu-copy'), statusJobMenuDisplayJoblog = document.getElementById('status-job-menu-display-joblog'), statusJobMenuConnectionSettings = document.getElementById('status-job-menu-connection-settings'), statusJobMenuReconnectServerJob = document.getElementById('status-job-menu-reconnect-server-job');
+  const statusText = document.getElementById('status-text'), statusIdentity = document.getElementById('status-identity'), statusJobId = document.getElementById('status-jobid'), results = document.getElementById('results');
   let historyIndex = -1, runningStartedAt, runningTimerId, runningStatusPrefix = l10n.runningStatusPrefix || 'Running…', historyDraft = '', sqlJobPollingId;
   let statusJobSingleClickTimer;
   let historyHoverTooltipEl;
@@ -146,6 +146,14 @@
   const formatElapsed = ms => ms < 1000 ? `${ms} ms` : `${(ms / 1000).toFixed(1)} s`;
   const setStatusMessage = (message = '') => {
     statusText.textContent = message;
+  };
+  const setStatusIdentity = (identity = '') => {
+    const normalized = String(identity || '').trim();
+    if (!statusIdentity) {
+      return;
+    }
+    statusIdentity.textContent = normalized;
+    statusIdentity.hidden = normalized.length === 0;
   };
   const hasRealSqlJobId = () => {
     const value = (statusJobId.getAttribute('data-jobid-raw') || statusJobId.textContent || '').trim().toLowerCase();
@@ -289,6 +297,7 @@
       return;
     }
     mode.value = normalized;
+    vscode.postMessage({ type: 'setRunMode', mode: normalized });
     updateRunModeMenuLabels();
     save();
   };
@@ -662,6 +671,14 @@
       menuStartNewJob.title = reason;
       menuStartNewJob.setAttribute('aria-disabled', String(!canStartNewJob));
     }
+    if (statusJobMenuReconnectServerJob) {
+      statusJobMenuReconnectServerJob.disabled = !canStartNewJob;
+      const reason = canStartNewJob
+        ? 'Reconnect the private SQL job'
+        : dedicatedRequiredReason;
+      statusJobMenuReconnectServerJob.title = reason;
+      statusJobMenuReconnectServerJob.setAttribute('aria-disabled', String(!canStartNewJob));
+    }
     if (menuUseSharedSqlJob) {
       menuUseSharedSqlJob.hidden = !remoteMapepireEnabled;
       menuUseSharedSqlJob.disabled = !remoteMapepireEnabled || useSharedSqlJob;
@@ -740,9 +757,7 @@
   const applyHistoryEntry = (index) => {
     if (index < 0) {
       command.value = historyDraft;
-      mode.value = state.mode || '*RUN';
-      updateRunModeMenuLabels();
-      save();
+      setRunMode(state.mode || '*RUN');
       resizeCommandInput();
       command.setSelectionRange(0, 0);
       return;
@@ -753,9 +768,7 @@
       ? item.isSql
       : (isSqlCommandText(item.command) || /^\s*(insert|update|delete|merge|call)\b/i.test(String(item.command || '')));
     command.value = trimTrailingWhitespaceForRecall(applySqlPrefixForRecall(item.command, historySqlHint));
-    mode.value = item.mode;
-    updateRunModeMenuLabels();
-    save();
+    setRunMode(item.mode || '*RUN');
     resizeCommandInput({ respectRememberedHeight: false });
     command.setSelectionRange(0, 0);
     command.focus();
@@ -1028,8 +1041,7 @@
   state.commandHeightPx = 0;
   command.rows = defaultCommandRows;
   command.style.height = 'auto';
-  mode.value = state.mode || '*RUN';
-  updateRunModeMenuLabels();
+  setRunMode(state.mode || '*RUN');
   if (severityFilter) {
     severityFilter.value = String(state.filterSeverity ?? 0);
   }
@@ -1046,7 +1058,7 @@
     observer.observe(command);
   }
   command.addEventListener('input', () => { historyDraft = ''; historyIndex = -1; save(); resizeCommandInput(); });
-  mode.addEventListener('change', () => { updateRunModeMenuLabels(); save(); });
+  mode.addEventListener('change', () => { setRunMode(mode.value || '*RUN'); });
   if (severityFilter) severityFilter.addEventListener('change', () => { save(); render(); });
   command.addEventListener('keydown', event => {
     if (event.key === 'Home' || event.key === 'End') {
@@ -1419,6 +1431,19 @@
     closeStatusJobMenu();
     vscode.postMessage({ type: 'requestDisplayJoblog', sqlJobId });
   });
+  statusJobMenuConnectionSettings?.addEventListener('click', () => {
+    closeStatusJobMenu();
+    vscode.postMessage({ type: 'openCmdEntrySettings' });
+    command.focus();
+  });
+  statusJobMenuReconnectServerJob?.addEventListener('click', () => {
+    if (statusJobMenuReconnectServerJob.disabled) {
+      return;
+    }
+    closeStatusJobMenu();
+    vscode.postMessage({ type: 'startNewJob' });
+    command.focus();
+  });
   statusJobMenu?.addEventListener('keydown', event => {
     if (event.key === 'Escape') {
       event.preventDefault();
@@ -1431,7 +1456,7 @@
       return;
     }
 
-    const items = [statusJobMenuCopy, statusJobMenuDisplayJoblog].filter(item => item && !item.disabled);
+    const items = [statusJobMenuCopy, statusJobMenuDisplayJoblog, statusJobMenuConnectionSettings, statusJobMenuReconnectServerJob].filter(item => item && !item.disabled);
     if (!items.length) { return; }
     event.preventDefault();
     const currentIndex = items.indexOf(document.activeElement);
@@ -1478,6 +1503,7 @@
           save();
           resizeCommandInput();
         }
+        setStatusIdentity(message.statusIdentity || '');
         setStatusJobId(message.sqlJobId || '');
         if (message.running) { setRunning(true, Date.now(), message.statusMessage); }
         render();
@@ -1485,11 +1511,17 @@
         startSqlJobPollingIfNeeded();
         break;
       case 'running':
+        if (typeof message.statusIdentity === 'string') {
+          setStatusIdentity(message.statusIdentity);
+        }
         setStatusJobId(message.sqlJobId || '');
         setRunning(message.running, message.startedAt, message.statusMessage);
         startSqlJobPollingIfNeeded();
         break;
       case 'sqlJobId':
+        if (typeof message.statusIdentity === 'string') {
+          setStatusIdentity(message.statusIdentity);
+        }
         setStatusJobId(message.sqlJobId || '');
         startSqlJobPollingIfNeeded();
         break;
@@ -1578,9 +1610,7 @@
         break;
       case 'setCommandMode':
         command.value = trimTrailingWhitespaceForRecall(message.command);
-        mode.value = message.mode || mode.value;
-        updateRunModeMenuLabels();
-        save();
+        setRunMode(message.mode || mode.value);
         resizeCommandInput({ respectRememberedHeight: false });
         command.focus();
         break;

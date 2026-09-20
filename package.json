@@ -2,7 +2,7 @@
   "name": "clprompter",
   "displayName": "%displayName%",
   "description": "%description%",
-  "version": "1.0.41",
+  "version": "1.0.42",
   "author": {
     "name": "Bob Cozzi",
     "url": "https://github.com/bobcozzi"
@@ -187,6 +187,10 @@
         "title": "Log SQL Statements"
       },
       {
+        "command": "clprompter.commandEntry.menu.toggleSqlLogChecked",
+        "title": "✓ Log SQL Statements"
+      },
+      {
         "command": "clprompter.commandEntry.menu.clearHistoryAndMessages",
         "title": "Clear CL Cmd History"
       },
@@ -200,19 +204,31 @@
       },
       {
         "command": "clprompter.commandEntry.menu.openConnectionSettings",
-        "title": "Connection Settings"
+        "title": "Connection Settings..."
       },
       {
         "command": "clprompter.commandEntry.menu.setRunModeRun",
         "title": "Run"
       },
       {
+        "command": "clprompter.commandEntry.menu.setRunModeRunChecked",
+        "title": "✓ Run"
+      },
+      {
         "command": "clprompter.commandEntry.menu.setRunModeLimit",
         "title": "Limit"
       },
       {
+        "command": "clprompter.commandEntry.menu.setRunModeLimitChecked",
+        "title": "✓ Limit"
+      },
+      {
         "command": "clprompter.commandEntry.menu.setRunModeCheck",
         "title": "Check"
+      },
+      {
+        "command": "clprompter.commandEntry.menu.setRunModeCheckChecked",
+        "title": "✓ Check"
       },
       {
         "command": "clprompter.commandEntry.title.openHelp",
@@ -223,34 +239,6 @@
         "command": "clprompter.commandEntry.title.openSettings",
         "title": "Command Entry Settings",
         "icon": "$(gear)"
-      },
-      {
-        "command": "clprompter.commandEntry.menu.openConnectionSettings",
-        "title": "Connection Settings"
-      },
-      {
-        "command": "clprompter.commandEntry.menu.toggleMessageDetails",
-        "title": "Show/Hide Message Details"
-      },
-      {
-        "command": "clprompter.commandEntry.menu.toggleSqlLog",
-        "title": "Log SQL Statements"
-      },
-      {
-        "command": "clprompter.commandEntry.menu.viewHistory",
-        "title": "View CL History"
-      },
-      {
-        "command": "clprompter.commandEntry.menu.clearHistoryAndMessages",
-        "title": "Clear CL Cmd History"
-      },
-      {
-        "command": "clprompter.commandEntry.menu.clearSqlHistoryAndMessages",
-        "title": "Clear SQL Stmt History"
-      },
-      {
-        "command": "clprompter.commandEntry.menu.clearSqlLogMessages",
-        "title": "Clear SQL Log Entries"
       }
     ],
     "submenus": [
@@ -264,7 +252,7 @@
       },
       {
         "id": "clprompter.commandEntry.settingsMenu",
-        "label": "Command Entry Settings",
+        "label": "Command Entry Options",
         "icon": "$(ellipsis)"
       }
     ],
@@ -588,8 +576,6 @@
         },
         {
           "submenu": "clprompter.commandEntry.settingsMenu",
-          "title": "...",
-          "icon": "$(ellipsis)",
           "when": "view == clprompter.commandEntryView.main",
           "group": "navigation@3"
         },
@@ -690,45 +676,85 @@
       ],
       "clprompter.commandEntry.settingsMenu": [
         {
-          "command": "clprompter.commandEntry.menu.openConnectionSettings",
-          "group": "1_settings@1"
-        },
-        {
           "command": "clprompter.commandEntry.menu.toggleMessageDetails",
-          "group": "1_settings@2"
-        },
-        {
-          "command": "clprompter.commandEntry.menu.toggleSqlLog",
-          "group": "1_settings@3"
+          "group": "2_view@1"
         },
         {
           "command": "clprompter.commandEntry.menu.viewHistory",
-          "group": "2_history@1"
+          "group": "3_history@1"
         },
         {
           "command": "clprompter.commandEntry.menu.clearHistoryAndMessages",
-          "group": "2_history@2"
+          "group": "3_history@2"
         },
         {
           "command": "clprompter.commandEntry.menu.clearSqlHistoryAndMessages",
-          "group": "2_history@3"
+          "group": "3_history@3"
+        },
+        {
+          "command": "clprompter.clearCommandEntry",
+          "group": "3_history@4"
         },
         {
           "command": "clprompter.commandEntry.menu.clearSqlLogMessages",
-          "group": "2_history@4"
+          "group": "3_history@5"
+        },
+        {
+          "command": "clprompter.commandEntry.menu.toggleSqlLogChecked",
+          "when": "clprompter.commandEntry.logSqlStatements",
+          "group": "3_history@6"
+        },
+        {
+          "command": "clprompter.commandEntry.menu.toggleSqlLog",
+          "when": "!clprompter.commandEntry.logSqlStatements",
+          "group": "3_history@6"
+        },
+        {
+          "submenu": "clprompter.commandEntry.menu.runMode",
+          "group": "9_options@1"
+        },
+        {
+          "command": "clprompter.commandEntry.menu.openConnectionSettings",
+          "group": "9_options@2"
+        },
+        {
+          "command": "clprompter.startNewCommandEntryJob",
+          "group": "9_options@4"
+        },
+        {
+          "command": "clprompter.cancelCommandEntry",
+          "group": "9_options@5"
         }
       ],
       "clprompter.commandEntry.menu.runMode": [
         {
-          "command": "clprompter.commandEntry.menu.setRunModeRun",
+          "command": "clprompter.commandEntry.menu.setRunModeRunChecked",
+          "when": "clprompter.commandEntry.runMode.run",
           "group": "1_mode@1"
         },
         {
-          "command": "clprompter.commandEntry.menu.setRunModeLimit",
+          "command": "clprompter.commandEntry.menu.setRunModeRun",
+          "when": "!clprompter.commandEntry.runMode.run",
+          "group": "1_mode@1"
+        },
+        {
+          "command": "clprompter.commandEntry.menu.setRunModeLimitChecked",
+          "when": "clprompter.commandEntry.runMode.limit",
           "group": "1_mode@2"
         },
         {
+          "command": "clprompter.commandEntry.menu.setRunModeLimit",
+          "when": "!clprompter.commandEntry.runMode.limit",
+          "group": "1_mode@2"
+        },
+        {
+          "command": "clprompter.commandEntry.menu.setRunModeCheckChecked",
+          "when": "clprompter.commandEntry.runMode.check",
+          "group": "1_mode@3"
+        },
+        {
           "command": "clprompter.commandEntry.menu.setRunModeCheck",
+          "when": "!clprompter.commandEntry.runMode.check",
           "group": "1_mode@3"
         }
       ],

@@ -9,7 +9,7 @@
     "contributes.commands.5.title": "CLPROMPTER : exécuter l'entrée de commandes",
     "contributes.commands.6.title": "CLPROMPTER : prompter l'entrée de commandes",
     "contributes.commands.7.title": "CLPROMPTER : ANNULER la dernière instruction SQL",
-    "contributes.commands.8.title": "CLPROMPTER : reconnecter le travail serveur de l'entrée de commandes",
+    "contributes.commands.8.title": "reconnecter le travail serveur de l'entrée de commandes",
     "contributes.commands.9.title": "CLPROMPTER : utiliser le travail SQL partagé (entrée de commandes)",
     "contributes.commands.10.title": "CLPROMPTER : utiliser le travail SQL privé (entrée de commandes)",
     "contributes.commands.11.title": "CLPROMPTER : effacer les résultats de l'entrée de commandes",

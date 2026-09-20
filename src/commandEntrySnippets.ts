@@ -110,31 +110,8 @@ export const BUILT_IN_SQL_SNIPPETS: ReadonlyArray<CommandEntrySqlSnippet> = [
         source: 'built-in'
     },
     {
-        id: 'builtin.last-spooled-file',
-        label: 'Dsp Last SPOOLED File',
-        stmt: [
-            'WITH sf AS (',
-            'SELECT * FROM TABLE (qsys2.spooled_file_info(',
-            "     USER_NAME => '*CURRENT', job_name => '*ALL',",
-            "     STARTING_TIMESTAMP => current_date,",
-            "     ENDING_TIMESTAMP => current_timestamp)) SF",
-            '  ORDER BY sf.creation_timestamp DESC',
-            '  LIMIT 1',
-            ') ',
-            'SELECT sd.SPOOLED_DATA FROM sf',
-            ',LATERAL (SELECT * FROM TABLE(systools.spooled_file_data(',
-            '           JOB_NAME => SF.QUALIFIED_JOB_NAME,',
-            '           SPOOLED_FILE_NAME => SF.SPOOLED_FILE_NAME,',
-            '           SPOOLED_FILE_NUMBER => SF.SPOOLED_FILE_NUMBER)) spd',
-            ') sd'
-        ].join(' '),
-        group: 'Job Info',
-        order: 90,
-        source: 'built-in'
-    },
-    {
         id: 'builtin.job-splf-list',
-        label: 'List SPOOLED Files (Job)',
+        label: 'SPOOLED Files List (Job)',
         stmt: [
             'SELECT SPOOLED_FILE_NAME AS SPLFNAME,',
             'SPOOLED_FILE_NUMBER AS SPLNBR,',
@@ -154,6 +131,29 @@ export const BUILT_IN_SQL_SNIPPETS: ReadonlyArray<CommandEntrySqlSnippet> = [
             "FROM TABLE(QSYS2.SPOOLED_FILE_INFO(JOB_NAME => '${sqlJobId}' ))",
             "WHERE (SPOOLED_FILE_NAME <> 'QPRINT' AND JOB_NAME <> 'MAPEPIRE')",
             'ORDER BY CREATION_TIMESTAMP'
+        ].join(' '),
+        group: 'Job Info',
+        order: 90,
+        source: 'built-in'
+    },
+    {
+        id: 'builtin.last-spooled-file',
+        label: 'View Last SPOOLED File',
+        stmt: [
+            'WITH sf AS (',
+            'SELECT * FROM TABLE (qsys2.spooled_file_info(',
+            "     USER_NAME => '*CURRENT', job_name => '*ALL',",
+            "     STARTING_TIMESTAMP => current_date,",
+            "     ENDING_TIMESTAMP => current_timestamp)) SF",
+            '  ORDER BY sf.creation_timestamp DESC',
+            '  LIMIT 1',
+            ') ',
+            'SELECT sd.SPOOLED_DATA FROM sf',
+            ',LATERAL (SELECT * FROM TABLE(systools.spooled_file_data(',
+            '           JOB_NAME => SF.QUALIFIED_JOB_NAME,',
+            '           SPOOLED_FILE_NAME => SF.SPOOLED_FILE_NAME,',
+            '           SPOOLED_FILE_NUMBER => SF.SPOOLED_FILE_NUMBER)) spd',
+            ') sd'
         ].join(' '),
         group: 'Job Info',
         order: 100,
@@ -237,7 +237,7 @@ export const BUILT_IN_SQL_SNIPPETS: ReadonlyArray<CommandEntrySqlSnippet> = [
     },
     {
         id: 'builtin.spooled-files-user',
-        label: 'List SPOOLED Files (User)',
+        label: 'SPOOLED Files List (User)',
         stmt: [
             'SELECT SPOOLED_FILE_NAME AS SPLFNAME,',
             'SPOOLED_FILE_NUMBER AS SPLNBR,',
