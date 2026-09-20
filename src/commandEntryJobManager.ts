@@ -2169,13 +2169,11 @@ export class CommandEntryJobManager {
                     break;
                 case '*RR':
                     jdbc['auto commit'] = true;
-                    jdbc['true autocommit'] = true;
                     jdbc['transaction isolation'] = 'repeatable read';
                     break;
                 case '*CHG':
                 case '*CS':
                     jdbc['auto commit'] = true;
-                    jdbc['true autocommit'] = true;
                     jdbc['transaction isolation'] = 'read committed';
                     break;
                 default:
@@ -2185,9 +2183,18 @@ export class CommandEntryJobManager {
 
         if (typeof sessionOptions.autoCommit === 'boolean') {
             jdbc['auto commit'] = sessionOptions.autoCommit;
-            if (!sessionOptions.autoCommit) {
-                jdbc['true autocommit'] = false;
-            }
+        }
+
+        const effectiveAutoCommit = toOptionalBoolean(jdbc['auto commit']);
+        if (effectiveAutoCommit !== true) {
+            jdbc['true autocommit'] = false;
+        } else if (typeof sessionOptions.trueAutocommit === 'boolean') {
+            jdbc['true autocommit'] = sessionOptions.trueAutocommit;
+        } else {
+            const effectiveIsolation = typeof jdbc['transaction isolation'] === 'string'
+                ? jdbc['transaction isolation'].trim().toLowerCase()
+                : undefined;
+            jdbc['true autocommit'] = effectiveIsolation !== undefined && effectiveIsolation !== 'none';
         }
 
         // Do not push user library settings into the JDBC bootstrap library list.

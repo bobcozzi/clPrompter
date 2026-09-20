@@ -5,6 +5,7 @@ export type ConnectionSqlSessionOptions = {
     naming?: 'sql' | 'system';
     commit?: string;
     autoCommit?: boolean;
+    trueAutocommit?: boolean;
     extendedMetadata?: boolean;
     runStartupScript?: boolean;
     runAfterSqlJobInitText?: string;
@@ -147,6 +148,50 @@ function normalizeLibraryName(value: unknown): string | undefined {
     return normalized;
 }
 
+export function splitLibraryListTokens(value: string): string[] | undefined {
+    const tokens: string[] = [];
+    let current = '';
+    let inDoubleQuote = false;
+
+    const pushToken = (): void => {
+        const trimmed = current.trim();
+        if (trimmed.length > 0) {
+            tokens.push(trimmed);
+        }
+        current = '';
+    };
+
+    for (let index = 0; index < value.length; index += 1) {
+        const char = value[index];
+        const nextChar = value[index + 1];
+
+        if (char === '"') {
+            current += char;
+            if (inDoubleQuote && nextChar === '"') {
+                current += nextChar;
+                index += 1;
+            } else {
+                inDoubleQuote = !inDoubleQuote;
+            }
+            continue;
+        }
+
+        if (!inDoubleQuote && (char === ',' || /\s/.test(char))) {
+            pushToken();
+            continue;
+        }
+
+        current += char;
+    }
+
+    if (inDoubleQuote) {
+        return undefined;
+    }
+
+    pushToken();
+    return tokens.length > 0 ? tokens : undefined;
+}
+
 function normalizeCurrentLibraryValue(value: unknown): string | undefined {
     if (typeof value !== 'string') {
         return undefined;
@@ -174,10 +219,19 @@ function normalizeLibraryListToken(value: unknown): string | undefined {
         return undefined;
     }
 
-    const normalized = value.trim().toUpperCase();
-    if (!normalized) {
+    const trimmed = value.trim();
+    if (!trimmed) {
         return undefined;
     }
+
+    if (trimmed.startsWith('"') || trimmed.endsWith('"')) {
+        if (trimmed.length >= 2 && trimmed.startsWith('"') && trimmed.endsWith('"')) {
+            return trimmed;
+        }
+        return undefined;
+    }
+
+    const normalized = trimmed.toUpperCase();
 
     if (normalized === '*NONE' || normalized === '*EMPTY' || normalized === '*LIBL') {
         return normalized;
@@ -195,7 +249,7 @@ function normalizeLibraryList(value: unknown): string[] | undefined {
     const tokens = Array.isArray(value)
         ? value.map(item => String(item ?? ''))
         : typeof value === 'string'
-            ? value.split(/[\s,]+/)
+            ? splitLibraryListTokens(value) ?? []
             : [];
 
     if (tokens.length === 0) {
@@ -375,6 +429,7 @@ export function getDefaultConnectionSqlSessionOptions(): ConnectionSqlSessionOpt
         naming: 'system',
         commit: undefined,
         autoCommit: undefined,
+        trueAutocommit: undefined,
         extendedMetadata: true,
         runStartupScript: true,
         runAfterSqlJobInitText: undefined,
@@ -399,6 +454,7 @@ export function getConnectionSqlSessionOptions(connection?: IBMi): ConnectionSql
         naming,
         commit: normalizeSqlOptionValue(raw.commit) ?? defaults.commit,
         autoCommit: readBooleanSetting(raw.autoCommit) ?? defaults.autoCommit,
+        trueAutocommit: readBooleanSetting((raw as Record<string, unknown>).trueAutocommit) ?? defaults.trueAutocommit,
         extendedMetadata: readBooleanSetting(raw.extendedMetadata) ?? defaults.extendedMetadata,
         runStartupScript: readBooleanSetting(raw.runStartupScript) ?? defaults.runStartupScript,
         runAfterSqlJobInitText: normalizeRunAfterSqlJobInitText(raw.runAfterSqlJobInitText),

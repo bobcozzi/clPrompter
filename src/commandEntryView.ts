@@ -6,7 +6,7 @@ import { CommandEntryHistory, CommandExecutionMode } from './commandEntryModel';
 import { detectCommandEntryPrefix } from './commandEntryPrefixes';
 import { CommandEntryService } from './commandEntryService';
 import { BUILT_IN_SQL_SNIPPETS, CommandEntrySqlSnippet } from './commandEntrySnippets';
-import { buildImmediateSessionContextSql, buildRunAfterSqlJobInitDefaults, getConnectionSqlSessionOptions, getConnectionSqlSettings, normalizeSchemaSessionContextValue, normalizeSessionContextValue, splitRunAfterSqlJobInitStatements, updateConnectionSqlSettings } from './commandEntrySqlSettings';
+import { buildImmediateSessionContextSql, buildRunAfterSqlJobInitDefaults, getConnectionSqlSessionOptions, getConnectionSqlSettings, normalizeSchemaSessionContextValue, normalizeSessionContextValue, splitLibraryListTokens, splitRunAfterSqlJobInitStatements, updateConnectionSqlSettings } from './commandEntrySqlSettings';
 import { closeSqlResultPanel, configureSqlResultPanelAssets, notifySqlResultSessionClosed, setSqlResultPanelRequestHandler, showSqlResultPanel } from './sqlResultPanel';
 
 const HISTORY_KEY = 'commandEntry.history';
@@ -2418,7 +2418,7 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
             this.cmdEntrySettingsPanel.webview.html = `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><style>body{font-family:var(--vscode-font-family,sans-serif);background:var(--vscode-editor-background);color:var(--vscode-editor-foreground);padding:20px}p{margin:0 0 12px}.error{color:var(--vscode-testing-iconFailed,#f85149)}</style></head><body><h2>Command Entry Connection Settings</h2><p>Connection settings are unavailable while the IBM i Mapepire endpoint is unreachable.</p><p class="error">${this.escapeHtmlAttribute(failure)}</p></body></html>`;
         }
 
-        this.cmdEntrySettingsPanel.webview.onDidReceiveMessage(async (message: { type?: string; useSharedJob?: boolean; naming?: string; commit?: string; autoCommit?: string; extendedMetadata?: boolean; runStartupScript?: boolean; currentLibrary?: string; libraryList?: string; runAfterSqlJobInit?: string; datfmt?: string; timfmt?: string; initialSchema?: string; initialPath?: string; autoColumnViewForSingleRow?: boolean; hasUnsavedChanges?: boolean }) => {
+        this.cmdEntrySettingsPanel.webview.onDidReceiveMessage(async (message: { type?: string; useSharedJob?: boolean; naming?: string; commit?: string; autoCommit?: string; trueAutocommit?: string; extendedMetadata?: boolean; runStartupScript?: boolean; currentLibrary?: string; libraryList?: string; runAfterSqlJobInit?: string; datfmt?: string; timfmt?: string; initialSchema?: string; initialPath?: string; autoColumnViewForSingleRow?: boolean; hasUnsavedChanges?: boolean }) => {
             if (message.type === 'setSqlJobMode') {
                 await this.setSharedSqlJobMode(Boolean(message.useSharedJob), 'command');
                 if (this.cmdEntrySettingsPanel) {
@@ -2480,6 +2480,7 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
                     naming: message.naming === 'system' ? 'system' as const : 'sql' as const,
                     commit: message.commit || undefined,
                     autoCommit: this.parseAutoCommitSelection(message.autoCommit),
+                    trueAutocommit: this.parseAutoCommitSelection(message.trueAutocommit),
                     extendedMetadata: typeof message.extendedMetadata === 'boolean' ? message.extendedMetadata : true,
                     runStartupScript: typeof message.runStartupScript === 'boolean' ? message.runStartupScript : true,
                     runAfterSqlJobInitText: normalizedRunAfterSqlJobInitText,
@@ -2498,6 +2499,7 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
                         naming: nextOptions.naming,
                         commit: nextOptions.commit,
                         autoCommit: nextOptions.autoCommit,
+                        trueAutocommit: nextOptions.trueAutocommit,
                         extendedMetadata: nextOptions.extendedMetadata,
                         runStartupScript: nextOptions.runStartupScript,
                         runAfterSqlJobInitText: nextOptions.runAfterSqlJobInitText,
@@ -2746,6 +2748,7 @@ FETCH FIRST 1 ROW ONLY`;
                         naming: message.naming === 'system' ? 'system' : 'sql',
                         commit: message.commit || undefined,
                         autoCommit: this.parseAutoCommitSelection(message.autoCommit),
+                        trueAutocommit: this.parseAutoCommitSelection(message.trueAutocommit),
                         extendedMetadata: typeof message.extendedMetadata === 'boolean' ? message.extendedMetadata : true,
                         runStartupScript: typeof message.runStartupScript === 'boolean' ? message.runStartupScript : true,
                         runAfterSqlJobInitText: normalizedRunAfterSqlJobInitText,
@@ -2865,15 +2868,15 @@ FETCH FIRST 1 ROW ONLY`;
             return undefined;
         }
 
-        const tokens = raw.split(/[\s,]+/).filter(Boolean);
-        if (tokens.length === 0) {
+        const tokens = splitLibraryListTokens(raw);
+        if (!tokens || tokens.length === 0) {
             return undefined;
         }
 
         const normalized: string[] = [];
         const seen = new Set<string>();
         for (const token of tokens) {
-            const item = this.normalizeRegularLibraryNameForSave(token);
+            const item = this.normalizeLibraryListTokenForSave(token);
             if (!item) {
                 return undefined;
             }
@@ -2884,6 +2887,22 @@ FETCH FIRST 1 ROW ONLY`;
         }
 
         return normalized.length > 0 ? normalized : undefined;
+    }
+
+    private normalizeLibraryListTokenForSave(value: string | undefined): string | undefined {
+        const trimmed = (value ?? '').trim();
+        if (!trimmed) {
+            return undefined;
+        }
+
+        if (trimmed.startsWith('"') || trimmed.endsWith('"')) {
+            if (trimmed.length >= 2 && trimmed.startsWith('"') && trimmed.endsWith('"')) {
+                return trimmed;
+            }
+            return undefined;
+        }
+
+        return this.normalizeRegularLibraryNameForSave(trimmed);
     }
 
     private normalizeRegularLibraryNameForSave(value: string | undefined): string | undefined {
@@ -3036,6 +3055,7 @@ FETCH FIRST 1 ROW ONLY`;
         const namingLabel = vscode.l10n.t('Naming');
         const commitLabel = vscode.l10n.t('COMMIT');
         const autoCommitLabel = vscode.l10n.t('Auto Commit');
+        const trueAutocommitLabel = vscode.l10n.t('True Autocommit');
         const extendedMetadataLabel = vscode.l10n.t('Extended Metadata');
         const extendedMetadataHelpText = vscode.l10n.t('Enables better SQL column information.');
         const currentLibraryLabel = vscode.l10n.t('Value for &CURLIB (current Library):');
@@ -3068,6 +3088,11 @@ FETCH FIRST 1 ROW ONLY`;
         const autoColumnViewChecked = autoColumnViewForSingleRow ? 'checked' : '';
         const extendedMetadataChecked = sessionOptions.extendedMetadata !== false ? 'checked' : '';
         const runStartupScriptChecked = sessionOptions.runStartupScript !== false ? 'checked' : '';
+        const trueAutocommitValue = typeof sessionOptions.trueAutocommit === 'boolean'
+            ? sessionOptions.trueAutocommit
+            : sessionOptions.autoCommit === true && (sessionOptions.commit === '*CHG' || sessionOptions.commit === '*CS' || sessionOptions.commit === '*RR');
+        const trueAutocommitDisabled = sessionOptions.autoCommit !== true || !(sessionOptions.commit === '*CHG' || sessionOptions.commit === '*CS' || sessionOptions.commit === '*RR') ? 'disabled' : '';
+        const trueAutocommitChecked = trueAutocommitValue ? 'selected' : '';
         const settingsStatusEscaped = this.escapeHtmlAttribute(settingsStatusMessage);
 
         return `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><style>
@@ -3118,7 +3143,8 @@ FETCH FIRST 1 ROW ONLY`;
                                     <legend>${mapepireSqlJobSettingsTitle}</legend>
                                     <div class="field"><label for="session-naming">${namingLabel}</label><select id="session-naming" ${sessionControlsDisabled}><option value="sql" ${sessionOptions.naming === 'sql' ? 'selected' : ''}>*SQL</option><option value="system" ${sessionOptions.naming === 'system' ? 'selected' : ''}>*SYS</option></select></div>
                                     <div class="field"><label for="session-commit">${commitLabel}</label><select id="session-commit" ${sessionControlsDisabled}><option value="">${noOverrideLabel}</option><option value="*AUTO" ${sessionOptions.commit === '*AUTO' ? 'selected' : ''}>*AUTO</option><option value="*NONE" ${sessionOptions.commit === '*NONE' ? 'selected' : ''}>*NONE</option><option value="*CHG" ${sessionOptions.commit === '*CHG' ? 'selected' : ''}>*CHG</option><option value="*CS" ${sessionOptions.commit === '*CS' ? 'selected' : ''}>*CS</option><option value="*RR" ${sessionOptions.commit === '*RR' ? 'selected' : ''}>*RR</option></select></div>
-                                    <div class="field"><label for="session-auto-commit">${autoCommitLabel}</label><select id="session-auto-commit" ${sessionControlsDisabled}><option value="">${noOverrideLabel}</option><option value="*AUTO" ${sessionOptions.autoCommit === true ? 'selected' : ''}>*AUTO</option><option value="*NO" ${sessionOptions.autoCommit === false ? 'selected' : ''}>*NO</option></select></div>
+                                    <div class="field"><label for="session-auto-commit">${autoCommitLabel}</label><select id="session-auto-commit" ${sessionControlsDisabled}><option value="">${noOverrideLabel}</option><option value="*YES" ${sessionOptions.autoCommit === true ? 'selected' : ''}>*YES</option><option value="*NO" ${sessionOptions.autoCommit === false ? 'selected' : ''}>*NO</option></select></div>
+                                    <div class="field"><label for="session-true-autocommit">${trueAutocommitLabel}</label><select id="session-true-autocommit" ${sessionControlsDisabled} ${trueAutocommitDisabled}><option value="">${noOverrideLabel}</option><option value="*YES" ${trueAutocommitChecked}>*YES</option><option value="*NO" ${!trueAutocommitValue ? 'selected' : ''}>*NO</option></select></div>
                                     <div class="field"><label for="session-datfmt">${datfmtLabel}</label><select id="session-datfmt" ${sessionControlsDisabled}><option value="">${noOverrideLabel}</option><option value="*ISO" ${sessionOptions.datfmt === '*ISO' ? 'selected' : ''}>*ISO</option><option value="*USA" ${sessionOptions.datfmt === '*USA' ? 'selected' : ''}>*USA</option><option value="*EUR" ${sessionOptions.datfmt === '*EUR' ? 'selected' : ''}>*EUR</option><option value="*JIS" ${sessionOptions.datfmt === '*JIS' ? 'selected' : ''}>*JIS</option><option value="*MDY" ${sessionOptions.datfmt === '*MDY' ? 'selected' : ''}>*MDY</option><option value="*DMY" ${sessionOptions.datfmt === '*DMY' ? 'selected' : ''}>*DMY</option><option value="*YMD" ${sessionOptions.datfmt === '*YMD' ? 'selected' : ''}>*YMD</option></select></div>
                                     <div class="field"><label for="session-timfmt">${timfmtLabel}</label><select id="session-timfmt" ${sessionControlsDisabled}><option value="">${noOverrideLabel}</option><option value="*HMS" ${sessionOptions.timfmt === '*HMS' ? 'selected' : ''}>*HMS</option><option value="*ISO" ${sessionOptions.timfmt === '*ISO' ? 'selected' : ''}>*ISO</option><option value="*USA" ${sessionOptions.timfmt === '*USA' ? 'selected' : ''}>*USA</option><option value="*EUR" ${sessionOptions.timfmt === '*EUR' ? 'selected' : ''}>*EUR</option><option value="*JIS" ${sessionOptions.timfmt === '*JIS' ? 'selected' : ''}>*JIS</option></select></div>
                                     <div class="row"><label><input id="session-extended-metadata" type="checkbox" ${extendedMetadataChecked} ${sessionControlsDisabled}> ${extendedMetadataLabel}</label></div>
@@ -3171,7 +3197,23 @@ FETCH FIRST 1 ROW ONLY`;
           const naming = document.getElementById('session-naming');
           const commit = document.getElementById('session-commit');
           const autoCommit = document.getElementById('session-auto-commit');
+          const trueAutocommit = document.getElementById('session-true-autocommit');
           const extendedMetadata = document.getElementById('session-extended-metadata');
+                            const syncTrueAutocommit = () => {
+                                if (!trueAutocommit) {
+                                    return;
+                                }
+                                const commitValue = commit ? commit.value : '';
+                                const autoCommitEnabled = autoCommit ? (autoCommit.value === '*YES' || autoCommit.value === '*AUTO') : false;
+                                const allowTrueAutocommit = autoCommitEnabled && (commitValue === '*CHG' || commitValue === '*CS' || commitValue === '*RR');
+                                trueAutocommit.disabled = !allowTrueAutocommit;
+                                if (!allowTrueAutocommit) {
+                                    trueAutocommit.value = '*NO';
+                                }
+                            };
+                            commit?.addEventListener('change', syncTrueAutocommit);
+                            autoCommit?.addEventListener('change', syncTrueAutocommit);
+                            syncTrueAutocommit();
           const runStartupScript = document.getElementById('session-run-startup-script');
           const currentLibrary = document.getElementById('session-current-library');
           const libraryList = document.getElementById('session-library-list');
@@ -3226,6 +3268,7 @@ FETCH FIRST 1 ROW ONLY`;
                         naming: naming ? naming.value : 'sql',
                         commit: commit ? commit.value : '',
                         autoCommit: autoCommit ? autoCommit.value : '',
+                        trueAutocommit: trueAutocommit ? trueAutocommit.value : '',
                         extendedMetadata: extendedMetadata ? !!extendedMetadata.checked : true,
                         runStartupScript: runStartupScript ? !!runStartupScript.checked : true,
                         currentLibrary: currentLibrary ? currentLibrary.value : '',
