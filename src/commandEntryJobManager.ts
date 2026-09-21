@@ -352,6 +352,14 @@ export class CommandEntryJobManager {
     private job: SqlJobLike | undefined;
     private connectionKey: string | undefined;
     private dedicatedJobId: string | undefined;
+    private cancelRequestJob: SqlJobLike | undefined;
+    private cancelRequestMonitor: {
+        startedAt: number;
+        timeoutMs: number;
+        timer?: ReturnType<typeof setTimeout>;
+        connection?: IBMi;
+        targetJobId?: string;
+    } | undefined;
     private readonly observedSharedJobIds = new Map<string, string | undefined>();
     private readonly startupReconnectCompleted = new Set<string>();
     private status: DedicatedJobState['status'] = 'ended';
@@ -675,6 +683,13 @@ export class CommandEntryJobManager {
             return false;
         }
         return this.connectionKey === this.buildConnectionKey(connection) && this.status !== 'ended';
+    }
+
+    hasPendingDedicatedRequest(connection?: IBMi): boolean {
+        if (!connection || !this.job || !this.connectionKey) {
+            return false;
+        }
+        return this.connectionKey === this.buildConnectionKey(connection) && this.status === 'busy';
     }
 
     getState(connection?: IBMi): DedicatedJobState {
@@ -1981,8 +1996,161 @@ export class CommandEntryJobManager {
         this.output?.appendLine(`[Cmd Entry] Dedicated cancel SQL request submitted for ${sqlJobId}.`);
     }
 
+    private getCancelRequestTimeoutSeconds(): number {
+        const config = vscode.workspace.getConfiguration('clPrompter');
+        const configured = config.get<number | undefined>('cmdEntryCancelRequestTimeoutSeconds');
+        if (typeof configured === 'number' && Number.isFinite(configured) && configured > 0) {
+            return Math.trunc(configured);
+        }
+        return 120;
+    }
+
+    private resolveSqlJobIdFromObject(job: SqlJobLike | undefined): string | undefined {
+        if (!job) {
+            return undefined;
+        }
+
+        const jobProperties = ['jobId', 'id', 'getId', 'getJobId'];
+        for (const prop of jobProperties) {
+            const value = (job as Record<string, unknown>)[prop];
+            if (typeof value === 'string') {
+                return normalizeSqlJobId(value);
+            }
+            if (typeof value === 'function') {
+                try {
+                    return normalizeSqlJobId(value.call(job) as string | undefined);
+                } catch {
+                    // ignore and continue to next property
+                }
+            }
+        }
+
+        return undefined;
+    }
+
+    private async ensureCancelRequestJob(connection: IBMi): Promise<SqlJobLike> {
+        if (this.cancelRequestJob) {
+            return this.cancelRequestJob;
+        }
+
+        const mapepire = await connection.getComponent('mapepire', { ignoreState: true }) as unknown as MapepireLike | undefined;
+        if (!mapepire) {
+            throw new Error('Code for IBM i Mapepire component is unavailable for Command Entry cancel-request job mode.');
+        }
+
+        const jdbc = this.buildJdbcOptionsForDedicatedJob(connection);
+        this.cancelRequestJob = await mapepire.newJob(connection, { jdbc });
+        const helperJobId = this.resolveSqlJobIdFromObject(this.cancelRequestJob);
+        this.output?.appendLine(helperJobId
+            ? `[Cmd Entry] Started private cancel-request SQL job ${helperJobId}.`
+            : '[Cmd Entry] Started private cancel-request SQL job (job ID not exposed by Mapepire object).');
+        return this.cancelRequestJob;
+    }
+
+    async submitCancelRequest(connection: IBMi, sqlJobId: string): Promise<void> {
+        if (!this.isDedicatedEnabled(connection)) {
+            return;
+        }
+
+        if (!this.hasPendingDedicatedRequest(connection)) {
+            this.output?.appendLine(`[Cmd Entry] Cancel request ignored for target job(${normalizeSqlJobId(sqlJobId) ?? '<unknown>'}): no active Command Entry request is currently pending.`);
+            return;
+        }
+
+        const normalizedJobId = normalizeSqlJobId(sqlJobId);
+        if (!normalizedJobId) {
+            return;
+        }
+
+        const helperJob = await this.ensureCancelRequestJob(connection);
+        const helperJobId = this.resolveSqlJobIdFromObject(helperJob);
+        const helperJobLabel = helperJobId ? `helper job(${helperJobId})` : 'helper job(ID unavailable from Mapepire object)';
+        const sql = `CALL QSYS2.CANCEL_SQL('${normalizedJobId.replace(/'/g, "''")}')`;
+
+        this.output?.appendLine(`[Cmd Entry] Cancel request: target job(${normalizedJobId}) from ${helperJobLabel}`);
+        await helperJob.execute(sql);
+        this.output?.appendLine(`[Cmd Entry] Cancel request submitted: target job(${normalizedJobId}) from ${helperJobLabel}.`);
+
+        if (this.cancelRequestMonitor?.timer) {
+            this.output?.appendLine(`[Cmd Entry] Cancel request verification timer stopped for target job(${normalizedJobId}): the request has already been accepted and the target job is no longer waiting on the prior command.`);
+            clearTimeout(this.cancelRequestMonitor.timer);
+        }
+
+        this.cancelRequestMonitor = undefined;
+        this.output?.appendLine(`[Cmd Entry] Cancel request verification timer stopped for target job(${normalizedJobId}): no pending timeout is needed after request acceptance.`);
+    }
+
+    private async promptForPendingCancelRequest(connection: IBMi, sqlJobId: string): Promise<void> {
+        if (!this.hasActiveDedicatedJob(connection) && this.status !== 'busy') {
+            this.output?.appendLine(`[Cmd Entry] Cancel request verification timer expired and stopped for target job(${sqlJobId}): Command Entry job is no longer active.`);
+            this.cancelRequestMonitor = undefined;
+            return;
+        }
+
+        this.output?.appendLine(`[Cmd Entry] Cancel request verification timer expired for target job(${sqlJobId}): job is still active; prompting user.`);
+
+        const choice = await vscode.window.showWarningMessage(
+            `Cancel request still pending for job ${sqlJobId}.`,
+            { modal: false },
+            'Continue',
+            'End cancel request'
+        );
+
+        if (choice === 'End cancel request') {
+            await this.endCancelRequestJob();
+            return;
+        }
+
+        if (this.cancelRequestMonitor && this.cancelRequestMonitor.connection) {
+            const timeoutMs = this.getCancelRequestTimeoutSeconds() * 1000;
+            const connection = this.cancelRequestMonitor.connection;
+            this.cancelRequestMonitor = {
+                startedAt: Date.now(),
+                timeoutMs,
+                timer: setTimeout(() => {
+                    void this.promptForPendingCancelRequest(connection, sqlJobId);
+                }, timeoutMs),
+                connection,
+                targetJobId: sqlJobId
+            };
+            this.output?.appendLine(`[Cmd Entry] Cancel request verification timer restarted for target job(${sqlJobId}); timeout=${timeoutMs} ms.`);
+        }
+    }
+
+    async endCancelRequestJob(): Promise<void> {
+        if (!this.cancelRequestJob) {
+            const cancelledTarget = this.cancelRequestMonitor?.targetJobId ?? '<unknown job>';
+            this.output?.appendLine(`[Cmd Entry] Cancel request verification timer stopped for target job(${cancelledTarget}): helper cancel-request job was already unavailable.`);
+            this.cancelRequestMonitor = undefined;
+            return;
+        }
+
+        const jobToClose = this.cancelRequestJob;
+        const cancelledTarget = this.cancelRequestMonitor?.targetJobId ?? '<unknown job>';
+        this.output?.appendLine(`[Cmd Entry] Cancel request verification timer stopped for target job(${cancelledTarget}): user chose to end monitor tracking and the helper cancel-request job was closed for cleanup.`);
+        this.cancelRequestJob = undefined;
+        this.cancelRequestMonitor = undefined;
+
+        try {
+            if (typeof jobToClose.close === 'function') {
+                await jobToClose.close();
+                return;
+            }
+            if (typeof jobToClose.end === 'function') {
+                await jobToClose.end();
+                return;
+            }
+            if (typeof jobToClose.dispose === 'function') {
+                await jobToClose.dispose();
+            }
+        } catch (error) {
+            this.output?.appendLine(`[Cmd Entry] Failed to end helper cancel-request job: ${error instanceof Error ? error.message : String(error)}`);
+        }
+    }
+
     async dispose(): Promise<void> {
         await this.endDedicatedJob();
+        await this.endCancelRequestJob();
     }
 
     private readRowString(row: Record<string, unknown>, key: string): string | undefined {

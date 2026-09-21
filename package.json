@@ -2,7 +2,7 @@
   "name": "clprompter",
   "displayName": "%displayName%",
   "description": "%description%",
-  "version": "1.0.43",
+  "version": "1.0.44",
   "author": {
     "name": "Bob Cozzi",
     "url": "https://github.com/bobcozzi"
@@ -288,6 +288,13 @@
           "type": "boolean",
           "default": true,
           "description": "%contributes.configuration.properties.clPrompter.cmdEntrySQLLimitFetch.description%"
+        },
+        "clPrompter.cmdEntryCancelRequestTimeoutSeconds": {
+          "order": 102.5,
+          "type": "integer",
+          "default": 120,
+          "minimum": 1,
+          "description": "%contributes.configuration.properties.clPrompter.cmdEntryCancelRequestTimeoutSeconds.description%"
         },
         "clPrompter.cmdEntrySqlFetchRowLimit": {
           "order": 104,

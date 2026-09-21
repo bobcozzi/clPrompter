@@ -2,6 +2,19 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.0.44] - 2026-09-21
+
+### What's New
+- Command Entry now includes a `Cancel Request` menu option for long-running commands or SQL statements. This submits a call to the `CANCEL_SQL` stored procedure using the job ID of the active private SQL job. In most cases, the request is canceled as expected. If control is not returned within 120 seconds, a prompt asks whether to continue waiting or to end the cancel request.
+- Status messages now appear in different colors based on their purpose and intent. Most remain unchanged from previous behavior.
+- Some log entries and message text were updated or clarified.
+
+Note: The new `Cancel Request` feature is available only when:
+- Mapepire is running in Server Mode
+- Private SQL Job is enabled for the Command Entry panel
+
+Users who continue to use Mapeire in so called "single-user" mode, or choose to have Command Entry use the original shared `Code for IBM i` job, do not have access to this new `cancel request` feature.
+
 ## [1.0.43] - 2026-09-20
 
 ### What's Fixed

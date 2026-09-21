@@ -8,16 +8,17 @@
   const minTextareaRows = 2;
   const defaultCommandRows = 3;
   const command = document.getElementById('command'), mode = document.getElementById('mode'), severityFilter = document.getElementById('message-severity-filter');
-  const run = document.getElementById('run'), prompt = document.getElementById('prompt'), cmdEntryHelp = document.getElementById('cmdentry-help'), cmdEntrySettings = document.getElementById('cmdentry-settings'), toolbarMenu = document.getElementById('toolbar-menu'), toolbarMenuList = document.getElementById('toolbar-menu-list'), menuViewLog = document.getElementById('menu-view-log'), menuClearLog = document.getElementById('menu-clear-log'), menuClearSqlLog = document.getElementById('menu-clear-sql-log'), menuClearSqlHistory = document.getElementById('menu-clear-sql-history'), menuToggleSqlLog = document.getElementById('menu-toggle-sql-log'), menuToggleMessageDetails = document.getElementById('menu-toggle-message-details'), menuConnectionSettings = document.getElementById('menu-connection-settings'), menuUseSharedSqlJob = document.getElementById('menu-use-shared-sql-job'), menuUsePrivateSqlJob = document.getElementById('menu-use-private-sql-job'), menuStartNewJob = document.getElementById('menu-start-new-job'), menuCancelSqlJob = document.getElementById('menu-cancel-sql-job'), menuClearHistory = document.getElementById('menu-clear-history'), menuRunMode = document.getElementById('menu-run-mode'), menuRunModeList = document.getElementById('menu-run-mode-list'), menuRunModeWrap = menuRunMode ? menuRunMode.closest('.toolbar-submenu-wrap') : null, menuRunModeRun = document.getElementById('menu-run-mode-run'), menuRunModeLimit = document.getElementById('menu-run-mode-limit'), menuRunModeCheck = document.getElementById('menu-run-mode-check'), historyPrev = document.getElementById('history-prev'), historyNext = document.getElementById('history-next'), statusJobMenu = document.getElementById('status-job-menu'), statusJobMenuCopy = document.getElementById('status-job-menu-copy'), statusJobMenuDisplayJoblog = document.getElementById('status-job-menu-display-joblog'), statusJobMenuConnectionSettings = document.getElementById('status-job-menu-connection-settings'), statusJobMenuReconnectServerJob = document.getElementById('status-job-menu-reconnect-server-job');
+  const run = document.getElementById('run'), prompt = document.getElementById('prompt'), cmdEntryHelp = document.getElementById('cmdentry-help'), cmdEntrySettings = document.getElementById('cmdentry-settings'), toolbarMenu = document.getElementById('toolbar-menu'), toolbarMenuList = document.getElementById('toolbar-menu-list'), menuViewLog = document.getElementById('menu-view-log'), menuClearLog = document.getElementById('menu-clear-log'), menuClearSqlLog = document.getElementById('menu-clear-sql-log'), menuClearSqlHistory = document.getElementById('menu-clear-sql-history'), menuToggleSqlLog = document.getElementById('menu-toggle-sql-log'), menuToggleMessageDetails = document.getElementById('menu-toggle-message-details'), menuConnectionSettings = document.getElementById('menu-connection-settings'), menuUseSharedSqlJob = document.getElementById('menu-use-shared-sql-job'), menuUsePrivateSqlJob = document.getElementById('menu-use-private-sql-job'), menuStartNewJob = document.getElementById('menu-start-new-job'), menuClearHistory = document.getElementById('menu-clear-history'), menuRunMode = document.getElementById('menu-run-mode'), menuRunModeList = document.getElementById('menu-run-mode-list'), menuRunModeWrap = menuRunMode ? menuRunMode.closest('.toolbar-submenu-wrap') : null, menuRunModeRun = document.getElementById('menu-run-mode-run'), menuRunModeLimit = document.getElementById('menu-run-mode-limit'), menuRunModeCheck = document.getElementById('menu-run-mode-check'), historyPrev = document.getElementById('history-prev'), historyNext = document.getElementById('history-next'), statusJobMenu = document.getElementById('status-job-menu'), statusJobMenuCopy = document.getElementById('status-job-menu-copy'), statusJobMenuDisplayJoblog = document.getElementById('status-job-menu-display-joblog'), statusJobMenuConnectionSettings = document.getElementById('status-job-menu-connection-settings'), statusJobMenuReconnectServerJob = document.getElementById('status-job-menu-reconnect-server-job');
   const statusText = document.getElementById('status-text'), statusIdentity = document.getElementById('status-identity'), statusJobId = document.getElementById('status-jobid'), results = document.getElementById('results');
   let historyIndex = -1, runningStartedAt, runningTimerId, runningStatusPrefix = l10n.runningStatusPrefix || 'Running…', historyDraft = '', sqlJobPollingId;
+  let transientStatusUntil = 0;
+  let transientStatusClearTimer;
   let statusJobSingleClickTimer;
   let historyHoverTooltipEl;
   let dedicatedJobEnabled = false;
   let remoteMapepireEnabled = false;
   let useSharedSqlJob = true;
   let canStartNewJob = false;
-  let canCancelSqlJob = false;
   let messageDetailsMode = 'SHOW';
   let logSqlStatementsToCommandLog = false;
   let baseMinHeightPx = 0, autoResizing = false;
@@ -144,8 +145,60 @@
     return `${trimmed.slice(0, Math.max(0, maxChars - 1)).trimEnd()}…`;
   };
   const formatElapsed = ms => ms < 1000 ? `${ms} ms` : `${(ms / 1000).toFixed(1)} s`;
-  const setStatusMessage = (message = '') => {
-    statusText.textContent = message;
+  const normalizeNoticeSeverity = severity => {
+    const normalized = String(severity || '').trim().toLowerCase();
+    if (normalized === 'error' || normalized === 'warning' || normalized === 'info') {
+      return normalized;
+    }
+    return 'info';
+  };
+  const deriveNoticeSeverityFromMessage = message => {
+    const text = String(message ?? '');
+    if (!text) {
+      return 'info';
+    }
+    if (/(?:failed|error|unable)/i.test(text)) {
+      return 'error';
+    }
+    if (/(?:No pending request|Cancel request|ignored|warning)/i.test(text)) {
+      return 'warning';
+    }
+    return 'info';
+  };
+  const setStatusMessage = (message = '', severity = 'info') => {
+    const text = String(message ?? '');
+    const normalizedSeverity = normalizeNoticeSeverity(severity);
+    statusText.textContent = text;
+    statusText.classList.toggle('notice-warning', normalizedSeverity === 'warning' && text.length > 0);
+    statusText.classList.toggle('notice-error', normalizedSeverity === 'error' && text.length > 0);
+    statusText.classList.toggle('muted', !text);
+  };
+  const showTransientStatusMessage = (message = '', severity = 'info') => {
+    const text = String(message ?? '');
+    if (transientStatusClearTimer) {
+      clearTimeout(transientStatusClearTimer);
+      transientStatusClearTimer = undefined;
+    }
+    if (!text) {
+      transientStatusUntil = 0;
+      setStatusMessage('', 'info');
+      return;
+    }
+    const normalizedSeverity = normalizeNoticeSeverity(severity);
+    const holdMs = normalizedSeverity === 'error' ? 3600 : (normalizedSeverity === 'warning' ? 2800 : 2200);
+    transientStatusUntil = Date.now() + holdMs;
+    setStatusMessage(text, normalizedSeverity);
+    transientStatusClearTimer = setTimeout(() => {
+      transientStatusClearTimer = undefined;
+      if (runningStartedAt) {
+        setStatusMessage(`${runningStatusPrefix} ${formatElapsed(Date.now() - runningStartedAt)}`, 'info');
+        return;
+      }
+      if (Date.now() >= transientStatusUntil) {
+        transientStatusUntil = 0;
+        setStatusMessage('', 'info');
+      }
+    }, holdMs + 20);
   };
   const setStatusIdentity = (identity = '') => {
     const normalized = String(identity || '').trim();
@@ -651,18 +704,9 @@
     });
   };
   const updateMenuCapabilities = () => {
-    const cancelDisabled = !canCancelSqlJob;
     const dedicatedRequiredReason =
       'Available only when Command Entry is using Private SQL Job and Code for IBM i Mapepire Server Mode is enabled';
     const serverModeReason = 'Available only when Code for IBM i Mapepire Server Mode is enabled';
-    if (menuCancelSqlJob) {
-      menuCancelSqlJob.disabled = cancelDisabled;
-      const reason = cancelDisabled
-        ? dedicatedRequiredReason
-        : 'Cancel the last SQL request on the private SQL job';
-      menuCancelSqlJob.title = reason;
-      menuCancelSqlJob.setAttribute('aria-disabled', String(cancelDisabled));
-    }
     if (menuStartNewJob) {
       menuStartNewJob.disabled = !canStartNewJob;
       const reason = canStartNewJob
@@ -1001,7 +1045,7 @@
     }
     if (value) {
       runningStatusPrefix = String(statusMessage || '').trim() || 'Running…';
-      setStatusMessage(runningStatusPrefix);
+      setStatusMessage(runningStatusPrefix, 'info');
       runningTimerId = setInterval(() => {
         if (!runningStartedAt) {
           if (runningTimerId) {
@@ -1010,13 +1054,20 @@
           }
           return;
         }
-        setStatusMessage(`${runningStatusPrefix} ${formatElapsed(Date.now() - runningStartedAt)}`);
+        if (Date.now() < transientStatusUntil) {
+          return;
+        }
+        setStatusMessage(`${runningStatusPrefix} ${formatElapsed(Date.now() - runningStartedAt)}`, 'info');
       }, 250);
     }
     else {
       runningStartedAt = undefined;
       runningStatusPrefix = 'Running…';
-      setStatusMessage('');
+      if (Date.now() < transientStatusUntil) {
+        return;
+      }
+      transientStatusUntil = 0;
+      setStatusMessage('', 'info');
     }
   }
   function requestRun() {
@@ -1202,14 +1253,6 @@
     }
     closeToolbarMenu();
     vscode.postMessage({ type: 'startNewJob' });
-    command.focus();
-  });
-  menuCancelSqlJob?.addEventListener('click', () => {
-    if (menuCancelSqlJob.disabled) {
-      return;
-    }
-    closeToolbarMenu();
-    vscode.postMessage({ type: 'requestCancelSqlJob' });
     command.focus();
   });
   menuClearHistory?.addEventListener('click', () => {
@@ -1490,9 +1533,6 @@
         canStartNewJob = typeof message.canStartNewJob === 'boolean'
           ? !!message.canStartNewJob
           : (dedicatedJobEnabled && remoteMapepireEnabled);
-        canCancelSqlJob = typeof message.canCancelSqlJob === 'boolean'
-          ? !!message.canCancelSqlJob
-          : (dedicatedJobEnabled && remoteMapepireEnabled);
         updateMenuCapabilities();
         updateRunModeMenuLabels();
         updateSqlLoggingMenuLabel();
@@ -1530,7 +1570,6 @@
         remoteMapepireEnabled = !!message.remoteMapepireEnabled;
         useSharedSqlJob = typeof message.useSharedSqlJob === 'boolean' ? !!message.useSharedSqlJob : useSharedSqlJob;
         canStartNewJob = !!message.canStartNewJob;
-        canCancelSqlJob = !!message.canCancelSqlJob;
         updateMenuCapabilities();
         // Re-render the status text marker when mode changes (shared mode shows trailing *).
         setStatusJobId(getStatusJobIdRaw());
@@ -1636,7 +1675,23 @@
         requestPrompt();
         break;
       case 'notice':
-        setStatusMessage(message.message);
+        {
+          const explicitSeverity = typeof message.severity === 'string'
+            ? normalizeNoticeSeverity(message.severity)
+            : undefined;
+          const severity = explicitSeverity || deriveNoticeSeverityFromMessage(message.message);
+          if (runningStartedAt && String(message.message ?? '').trim().length > 0) {
+            showTransientStatusMessage(message.message, severity);
+          }
+          else {
+            if (transientStatusClearTimer) {
+              clearTimeout(transientStatusClearTimer);
+              transientStatusClearTimer = undefined;
+            }
+            transientStatusUntil = 0;
+            setStatusMessage(message.message, severity);
+          }
+        }
         break;
     }
   });
@@ -1647,6 +1702,10 @@
     if (runningTimerId) {
       clearInterval(runningTimerId);
       runningTimerId = undefined;
+    }
+    if (transientStatusClearTimer) {
+      clearTimeout(transientStatusClearTimer);
+      transientStatusClearTimer = undefined;
     }
     stopSqlJobPolling();
   });

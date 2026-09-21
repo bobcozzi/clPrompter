@@ -55,6 +55,13 @@ type CommandEntryRequest =
     | { type: 'clear' };
 
 type MessageDetailsMode = 'SHOW' | 'HIDE';
+type CmdEntryNoticeSeverity = 'info' | 'warning' | 'error';
+
+interface CmdEntryNoticePayload {
+    type: 'notice';
+    message?: string;
+    severity?: CmdEntryNoticeSeverity;
+}
 
 export interface CodeSnippetRecord {
     id: string;
@@ -256,6 +263,7 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
     private clearInputOnFirstReady = true;
     private clearHistoryOnFirstReady = true;
     private lastPostedSqlJobId: string | undefined;
+    private pendingCmdEntryCancelConfirmationJobId: string | undefined;
     private readonly autoInitInFlightConnectionKeys = new Set<string>();
     private readonly autoInitLastFailureByConnectionKey = new Map<string, number>();
     private remainingSqlNotLoggedFeedbackCount = SQL_NOT_LOGGED_FEEDBACK_MAX_PER_SESSION;
@@ -1310,6 +1318,14 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
             const latestSqlJobId = this.currentSqlJobId(connection);
             this.lastPostedSqlJobId = latestSqlJobId;
             this.post({ type: 'running', running: false, sqlJobId: latestSqlJobId, statusIdentity: this.currentStatusIdentity(connection) });
+            if (this.pendingCmdEntryCancelConfirmationJobId) {
+                if (!this.jobManager.hasPendingDedicatedRequest(connection)) {
+                    this.post({ type: 'notice', message: vscode.l10n.t('> Cancel request completed.'), severity: 'warning' });
+                    this.pendingCmdEntryCancelConfirmationJobId = undefined;
+                } else {
+                    this.safeOutputAppendLine(`[Cmd Entry] Cancel follow-up pending for job ${this.pendingCmdEntryCancelConfirmationJobId}: request still reported busy.`);
+                }
+            }
             if (completionNotice) {
                 this.post({ type: 'notice', message: completionNotice });
             }
@@ -1368,14 +1384,22 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
             return;
         }
 
+        if (!this.jobManager.hasPendingDedicatedRequest(connection)) {
+            this.safeOutputAppendLine(`[Cmd Entry] Cancel request ignored for job ${sqlJobId}: no pending Command Entry request is active.`);
+            this.post({ type: 'notice', message: vscode.l10n.t('No pending request. Cancel request ignored.'), severity: 'warning' });
+            this.postJobCapabilities();
+            return;
+        }
+
         try {
-            await this.jobManager.cancelActive(connection);
-            this.safeOutputAppendLine(`[Cmd Entry] Manual cancel requested for private SQL job ${sqlJobId}.`);
-            this.post({ type: 'notice', message: vscode.l10n.t('Cancel SQL requested for job {jobId}. IBM i may ignore this when no interruptible SQL is active.', { jobId: sqlJobId }) });
+            await this.jobManager.submitCancelRequest(connection, sqlJobId);
+            this.post({ type: 'notice', message: vscode.l10n.t('Cancel request submitted.'), severity: 'warning' });
+            this.pendingCmdEntryCancelConfirmationJobId = sqlJobId;
         } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
             this.safeOutputAppendLine(`[Cmd Entry] Manual cancel request failed: ${message}`);
-            this.post({ type: 'notice', message: vscode.l10n.t('Cancel SQL request failed: {message}', { message }) });
+            this.post({ type: 'notice', message: vscode.l10n.t('Cancel SQL request failed: {message}', { message }), severity: 'error' });
+            this.pendingCmdEntryCancelConfirmationJobId = undefined;
         } finally {
             this.postJobCapabilities();
         }
@@ -2507,7 +2531,7 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
 
                 if (this.isUsingSharedSqlJob(nextConnection)) {
                     const statusNotice = vscode.l10n.t('Settings saved. Shared SQL job settings remain fixed by the active IBM i job.');
-                    this.postNoticeText(statusNotice, true);
+                    this.postCmdEntryNoticeText(statusNotice, true);
                     if (closeAfterSave) {
                         this.cmdEntrySettingsPanel?.dispose();
                     } else if (this.cmdEntrySettingsPanel) {
@@ -2517,28 +2541,28 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
                 }
 
                 if (this.hasDisallowedSessionPrefix(message.initialSchema, 'schema')) {
-                    this.postNoticeText(vscode.l10n.t('Initial SCHEMA does not accept SET PATH input.'), true);
+                    this.postCmdEntryNoticeText(vscode.l10n.t('Initial SCHEMA does not accept SET PATH input.'), true);
                     return;
                 }
                 if (this.hasDisallowedSessionPrefix(message.initialPath, 'path')) {
-                    this.postNoticeText(vscode.l10n.t('Initial PATH does not accept SET SCHEMA input.'), true);
+                    this.postCmdEntryNoticeText(vscode.l10n.t('Initial PATH does not accept SET SCHEMA input.'), true);
                     return;
                 }
 
                 const normalizedSchema = this.normalizeInitialSchemaForSave(message.initialSchema);
                 if ((message.initialSchema ?? '').trim().length > 0 && !normalizedSchema) {
-                    this.postNoticeText(vscode.l10n.t('Initial SCHEMA must be 128 characters or fewer, or *LIBL.'), true);
+                    this.postCmdEntryNoticeText(vscode.l10n.t('Initial SCHEMA must be 128 characters or fewer, or *LIBL.'), true);
                     return;
                 }
                 const normalizedPath = this.normalizeInitialPathForSave(message.initialPath);
                 const normalizedCurrentLibrary = this.normalizeCurrentLibraryForSave(message.currentLibrary);
                 if ((message.currentLibrary ?? '').trim().length > 0 && !normalizedCurrentLibrary) {
-                    this.postNoticeText(vscode.l10n.t('Current Library must be a valid IBM i library name (10 chars max) or *NONE or *CRTDFT.'), true);
+                    this.postCmdEntryNoticeText(vscode.l10n.t('Current Library must be a valid IBM i library name (10 chars max) or *NONE or *CRTDFT.'), true);
                     return;
                 }
                 const normalizedLibraryList = this.normalizeLibraryListForSave(message.libraryList);
                 if ((message.libraryList ?? '').trim().length > 0 && !normalizedLibraryList) {
-                    this.postNoticeText(vscode.l10n.t('Library List must be a comma/space separated list of valid IBM i library names (max 10 chars each).'), true);
+                    this.postCmdEntryNoticeText(vscode.l10n.t('Library List must be a comma/space separated list of valid IBM i library names (max 10 chars each).'), true);
                     return;
                 }
                 const normalizedRunAfterSqlJobInit = this.normalizeRunAfterSqlJobInitForSave(message.runAfterSqlJobInit);
@@ -2582,7 +2606,7 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
                     }
                 });
                 const settingsSavedNotice = vscode.l10n.t('Settings saved.');
-                this.postNoticeText(settingsSavedNotice, true);
+                this.postCmdEntryNoticeText(settingsSavedNotice, true);
 
                 if (closeAfterSave) {
                     this.cmdEntrySettingsPanel?.dispose();
@@ -2594,27 +2618,27 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
             if (message.type === 'setSessionContextNow') {
                 const nextConnection = this.getConnection();
                 if (!nextConnection || !nextConnection.sqlRunnerAvailable()) {
-                    this.postNoticeText(vscode.l10n.t('Not connected to IBM i, or the SQL runner is unavailable.'), true);
+                    this.postCmdEntryNoticeText(vscode.l10n.t('Not connected to IBM i, or the SQL runner is unavailable.'), true);
                     return;
                 }
 
                 if (this.isUsingSharedSqlJob(nextConnection)) {
-                    this.postNoticeText(vscode.l10n.t('Shared SQL job settings are fixed by the active IBM i job and cannot be changed here.'), true);
+                    this.postCmdEntryNoticeText(vscode.l10n.t('Shared SQL job settings are fixed by the active IBM i job and cannot be changed here.'), true);
                     return;
                 }
 
                 if (this.hasDisallowedSessionPrefix(message.initialSchema, 'schema')) {
-                    this.postNoticeText(vscode.l10n.t('Initial SCHEMA does not accept SET PATH input.'), true);
+                    this.postCmdEntryNoticeText(vscode.l10n.t('Initial SCHEMA does not accept SET PATH input.'), true);
                     return;
                 }
                 if (this.hasDisallowedSessionPrefix(message.initialPath, 'path')) {
-                    this.postNoticeText(vscode.l10n.t('Initial PATH does not accept SET SCHEMA input.'), true);
+                    this.postCmdEntryNoticeText(vscode.l10n.t('Initial PATH does not accept SET SCHEMA input.'), true);
                     return;
                 }
 
                 const normalizedSchema = this.normalizeInitialSchemaForSave(message.initialSchema);
                 if ((message.initialSchema ?? '').trim().length > 0 && !normalizedSchema) {
-                    this.postNoticeText(vscode.l10n.t('Initial SCHEMA must be 128 characters or fewer, or *LIBL.'), true);
+                    this.postCmdEntryNoticeText(vscode.l10n.t('Initial SCHEMA must be 128 characters or fewer, or *LIBL.'), true);
                     return;
                 }
                 const normalizedPath = this.normalizeInitialPathForSave(message.initialPath);
@@ -2643,7 +2667,7 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
 
                 const statements = buildImmediateSessionContextSql(sessionOptions);
                 if (statements.length === 0) {
-                    this.postNoticeText(vscode.l10n.t('No Initial SCHEMA/PATH override to apply.'), true);
+                    this.postCmdEntryNoticeText(vscode.l10n.t('No Initial SCHEMA/PATH override to apply.'), true);
                     return;
                 }
 
@@ -2653,11 +2677,11 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
                         await this.jobManager.runSQL(nextConnection, statement, { skipSyntaxCheck: true });
                     }
                     sessionContextNotice = vscode.l10n.t('Session settings applied to the active SQL job.');
-                    this.postNoticeText(sessionContextNotice, true);
+                    this.postCmdEntryNoticeText(sessionContextNotice, true);
                 } catch (error) {
                     const failure = error instanceof Error ? error.message : String(error);
                     sessionContextNotice = vscode.l10n.t('Set Now failed: {failure}', { failure });
-                    this.postNoticeText(sessionContextNotice, true);
+                    this.postCmdEntryNoticeText(sessionContextNotice, true);
                 }
 
                 if (this.cmdEntrySettingsPanel) {
@@ -2668,11 +2692,11 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
             if (message.type === 'getCurrentUserLibrarySettings') {
                 const connection = this.getConnection();
                 if (!connection || !connection.sqlRunnerAvailable()) {
-                    this.postNoticeText(vscode.l10n.t('Not connected to IBM i, or the SQL runner is unavailable.'), true);
+                    this.postCmdEntryNoticeText(vscode.l10n.t('Not connected to IBM i, or the SQL runner is unavailable.'), true);
                     return;
                 }
                 if (this.isUsingSharedSqlJob(connection)) {
-                    this.postNoticeText(vscode.l10n.t('Shared SQL job settings are fixed by the active IBM i job and cannot be changed here.'), true);
+                    this.postCmdEntryNoticeText(vscode.l10n.t('Shared SQL job settings are fixed by the active IBM i job and cannot be changed here.'), true);
                     return;
                 }
 
@@ -2727,26 +2751,26 @@ FETCH FIRST 1 ROW ONLY`;
                     }
 
                     if (!payload.currentLibrary && !payload.libraryList) {
-                        this.postNoticeText(vscode.l10n.t('No usable current-user library settings were returned for this profile.'), true);
+                        this.postCmdEntryNoticeText(vscode.l10n.t('No usable current-user library settings were returned for this profile.'), true);
                         return;
                     }
 
                     this.cmdEntrySettingsPanel?.webview.postMessage(payload);
                 } catch (error) {
                     const failure = error instanceof Error ? error.message : String(error);
-                    this.postNoticeText(vscode.l10n.t('Could not read current-user library settings: {failure}', { failure }), true);
+                    this.postCmdEntryNoticeText(vscode.l10n.t('Could not read current-user library settings: {failure}', { failure }), true);
                 }
             }
             if (message.type === 'viewStartupScriptLog') {
                 const connection = this.getConnection();
                 if (!connection) {
-                    this.postNoticeText(vscode.l10n.t('No IBM i connection is available for the startup script log.'), true);
+                    this.postCmdEntryNoticeText(vscode.l10n.t('No IBM i connection is available for the startup script log.'), true);
                     return;
                 }
 
                 const workspaceLogUri = this.jobManager.getStartupScriptLogUri(connection);
                 if (!workspaceLogUri) {
-                    this.postNoticeText(vscode.l10n.t('The startup script log is unavailable in this environment.'), true);
+                    this.postCmdEntryNoticeText(vscode.l10n.t('The startup script log is unavailable in this environment.'), true);
                     return;
                 }
 
@@ -2754,7 +2778,7 @@ FETCH FIRST 1 ROW ONLY`;
                     await vscode.workspace.fs.stat(workspaceLogUri);
                     await this.openStartupScriptLogPanel(workspaceLogUri, connection.currentConnectionName ?? 'connection');
                 } catch {
-                    this.postNoticeText(vscode.l10n.t('No startup script log has been generated yet for this connection.'), true);
+                    this.postCmdEntryNoticeText(vscode.l10n.t('No startup script log has been generated yet for this connection.'), true);
                 }
             }
             if (message.type === 'closeCmdEntrySettings') {
@@ -2779,33 +2803,33 @@ FETCH FIRST 1 ROW ONLY`;
                 }
 
                 if (this.isUsingSharedSqlJob(reconnectConnection)) {
-                    this.postNoticeText(vscode.l10n.t('Shared SQL job settings are fixed by the active IBM i job and cannot be changed here.'), true);
+                    this.postCmdEntryNoticeText(vscode.l10n.t('Shared SQL job settings are fixed by the active IBM i job and cannot be changed here.'), true);
                     return;
                 }
 
                 if (this.hasDisallowedSessionPrefix(message.initialSchema, 'schema')) {
-                    this.postNoticeText(vscode.l10n.t('Initial SCHEMA does not accept SET PATH input.'), true);
+                    this.postCmdEntryNoticeText(vscode.l10n.t('Initial SCHEMA does not accept SET PATH input.'), true);
                     return;
                 }
                 if (this.hasDisallowedSessionPrefix(message.initialPath, 'path')) {
-                    this.postNoticeText(vscode.l10n.t('Initial PATH does not accept SET SCHEMA input.'), true);
+                    this.postCmdEntryNoticeText(vscode.l10n.t('Initial PATH does not accept SET SCHEMA input.'), true);
                     return;
                 }
 
                 const normalizedSchema = this.normalizeInitialSchemaForSave(message.initialSchema);
                 if ((message.initialSchema ?? '').trim().length > 0 && !normalizedSchema) {
-                    this.postNoticeText(vscode.l10n.t('Initial SCHEMA must be 128 characters or fewer, or *LIBL.'), true);
+                    this.postCmdEntryNoticeText(vscode.l10n.t('Initial SCHEMA must be 128 characters or fewer, or *LIBL.'), true);
                     return;
                 }
                 const normalizedPath = this.normalizeInitialPathForSave(message.initialPath);
                 const normalizedCurrentLibrary = this.normalizeCurrentLibraryForSave(message.currentLibrary);
                 if ((message.currentLibrary ?? '').trim().length > 0 && !normalizedCurrentLibrary) {
-                    this.postNoticeText(vscode.l10n.t('Current Library must be a valid IBM i library name (10 chars max) or *NONE or *CRTDFT.'), true);
+                    this.postCmdEntryNoticeText(vscode.l10n.t('Current Library must be a valid IBM i library name (10 chars max) or *NONE or *CRTDFT.'), true);
                     return;
                 }
                 const normalizedLibraryList = this.normalizeLibraryListForSave(message.libraryList);
                 if ((message.libraryList ?? '').trim().length > 0 && !normalizedLibraryList) {
-                    this.postNoticeText(vscode.l10n.t('Library List must be a comma/space separated list of valid IBM i library names (max 10 chars each).'), true);
+                    this.postCmdEntryNoticeText(vscode.l10n.t('Library List must be a comma/space separated list of valid IBM i library names (max 10 chars each).'), true);
                     return;
                 }
                 const normalizedRunAfterSqlJobInit = this.normalizeRunAfterSqlJobInitForSave(message.runAfterSqlJobInit);
@@ -3512,13 +3536,70 @@ FETCH FIRST 1 ROW ONLY`;
         }
     }
 
-    private post(message: unknown): void { void this.view?.webview.postMessage(message); }
-
-    private postNoticeText(message: string, mirrorToSettingsStatus = false): void {
-        this.post({ type: 'notice', message });
-        if (mirrorToSettingsStatus) {
-            void this.cmdEntrySettingsPanel?.webview.postMessage({ type: 'settingsStatus', message });
+    private isCmdEntryNoticePayload(message: unknown): message is CmdEntryNoticePayload {
+        if (!message || typeof message !== 'object') {
+            return false;
         }
+
+        return (message as { type?: unknown }).type === 'notice';
+    }
+
+    private normalizeCmdEntryNoticeSeverity(
+        severity: unknown,
+        messageText = ''
+    ): CmdEntryNoticeSeverity {
+        const normalized = String(severity ?? '').trim().toLowerCase();
+        if (normalized === 'info' || normalized === 'warning' || normalized === 'error') {
+            return normalized;
+        }
+
+        if (/(?:failed|error|unable)/i.test(messageText)) {
+            return 'error';
+        }
+
+        if (/(?:no pending request|cancel request|ignored|warning)/i.test(messageText)) {
+            return 'warning';
+        }
+
+        return 'info';
+    }
+
+    private post(message: unknown): void {
+        if (!this.view) {
+            return;
+        }
+
+        if (!this.isCmdEntryNoticePayload(message)) {
+            void this.view.webview.postMessage(message);
+            return;
+        }
+
+        const normalizedText = typeof message.message === 'string' ? message.message : '';
+        const severity = this.normalizeCmdEntryNoticeSeverity(message.severity, normalizedText);
+        void this.view.webview.postMessage({ type: 'notice', message: normalizedText, severity });
+    }
+
+    private postCmdEntryStatusNotice(
+        message: string,
+        options?: {
+            severity?: CmdEntryNoticeSeverity;
+            mirrorToSettingsStatus?: boolean;
+        }
+    ): void {
+        const normalizedText = String(message ?? '');
+        const severity = this.normalizeCmdEntryNoticeSeverity(options?.severity, normalizedText);
+        this.post({ type: 'notice', message: normalizedText, severity });
+        if (options?.mirrorToSettingsStatus) {
+            void this.cmdEntrySettingsPanel?.webview.postMessage({ type: 'settingsStatus', message: normalizedText });
+        }
+    }
+
+    private postCmdEntryNoticeText(
+        message: string,
+        mirrorToSettingsStatus = false,
+        severity: CmdEntryNoticeSeverity = 'info'
+    ): void {
+        this.postCmdEntryStatusNotice(message, { severity, mirrorToSettingsStatus });
     }
 
     private safeOutputAppendLine(message: string): void {

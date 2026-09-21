@@ -278,6 +278,29 @@ button[data-tooltip]:focus-visible::after {
 
 #status-text {
     min-width: 0;
+    color: var(--vscode-descriptionForeground);
+    transition: color 120ms ease-in-out, opacity 120ms ease-in-out;
+}
+
+#status-text.notice-warning,
+#status-text.notice-error {
+    font-weight: 600;
+}
+
+#status-text.notice-warning {
+    color: var(--vscode-editorWarning-foreground, #a15d00);
+}
+
+.vscode-light #status-text.notice-warning {
+    color: var(--vscode-editorWarning-foreground, #9a5d00);
+}
+
+#status-text.notice-error {
+    color: var(--vscode-errorForeground, #c72e0f);
+}
+
+.vscode-light #status-text.notice-error {
+    color: var(--vscode-errorForeground, #b42318);
 }
 
 #status-identity {
