@@ -2,6 +2,11 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.0.43] - 2026-09-20
+
+### What's Fixed
+- Restored the SQL Results Copy/Save toolbar icons by ensuring required codicon assets are included in packaged builds.
+
 ## [1.0.42] - 2026-09-20
 
 ### What's New

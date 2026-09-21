@@ -2,7 +2,7 @@
   "name": "clprompter",
   "displayName": "%displayName%",
   "description": "%description%",
-  "version": "1.0.42",
+  "version": "1.0.43",
   "author": {
     "name": "Bob Cozzi",
     "url": "https://github.com/bobcozzi"

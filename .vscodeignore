@@ -1,6 +1,7 @@
 node_modules/**
 !node_modules/@xmldom/xmldom/**
 !node_modules/@halcyontech/vscode-ibmi-types/**
+!node_modules/@vscode/codicons/dist/**
 
 .vscode/
 src/
@@ -43,6 +44,10 @@ node_modules/@halcyontech/vscode-ibmi-types/**/*.md
 node_modules/@halcyontech/vscode-ibmi-types/**/*.MD
 node_modules/@halcyontech/vscode-ibmi-types/**/*.markdown
 node_modules/@halcyontech/vscode-ibmi-types/**/*.MARKDOWN
+node_modules/@vscode/codicons/dist/**/*.md
+node_modules/@vscode/codicons/dist/**/*.MD
+node_modules/@vscode/codicons/dist/**/*.markdown
+node_modules/@vscode/codicons/dist/**/*.MARKDOWN
 API_TESTS.md
 COMMENT_PRESERVATION_FIXES.md
 FORMATTER_FIXES_FEB6.md
