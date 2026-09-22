@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import IBMi from '@halcyontech/vscode-ibmi-types/api/IBMi';
-import { CommandEntryJobManager, DedicatedJobState, EffectiveJobConfig, RunSQLWithDetailsResult } from './commandEntryJobManager';
+import { CommandEntryJobManager, DedicatedJobState, EffectiveJobConfig, RunSQLWithDetailsResult, SqlPoolJobListEntry, SqlPoolSnapshot } from './commandEntryJobManager';
 import { CommandEntryService } from './commandEntryService';
 import { CommandExecution, CommandExecutionMode, SqlResultPayload } from './commandEntryModel';
 
@@ -18,6 +18,8 @@ export interface MultiSqlJobApiV1 {
     cancelDedicatedJobSql(): Promise<void>;
     runSql(statements: string | string[], options?: MultiSqlJobRunSqlOptions): Promise<Record<string, unknown>[]>;
     runSqlWithDetails(statements: string | string[], options?: MultiSqlJobRunSqlOptions): Promise<RunSQLWithDetailsResult>;
+    getSqlPoolSnapshot(): SqlPoolSnapshot;
+    listSqlPoolJobs(): SqlPoolJobListEntry[];
     getConfig(): Promise<EffectiveJobConfig>;
     executeCommandEntry(command: string, mode: CommandExecutionMode, executionId?: string): Promise<CommandExecution>;
     closeSqlSession(sessionId?: string): Promise<void>;
@@ -88,6 +90,14 @@ export function createMultiSqlJobApi(
         ): Promise<RunSQLWithDetailsResult> {
             const connection = requireConnection();
             return jobManager.runSQLWithDetails(connection, statements, options);
+        },
+
+        getSqlPoolSnapshot(): SqlPoolSnapshot {
+            return jobManager.getSqlPoolSnapshot();
+        },
+
+        listSqlPoolJobs(): SqlPoolJobListEntry[] {
+            return jobManager.listSqlPoolJobs();
         },
 
         async getConfig(): Promise<EffectiveJobConfig> {

@@ -767,13 +767,6 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
             // mode it creates/restarts the dedicated job and returns that ID.
             const resolvedSqlJobId = await this.jobManager.restartJob(connection);
 
-            console.log('[Cmd Entry][SqlJobModeSwitch] resolved display SQL job ID', {
-                useSharedJob,
-                resolvedSqlJobId,
-                connection: connection.currentConnectionName ?? '<unknown>',
-                currentSqlJobId: this.currentSqlJobId(connection) ?? '<none>'
-            });
-
             const displaySqlJobId = resolvedSqlJobId ?? this.currentSqlJobId(connection) ?? '';
             this.safeOutputAppendLine(`[Cmd Entry] SQL job mode switch => useSharedJob=${useSharedJob} resolvedSqlJobId=${displaySqlJobId || '<none>'} currentSqlJobId=${this.currentSqlJobId(connection) || '<none>'}`);
             this.lastPostedSqlJobId = undefined;
@@ -1131,8 +1124,6 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
                 : `select OBJLIB, OBJNAME, OBJTEXT from table(QSYS2.OBJECT_STATISTICS('${lookupLibrary}', 'CMD', '${name}*'))`;
             const wildcardRowLimit = this.resolveWildcardLookupRowLimit(connection);
             const fetchRows = this.resolveWildcardLookupFetchRows(wildcardRowLimit);
-            this.safeOutputAppendLine(`[Cmd Entry][WildcardLookup] mode=${goCommandName !== undefined ? 'GO_CMD' : 'GENERIC'} lookupLibrary=${lookupLibrary} pattern=${name}* rowLimit=${wildcardRowLimit} fetchRows=${fetchRows}`);
-
             const seen = new Set<string>();
             const collected: Array<{ library: string; name: string; text: string | undefined }> = [];
             const toCommandRows = (rows: Record<string, unknown>[]) => rows
@@ -1159,14 +1150,11 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
             let continuation = pageResult.continuation;
             let pageRows = toCommandRows(pageResult.rows);
 
-            this.safeOutputAppendLine(`[Cmd Entry][WildcardLookupTuple] initialTuple=${continuation ? `type=${continuation.type ?? '<none>'} id=${continuation.id ?? '<none>'} cont_id=${continuation.contId ?? '<none>'} is_done=${continuation.isDone ?? '<unknown>'} fetchMore=${continuation.hasFetchMore} source=${continuation.source}` : 'not_present'}`);
-
             while (pageRows.length > 0 && collected.length < wildcardRowLimit) {
                 const uniqueAdded = appendUniqueRows(pageRows);
                 if (uniqueAdded === 0) {
                     stagnantIterations += 1;
                     if (stagnantIterations >= 2) {
-                        this.safeOutputAppendLine('[Cmd Entry][WildcardLookup] stopping pagination after repeated duplicate-only pages.');
                         break;
                     }
                 } else {
@@ -1198,11 +1186,6 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
 
             const suggestions = collected;
             const distinctLibraries = [...new Set(suggestions.map((entry) => entry.library))];
-
-            const librarySample = distinctLibraries.slice(0, 20).join(', ');
-            const firstSuggestionSample = suggestions.slice(0, 10).map((entry) => `${entry.library}/${entry.name}`).join(', ');
-            this.safeOutputAppendLine(`[Cmd Entry][WildcardLookupResult] mode=${goCommandName !== undefined ? 'GO_CMD' : 'GENERIC'} rows=${suggestions.length} distinctLibs=${distinctLibraries.length} libsSample=${librarySample || '<none>'}`);
-            this.safeOutputAppendLine(`[Cmd Entry][WildcardLookupResult] firstRows=${firstSuggestionSample || '<none>'}`);
 
             try {
                 if (suggestions.length > 0) {
@@ -2347,9 +2330,6 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
     public refreshSqlJobId(connection = this.getConnection()): void {
         const sqlJobId = this.currentSqlJobId(connection);
         const statusIdentity = this.currentStatusIdentity(connection);
-        if (sqlJobId !== this.lastPostedSqlJobId) {
-            this.safeOutputAppendLine(`[Cmd Entry] SQL job display ID changed: ${this.lastPostedSqlJobId || '<none>'} -> ${sqlJobId || '<none>'}`);
-        }
         this.lastPostedSqlJobId = sqlJobId;
 
         const debugEnabled = vscode.workspace.getConfiguration('clPrompter').get<boolean>('cmdEntryDebugLogging', false);
@@ -2510,12 +2490,19 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
             this.cmdEntrySettingsPanel.webview.html = `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><style>body{font-family:var(--vscode-font-family,sans-serif);background:var(--vscode-editor-background);color:var(--vscode-editor-foreground);padding:20px}p{margin:0 0 12px}.error{color:var(--vscode-testing-iconFailed,#f85149)}</style></head><body><h2>Command Entry Connection Settings</h2><p>Connection settings are unavailable while the IBM i Mapepire endpoint is unreachable.</p><p class="error">${this.escapeHtmlAttribute(failure)}</p></body></html>`;
         }
 
-        this.cmdEntrySettingsPanel.webview.onDidReceiveMessage(async (message: { type?: string; useSharedJob?: boolean; naming?: string; commit?: string; autoCommit?: string; trueAutocommit?: string; extendedMetadata?: boolean; runStartupScript?: boolean; currentLibrary?: string; libraryList?: string; runAfterSqlJobInit?: string; datfmt?: string; timfmt?: string; initialSchema?: string; initialPath?: string; autoColumnViewForSingleRow?: boolean; hasUnsavedChanges?: boolean }) => {
+        this.cmdEntrySettingsPanel.webview.onDidReceiveMessage(async (message: { type?: string; useSharedJob?: boolean; naming?: string; commit?: string; autoCommit?: string; trueAutocommit?: string; extendedMetadata?: boolean; runStartupScript?: boolean; currentLibrary?: string; libraryList?: string; runAfterSqlJobInit?: string; datfmt?: string; timfmt?: string; initialSchema?: string; initialPath?: string; autoColumnViewForSingleRow?: boolean; hasUnsavedChanges?: boolean; sqlJobId?: string }) => {
             if (message.type === 'setSqlJobMode') {
                 await this.setSharedSqlJobMode(Boolean(message.useSharedJob), 'command');
                 if (this.cmdEntrySettingsPanel) {
                     this.cmdEntrySettingsPanel.webview.html = await this.buildConnectionSettingsHtml(this.cmdEntrySettingsPanel.webview, connection);
                 }
+            }
+            if (message.type === 'requestDisplayJoblog') {
+                const sqlJobId = String(message.sqlJobId ?? '').trim();
+                if (!sqlJobId) {
+                    return;
+                }
+                await this.displayJoblogForSqlJob(sqlJobId);
             }
             if (message.type === 'saveCmdEntrySettings' || message.type === 'saveAndCloseCmdEntrySettings') {
                 const closeAfterSave = message.type === 'saveAndCloseCmdEntrySettings';
@@ -3035,6 +3022,93 @@ FETCH FIRST 1 ROW ONLY`;
         return normalized.trim().length > 0 ? normalized : undefined;
     }
 
+    private currentSharedSqlJobDisplayId(connection = this.getConnection()): string | undefined {
+        const raw = String(connection?.getSqlJobId?.() ?? '').trim();
+        return raw.length > 0 ? raw : undefined;
+    }
+
+    private buildSqlJobTopologyHtml(connection = this.getConnection()): string {
+        const notAvailableLabel = vscode.l10n.t('Not available');
+        const joblogHoverText = vscode.l10n.t('Click to display joblog');
+        const sharedJobId = this.currentSharedSqlJobDisplayId(connection) ?? notAvailableLabel;
+        const dedicatedState = this.jobManager.getState(connection);
+        const poolSnapshot = this.jobManager.getSqlPoolSnapshot();
+        const dedicatedJobId = dedicatedState.jobId?.trim() || notAvailableLabel;
+        const dedicatedStatusLabel = dedicatedState.enabled
+            ? (dedicatedState.status === 'busy'
+                ? vscode.l10n.t('busy')
+                : dedicatedState.status === 'ready'
+                    ? vscode.l10n.t('ready')
+                    : vscode.l10n.t('ended'))
+            : vscode.l10n.t('disabled');
+        const dedicatedSummary = dedicatedState.enabled
+            ? vscode.l10n.t('Private SQL job is enabled for this connection.')
+            : vscode.l10n.t('The Private SQL Job is used when the Command Entry connection type is set to Private SQL Job.');
+        const renderJoblogLink = (jobId: string): string => {
+            const trimmedJobId = jobId.trim();
+            if (!trimmedJobId || trimmedJobId === notAvailableLabel) {
+                return this.escapeHtmlAttribute(jobId);
+            }
+
+            const escapedJobId = this.escapeHtmlAttribute(trimmedJobId);
+            const escapedHoverText = this.escapeHtmlAttribute(joblogHoverText);
+            return `<a href="#" class="sql-job-topology-joblog-link" data-sql-job-id="${escapedJobId}" title="${escapedHoverText}" aria-label="${escapedHoverText}">${escapedJobId}</a>`;
+        };
+        const poolSummary = poolSnapshot.poolSize > 0
+            ? vscode.l10n.t('{current} of {max} helper jobs active.', {
+                current: String(poolSnapshot.poolSize),
+                max: String(poolSnapshot.maxSize)
+            })
+            : vscode.l10n.t('No helper jobs have been created yet.');
+        const poolEntries = poolSnapshot.jobs.length > 0
+            ? `<ul class="sql-job-topology-job-list">${poolSnapshot.jobs.map((job) => {
+                const jobId = job.jobId?.trim() || notAvailableLabel;
+                const jobState = job.busy ? vscode.l10n.t('busy') : vscode.l10n.t('idle');
+                return `<li><span class="sql-job-topology-entry-id">${renderJoblogLink(jobId)}</span><span class="sql-job-topology-entry-state">${jobState}</span></li>`;
+            }).join('')}</ul>`
+            : `<div class="small">${this.escapeHtmlAttribute(poolSummary)}</div>`;
+
+        return `
+            <div class="section sql-job-topology-section">
+                <details class="sql-job-topology-details">
+                    <summary class="sql-job-topology-summary">
+                        <div class="section-heading">
+                            <div><span class="sql-job-topology-chevron" aria-hidden="true"></span><strong>${vscode.l10n.t('SQL Job Topology')}</strong><span class="sql-job-topology-summary-toggle">${vscode.l10n.t('(click to expand/collapse)')}</span></div>
+                            <div class="small">${vscode.l10n.t('Command Entry IBM i Job routing status')}</div>
+                        </div>
+                    </summary>
+                    <div class="sql-job-topology-body">
+                <div class="sql-job-topology-grid">
+                    <div class="sql-job-topology-card">
+                        <div class="sql-job-topology-row">
+                            <span class="sql-job-topology-label">${vscode.l10n.t('Shared C4i SQL job')}</span>
+                            <span class="sql-job-topology-badge">${vscode.l10n.t('shared')}</span>
+                        </div>
+                        <div class="sql-job-topology-id">${renderJoblogLink(sharedJobId)}</div>
+                        <div class="small">${vscode.l10n.t('The shared job is used when Command Entry runs in shared mode.')}</div>
+                    </div>
+                    <div class="sql-job-topology-card">
+                        <div class="sql-job-topology-row">
+                            <span class="sql-job-topology-label">${vscode.l10n.t('Cmd Entry SQL Job')}</span>
+                            <span class="sql-job-topology-badge">${this.escapeHtmlAttribute(dedicatedStatusLabel)}</span>
+                        </div>
+                        <div class="sql-job-topology-id">${renderJoblogLink(dedicatedJobId)}</div>
+                        <div class="small">${this.escapeHtmlAttribute(dedicatedSummary)}</div>
+                    </div>
+                    <div class="sql-job-topology-card">
+                        <div class="sql-job-topology-row">
+                            <span class="sql-job-topology-label">${vscode.l10n.t('Cmd Entry SQL Pool Job(s) (helper job set)')}</span>
+                            <span class="sql-job-topology-badge">${vscode.l10n.t('{count} active', { count: String(poolSnapshot.poolSize) })}</span>
+                        </div>
+                        <div class="small">${this.escapeHtmlAttribute(poolSummary)}</div>
+                        <div class="sql-job-topology-entries">${poolEntries}</div>
+                    </div>
+                </div>
+                    </div>
+                </details>
+            </div>`;
+    }
+
     private hasDisallowedSessionPrefix(value: string | undefined, field: 'schema' | 'path'): boolean {
         const trimmed = (value ?? '').trim();
         if (!trimmed) {
@@ -3076,12 +3150,21 @@ FETCH FIRST 1 ROW ONLY`;
             ? (useSharedJob ? vscode.l10n.t('Shared SQL Job selected') : vscode.l10n.t('Private SQL Job selected'))
             : vscode.l10n.t('Shared SQL Job selected (server mode unavailable)');
         const sessionControlsDisabled = useSharedJob ? 'disabled' : '';
+        const topologyHtml = this.buildSqlJobTopologyHtml(connection);
+        const sharedJobModeClass = `${useSharedJob ? 'sql-job-mode-option sql-job-mode-option-selected' : 'sql-job-mode-option'}${remoteMapepireEnabled ? '' : ' sql-job-mode-option-disabled'}`;
+        const privateJobModeClass = `${!useSharedJob ? 'sql-job-mode-option sql-job-mode-option-selected' : 'sql-job-mode-option'}${remoteMapepireEnabled ? '' : ' sql-job-mode-option-disabled'}`;
+        const sharedJobDescription = remoteMapepireEnabled
+            ? vscode.l10n.t('Route Command Entry through the shared C4i SQL job.')
+            : vscode.l10n.t('Shared job routing is the only available mode while server mode is unavailable.');
+        const privateJobDescription = remoteMapepireEnabled
+            ? vscode.l10n.t('Use a dedicated SQL job for Command Entry.')
+            : vscode.l10n.t('Enable Mapepire server mode to use a private SQL job.');
         const mapepireStatusText = remoteMapepireEnabled
-            ? `${vscode.l10n.t('Mapepire')} <span class="server-badge">${vscode.l10n.t('SERVER')}</span> ${vscode.l10n.t('mode is available.')}`
-            : vscode.l10n.t('Mapepire server mode is unavailable. Command Entry falls back to the shared SQL job.');
+            ? vscode.l10n.t('Mapepire Server mode detected.')
+            : vscode.l10n.t('Mapepire single-user mode detected.');
         const sessionReadOnlyNotice = useSharedJob
-            ? `<div class="small">${vscode.l10n.t('Shared SQL jobs use the active IBM i job settings and cannot be changed here.')}</div>`
-            : `<div class="small">${vscode.l10n.t('Easily change the active SQL Job PATH and SCHEMA by modifying these settings and press Apply now.')}</div>`;
+            ? `<div class="small">${vscode.l10n.t('Shared SQL jobs use the active C4i IBM i job settings and cannot be changed here.')}</div>`
+            : `<div class="small">${vscode.l10n.t('Easily change the active Cmd Entry SQL Job PATH and SCHEMA by modifying these settings and press Apply now.')}</div>`;
         let liveSessionContext: { currentSchema?: string; currentPath?: string } = {};
         try {
             liveSessionContext = await this.resolveCurrentSchemaAndPath(connection);
@@ -3189,9 +3272,10 @@ FETCH FIRST 1 ROW ONLY`;
 
         return `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><style>
             body { font-family: var(--vscode-font-family, sans-serif); background: var(--vscode-editor-background); color: var(--vscode-editor-foreground); margin: 0; padding: 20px; }
-            .panel { max-width: 540px; margin: 0 auto; }
+            .panel { max-width: 720px; margin: 0 auto; }
             h1 { margin: 0 0 12px; font-size: 1.2rem; }
             .section { margin-top: 18px; padding: 12px 14px; border: 1px solid var(--vscode-panel-border); border-radius: 6px; background: var(--vscode-sideBar-background); }
+            .section-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 8px; }
             .row { display: flex; align-items: center; gap: 12px; margin: 10px 0; }
             .status { font-size: 12px; opacity: 0.8; }
             label { display: flex; align-items: center; gap: 8px; }
@@ -3206,9 +3290,9 @@ FETCH FIRST 1 ROW ONLY`;
             button.secondary { background: var(--vscode-button-secondaryBackground); color: var(--vscode-button-secondaryForeground); }
             button[disabled] { opacity: 0.5; cursor: not-allowed; }
             .small { font-size: 12px; opacity: 0.8; }
-                        .server-badge { font-weight: 700; color: var(--vscode-textLink-foreground, var(--vscode-foreground)); }
-                        .success-message { color: var(--vscode-testing-iconPassed, #2ea043); }
-                        .error-message { color: var(--vscode-testing-iconFailed, #f85149); }
+            .server-badge { font-weight: 700; color: var(--vscode-textLink-foreground, var(--vscode-foreground)); }
+            .success-message { color: var(--vscode-testing-iconPassed, #2ea043); }
+            .error-message { color: var(--vscode-testing-iconFailed, #f85149); }
             .actions-row { justify-content: flex-end; }
             .field { display: grid; grid-template-columns: 120px 1fr; gap: 10px; align-items: center; margin: 8px 0; }
             .field-inline { display: flex; align-items: center; gap: 8px; width: 100%; }
@@ -3220,14 +3304,58 @@ FETCH FIRST 1 ROW ONLY`;
             .startup-script-examples { margin: 4px 0 8px 18px; padding: 0; }
             .startup-script-examples li { margin: 2px 0; }
             .reset-button { width: 28px; min-width: 28px; height: 28px; padding: 0; border-radius: 999px; display: inline-flex; align-items: center; justify-content: center; font-size: 18px; line-height: 1; font-weight: 400; }
-                    </style></head><body><div class="panel"><h1>${panelTitle}</h1><div class="status">${connectionNameLabel} ${connection && connection.sqlRunnerAvailable() ? `${connection.currentConnectionName ?? notConnectedLabel} - ${connection.currentHost ?? unknownHostLabel} • ${effectiveJobId}` : notConnectedLabel}</div>
+            .sql-job-mode-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin: 10px 0 4px; }
+            .sql-job-mode-option { display: grid; grid-template-columns: auto 1fr; align-items: center; gap: 8px; padding: 8px 10px; border: 1px solid var(--vscode-panel-border); border-radius: 8px; background: color-mix(in srgb, var(--vscode-sideBar-background) 88%, transparent); cursor: pointer; transition: border-color 120ms ease, box-shadow 120ms ease, transform 120ms ease; min-height: 38px; }
+            .sql-job-mode-option:hover { border-color: var(--vscode-focusBorder); box-shadow: 0 0 0 1px color-mix(in srgb, var(--vscode-focusBorder) 35%, transparent); }
+            .sql-job-mode-option-selected { border-color: var(--vscode-focusBorder); box-shadow: inset 0 0 0 1px var(--vscode-focusBorder); }
+            .sql-job-mode-option-disabled { opacity: 0.72; cursor: not-allowed; }
+            .sql-job-mode-option input { appearance: none; -webkit-appearance: none; width: 1.1em; height: 1.1em; margin: 0; border: 1px solid var(--vscode-panel-border); border-radius: 999px; background: var(--vscode-input-background); display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto; }
+            .sql-job-mode-option input::before { content: '•'; font-size: 9px; line-height: 1; font-weight: 700; color: color-mix(in srgb, var(--vscode-descriptionForeground, var(--vscode-foreground)) 62%, transparent); transform: translateY(-0.5px); }
+            .sql-job-mode-option input:checked { border-color: var(--vscode-focusBorder); background: color-mix(in srgb, var(--vscode-focusBorder) 12%, var(--vscode-input-background)); }
+            .sql-job-mode-option input:checked::before { content: '✓'; color: var(--vscode-testing-iconPassed, var(--vscode-foreground)); }
+            .sql-job-mode-option-title { font-weight: 600; line-height: 1.1; }
+            .sql-job-mode-option-description { display: block; font-size: 11px; opacity: 0.78; margin-top: 2px; }
+            .sql-job-topology-section { margin-top: 14px; }
+            .sql-job-topology-grid { display: grid; gap: 10px; grid-template-columns: minmax(0, 1fr); }
+            .sql-job-topology-card { border: 1px solid var(--vscode-panel-border); border-radius: 8px; padding: 10px 12px; background: color-mix(in srgb, var(--vscode-sideBar-background) 92%, transparent); }
+            .sql-job-topology-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 6px; }
+            .sql-job-topology-label { font-weight: 600; }
+            .sql-job-topology-badge { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; padding: 2px 8px; border-radius: 999px; background: color-mix(in srgb, var(--vscode-button-secondaryBackground) 72%, transparent); color: var(--vscode-foreground); }
+            .sql-job-topology-id { font-family: var(--vscode-editor-font-family, var(--vscode-font-family, monospace)); word-break: break-word; }
+            .sql-job-topology-joblog-link { color: var(--vscode-textLink-foreground); text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
+            .sql-job-topology-joblog-link:hover { color: var(--vscode-textLink-foreground); text-decoration-thickness: 2px; }
+            .sql-job-topology-entries { margin-top: 8px; }
+            .sql-job-topology-job-list { margin: 0 0 0 18px; padding: 0; }
+            .sql-job-topology-job-list li { margin: 4px 0; }
+            .sql-job-topology-entry-id { font-family: var(--vscode-editor-font-family, var(--vscode-font-family, monospace)); word-break: break-word; }
+            .sql-job-topology-entry-state { margin-left: 8px; font-size: 12px; opacity: 0.8; }
+                .sql-job-topology-details { margin: 0; }
+                .sql-job-topology-summary { list-style: none; cursor: pointer; }
+                .sql-job-topology-summary::-webkit-details-marker { display: none; }
+                .sql-job-topology-summary::marker { content: ''; }
+                .sql-job-topology-summary .section-heading { margin-bottom: 0; }
+                    .sql-job-topology-summary .section-heading > div:first-child { display: inline-flex; align-items: center; gap: 8px; }
+                    .sql-job-topology-chevron { display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; border: 1px solid var(--vscode-panel-border); border-radius: 4px; background: color-mix(in srgb, var(--vscode-button-secondaryBackground) 68%, transparent); }
+                    .sql-job-topology-chevron::before { content: '▶'; display: inline-block; font-size: 13px; line-height: 1; transition: transform 120ms ease; transform-origin: 50% 50%; }
+                    .sql-job-topology-details[open] .sql-job-topology-chevron::before { transform: rotate(90deg); }
+                .sql-job-topology-summary-toggle { font-size: 11px; opacity: 0.85; margin-left: 8px; }
+                .sql-job-topology-body { margin-top: 10px; }
+                    </style></head><body><div class="panel"><h1>${panelTitle}</h1><div class="small">${mapepireStatusText}</div><div class="status">${connectionNameLabel} ${connection && connection.sqlRunnerAvailable() ? `${connection.currentConnectionName ?? notConnectedLabel} - ${connection.currentHost ?? unknownHostLabel} • ${effectiveJobId}` : notConnectedLabel}</div>
                 <div class="section">
                                 <div><strong>${connectionTypeTitle}</strong></div>
           <div class="status">${modeSummary}</div>
-                      <div class="row"><label><input type="radio" name="sqlJobMode" value="shared" ${useSharedJob ? 'checked' : ''} ${remoteMapepireEnabled ? '' : 'disabled'}> ${sharedJobLabel}</label></div>
-                      <div class="row"><label><input type="radio" name="sqlJobMode" value="private" ${!useSharedJob ? 'checked' : ''} ${remoteMapepireEnabled ? '' : 'disabled'}> ${privateJobLabel}</label></div>
-                    <div class="small">${mapepireStatusText}</div>
+                      <div class="sql-job-mode-grid">
+                          <label class="${sharedJobModeClass}">
+                              <input type="radio" name="sqlJobMode" value="shared" ${useSharedJob ? 'checked' : ''} ${remoteMapepireEnabled ? '' : 'disabled'}>
+                              <span><span class="sql-job-mode-option-title">${sharedJobLabel}</span><span class="sql-job-mode-option-description">${sharedJobDescription}</span></span>
+                          </label>
+                          <label class="${privateJobModeClass}">
+                              <input type="radio" name="sqlJobMode" value="private" ${!useSharedJob ? 'checked' : ''} ${remoteMapepireEnabled ? '' : 'disabled'}>
+                              <span><span class="sql-job-mode-option-title">${privateJobLabel}</span><span class="sql-job-mode-option-description">${privateJobDescription}</span></span>
+                          </label>
+                                            </div>
                 </div>
+                ${topologyHtml}
                 <div class="section">
                                 <div><strong>${connectionSettingsTitle}</strong></div>
                                 <div class="small">${applyOnReconnectLabel}</div>
@@ -3322,6 +3450,19 @@ FETCH FIRST 1 ROW ONLY`;
                     });
                     viewStartupScriptLog?.addEventListener('click', () => {
                         vscode.postMessage({ type: 'viewStartupScriptLog' });
+                    });
+                    const displayJoblog = (sqlJobId) => {
+                        const jobId = String(sqlJobId || '').trim();
+                        if (!jobId) {
+                            return;
+                        }
+                        vscode.postMessage({ type: 'requestDisplayJoblog', sqlJobId: jobId });
+                    };
+                    document.querySelectorAll('[data-sql-job-id]').forEach((jobLink) => {
+                        jobLink.addEventListener('click', (event) => {
+                            event.preventDefault();
+                            displayJoblog(jobLink.getAttribute('data-sql-job-id'));
+                        });
                     });
                     window.addEventListener('message', (event) => {
                         const message = event.data;

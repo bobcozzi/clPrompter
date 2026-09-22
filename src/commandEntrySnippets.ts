@@ -66,8 +66,8 @@ export const BUILT_IN_SQL_SNIPPETS: ReadonlyArray<CommandEntrySqlSnippet> = [
         stmt: ["SELECT JOB_NAME as JOB,SUBSYSTEM,AUTHORIZATION_NAME as USER_NAME,JOB_NAME_SHORT as JOB_NAME,",
             "trim(JOB_TYPE) concat '/' concat trim(JOB_TYPE_ENHANCED) as JOB_TYPE,",
             "OPEN_FILES,",
-            "JOB_STATUS,MEMORY_POOL,RUN_PRIORITY, THREAD_COUNT, TEMPORARY_STORAGE, CPU_TIME,",
-            "TOTAL_DISK_IO_COUNT,SERVER_TYPE,ELAPSED_TIME,",
+            'JOB_STATUS,MEMORY_POOL,RUN_PRIORITY, THREAD_COUNT, TEMPORARY_STORAGE as "Temp Stg", CPU_TIME,',
+            'TOTAL_DISK_IO_COUNT as "Total Disk I/O",SERVER_TYPE,ELAPSED_TIME,',
             "trim(JOB_DESCRIPTION_LIBRARY) concat '/' concat JOB_DESCRIPTION as JOB_DESC,",
             "trim(OUTPUT_QUEUE_LIBRARY) concat '/' concat OUTPUT_QUEUE as OUTPUT_QUEUE,",
             '"CCSID",DEFAULT_CCSID, LANGUAGE_ID,',
@@ -137,12 +137,12 @@ export const BUILT_IN_SQL_SNIPPETS: ReadonlyArray<CommandEntrySqlSnippet> = [
         source: 'built-in'
     },
     {
-        id: 'builtin.last-spooled-file',
-        label: 'View Last SPOOLED File',
+        id: 'builtin.last-job-spooled-file',
+        label: 'View Last SPOOLED File (Job)',
         stmt: [
             'WITH sf AS (',
             'SELECT * FROM TABLE (qsys2.spooled_file_info(',
-            "     USER_NAME => '*CURRENT', job_name => '*ALL',",
+            "     USER_NAME => '*CURRENT', JOB_NAME => '${sqlJobId}',",
             "     STARTING_TIMESTAMP => current_date,",
             "     ENDING_TIMESTAMP => current_timestamp)) SF",
             '  ORDER BY sf.creation_timestamp DESC',
@@ -160,13 +160,14 @@ export const BUILT_IN_SQL_SNIPPETS: ReadonlyArray<CommandEntrySqlSnippet> = [
         source: 'built-in'
     },
     {
-        id: 'builtin.active-jobs-usersbs',
-        label: 'Active Jobs (Fast)',
+        id: 'builtin.active-jobs-settings',
+        label: 'Active Jobs (User/Fast)',
         stmt: [
-            'SELECT aj.JOB_NAME, aj.SUBSYSTEM, aj.AUTHORIZATION_NAME as USER_NAME,',
+            'SELECT aj.JOB_NAME as JOB, aj.SUBSYSTEM, aj.JOB_NAME_SHORT as JOB_NAME,',
+            'aj.AUTHORIZATION_NAME as USER_NAME, ',
             " trim(aj.FUNCTION_TYPE) concat '-' concat aj.FUNCTION as FUNCTION_INFO,",
             ' JOB_STATUS, ',
-            ' MEMORY_POOL, TEMPORARY_STORAGE, CPU_TIME, TOTAL_DISK_IO_COUNT',
+            ' MEMORY_POOL, TEMPORARY_STORAGE, CPU_TIME, TOTAL_DISK_IO_COUNT as "Total Disk I/O"',
             "FROM TABLE(QSYS2.ACTIVE_JOB_INFO(SUBSYSTEM_LIST_FILTER => '${userSBSList}')) aj",
             'ORDER BY ORDINAL_POSITION'
         ].join(' '),
@@ -175,13 +176,14 @@ export const BUILT_IN_SQL_SNIPPETS: ReadonlyArray<CommandEntrySqlSnippet> = [
         source: 'built-in'
     },
     {
-        id: 'builtin.active-jobs-full',
-        label: 'Active Jobs (Detailed)',
+        id: 'builtin.active-jobs-settings-detailed',
+        label: 'Active Jobs (User/Detailed)',
         stmt: [
-            'SELECT aj.JOB_NAME, aj.SUBSYSTEM, aj.AUTHORIZATION_NAME as USER_NAME,',
+            'SELECT aj.JOB_NAME as JOB, aj.SUBSYSTEM, aj.JOB_NAME_SHORT as JOB_NAME,',
+            'aj.AUTHORIZATION_NAME as USER_NAME, ',
             " trim(aj.FUNCTION_TYPE) concat '-' concat aj.FUNCTION as FUNCTION_INFO,",
             ' JOB_STATUS, JOB_ACTIVE_TIME as "Job Start Time",',
-            ' MEMORY_POOL, TEMPORARY_STORAGE, CPU_TIME, TOTAL_DISK_IO_COUNT',
+            ' MEMORY_POOL, TEMPORARY_STORAGE as "Temp Stg", CPU_TIME, TOTAL_DISK_IO_COUNT as "Total Disk I/O"',
             ' , OUTPUT_QUEUE, JOB_USER_IDENTITY, PAGE_FAULTS, DATABASE_LOCK_WAITS, OPEN_FILES',
             "FROM TABLE(QSYS2.ACTIVE_JOB_INFO(DETAILED_INFO => 'ALL', SUBSYSTEM_LIST_FILTER => '${userSBSList}')) aj",
             'ORDER BY ORDINAL_POSITION'
@@ -194,10 +196,11 @@ export const BUILT_IN_SQL_SNIPPETS: ReadonlyArray<CommandEntrySqlSnippet> = [
         id: 'builtin.active-jobs-qinter',
         label: 'Active Jobs sbs(QINTER)',
         stmt: [
-            'SELECT aj.JOB_NAME, aj.SUBSYSTEM, aj.AUTHORIZATION_NAME as USER_NAME,',
+            'SELECT aj.JOB_NAME as JOB, aj.SUBSYSTEM, aj.JOB_NAME_SHORT as JOB_NAME,',
+            'aj.AUTHORIZATION_NAME as USER_NAME, ',
             " trim(aj.FUNCTION_TYPE) concat '-' concat aj.FUNCTION as FUNCTION_INFO,",
             ' JOB_STATUS, JOB_ACTIVE_TIME as "Job Start Time",',
-            ' MEMORY_POOL, TEMPORARY_STORAGE, CPU_TIME, TOTAL_DISK_IO_COUNT',
+            ' MEMORY_POOL, TEMPORARY_STORAGE as "Temp Stg", CPU_TIME, TOTAL_DISK_IO_COUNT as "Total Disk I/O"',
             "FROM TABLE(QSYS2.ACTIVE_JOB_INFO(DETAILED_INFO => 'ALL', SUBSYSTEM_LIST_FILTER => 'QINTER')) aj",
             'ORDER BY ORDINAL_POSITION'
         ].join(' '),
@@ -206,13 +209,30 @@ export const BUILT_IN_SQL_SNIPPETS: ReadonlyArray<CommandEntrySqlSnippet> = [
         source: 'built-in'
     },
     {
+        id: 'builtin.active-jobs-qbatch',
+        label: 'Active Jobs sbs(QBATCH)',
+        stmt: [
+            'SELECT aj.JOB_NAME as JOB, aj.SUBSYSTEM, aj.JOB_NAME_SHORT as JOB_NAME,',
+            'aj.AUTHORIZATION_NAME as USER_NAME, ',
+            " trim(aj.FUNCTION_TYPE) concat '-' concat aj.FUNCTION as FUNCTION_INFO,",
+            ' JOB_STATUS, JOB_ACTIVE_TIME as "Job Start Time",',
+            ' MEMORY_POOL, TEMPORARY_STORAGE as "Temp Stg", CPU_TIME, TOTAL_DISK_IO_COUNT as "Total Disk I/O"',
+            "FROM TABLE(QSYS2.ACTIVE_JOB_INFO(DETAILED_INFO => 'ALL', SUBSYSTEM_LIST_FILTER => 'QBATCH')) aj",
+            'ORDER BY ORDINAL_POSITION'
+        ].join(' '),
+        group: 'Admin',
+        order: 40,
+        source: 'built-in'
+    },
+    {
         id: 'builtin.active-jobs-qusrwrk',
         label: 'Active Jobs sbs(QUSRWRK)',
         stmt: [
-            'SELECT aj.JOB_NAME, aj.SUBSYSTEM, aj.AUTHORIZATION_NAME as USER_NAME,',
+            'SELECT aj.JOB_NAME as JOB, aj.SUBSYSTEM, aj.JOB_NAME_SHORT as JOB_NAME,',
+            'aj.AUTHORIZATION_NAME as USER_NAME, ',
             " trim(aj.FUNCTION_TYPE) concat '-' concat aj.FUNCTION as FUNCTION_INFO,",
             ' JOB_STATUS, JOB_ACTIVE_TIME as "Job Start Time",',
-            ' MEMORY_POOL, TEMPORARY_STORAGE, CPU_TIME, TOTAL_DISK_IO_COUNT',
+            ' MEMORY_POOL, TEMPORARY_STORAGE as "Temp Stg", CPU_TIME, TOTAL_DISK_IO_COUNT as "Total Disk I/O"',
             "FROM TABLE(QSYS2.ACTIVE_JOB_INFO(DETAILED_INFO => 'ALL', SUBSYSTEM_LIST_FILTER => 'QUSRWRK')) aj",
             'ORDER BY ORDINAL_POSITION'
         ].join(' '),
@@ -224,10 +244,11 @@ export const BUILT_IN_SQL_SNIPPETS: ReadonlyArray<CommandEntrySqlSnippet> = [
         id: 'builtin.active-jobs-qhttpsvr',
         label: 'Active Jobs sbs(QHTTPSVR)',
         stmt: [
-            'SELECT aj.JOB_NAME, aj.SUBSYSTEM, aj.AUTHORIZATION_NAME as USER_NAME,',
+            'SELECT aj.JOB_NAME as JOB, aj.SUBSYSTEM, aj.JOB_NAME_SHORT as JOB_NAME,',
+            'aj.AUTHORIZATION_NAME as USER_NAME, ',
             " trim(aj.FUNCTION_TYPE) concat '-' concat aj.FUNCTION as FUNCTION_INFO,",
             ' JOB_STATUS, JOB_ACTIVE_TIME as "Job Start Time",',
-            ' MEMORY_POOL, TEMPORARY_STORAGE, CPU_TIME, TOTAL_DISK_IO_COUNT',
+            ' MEMORY_POOL, TEMPORARY_STORAGE as "Temp Stg", CPU_TIME, TOTAL_DISK_IO_COUNT as "Total Disk I/O"',
             "FROM TABLE(QSYS2.ACTIVE_JOB_INFO(DETAILED_INFO => 'ALL', SUBSYSTEM_LIST_FILTER => 'QHTTPSVR')) aj",
             'ORDER BY ORDINAL_POSITION'
         ].join(' '),
@@ -257,6 +278,28 @@ export const BUILT_IN_SQL_SNIPPETS: ReadonlyArray<CommandEntrySqlSnippet> = [
             "FROM TABLE(QSYS2.SPOOLED_FILE_INFO(USER_NAME => '${currentUser}'))",
             " WHERE SPOOLED_FILE_NAME <> 'QPRINT' AND JOB_NAME <> 'MAPEPIRE'",
             " ORDER BY CREATION_TIMESTAMP"
+        ].join(' '),
+        group: 'SPOOLED Files',
+        order: 10,
+        source: 'built-in'
+    },
+    {
+        id: 'builtin.last-user-spooled-file',
+        label: 'View Last SPOOLED File (User)',
+        stmt: [
+            'WITH sf AS (',
+            'SELECT * FROM TABLE (qsys2.spooled_file_info(',
+            "     USER_NAME => '*CURRENT', job_name => '*ALL')) SF",
+            '  ORDER BY sf.creation_timestamp DESC',
+            '  LIMIT 1',
+            ') ',
+            'SELECT SF.CREATION_TIMESTAMP AS CREATED,',
+            ' SF.QUALIFIED_JOB_NAME as JOB, sf.SPOOLED_FILE_NAME as SPLFNAME,',
+            ' sd.SPOOLED_DATA FROM sf',
+            ',LATERAL (SELECT * FROM TABLE(systools.spooled_file_data(',
+            '           JOB_NAME => SF.QUALIFIED_JOB_NAME,',
+            '           SPOOLED_FILE_NAME => SF.SPOOLED_FILE_NAME,',
+            '           SPOOLED_FILE_NUMBER => SF.SPOOLED_FILE_NUMBER)) spd) sd'
         ].join(' '),
         group: 'SPOOLED Files',
         order: 20,

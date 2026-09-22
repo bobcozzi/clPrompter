@@ -37,7 +37,7 @@ import { CommandEntryViewProvider } from './commandEntryView';
 import { registerCodeSnippetManagerView } from './commandEntrySnippetView';
 import { CommandEntryJobManager } from './commandEntryJobManager';
 import { CommandEntryService } from './commandEntryService';
-import { createMultiSqlJobApi } from './multiSqlJobApi';
+import { createMultiSqlJobApi } from './commandEntryMultiSqlJob';
 
 import { ParmMeta, ParmMetaMap } from './types';
 import {
@@ -404,6 +404,13 @@ export async function activate(context: vscode.ExtensionContext) {
         return config.get<boolean>('cmdEntryDisplay', true);
     };
 
+    const isCommandEntryAutoSwitchOnStartupEnabled = (): boolean => {
+        const config = vscode.workspace.getConfiguration('clPrompter');
+        return config.get<boolean>('cmdEntryAutoSwitchOnStartup', false);
+    };
+
+    let commandEntryAutoSwitchHandled = false;
+
     const applyCommandEntryStartupVisibility = async (): Promise<void> => {
         const displayEnabled = isCommandEntryDisplayEnabled();
         const hasConnection = !!code4i?.instance?.getConnection();
@@ -413,6 +420,11 @@ export async function activate(context: vscode.ExtensionContext) {
         // Mode B: when disabled, display only after explicit user open command.
         const shouldShowPanel = displayEnabled ? hasConnection : touchedThisSession;
         await setCommandEntryPanelAvailable(shouldShowPanel);
+
+        if (!commandEntryAutoSwitchHandled && shouldShowPanel && isCommandEntryAutoSwitchOnStartupEnabled()) {
+            commandEntryAutoSwitchHandled = true;
+            await revealCommandEntryContainer();
+        }
     };
 
     const prioritizeCommandEntryPanelOnConnect = async (): Promise<void> => {

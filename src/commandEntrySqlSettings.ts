@@ -302,7 +302,7 @@ export function splitRunAfterSqlJobInitStatements(value: unknown): string[] | un
             const char = entry[index];
             const nextChar = entry[index + 1];
 
-            if ((char === '\r' || char === '\n') && !inSingleQuote && !inDoubleQuote) {
+            if (!inSingleQuote && !inDoubleQuote && /\s/.test(char)) {
                 if (current.length > 0 && !/\s$/.test(current)) {
                     current += ' ';
                 }
@@ -520,7 +520,7 @@ export function buildRunAfterSqlJobInitDefaults(options?: ConnectionSqlSessionOp
         }
     }
 
-    return statements;
+    return statements.map((statement) => expandStartupScriptPlaceholders(statement, settings.currentLibrary, libraryList));
 }
 
 export function getDefaultConnectionSqlSettings(): ConnectionSqlSettings {
@@ -550,9 +550,14 @@ export function getConnectionSqlSettings(_context?: vscode.ExtensionContext, con
     const useSharedOverride = readBooleanSetting(commandSettings?.sharedSQLJob)
         ?? readBooleanSetting(commandSettings?.sharedSqlJob);
     const autoColumnViewForSingleRow = readBooleanSetting(commandSettings?.autoColumnViewForSingleRow);
+    const connectionConfig = readConnectionConfig(connection);
+    const serverModeEnabled = readBooleanSetting(connectionConfig?.mapepireUseServer)
+        === true
+        || readBooleanSetting(connectionConfig?.mapepireServerMode) === true
+        || readBooleanSetting(connectionConfig?.connectToRemoteMapepireServer) === true;
 
     return {
-        useSharedJob: useSharedOverride ?? defaults.useSharedJob,
+        useSharedJob: useSharedOverride ?? (serverModeEnabled ? false : defaults.useSharedJob),
         limitFetch: defaults.limitFetch,
         fetchRowLimit: defaults.fetchRowLimit,
         firstPageRowsToFetch: defaults.firstPageRowsToFetch,

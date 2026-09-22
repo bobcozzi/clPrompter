@@ -2,6 +2,30 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.0.45] - 2026-09-22
+
+### What's Improved
+- Command Entry Connection Settings now presents Mapepire mode status more clearly at the top of the panel:
+  - `Mapepire Server mode detected.`
+  - `Mapepire single-user mode detected.`
+- You can now dynamically switch between a Private SQL job for command entry use and the C4i shared SQL job, regardless of Mapepire mode. If the `Shared C4I SQL Job` is selected, then Command Entry commands are routed through that shared C4i job.
+- Mapepire single-user mode no longer limts Command Entry from using its own private SQL job to run CL commands and SQL statements. You can now select `Private SQL Job` for CL Command Entry even when `single-user mode` is detected. Note that in most cases a 2nd JVM may be started in this scenario, while that private job is initializing.
+
+- Connection identity details now appear directly beneath the panel header status area for faster orientation.
+- SQL Job Topology wording was refined to reduce ambiguity:
+  - `Shared SQL Job` is now labeled `Shared C4i SQL job`.
+  - `Cmd Entry Private Job` is now labeled `Cmd Entry SQL Job`.
+  - `SQL Pool Job` is now labeled `Cmd Entry SQL Pool Job(s)`.
+- SQL Job Topology is now collapsible (collapsed by default), making the settings page easier to use when many SQL pool jobs are listed.
+- Shared/Private SQL job selector visuals were refined.
+- SQL job topology joblog id can be clicked on to open the job's joblog.
+
+### What's Fixed
+- Reduced noisy Command Entry diagnostic output by removing non-essential mode-switch, wildcard-lookup, and other SQL-job-display trace logging.
+
+### What's New
+- A new Command Entry setting `cmdEntryAutoSwitchOnStartup` can be use to cause the CL Command Entry panel to appear (reveal itself) after it is initialized. Normally the Panel row stays on whatever panel tab you are currently viewing, such as Terminal or Debug Console. When `clPrompter.cmdEntryAutoSwitchOnStartup` is `true` Command Entry is revealed after it is rendered. This is shipped as `false` by default.
+
 ## [1.0.44] - 2026-09-21
 
 ### What's New

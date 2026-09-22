@@ -663,7 +663,7 @@ function renderSqlResultHtml(result: SqlResultPayload, cspSource: string, script
         const byName = columnMetadataByName.get(normalizeColumnKey(column));
         const byScan = findMetadataForColumn(column, result.columnMetadata ?? []);
         const byPosition = result.columnMetadata?.[index];
-        const metadata = byName ?? byScan ?? byPosition;
+        const metadata = byPosition ?? byName ?? byScan;
         const headerText = resolveColumnHeaderText(column, metadata);
         const tooltipText = buildColumnHeaderTooltip(column, metadata);
         const headerHtml = renderColumnHeaderHtml(headerText);
@@ -750,6 +750,7 @@ function buildClientPayload(result: SqlResultPayload, l10n: SqlResultPanelL10n) 
     });
 
     return {
+        columns,
         rowCells,
         resultTitle: result.resultTitle ?? '',
         rowCount: result.rowCount,
@@ -907,42 +908,78 @@ function findMetadataForColumn(columnName: string, metadata: SqlColumnMetadata[]
     }
 
     const match = metadata.find((entry) => normalizeColumnKey(entry.name) === normalizeColumnKey(columnName));
-    return match ?? metadata.find((entry) => normalizeColumnKey(entry.label) === normalizeColumnKey(columnName));
+    if (match) {
+        return match;
+    }
+
+    return metadata.find((entry) => normalizeColumnKey(entry.label) === normalizeColumnKey(columnName));
 }
 
 function resolveColumnHeaderText(columnName: string, metadata?: SqlColumnMetadata): string {
     const preferred = metadata?.label?.trim() || metadata?.name?.trim() || columnName;
     const cleaned = preferred.replace(/\r?\n/g, ' ').replace(/\s{2,}/g, ' ').trim();
-    if (!cleaned || cleaned.toUpperCase() === columnName.toUpperCase()) {
+    if (!cleaned) {
         return columnName;
     }
     return cleaned;
 }
 
-function buildColumnHeaderTooltip(columnName: string, metadata?: SqlColumnMetadata): string {
+function formatTooltipType(metadata: SqlColumnMetadata | undefined): string {
     const typeName = metadata?.typeName?.trim() || 'UNKNOWN';
+    const upperType = typeName.toUpperCase();
     const displaySize = typeof metadata?.displaySize === 'number' ? metadata.displaySize : undefined;
     const scale = typeof metadata?.scale === 'number' ? metadata.scale : undefined;
+
+    const integerTypes = new Set(['SMALLINT', 'INTEGER', 'INT', 'BIGINT']);
+    const decimalTypes = new Set(['NUMERIC', 'DECIMAL', 'DEC', 'DECFLOAT', 'NUM']);
+    const charLikeTypes = new Set(['CHAR', 'CHARACTER', 'VARCHAR', 'CLOB', 'DBCLOB', 'GRAPHIC', 'VARGRAPHIC', 'BINARY', 'VARBINARY']);
+
+    if (displaySize && displaySize > 0) {
+        if (integerTypes.has(upperType)) {
+            return typeName;
+        }
+
+        if (decimalTypes.has(upperType)) {
+            if (scale != null && scale >= 0) {
+                if (upperType === 'NUMERIC' || upperType === 'NUM') {
+                    return `Zoned(${displaySize}, ${scale})`;
+                }
+                if (upperType === 'DECIMAL' || upperType === 'DEC') {
+                    return `Dec(${displaySize}, ${scale})`;
+                }
+                return `${typeName}(${displaySize}, ${scale})`;
+            }
+            if (upperType === 'NUMERIC' || upperType === 'NUM') {
+                return `Zoned(${displaySize})`;
+            }
+            if (upperType === 'DECIMAL' || upperType === 'DEC') {
+                return `Dec(${displaySize})`;
+            }
+            return `${typeName}(${displaySize})`;
+        }
+
+        if (charLikeTypes.has(upperType)) {
+            return `${typeName}(${displaySize})`;
+        }
+    }
+
+    return typeName;
+}
+
+function buildColumnHeaderTooltip(columnName: string, metadata?: SqlColumnMetadata): string {
     const textDescription = metadata?.textDescription?.trim();
-    const ddsType = metadata?.ddsType?.trim();
     const isIdentity = metadata?.isIdentity;
     const label = metadata?.label?.trim();
-    const isExactNumeric = /^(NUMERIC|DECIMAL|DEC)$/i.test(typeName);
-    const sqlType = displaySize && displaySize > 0
-        ? (isExactNumeric && scale != null && scale >= 0 ? `${typeName}(${displaySize}, ${scale})` : `${typeName}(${displaySize})`)
-        : typeName;
+    const sqlType = formatTooltipType(metadata);
     const lines: string[] = [];
-    if (label && label.toUpperCase() !== columnName.toUpperCase()) {
+    if (label && label !== columnName) {
         lines.push(`Heading: ${label}`);
     }
-    if (textDescription && textDescription.toUpperCase() !== columnName.toUpperCase() && (!label || textDescription.toUpperCase() !== label.toUpperCase())) {
+    if (textDescription && textDescription !== columnName && (!label || textDescription !== label)) {
         lines.push(`Text: ${textDescription}`);
     }
     lines.push(`Column: ${columnName}`);
     lines.push(`Type: ${sqlType}`);
-    if (ddsType) {
-        lines.push(`DDS Type: ${ddsType}`);
-    }
     if (typeof isIdentity === 'boolean') {
         lines.push(`Identity: ${isIdentity ? 'Yes' : 'No'}`);
     }

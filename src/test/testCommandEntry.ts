@@ -23,18 +23,28 @@ Module._load = function (request: string) {
 };
 
 function requireFromOut(moduleName: string): any {
-    try {
-        return require(`../${moduleName}`);
-    } catch {
-        return require(`./${moduleName}`);
+    const candidates = [
+        `./${moduleName}`,
+        `../${moduleName}`,
+        `../src/${moduleName}`
+    ];
+
+    for (const candidate of candidates) {
+        try {
+            return require(candidate);
+        } catch {
+            // Try the next candidate path.
+        }
     }
+
+    throw new Error(`Unable to resolve module '${moduleName}' from the compiled test output.`);
 }
 
 const { classifyMessage, determineOutcome, mapCommandMessages } = requireFromOut('commandEntryModel');
 const { detectCommandEntryPrefix } = requireFromOut('commandEntryPrefixes');
 const { buildCancelSqlJobCommand, CMD_RUN_SQL, normalizeSqlJobId } = requireFromOut('commandEntrySqlHelpers');
-const { collectRunAfterSqlJobInit, resolveRunAfterSqlJobInitMode, resolveSqlNamingMode } = requireFromOut('commandEntryJobManager');
-const { buildImmediateSessionContextSql, expandStartupScriptPlaceholders, normalizeSchemaSessionContextValue, normalizeSessionContextValue, splitRunAfterSqlJobInitStatements } = requireFromOut('commandEntrySqlSettings');
+const { CommandEntryJobManager, buildJoblogQueryForSqlJob, collectRunAfterSqlJobInit, resolveRunAfterSqlJobInitMode, resolveSqlNamingMode } = requireFromOut('commandEntryJobManager');
+const { buildImmediateSessionContextSql, buildRunAfterSqlJobInitDefaults, expandStartupScriptPlaceholders, normalizeSchemaSessionContextValue, normalizeSessionContextValue, splitRunAfterSqlJobInitStatements } = requireFromOut('commandEntrySqlSettings');
 const { checkSQLForExecution } = requireFromOut('sqlSyntaxChecker');
 
 const messages = mapCommandMessages([
@@ -49,6 +59,14 @@ assert.strictEqual(determineOutcome(messages), 'error');
 assert.match(CMD_RUN_SQL, /CMD_RUN\(\?, \?\)/);
 assert.strictEqual(normalizeSqlJobId('123456/myuser/qzdasoinit'), '123456/MYUSER/QZDASOINIT');
 assert.strictEqual(normalizeSqlJobId('123456/USER/NOT VALID'), undefined);
+assert.match(
+    buildJoblogQueryForSqlJob('123456/MYUSER/QZDASOINIT'),
+    /FROM TABLE\(QSYS2\.JOBLOG_INFO\('123456\/MYUSER\/QZDASOINIT'\)\)\s+ORDER BY ORDINAL_POSITION DESC/i
+);
+assert.match(
+    buildJoblogQueryForSqlJob('123456/USR$ABC/QZDASOINIT'),
+    /FROM TABLE\(QSYS2\.JOBLOG_INFO\('123456\/USR\$ABC\/QZDASOINIT'\)\)\s+ORDER BY ORDINAL_POSITION DESC/i
+);
 const cancelCommand = buildCancelSqlJobCommand('123456/MYUSER/QZDASOINIT');
 assert.match(cancelCommand, /^CALL\s+QSYS2\.CANCEL_SQL\('123456\/MYUSER\/QZDASOINIT'\)$/i);
 assert.strictEqual(detectCommandEntryPrefix('CL: CPYF FROMFILE(A) TOFILE(B)'), 'CL');
@@ -101,6 +119,24 @@ assert.strictEqual(expandStartupScriptPlaceholders('CHGCURLIB PICKLES', 'COZTEST
     } as any;
     await checkSQLForExecution(connection, 'SELECT * FROM MYTABLE');
     console.log('SQL syntax validation avoids runtime PREPARE checks');
+
+    const manager = new CommandEntryJobManager();
+    const mockConnection = {
+        getComponent: async () => ({
+            newJob: async () => ({
+                execute: async () => ({
+                    data: [{ MSGID: 'CPF0000', MSGTEXT: 'ok' }, { MSGID: 'CPF0001', MSGTEXT: 'fail' }]
+                })
+            })
+        }),
+        getSqlJobJDBCOptions: () => ({}),
+        getConfig: () => ({})
+    } as any;
+
+    const rows = await manager.queryJoblog(mockConnection, '123456/MYUSER/QZDASOINIT');
+    assert.strictEqual(rows.length, 2);
+    assert.strictEqual(rows[0].MSGID, 'CPF0000');
+    console.log('Joblog helper object-result parsing works');
 })();
 
 console.log('Command Entry model tests passed');

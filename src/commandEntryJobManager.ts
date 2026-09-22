@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import IBMi from '@halcyontech/vscode-ibmi-types/api/IBMi';
 import { buildRunAfterSqlJobInitDefaults, expandStartupScriptPlaceholders, getConnectionSqlSessionOptions, getConnectionSqlSettings, getDefaultConnectionSqlSettings, splitRunAfterSqlJobInitStatements } from './commandEntrySqlSettings';
 import { getUDTFLibrary } from './components/hostFunctions';
+import { BUILT_IN_SQL_SNIPPETS } from './commandEntrySnippets';
 
 function isCommandEntryDebugLoggingEnabled(): boolean {
     const config = vscode.workspace.getConfiguration('clPrompter');
@@ -21,6 +22,20 @@ function normalizeSqlJobId(jobId: string | undefined): string | undefined {
     return normalized && /^\d{6}\/[A-Z0-9#$@]{1,10}\/[A-Z0-9#$@]{1,10}$/.test(normalized)
         ? normalized
         : undefined;
+}
+
+export function buildJoblogQueryForSqlJob(sqlJobId: string): string {
+    const normalized = normalizeSqlJobId(sqlJobId) ?? sqlJobId.trim();
+    if (!normalized) {
+        throw new Error('A valid SQL job ID is required to query its joblog.');
+    }
+
+    const fullJoblogSnippet = BUILT_IN_SQL_SNIPPETS.find((snippet) => snippet.id === 'builtin.full-joblog');
+    const escaped = normalized.replace(/'/g, "''");
+    const template = fullJoblogSnippet?.stmt ?? "SELECT * FROM TABLE(QSYS2.JOBLOG_INFO('${sqlJobId}')) ORDER BY ORDINAL_POSITION";
+
+    // Use a callback replacement so '$' inside job IDs is treated literally.
+    return template.replace(/\$\{sqlJobId\}/g, () => escaped);
 }
 
 function sharedSqlJobIdForDisplay(connection?: IBMi): string | undefined {
@@ -189,6 +204,24 @@ export interface DedicatedJobState {
     status: 'ready' | 'busy' | 'ended';
 }
 
+export interface SqlPoolJobInfo {
+    index: number;
+    jobId?: string;
+    busy: boolean;
+}
+
+export interface SqlPoolSnapshot {
+    maxSize: number;
+    poolSize: number;
+    busyCount: number;
+    jobs: SqlPoolJobInfo[];
+}
+
+export interface SqlPoolJobListEntry {
+    jobId?: string;
+    busy: boolean;
+}
+
 function toOptionalBoolean(value: unknown): boolean | undefined {
     if (typeof value === 'boolean') {
         return value;
@@ -352,7 +385,9 @@ export class CommandEntryJobManager {
     private job: SqlJobLike | undefined;
     private connectionKey: string | undefined;
     private dedicatedJobId: string | undefined;
-    private cancelRequestJob: SqlJobLike | undefined;
+    private readonly secondarySqlJobPool: SqlJobLike[] = [];
+    private readonly secondarySqlJobPoolBusy = new Set<SqlJobLike>();
+    private readonly sqlPoolWarmupInFlight = new Map<string, Promise<void>>();
     private cancelRequestMonitor: {
         startedAt: number;
         timeoutMs: number;
@@ -387,6 +422,64 @@ export class CommandEntryJobManager {
 
     logDiagnostic(message: string): void {
         this.debugLog(message);
+    }
+
+    private getSqlPoolMaxSize(): number {
+        const configured = vscode.workspace.getConfiguration('clPrompter').get<number>('cmdEntryMaxSQLJobPoolJobs', 3);
+        if (!Number.isFinite(configured)) {
+            return 3;
+        }
+
+        const normalized = Math.trunc(configured);
+        if (normalized < 1) {
+            return 1;
+        }
+        if (normalized > 20) {
+            return 20;
+        }
+        return normalized;
+    }
+
+    getSqlPoolSnapshot(): SqlPoolSnapshot {
+        const jobs = this.secondarySqlJobPool.map((job, index) => ({
+            index: index + 1,
+            jobId: this.resolveSqlJobIdFromObject(job),
+            busy: this.secondarySqlJobPoolBusy.has(job)
+        }));
+
+        return {
+            maxSize: this.getSqlPoolMaxSize(),
+            poolSize: this.secondarySqlJobPool.length,
+            busyCount: this.secondarySqlJobPoolBusy.size,
+            jobs
+        };
+    }
+
+    /**
+     * Development helper to enumerate active SQL Pool Job members.
+     */
+    listSqlPoolJobs(): SqlPoolJobListEntry[] {
+        return this.secondarySqlJobPool.map((job) => ({
+            jobId: this.resolveSqlJobIdFromObject(job),
+            busy: this.secondarySqlJobPoolBusy.has(job)
+        }));
+    }
+
+    private logSqlPoolSnapshot(reason: string): void {
+        if (!isCommandEntryDebugLoggingEnabled()) {
+            return;
+        }
+
+        const snapshot = this.getSqlPoolSnapshot();
+        const members = snapshot.jobs.length > 0
+            ? snapshot.jobs
+                .map((job) => `#${job.index}:${job.jobId ?? '<unknown>'}:${job.busy ? 'busy' : 'idle'}`)
+                .join(', ')
+            : '<empty>';
+
+        this.output?.appendLine(
+            `[Cmd Entry][Pool] ${reason} max=${snapshot.maxSize} size=${snapshot.poolSize} busy=${snapshot.busyCount} members=${members}`
+        );
     }
 
     private logContinuationJsonDump(label: string, result: unknown): void {
@@ -566,22 +659,6 @@ export class CommandEntryJobManager {
                 },
                 route: 'shared',
                 finalReason: `dedicated disabled (${dedicatedEnabledReason})`
-            };
-        }
-
-        if (!remoteServerEnabled) {
-            return {
-                dedicatedEnabled,
-                dedicatedEnabledReason,
-                remoteServerEnabled,
-                remoteServerReason,
-                remoteFlags: {
-                    mapepireUseServer: flagUseServer,
-                    mapepireServerMode: flagServerMode,
-                    connectToRemoteMapepireServer: flagConnectRemote
-                },
-                route: 'shared',
-                finalReason: `single-mode mapepire/shared-job gate active (${remoteServerReason})`
             };
         }
 
@@ -1772,6 +1849,7 @@ export class CommandEntryJobManager {
         this.logRouteSnapshot('runSQL.enter', connection, `rows=${options?.rows ?? '<none>'}`);
 
         const runOnSharedJob = async (reason: string): Promise<RunSQLWithDetailsResult> => {
+            this.debugLog('[Cmd Entry][Route] SQLJob(shared): running statement(s) on shared SQL runner path.');
             try {
                 const sharedExecution = await this.executeSharedSql(connection, statements, options);
                 const sharedResult = sharedExecution.result;
@@ -1820,6 +1898,7 @@ export class CommandEntryJobManager {
 
         this.logDedicatedRouteDecision('runSQLWithDetails.route.dedicated', connection);
         this.logRouteSnapshot('runSQL.route.dedicated', connection);
+        this.debugLog('[Cmd Entry][Route] SQLJob(primary): running statement(s) on dedicated primary SQL job path.');
 
         this.status = 'busy';
         try {
@@ -1991,9 +2070,18 @@ export class CommandEntryJobManager {
             return;
         }
 
-        this.output?.appendLine(`[Cmd Entry] Requesting cancel for private SQL job ${sqlJobId}.`);
-        await connection.runSQL(CANCEL_SQL_STATEMENT, { bindings: [sqlJobId] });
-        this.output?.appendLine(`[Cmd Entry] Dedicated cancel SQL request submitted for ${sqlJobId}.`);
+        const helperJob = await this.ensureCancelRequestPoolJob(connection);
+        const helperJobId = this.resolveSqlJobIdFromObject(helperJob);
+        const helperJobLabel = helperJobId ? `helper job(${helperJobId})` : 'helper job(ID unavailable from Mapepire object)';
+        const sql = `CALL QSYS2.CANCEL_SQL('${sqlJobId.replace(/'/g, "''")}')`;
+
+        this.output?.appendLine(`[Cmd Entry] Requesting cancel for private SQL job ${sqlJobId} via ${helperJobLabel}.`);
+        try {
+            await helperJob.execute(sql);
+            this.output?.appendLine(`[Cmd Entry] Dedicated cancel SQL request submitted for ${sqlJobId} via ${helperJobLabel}.`);
+        } finally {
+            this.releaseSqlPoolJob(helperJob);
+        }
     }
 
     private getCancelRequestTimeoutSeconds(): number {
@@ -2028,23 +2116,139 @@ export class CommandEntryJobManager {
         return undefined;
     }
 
-    private async ensureCancelRequestJob(connection: IBMi): Promise<SqlJobLike> {
-        if (this.cancelRequestJob) {
-            return this.cancelRequestJob;
-        }
-
-        const mapepire = await connection.getComponent('mapepire', { ignoreState: true }) as unknown as MapepireLike | undefined;
+    private async createSqlPoolJob(connection: IBMi): Promise<SqlJobLike> {
+        const t0 = Date.now();
+        const mapepire = await connection.getComponent('mapepire') as unknown as MapepireLike | undefined;
         if (!mapepire) {
-            throw new Error('Code for IBM i Mapepire component is unavailable for Command Entry cancel-request job mode.');
+            throw new Error('Code for IBM i Mapepire component is unavailable for Command Entry pooled secondary SQL job mode.');
         }
 
         const jdbc = this.buildJdbcOptionsForDedicatedJob(connection);
-        this.cancelRequestJob = await mapepire.newJob(connection, { jdbc });
-        const helperJobId = this.resolveSqlJobIdFromObject(this.cancelRequestJob);
+        const job = await mapepire.newJob(connection, { jdbc });
+        const elapsedMs = Date.now() - t0;
+        const helperJobId = this.resolveSqlJobIdFromObject(job);
         this.output?.appendLine(helperJobId
-            ? `[Cmd Entry] Started private cancel-request SQL job ${helperJobId}.`
-            : '[Cmd Entry] Started private cancel-request SQL job (job ID not exposed by Mapepire object).');
-        return this.cancelRequestJob;
+            ? `[Cmd Entry] Started SQL Pool Job ${helperJobId} in ${elapsedMs}ms.`
+            : `[Cmd Entry] Started SQL Pool Job (job ID not exposed by Mapepire object) in ${elapsedMs}ms.`);
+        return job;
+    }
+
+    async warmSqlPoolJob(connection: IBMi): Promise<void> {
+        const key = this.buildConnectionKey(connection);
+        if (this.secondarySqlJobPool.length > 0) {
+            return;
+        }
+
+        const existingWarmup = this.sqlPoolWarmupInFlight.get(key);
+        if (existingWarmup) {
+            await existingWarmup;
+            return;
+        }
+
+        const warmup = (async () => {
+            try {
+                if (this.secondarySqlJobPool.length > 0) {
+                    return;
+                }
+
+                const created = await this.createSqlPoolJob(connection);
+                if (this.secondarySqlJobPool.length === 0) {
+                    this.secondarySqlJobPool.push(created);
+                    this.logSqlPoolSnapshot('warmup:create');
+                }
+            } catch (error) {
+                this.output?.appendLine(`[Cmd Entry] SQL Pool Job warmup failed: ${error instanceof Error ? error.message : String(error)}`);
+            } finally {
+                this.sqlPoolWarmupInFlight.delete(key);
+            }
+        })();
+
+        this.sqlPoolWarmupInFlight.set(key, warmup);
+        await warmup;
+    }
+
+    private async acquireSqlPoolJob(connection: IBMi): Promise<SqlJobLike> {
+        const maxSize = this.getSqlPoolMaxSize();
+        const warmup = this.sqlPoolWarmupInFlight.get(this.buildConnectionKey(connection));
+        if (warmup) {
+            await warmup;
+        }
+
+        const idle = this.secondarySqlJobPool.find((job) => !this.secondarySqlJobPoolBusy.has(job));
+        if (idle) {
+            this.secondarySqlJobPoolBusy.add(idle);
+            this.output?.appendLine(`[Cmd Entry] Reused pooled secondary SQL job. poolSize=${this.secondarySqlJobPool.length} busy=${this.secondarySqlJobPoolBusy.size} max=${maxSize}`);
+            this.logSqlPoolSnapshot('acquire:reuse-idle');
+            return idle;
+        }
+
+        if (this.secondarySqlJobPool.length < maxSize) {
+            const created = await this.createSqlPoolJob(connection);
+            this.secondarySqlJobPool.push(created);
+            this.secondarySqlJobPoolBusy.add(created);
+            const createdJobId = this.resolveSqlJobIdFromObject(created) ?? '<unknown>';
+            this.output?.appendLine(`[Cmd Entry] SQL Pool Job created and added: job=${createdJobId} poolSize=${this.secondarySqlJobPool.length} busy=${this.secondarySqlJobPoolBusy.size} max=${maxSize}`);
+            this.logSqlPoolSnapshot('acquire:create');
+            return created;
+        }
+
+        const fallback = this.secondarySqlJobPool[0];
+        if (!fallback) {
+            throw new Error('No pooled secondary SQL jobs are available.');
+        }
+
+        this.secondarySqlJobPoolBusy.add(fallback);
+        this.output?.appendLine(`[Cmd Entry] Reused oldest pooled secondary SQL job due to full pool. poolSize=${this.secondarySqlJobPool.length} busy=${this.secondarySqlJobPoolBusy.size} max=${maxSize}`);
+        this.logSqlPoolSnapshot('acquire:reuse-oldest');
+        return fallback;
+    }
+
+    private releaseSqlPoolJob(job: SqlJobLike): void {
+        this.secondarySqlJobPoolBusy.delete(job);
+        this.logSqlPoolSnapshot('release');
+    }
+
+    /** SQL Pool Job route used by cancel request operations. */
+    private async ensureCancelRequestPoolJob(connection: IBMi): Promise<SqlJobLike> {
+        return this.acquireSqlPoolJob(connection);
+    }
+
+    /** SQL Pool Job route used by Display Joblog operations. */
+    private async ensureDisplayJoblogPoolJob(connection: IBMi): Promise<SqlJobLike> {
+        return this.acquireSqlPoolJob(connection);
+    }
+
+    async queryJoblog(connection: IBMi, sqlJobId: string): Promise<Record<string, unknown>[]> {
+        const normalizedJob = normalizeSqlJobId(sqlJobId) ?? sqlJobId.trim();
+        if (!normalizedJob) {
+            throw new Error('A valid SQL job ID is required to query its joblog.');
+        }
+
+        const helperJob = await this.ensureDisplayJoblogPoolJob(connection);
+        const statement = buildJoblogQueryForSqlJob(normalizedJob);
+        const helperJobId = this.resolveSqlJobIdFromObject(helperJob);
+        this.output?.appendLine(`[Cmd Entry][Route] SQLPoolJob(DisplayJoblog): targetJob=${normalizedJob} helperJob=${helperJobId ?? '<unknown>'} sql=${statement}`);
+
+        try {
+            const rawResult = await helperJob.execute(statement);
+            const rows = this.rowsFromExecutionResult(rawResult);
+            const rawKeys = rawResult && typeof rawResult === 'object' && !Array.isArray(rawResult)
+                ? Object.keys(rawResult as Record<string, unknown>)
+                : [];
+            this.output?.appendLine(`[Cmd Entry] Display Joblog helper: targetJob=${normalizedJob} helperJob=${helperJobId ?? '<unknown>'} rawResultType=${rawResult === null ? 'null' : Array.isArray(rawResult) ? 'array' : typeof rawResult} rawKeys=${rawKeys.length > 0 ? rawKeys.join(', ') : '<none>'} rowsReturned=${rows.length}`);
+            if (rows.length > 0) {
+                const firstRow = rows[0] as Record<string, unknown> | undefined;
+                const sample = firstRow ? Object.entries(firstRow).slice(0, 8).map(([key, value]) => `${key}=${String(value)}`).join(' | ') : '<none>';
+                this.output?.appendLine(`[Cmd Entry] Display Joblog helper: targetJob=${normalizedJob} firstRowSample=${sample}`);
+            }
+            return rows;
+        } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            this.output?.appendLine(`[Cmd Entry] Display Joblog helper failed: targetJob=${normalizedJob} helperJob=${helperJobId ?? '<unknown>'} error=${message}`);
+            throw error;
+        } finally {
+            this.releaseSqlPoolJob(helperJob);
+        }
     }
 
     async submitCancelRequest(connection: IBMi, sqlJobId: string): Promise<void> {
@@ -2062,22 +2266,26 @@ export class CommandEntryJobManager {
             return;
         }
 
-        const helperJob = await this.ensureCancelRequestJob(connection);
+        const helperJob = await this.ensureCancelRequestPoolJob(connection);
         const helperJobId = this.resolveSqlJobIdFromObject(helperJob);
         const helperJobLabel = helperJobId ? `helper job(${helperJobId})` : 'helper job(ID unavailable from Mapepire object)';
         const sql = `CALL QSYS2.CANCEL_SQL('${normalizedJobId.replace(/'/g, "''")}')`;
 
-        this.output?.appendLine(`[Cmd Entry] Cancel request: target job(${normalizedJobId}) from ${helperJobLabel}`);
-        await helperJob.execute(sql);
-        this.output?.appendLine(`[Cmd Entry] Cancel request submitted: target job(${normalizedJobId}) from ${helperJobLabel}.`);
+        this.output?.appendLine(`[Cmd Entry][Route] SQLPoolJob(CancelRequest): target job(${normalizedJobId}) from ${helperJobLabel}`);
+        try {
+            await helperJob.execute(sql);
+            this.output?.appendLine(`[Cmd Entry] Cancel request submitted: target job(${normalizedJobId}) from ${helperJobLabel}.`);
 
-        if (this.cancelRequestMonitor?.timer) {
-            this.output?.appendLine(`[Cmd Entry] Cancel request verification timer stopped for target job(${normalizedJobId}): the request has already been accepted and the target job is no longer waiting on the prior command.`);
-            clearTimeout(this.cancelRequestMonitor.timer);
+            if (this.cancelRequestMonitor?.timer) {
+                this.output?.appendLine(`[Cmd Entry] Cancel request verification timer stopped for target job(${normalizedJobId}): the request has already been accepted and the target job is no longer waiting on the prior command.`);
+                clearTimeout(this.cancelRequestMonitor.timer);
+            }
+
+            this.cancelRequestMonitor = undefined;
+            this.output?.appendLine(`[Cmd Entry] Cancel request verification timer stopped for target job(${normalizedJobId}): no pending timeout is needed after request acceptance.`);
+        } finally {
+            this.releaseSqlPoolJob(helperJob);
         }
-
-        this.cancelRequestMonitor = undefined;
-        this.output?.appendLine(`[Cmd Entry] Cancel request verification timer stopped for target job(${normalizedJobId}): no pending timeout is needed after request acceptance.`);
     }
 
     private async promptForPendingCancelRequest(connection: IBMi, sqlJobId: string): Promise<void> {
@@ -2118,39 +2326,66 @@ export class CommandEntryJobManager {
     }
 
     async endCancelRequestJob(): Promise<void> {
-        if (!this.cancelRequestJob) {
-            const cancelledTarget = this.cancelRequestMonitor?.targetJobId ?? '<unknown job>';
-            this.output?.appendLine(`[Cmd Entry] Cancel request verification timer stopped for target job(${cancelledTarget}): helper cancel-request job was already unavailable.`);
-            this.cancelRequestMonitor = undefined;
+        const cancelledTarget = this.cancelRequestMonitor?.targetJobId ?? '<unknown job>';
+        this.output?.appendLine(`[Cmd Entry] Cancel request verification timer stopped for target job(${cancelledTarget}): pooled secondary SQL jobs are being closed for cleanup.`);
+        this.cancelRequestMonitor = undefined;
+
+        if (this.secondarySqlJobPool.length === 0) {
             return;
         }
 
-        const jobToClose = this.cancelRequestJob;
-        const cancelledTarget = this.cancelRequestMonitor?.targetJobId ?? '<unknown job>';
-        this.output?.appendLine(`[Cmd Entry] Cancel request verification timer stopped for target job(${cancelledTarget}): user chose to end monitor tracking and the helper cancel-request job was closed for cleanup.`);
-        this.cancelRequestJob = undefined;
-        this.cancelRequestMonitor = undefined;
+        const jobsToClose = [...this.secondarySqlJobPool];
+        this.secondarySqlJobPool.length = 0;
+        this.secondarySqlJobPoolBusy.clear();
 
-        try {
-            if (typeof jobToClose.close === 'function') {
-                await jobToClose.close();
-                return;
+        for (const jobToClose of jobsToClose) {
+            try {
+                if (typeof jobToClose.close === 'function') {
+                    await jobToClose.close();
+                    continue;
+                }
+                if (typeof jobToClose.end === 'function') {
+                    await jobToClose.end();
+                    continue;
+                }
+                if (typeof jobToClose.dispose === 'function') {
+                    await jobToClose.dispose();
+                }
+            } catch (error) {
+                this.output?.appendLine(`[Cmd Entry] Failed to end pooled secondary SQL job during cancel cleanup: ${error instanceof Error ? error.message : String(error)}`);
             }
-            if (typeof jobToClose.end === 'function') {
-                await jobToClose.end();
-                return;
-            }
-            if (typeof jobToClose.dispose === 'function') {
-                await jobToClose.dispose();
-            }
-        } catch (error) {
-            this.output?.appendLine(`[Cmd Entry] Failed to end helper cancel-request job: ${error instanceof Error ? error.message : String(error)}`);
         }
     }
 
     async dispose(): Promise<void> {
         await this.endDedicatedJob();
         await this.endCancelRequestJob();
+
+        if (this.secondarySqlJobPool.length === 0) {
+            return;
+        }
+
+        const jobsToClose = [...this.secondarySqlJobPool];
+        this.secondarySqlJobPool.length = 0;
+        this.secondarySqlJobPoolBusy.clear();
+
+        for (const jobToClose of jobsToClose) {
+            try {
+                if (typeof jobToClose.close === 'function') {
+                    await jobToClose.close();
+                    continue;
+                }
+                if (typeof jobToClose.end === 'function') {
+                    await jobToClose.end();
+                    continue;
+                }
+                if (typeof jobToClose.dispose === 'function') {
+                    await jobToClose.dispose();
+                }
+            } catch (error) {
+                this.output?.appendLine(`[Cmd Entry] Failed to end pooled secondary SQL job: ${error instanceof Error ? error.message : String(error)}`);
+            }
+        }
     }
 
     private readRowString(row: Record<string, unknown>, key: string): string | undefined {
@@ -2248,27 +2483,41 @@ export class CommandEntryJobManager {
             && !this.startupReconnectCompleted.has(key);
 
         this.debugLog('[Cmd Entry] Creating new private SQL job...');
+        const endDedicatedJobStartedAt = Date.now();
         await this.endDedicatedJob();
+        this.output?.appendLine(`[Cmd Entry] endDedicatedJob completed in ${Date.now() - endDedicatedJobStartedAt}ms.`);
+
+        const createDedicatedJobStartedAt = Date.now();
         await this.createDedicatedJob(connection, key, !shouldForceStartupReconnect);
+        this.output?.appendLine(`[Cmd Entry] createDedicatedJob completed in ${Date.now() - createDedicatedJobStartedAt}ms.`);
 
         // In Mapepire server mode, a recycled host job may carry previous session state
         // (for example custom library list). Force one reconnect cycle per connection key
         // at first acquisition so startup behavior matches explicit "Reconnect Server Job".
+        const maybeForceStartupReconnectStartedAt = Date.now();
         await this.maybeForceStartupReconnect(connection, key);
+        this.output?.appendLine(`[Cmd Entry] maybeForceStartupReconnect completed in ${Date.now() - maybeForceStartupReconnectStartedAt}ms.`);
     }
 
     private async createDedicatedJob(connection: IBMi, key: string, runStartupHooks = true): Promise<void> {
+        const t0 = Date.now();
         this.debugLog('[Cmd Entry] Getting Mapepire component from connection...');
-        const mapepire = await connection.getComponent('mapepire', { ignoreState: true }) as unknown as MapepireLike | undefined;
+        const getComponentStartedAt = Date.now();
+        const mapepire = await connection.getComponent('mapepire') as unknown as MapepireLike | undefined;
+        this.output?.appendLine(`[Cmd Entry] Mapepire component fetched in ${Date.now() - getComponentStartedAt}ms.`);
         if (!mapepire) {
             throw new Error('Code for IBM i Mapepire component is unavailable for dedicated CLPROMPTER job mode.');
         }
 
         this.debugLog('[Cmd Entry] Creating new Mapepire job...');
         const jdbc = this.buildJdbcOptionsForDedicatedJob(connection);
+        const newJobStartedAt = Date.now();
         this.job = await mapepire.newJob(connection, { jdbc });
+        this.output?.appendLine(`[Cmd Entry] mapepire.newJob completed in ${Date.now() - newJobStartedAt}ms.`);
+        const elapsedMs = Date.now() - t0;
         this.connectionKey = key;
         this.status = 'ready';
+        this.output?.appendLine(`[Cmd Entry] Primary SQL job created in ${elapsedMs}ms. jobId=${this.dedicatedJobId ?? '<unknown>'}`);
 
         if (runStartupHooks) {
             try {
@@ -2384,13 +2633,20 @@ export class CommandEntryJobManager {
         this.output?.appendLine('[Cmd Entry] Performing startup reconnect cycle for private SQL job to reset host job environment.');
 
         try {
+            const cancelActiveStartedAt = Date.now();
             await this.cancelActive(connection);
+            this.output?.appendLine(`[Cmd Entry] startup reconnect cancelActive completed in ${Date.now() - cancelActiveStartedAt}ms.`);
         } catch (error) {
             this.output?.appendLine(`[Cmd Entry] Startup reconnect cancel request failed (continuing): ${error instanceof Error ? error.message : String(error)}`);
         }
 
+        const endDedicatedJobStartedAt = Date.now();
         await this.endDedicatedJob();
+        this.output?.appendLine(`[Cmd Entry] startup reconnect endDedicatedJob completed in ${Date.now() - endDedicatedJobStartedAt}ms.`);
+
+        const createDedicatedJobStartedAt = Date.now();
         await this.createDedicatedJob(connection, key, true);
+        this.output?.appendLine(`[Cmd Entry] startup reconnect createDedicatedJob completed in ${Date.now() - createDedicatedJobStartedAt}ms.`);
         this.output?.appendLine('[Cmd Entry] Startup reconnect cycle complete. Private SQL job environment reset.');
     }
 

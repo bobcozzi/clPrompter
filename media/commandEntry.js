@@ -8,7 +8,7 @@
   const minTextareaRows = 2;
   const defaultCommandRows = 3;
   const command = document.getElementById('command'), mode = document.getElementById('mode'), severityFilter = document.getElementById('message-severity-filter');
-  const run = document.getElementById('run'), prompt = document.getElementById('prompt'), cmdEntryHelp = document.getElementById('cmdentry-help'), cmdEntrySettings = document.getElementById('cmdentry-settings'), toolbarMenu = document.getElementById('toolbar-menu'), toolbarMenuList = document.getElementById('toolbar-menu-list'), menuViewLog = document.getElementById('menu-view-log'), menuClearLog = document.getElementById('menu-clear-log'), menuClearSqlLog = document.getElementById('menu-clear-sql-log'), menuClearSqlHistory = document.getElementById('menu-clear-sql-history'), menuToggleSqlLog = document.getElementById('menu-toggle-sql-log'), menuToggleMessageDetails = document.getElementById('menu-toggle-message-details'), menuConnectionSettings = document.getElementById('menu-connection-settings'), menuUseSharedSqlJob = document.getElementById('menu-use-shared-sql-job'), menuUsePrivateSqlJob = document.getElementById('menu-use-private-sql-job'), menuStartNewJob = document.getElementById('menu-start-new-job'), menuClearHistory = document.getElementById('menu-clear-history'), menuRunMode = document.getElementById('menu-run-mode'), menuRunModeList = document.getElementById('menu-run-mode-list'), menuRunModeWrap = menuRunMode ? menuRunMode.closest('.toolbar-submenu-wrap') : null, menuRunModeRun = document.getElementById('menu-run-mode-run'), menuRunModeLimit = document.getElementById('menu-run-mode-limit'), menuRunModeCheck = document.getElementById('menu-run-mode-check'), historyPrev = document.getElementById('history-prev'), historyNext = document.getElementById('history-next'), statusJobMenu = document.getElementById('status-job-menu'), statusJobMenuCopy = document.getElementById('status-job-menu-copy'), statusJobMenuDisplayJoblog = document.getElementById('status-job-menu-display-joblog'), statusJobMenuConnectionSettings = document.getElementById('status-job-menu-connection-settings'), statusJobMenuReconnectServerJob = document.getElementById('status-job-menu-reconnect-server-job');
+  const run = document.getElementById('run'), prompt = document.getElementById('prompt'), cmdEntryHelp = document.getElementById('cmdentry-help'), cmdEntrySettings = document.getElementById('cmdentry-settings'), toolbarMenu = document.getElementById('toolbar-menu'), toolbarMenuList = document.getElementById('toolbar-menu-list'), menuViewLog = document.getElementById('menu-view-log'), menuClearLog = document.getElementById('menu-clear-log'), menuClearSqlLog = document.getElementById('menu-clear-sql-log'), menuClearSqlHistory = document.getElementById('menu-clear-sql-history'), menuToggleSqlLog = document.getElementById('menu-toggle-sql-log'), menuToggleMessageDetails = document.getElementById('menu-toggle-message-details'), menuConnectionSettings = document.getElementById('menu-connection-settings'), menuUseSharedSqlJob = document.getElementById('menu-use-shared-sql-job'), menuUsePrivateSqlJob = document.getElementById('menu-use-private-sql-job'), menuStartNewJob = document.getElementById('menu-start-new-job'), menuClearHistory = document.getElementById('menu-clear-history'), menuRunMode = document.getElementById('menu-run-mode'), menuRunModeList = document.getElementById('menu-run-mode-list'), menuRunModeWrap = menuRunMode ? menuRunMode.closest('.toolbar-submenu-wrap') : null, menuRunModeRun = document.getElementById('menu-run-mode-run'), menuRunModeLimit = document.getElementById('menu-run-mode-limit'), menuRunModeCheck = document.getElementById('menu-run-mode-check'), historyPrev = document.getElementById('history-prev'), historyNext = document.getElementById('history-next'), statusJobMenu = document.getElementById('status-job-menu'), statusJobMenuCopy = document.getElementById('status-job-menu-copy'), statusJobMenuDisplayJoblog = document.getElementById('status-job-menu-display-joblog'), statusJobMenuToggleSqlJob = document.getElementById('status-job-menu-toggle-sql-job'), statusJobMenuConnectionSettings = document.getElementById('status-job-menu-connection-settings'), statusJobMenuReconnectServerJob = document.getElementById('status-job-menu-reconnect-server-job');
   const statusText = document.getElementById('status-text'), statusIdentity = document.getElementById('status-identity'), statusJobId = document.getElementById('status-jobid'), results = document.getElementById('results');
   let historyIndex = -1, runningStartedAt, runningTimerId, runningStatusPrefix = l10n.runningStatusPrefix || 'Running…', historyDraft = '', sqlJobPollingId;
   let transientStatusUntil = 0;
@@ -690,6 +690,14 @@
       ? 'Disable logging SQL statements to the Command Entry Log'
       : 'Enable logging SQL statements to the Command Entry Log';
   };
+  const updateStatusJobMenuToggleLabel = () => {
+    if (!statusJobMenuToggleSqlJob) { return; }
+    const switchToShared = !useSharedSqlJob;
+    statusJobMenuToggleSqlJob.textContent = switchToShared ? 'Switch to Shared C4i Job' : 'Switch to Private Job';
+    statusJobMenuToggleSqlJob.title = switchToShared
+      ? 'Use the Code for IBM i SQL job for Command Entry'
+      : 'Use a private SQL job for Command Entry';
+  };
   const applyMessageDetailsMode = () => {
     const expand = areMessageDetailsShown();
     const buckets = ensureExecutionBuckets();
@@ -723,9 +731,10 @@
       statusJobMenuReconnectServerJob.title = reason;
       statusJobMenuReconnectServerJob.setAttribute('aria-disabled', String(!canStartNewJob));
     }
+    updateStatusJobMenuToggleLabel();
     if (menuUseSharedSqlJob) {
       menuUseSharedSqlJob.hidden = !remoteMapepireEnabled;
-      menuUseSharedSqlJob.disabled = !remoteMapepireEnabled || useSharedSqlJob;
+      menuUseSharedSqlJob.disabled = useSharedSqlJob;
       menuUseSharedSqlJob.textContent = `${useSharedSqlJob ? '✓ ' : ''}Use Shared SQL Job`;
       menuUseSharedSqlJob.title = remoteMapepireEnabled
         ? 'Route CL/SQL through the Code for IBM i shared SQL job'
@@ -734,7 +743,7 @@
     }
     if (menuUsePrivateSqlJob) {
       menuUsePrivateSqlJob.hidden = !remoteMapepireEnabled;
-      menuUsePrivateSqlJob.disabled = !remoteMapepireEnabled || !useSharedSqlJob;
+      menuUsePrivateSqlJob.disabled = !useSharedSqlJob;
       menuUsePrivateSqlJob.textContent = `${!useSharedSqlJob ? '✓ ' : ''}Use Private SQL Job`;
       menuUsePrivateSqlJob.title = remoteMapepireEnabled
         ? 'Use a private SQL job for Command Entry'
@@ -1474,6 +1483,11 @@
     closeStatusJobMenu();
     vscode.postMessage({ type: 'requestDisplayJoblog', sqlJobId });
   });
+  statusJobMenuToggleSqlJob?.addEventListener('click', () => {
+    closeStatusJobMenu();
+    vscode.postMessage({ type: useSharedSqlJob ? 'usePrivateSqlJob' : 'useSharedSqlJob' });
+    command.focus();
+  });
   statusJobMenuConnectionSettings?.addEventListener('click', () => {
     closeStatusJobMenu();
     vscode.postMessage({ type: 'openCmdEntrySettings' });
@@ -1487,6 +1501,13 @@
     vscode.postMessage({ type: 'startNewJob' });
     command.focus();
   });
+  document.querySelectorAll('.joblog-button[data-sql-job-id]').forEach(button => {
+    button.addEventListener('click', () => {
+      const sqlJobId = String(button.getAttribute('data-sql-job-id') || '').trim();
+      if (!sqlJobId) { return; }
+      vscode.postMessage({ type: 'requestDisplayJoblog', sqlJobId });
+    });
+  });
   statusJobMenu?.addEventListener('keydown', event => {
     if (event.key === 'Escape') {
       event.preventDefault();
@@ -1499,7 +1520,7 @@
       return;
     }
 
-    const items = [statusJobMenuCopy, statusJobMenuDisplayJoblog, statusJobMenuConnectionSettings, statusJobMenuReconnectServerJob].filter(item => item && !item.disabled);
+    const items = [statusJobMenuCopy, statusJobMenuDisplayJoblog, statusJobMenuToggleSqlJob, statusJobMenuConnectionSettings, statusJobMenuReconnectServerJob].filter(item => item && !item.disabled);
     if (!items.length) { return; }
     event.preventDefault();
     const currentIndex = items.indexOf(document.activeElement);

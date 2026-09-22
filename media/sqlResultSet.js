@@ -15,6 +15,9 @@
     var initialPayload = (bootstrap.initialPayload && typeof bootstrap.initialPayload === 'object')
         ? bootstrap.initialPayload
         : {};
+    var initialColumnMetadata = Array.isArray(initialPayload.columnMetadata) ? initialPayload.columnMetadata : [];
+    var currentColumns = initialColumns.slice();
+    var currentColumnMetadata = initialColumnMetadata.slice();
 
     var vscode = {
         getState: function () { return {}; },
@@ -54,6 +57,229 @@
             .replace(/>/g, '&gt;')
             .replace(/\"/g, '&quot;')
             .replace(/'/g, '&#39;');
+    }
+
+    function normalizeColumnKey(value) {
+        return String(value || '').trim().toUpperCase();
+    }
+
+    function isLikelyNumericType(typeName) {
+        return /^(SMALLINT|INTEGER|INT|BIGINT|DEC|DECIMAL|NUMERIC|DECFLOAT|REAL|DOUBLE|FLOAT)$/i.test(String(typeName || ''));
+    }
+
+    function findMetadataForColumn(columnName, metadata, index) {
+        if (!Array.isArray(metadata) || metadata.length === 0) {
+            return null;
+        }
+
+        if (typeof index === 'number' && index >= 0 && index < metadata.length) {
+            var byIndex = metadata[index];
+            if (byIndex && typeof byIndex === 'object') {
+                return byIndex;
+            }
+        }
+
+        var byName = null;
+        var byLabel = null;
+        var target = normalizeColumnKey(columnName);
+        for (var i = 0; i < metadata.length; i++) {
+            var entry = metadata[i];
+            if (!entry || typeof entry !== 'object') {
+                continue;
+            }
+            if (!byName && normalizeColumnKey(entry.name) === target) {
+                byName = entry;
+            }
+            if (!byLabel && normalizeColumnKey(entry.label) === target) {
+                byLabel = entry;
+            }
+        }
+
+        if (byName) {
+            return byName;
+        }
+        if (byLabel) {
+            return byLabel;
+        }
+
+        return null;
+    }
+
+    function resolveColumnHeaderText(columnName, metadata) {
+        var preferred = '';
+        if (metadata && typeof metadata === 'object') {
+            preferred = String(metadata.label || metadata.name || '').trim();
+        }
+        if (!preferred) {
+            preferred = String(columnName || '');
+        }
+
+        var cleaned = preferred.replace(/\r?\n/g, ' ').replace(/\s{2,}/g, ' ').trim();
+        if (!cleaned) {
+            return String(columnName || '');
+        }
+        return cleaned;
+    }
+
+    function formatTooltipType(metadata) {
+        var typeName = (metadata && (metadata.typeName || metadata.type)) ? String(metadata.typeName || metadata.type).trim() : 'UNKNOWN';
+        var upperType = typeName.toUpperCase();
+        var displaySize = asPositiveNumber(
+            metadata && metadata.displaySize != null ? metadata.displaySize
+                : (metadata && metadata.display_size != null ? metadata.display_size : (metadata ? metadata.precision : undefined))
+        );
+        var scale = asNonNegativeNumber(
+            metadata && metadata.scale != null ? metadata.scale : (metadata ? metadata.numeric_scale : undefined)
+        );
+
+        var integerType = /^(SMALLINT|INTEGER|INT|BIGINT)$/i.test(upperType);
+        var decimalType = /^(NUMERIC|DECIMAL|DEC|DECFLOAT|NUM)$/i.test(upperType);
+        var charLikeType = /^(CHAR|CHARACTER|VARCHAR|CLOB|DBCLOB|GRAPHIC|VARGRAPHIC|BINARY|VARBINARY)$/i.test(upperType);
+
+        if (displaySize) {
+            if (integerType) {
+                return typeName;
+            }
+
+            if (decimalType) {
+                if (scale != null) {
+                    if (upperType === 'NUMERIC' || upperType === 'NUM') {
+                        return 'Zoned(' + displaySize + ', ' + scale + ')';
+                    }
+                    if (upperType === 'DECIMAL' || upperType === 'DEC') {
+                        return 'Dec(' + displaySize + ', ' + scale + ')';
+                    }
+                    return typeName + '(' + displaySize + ', ' + scale + ')';
+                }
+                if (upperType === 'NUMERIC' || upperType === 'NUM') {
+                    return 'Zoned(' + displaySize + ')';
+                }
+                if (upperType === 'DECIMAL' || upperType === 'DEC') {
+                    return 'Dec(' + displaySize + ')';
+                }
+                return typeName + '(' + displaySize + ')';
+            }
+
+            if (charLikeType) {
+                return typeName + '(' + displaySize + ')';
+            }
+        }
+
+        return typeName;
+    }
+
+    function asPositiveNumber(value) {
+        var n = Number(value);
+        if (!isFinite(n) || n <= 0) {
+            return undefined;
+        }
+        return n;
+    }
+
+    function asNonNegativeNumber(value) {
+        var n = Number(value);
+        if (!isFinite(n) || n < 0) {
+            return undefined;
+        }
+        return n;
+    }
+
+    function buildColumnHeaderTooltip(columnName, metadata) {
+        var typeName = 'UNKNOWN';
+        var label = '';
+        var textDescription = '';
+        var isIdentity;
+
+        if (metadata && typeof metadata === 'object') {
+            typeName = String(metadata.typeName || metadata.type || 'UNKNOWN').trim() || 'UNKNOWN';
+            label = String(metadata.label || '').trim();
+            textDescription = String(metadata.textDescription || metadata.text_description || '').trim();
+            isIdentity = metadata.isIdentity;
+        }
+
+        var sqlType = formatTooltipType(metadata);
+
+        var lines = [];
+        if (label && label !== String(columnName || '')) {
+            lines.push('Heading: ' + label);
+        }
+        if (textDescription && textDescription !== String(columnName || '') && (!label || textDescription !== label)) {
+            lines.push('Text: ' + textDescription);
+        }
+        lines.push('Column: ' + String(columnName || ''));
+        lines.push('Type: ' + sqlType);
+        if (typeof isIdentity === 'boolean') {
+            lines.push('Identity: ' + (isIdentity ? 'Yes' : 'No'));
+        }
+
+        return lines.join('\n');
+    }
+
+    function renderColumnHeaderHtml(displayText) {
+        var lines = String(displayText || '')
+            .replace(/\r?\n/g, ' ')
+            .split(/\s+/)
+            .filter(function (part) { return !!part; })
+            .slice(0, 3);
+
+        var visibleLines = lines.length > 0 ? lines : [String(displayText || '')];
+        var spans = '';
+        for (var i = 0; i < visibleLines.length; i++) {
+            spans += '<span>' + escapeHtml(visibleLines[i]) + '</span>';
+        }
+        return '<div class="stacked-header">' + spans + '</div>';
+    }
+
+    function updateColumnHeaders(columnNames, metadata) {
+        var headerRow = document.querySelector('#table-wrap thead tr');
+        if (!headerRow) {
+            return;
+        }
+
+        var headerCells = headerRow.querySelectorAll('th.sortable-col[data-col-index]');
+        var needsRebuild = headerCells.length !== columnNames.length;
+
+        if (needsRebuild) {
+            var rowHeader = headerRow.querySelector('th.row-index-col');
+            var rowHeaderHtml = rowHeader ? rowHeader.outerHTML : '<th class="align-right row-index-col">ROW</th>';
+            var rebuilt = rowHeaderHtml;
+            for (var rebuildIndex = 0; rebuildIndex < columnNames.length; rebuildIndex++) {
+                var rebuildName = String(columnNames[rebuildIndex] || '');
+                var rebuildMeta = findMetadataForColumn(rebuildName, metadata, rebuildIndex);
+                var rebuildHeaderText = resolveColumnHeaderText(rebuildName, rebuildMeta || undefined);
+                var rebuildTooltip = buildColumnHeaderTooltip(rebuildName, rebuildMeta || undefined);
+                var classNames = ['sortable-col'];
+                var rebuildType = rebuildMeta ? String(rebuildMeta.typeName || rebuildMeta.type || '') : '';
+                if (isLikelyNumericType(rebuildType)) {
+                    classNames.push('align-right');
+                }
+                rebuilt += '<th class="' + classNames.join(' ') + '" data-col-index="' + rebuildIndex + '" title="' + escapeHtml(rebuildTooltip) + '" data-tooltip="' + escapeHtml(rebuildTooltip) + '" aria-label="' + escapeHtml(rebuildTooltip) + '" aria-sort="none">' + renderColumnHeaderHtml(rebuildHeaderText) + '</th>';
+            }
+            headerRow.innerHTML = rebuilt;
+            refreshSortableHeaders();
+            attachSortHandlers();
+            attachResizeHandlers();
+            return;
+        }
+
+        for (var i = 0; i < headerCells.length; i++) {
+            var headerCell = headerCells[i];
+            var columnName = String(columnNames[i] || '');
+            var columnMetadata = findMetadataForColumn(columnName, metadata, i);
+            var headerText = resolveColumnHeaderText(columnName, columnMetadata || undefined);
+            var tooltip = buildColumnHeaderTooltip(columnName, columnMetadata || undefined);
+            var stackedHeader = headerCell.querySelector('.stacked-header');
+            if (stackedHeader) {
+                stackedHeader.innerHTML = renderColumnHeaderHtml(headerText).replace(/^<div class="stacked-header">|<\/div>$/g, '');
+            } else {
+                var wrapper = document.createElement('div');
+                wrapper.innerHTML = renderColumnHeaderHtml(headerText);
+                headerCell.insertBefore(wrapper.firstChild, headerCell.firstChild);
+            }
+            headerCell.title = tooltip;
+            headerCell.setAttribute('data-tooltip', tooltip);
+            headerCell.setAttribute('aria-label', tooltip);
+        }
     }
 
     var tbody = document.getElementById('results-body');
@@ -178,7 +404,7 @@
                 continue;
             }
             var outRow = [];
-            for (var c = 0; c < initialColumns.length; c++) {
+            for (var c = 0; c < currentColumns.length; c++) {
                 outRow.push(getCellRawValue(sourceRow[c]));
             }
             data.push(outRow);
@@ -422,7 +648,7 @@
         spacer.style.height = Math.max(0, Math.round(missingRows * averageRowHeight)) + 'px';
     }
 
-    var tableSignature = initialColumns.join('|~|');
+    var tableSignature = currentColumns.join('|~|');
     var widthBySignature = (persistedState.columnWidthsBySignature && typeof persistedState.columnWidthsBySignature === 'object')
         ? persistedState.columnWidthsBySignature
         : {};
@@ -447,6 +673,22 @@
             }
         } catch (_saveError) {
             // Ignore persistence errors.
+        }
+    }
+
+    function setCurrentColumns(columnsFromPayload, metadataFromPayload) {
+        currentColumns = Array.isArray(columnsFromPayload) ? columnsFromPayload.slice() : currentColumns;
+        currentColumnMetadata = Array.isArray(metadataFromPayload) ? metadataFromPayload.slice() : [];
+
+        tableSignature = currentColumns.join('|~|');
+        columnWidths = (tableSignature && widthBySignature[tableSignature] && typeof widthBySignature[tableSignature] === 'object')
+            ? widthBySignature[tableSignature]
+            : {};
+        applyWidths();
+        updateColumnHeaders(currentColumns, currentColumnMetadata);
+        if (sortColumnIndex >= currentColumns.length) {
+            sortColumnIndex = -1;
+            sortDirection = 'asc';
         }
     }
 
@@ -1031,10 +1273,10 @@
 
         var sourceCells = rows[0];
         var entries = [];
-        for (var colIndex = 0; colIndex < initialColumns.length; colIndex++) {
+        for (var colIndex = 0; colIndex < currentColumns.length; colIndex++) {
             entries.push({
                 index: colIndex,
-                columnId: String(initialColumns[colIndex] || ''),
+                columnId: String(currentColumns[colIndex] || ''),
                 cell: sourceCells[colIndex] || {}
             });
         }
@@ -1297,7 +1539,13 @@
         return 0;
     }
 
-    var sortableHeaders = document.querySelectorAll('#table-wrap thead th.sortable-col[data-col-index]');
+    var sortableHeaders = [];
+
+    function refreshSortableHeaders() {
+        sortableHeaders = document.querySelectorAll('#table-wrap thead th.sortable-col[data-col-index]');
+    }
+
+    refreshSortableHeaders();
 
     function updateSortIndicators() {
         for (var i = 0; i < sortableHeaders.length; i++) {
@@ -1361,9 +1609,13 @@
     function attachSortHandlers() {
         for (var i = 0; i < sortableHeaders.length; i++) {
             (function (header) {
+                if (header.getAttribute('data-sort-bound') === 'true') {
+                    return;
+                }
                 var colIndex = Number(header.getAttribute('data-col-index') || -1);
                 header.tabIndex = 0;
                 header.setAttribute('role', 'button');
+                header.setAttribute('data-sort-bound', 'true');
                 header.addEventListener('click', function () {
                     if (Date.now() < suppressSortUntil) {
                         return;
@@ -1406,6 +1658,9 @@
     function attachResizeHandlers() {
         for (var i = 0; i < sortableHeaders.length; i++) {
             (function (header) {
+                if (header.querySelector('.col-resize-handle')) {
+                    return;
+                }
                 var colIndex = Number(header.getAttribute('data-col-index') || -1);
                 if (!isFinite(colIndex) || Math.floor(colIndex) !== colIndex || colIndex < 0) {
                     return;
@@ -1714,7 +1969,7 @@
             if (vscode.postMessage) {
                 vscode.postMessage({
                     type: 'copyResultSet',
-                    columns: initialColumns,
+                    columns: currentColumns,
                     rows: collectLoadedRowsForExport()
                 });
             }
@@ -1731,7 +1986,7 @@
                 vscode.postMessage({
                     type: 'saveResultSet',
                     resultTitle: resultTitle,
-                    columns: initialColumns,
+                    columns: currentColumns,
                     rows: collectLoadedRowsForExport()
                 });
             }
@@ -1799,6 +2054,7 @@
         rerunInFlight = false;
         var payload = message.payload;
         rows = (payload.rowCells && Array.isArray(payload.rowCells)) ? payload.rowCells.slice() : [];
+        setCurrentColumns(payload.columns, payload.columnMetadata);
         resultTitle = String(payload.resultTitle || '').trim();
         sessionId = payload.sessionId || '';
         hasMoreRows = !!payload.hasMoreRows;
@@ -1835,6 +2091,7 @@
         updatePageSizeFromSelection();
         setRerunBusy(false);
         updatePagingButtonTitles();
+        updateColumnHeaders(currentColumns, currentColumnMetadata);
         attachSortHandlers();
         attachResizeHandlers();
         applyWidths();

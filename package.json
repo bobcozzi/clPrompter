@@ -2,7 +2,7 @@
   "name": "clprompter",
   "displayName": "%displayName%",
   "description": "%description%",
-  "version": "1.0.44",
+  "version": "1.0.45",
   "author": {
     "name": "Bob Cozzi",
     "url": "https://github.com/bobcozzi"
@@ -277,6 +277,12 @@
           "default": true,
           "description": "%contributes.configuration.properties.clPrompter.cmdEntryDisplay.description%"
         },
+        "clPrompter.cmdEntryAutoSwitchOnStartup": {
+          "order": 100.1,
+          "type": "boolean",
+          "default": false,
+          "description": "%contributes.configuration.properties.clPrompter.cmdEntryAutoSwitchOnStartup.description%"
+        },
         "clPrompter.cmdEntrySQLUseSharedJob": {
           "order": 101,
           "type": "boolean",
@@ -295,6 +301,14 @@
           "default": 120,
           "minimum": 1,
           "description": "%contributes.configuration.properties.clPrompter.cmdEntryCancelRequestTimeoutSeconds.description%"
+        },
+        "clPrompter.cmdEntryMaxSQLJobPoolJobs": {
+          "order": 102.6,
+          "type": "integer",
+          "default": 3,
+          "minimum": 1,
+          "maximum": 20,
+          "description": "%contributes.configuration.properties.clPrompter.cmdEntryMaxSQLJobPoolJobs.description%"
         },
         "clPrompter.cmdEntrySqlFetchRowLimit": {
           "order": 104,
@@ -872,7 +886,7 @@
     "build": "npm run compile && npm run compile-webview && npm run copy-assets && npm run copy-nls",
     "test:name-validation": "tsc src/test/testNameTypeValidation.ts --outDir out --module commonjs --target es2020 --esModuleInterop --skipLibCheck && node out/test/testNameTypeValidation.js",
     "test:api": "tsc src/testAPICall.ts --outDir out --module commonjs --target es2020 --esModuleInterop --skipLibCheck && node out/testAPICall.js",
-    "test:command-entry": "tsc src/test/testCommandEntry.ts --outDir out --module commonjs --target es2020 --esModuleInterop --skipLibCheck && node out/testCommandEntry.js",
+    "test:command-entry": "tsc src/commandEntryModel.ts src/commandEntryPrefixes.ts src/commandEntrySqlHelpers.ts src/commandEntrySqlSettings.ts src/commandEntryJobManager.ts src/sqlSyntaxChecker.ts src/test/testCommandEntry.ts --outDir out --module commonjs --target es2020 --esModuleInterop --skipLibCheck --rootDir src && node out/test/testCommandEntry.js",
     "test:dep-qual-default": "tsc src/test/testDepQualDefault.ts --outDir out --module commonjs --target es2020 --esModuleInterop --skipLibCheck && node out/test/testDepQualDefault.js"
   },
   "devDependencies": {

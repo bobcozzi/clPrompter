@@ -1,0 +1,1013 @@
+[Cmd Entry][SnippetTree] created view=clprompter.codeSnippetManagerView initialSnippets=14
+[Cmd Entry][Context] clprompter.ibmiLoaded=true reason=code-for-ibmi-activated
+[Cmd Entry][JobRoute] getState.shared.serverDisabled connObj=1 key=10.0.0.21|cozzi|22 dedicatedEnabled=true serverEnabled=false sharedSqlJobObj=1 sharedJobStatus=busy sharedJobId=904087/QUSER/QZDASOINIT sharedJobIdRaw=904087/QUSER/QZDASOINIT observedSharedJobId=<none> dedicatedJobId=<none> status=ended
+[Cmd Entry] SQL job display ID changed: <none> -> 904087/QUSER/QZDASOINIT
+[Cmd Entry][JobRoute] getState.shared.serverDisabled connObj=1 key=10.0.0.21|cozzi|22 dedicatedEnabled=true serverEnabled=false sharedSqlJobObj=1 sharedJobStatus=busy sharedJobId=904087/QUSER/QZDASOINIT sharedJobIdRaw=904087/QUSER/QZDASOINIT observedSharedJobId=<none> dedicatedJobId=<none> status=ended
+[Cmd Entry][MapepireDump] connected-event connection=COZZIP1 user=COZZI host=10.0.0.21 sqlRunnerAvailable=true sharedJobStatus=busy sharedJobId=904087/QUSER/QZDASOINIT
+[Cmd Entry][MapepireDump] connected-event config mapepireAllowSelfCert=true, mapepireExtendedMetadata=true, mapepireJavaVersion="default", mapepireMetadataSource="0", mapepireServerPort="8076", mapepireUseServer=false
+[Cmd Entry][Context] clprompter.connected=true reason=ibmi-connected-event
+[Cmd Entry][SnippetTree] visibility changed visible=true
+[Cmd Entry][JobRoute] getState.shared.serverDisabled connObj=1 key=10.0.0.21|cozzi|22 dedicatedEnabled=true serverEnabled=false sharedSqlJobObj=1 sharedJobStatus=ready sharedJobId=904087/QUSER/QZDASOINIT sharedJobIdRaw=904087/QUSER/QZDASOINIT observedSharedJobId=<none> dedicatedJobId=<none> status=ended
+[Cmd Entry][JobRoute] getState.shared.serverDisabled connObj=1 key=10.0.0.21|cozzi|22 dedicatedEnabled=true serverEnabled=false sharedSqlJobObj=1 sharedJobStatus=ready sharedJobId=904087/QUSER/QZDASOINIT sharedJobIdRaw=904087/QUSER/QZDASOINIT observedSharedJobId=<none> dedicatedJobId=<none> status=ended
+[Cmd Entry][JobRoute] getState.shared.serverDisabled connObj=1 key=10.0.0.21|cozzi|22 dedicatedEnabled=true serverEnabled=false sharedSqlJobObj=1 sharedJobStatus=ready sharedJobId=904087/QUSER/QZDASOINIT sharedJobIdRaw=904087/QUSER/QZDASOINIT observedSharedJobId=<none> dedicatedJobId=<none> status=ended
+[Cmd Entry][SQLPolicy] query.start continuationOnly=true dedicatedUsable=false
+[Cmd Entry][SQLDiag] query.start dedicatedUsable=false maxRows=500 prefetchRows=200 unlimited=false userManagedLimiter=false
+[Cmd Entry][GateDiag] runSQLWithDetails.enter route=shared finalReason=remote server disabled (mapepireUseServer=false, mapepireServerMode=false, connectToRemoteMapepireServer=false) dedicatedEnabled=true dedicatedReason=connection cmdEntry.sharedSQLJob=false remoteServerEnabled=false remoteReason=mapepireUseServer=false, mapepireServerMode=false, connectToRemoteMapepireServer=false
+[Cmd Entry][runSQLWithDetails] route=shared-only rows=<none> sql=
+SELECT SYSTEM_SCHEMA_NAME, TYPE, ORDINAL_POSITION
+FROM QSYS2.LIBRARY_LIST_INFO
+ORDER BY ORDINAL_POSITION
+
+[Cmd Entry][JobRoute] runSQL.enter connObj=1 key=10.0.0.21|cozzi|22 dedicatedEnabled=true serverEnabled=false sharedSqlJobObj=1 sharedJobStatus=ready sharedJobId=904087/QUSER/QZDASOINIT sharedJobIdRaw=904087/QUSER/QZDASOINIT observedSharedJobId=<none> dedicatedJobId=<none> status=ended rows=<none>
+[Cmd Entry][GateDiag] runSQLWithDetails.route.shared route=shared finalReason=remote server disabled (mapepireUseServer=false, mapepireServerMode=false, connectToRemoteMapepireServer=false) dedicatedEnabled=true dedicatedReason=connection cmdEntry.sharedSQLJob=false remoteServerEnabled=false remoteReason=mapepireUseServer=false, mapepireServerMode=false, connectToRemoteMapepireServer=false
+[Cmd Entry][JobRoute] runSQL.route.shared.dedicatedDisabled connObj=1 key=10.0.0.21|cozzi|22 dedicatedEnabled=true serverEnabled=false sharedSqlJobObj=1 sharedJobStatus=ready sharedJobId=904087/QUSER/QZDASOINIT sharedJobIdRaw=904087/QUSER/QZDASOINIT observedSharedJobId=<none> dedicatedJobId=<none> status=ended
+[Cmd Entry][Route] SQLJob(shared): running statement(s) on shared SQL runner path.
+[Cmd Entry][ContinuationCandidate] source=shared keys=id, has_results, update_count, metadata, data, is_done, success, execution_time, fetchMore, close interestingKeys=id, is_done, fetchMore nested=n1={column_count, job, columns}
+[Cmd Entry][ContinuationCandidate] source=shared filtered={
+  "id": "query38",
+  "is_done": true,
+  "fetchMore": "[Function]"
+}
+[Cmd Entry][SQLDiag] shared execute signature=query.execute requestedRows=<none>
+[Cmd Entry] job.execute() returned object with .data array containing 10 rows
+[Cmd Entry][ContinuationCandidate] source=shared keys=id, has_results, update_count, metadata, data, is_done, success, execution_time, fetchMore, close interestingKeys=id, is_done, fetchMore nested=n1={column_count, job, columns}
+[Cmd Entry][ContinuationCandidate] source=shared filtered={
+  "id": "query38",
+  "is_done": true,
+  "fetchMore": "[Function]"
+}
+[Cmd Entry][ContinuationDump] route=shared requestedRows=<none> summary top(id=query38,cont_id=<none>,is_done=true,fetchMore=true) nested(id=<none>,cont_id=<none>,is_done=<unknown>,fetchMore=false)
+[Cmd Entry][ContinuationDump] route=shared requestedRows=<none> {
+  "id": "query38",
+  "has_results": true,
+  "update_count": -1,
+  "metadata": {
+    "column_count": 3,
+    "job": "904087/QUSER/QZDASOINIT",
+    "columns": [
+      {
+        "name": "SYSTEM_SCHEMA_NAME",
+        "type": "VARCHAR",
+        "display_size": 10,
+        "label": "SYSTEM_SCHEMA_NAME",
+        "precision": 10,
+        "scale": 0,
+        "autoIncrement": false,
+        "nullable": 1,
+        "readOnly": true,
+        "writeable": false,
+        "table": ""
+      },
+      {
+        "name": "TYPE",
+        "type": "VARCHAR",
+        "display_size": 15,
+        "label": "TYPE",
+        "precision": 15,
+        "scale": 0,
+        "autoIncrement": false,
+        "nullable": 1,
+        "readOnly": true,
+        "writeable": false,
+        "table": ""
+      },
+      {
+        "name": "ORDINAL_POSITION",
+        "type": "INTEGER",
+        "display_size": 11,
+        "label": "ORDINAL_POSITION",
+        "precision": 10,
+        "scale": 0,
+        "autoIncrement": false,
+        "nullable": 1,
+        "readOnly": true,
+        "writeable": false,
+        "table": ""
+      }
+    ]
+  },
+  "data": "[data omitted: 10 row(s)]",
+  "is_done": true,
+  "success": true,
+  "execution_time": 8,
+  "fetchMore": "[Function]",
+  "close": "[Function]"
+}
+[Cmd Entry][SQLDiag] route=shared signature=query.execute requestedRows=<none> extractedRows=10 reportedRows=<none> continuationFetchMore=true isDone=true
+[Cmd Entry] shared continuation tuple type=<none> id=query38 cont_id=<none> is_done=true fetchMore=true
+[Cmd Entry][JobRoute] observed shared job ID changed (sharedOnlyMode) <none> -> 904087/QUSER/QZDASOINIT
+[Cmd Entry][GateDiag] runSQLWithDetails.enter route=shared finalReason=remote server disabled (mapepireUseServer=false, mapepireServerMode=false, connectToRemoteMapepireServer=false) dedicatedEnabled=true dedicatedReason=connection cmdEntry.sharedSQLJob=false remoteServerEnabled=false remoteReason=mapepireUseServer=false, mapepireServerMode=false, connectToRemoteMapepireServer=false
+[Cmd Entry][runSQLWithDetails] route=shared-only rows=<none> sql=VALUES CURRENT SCHEMA
+[Cmd Entry][JobRoute] runSQL.enter connObj=1 key=10.0.0.21|cozzi|22 dedicatedEnabled=true serverEnabled=false sharedSqlJobObj=1 sharedJobStatus=ready sharedJobId=904087/QUSER/QZDASOINIT sharedJobIdRaw=904087/QUSER/QZDASOINIT observedSharedJobId=904087/QUSER/QZDASOINIT dedicatedJobId=<none> status=ended rows=<none>
+[Cmd Entry][GateDiag] runSQLWithDetails.route.shared route=shared finalReason=remote server disabled (mapepireUseServer=false, mapepireServerMode=false, connectToRemoteMapepireServer=false) dedicatedEnabled=true dedicatedReason=connection cmdEntry.sharedSQLJob=false remoteServerEnabled=false remoteReason=mapepireUseServer=false, mapepireServerMode=false, connectToRemoteMapepireServer=false
+[Cmd Entry][JobRoute] runSQL.route.shared.dedicatedDisabled connObj=1 key=10.0.0.21|cozzi|22 dedicatedEnabled=true serverEnabled=false sharedSqlJobObj=1 sharedJobStatus=ready sharedJobId=904087/QUSER/QZDASOINIT sharedJobIdRaw=904087/QUSER/QZDASOINIT observedSharedJobId=904087/QUSER/QZDASOINIT dedicatedJobId=<none> status=ended
+[Cmd Entry][Route] SQLJob(shared): running statement(s) on shared SQL runner path.
+[Cmd Entry][ContinuationCandidate] source=shared keys=id, has_results, update_count, metadata, data, is_done, success, execution_time, fetchMore, close interestingKeys=id, is_done, fetchMore nested=n1={column_count, job, columns}
+[Cmd Entry][ContinuationCandidate] source=shared filtered={
+  "id": "query39",
+  "is_done": true,
+  "fetchMore": "[Function]"
+}
+[Cmd Entry][SQLDiag] shared execute signature=query.execute requestedRows=<none>
+[Cmd Entry] job.execute() returned object with .data array containing 1 rows
+[Cmd Entry][ContinuationCandidate] source=shared keys=id, has_results, update_count, metadata, data, is_done, success, execution_time, fetchMore, close interestingKeys=id, is_done, fetchMore nested=n1={column_count, job, columns}
+[Cmd Entry][ContinuationCandidate] source=shared filtered={
+  "id": "query39",
+  "is_done": true,
+  "fetchMore": "[Function]"
+}
+[Cmd Entry][ContinuationDump] route=shared requestedRows=<none> summary top(id=query39,cont_id=<none>,is_done=true,fetchMore=true) nested(id=<none>,cont_id=<none>,is_done=<unknown>,fetchMore=false)
+[Cmd Entry][ContinuationDump] route=shared requestedRows=<none> {
+  "id": "query39",
+  "has_results": true,
+  "update_count": -1,
+  "metadata": {
+    "column_count": 1,
+    "job": "904087/QUSER/QZDASOINIT",
+    "columns": [
+      {
+        "name": "00001",
+        "type": "VARCHAR",
+        "display_size": 128,
+        "label": "00001",
+        "precision": 128,
+        "scale": 0,
+        "autoIncrement": false,
+        "nullable": 0,
+        "readOnly": true,
+        "writeable": false,
+        "table": ""
+      }
+    ]
+  },
+  "data": "[data omitted: 1 row(s)]",
+  "is_done": true,
+  "success": true,
+  "execution_time": 4,
+  "fetchMore": "[Function]",
+  "close": "[Function]"
+}
+[Cmd Entry][SQLDiag] route=shared signature=query.execute requestedRows=<none> extractedRows=1 reportedRows=<none> continuationFetchMore=true isDone=true
+[Cmd Entry] shared continuation tuple type=<none> id=query39 cont_id=<none> is_done=true fetchMore=true
+[Cmd Entry][GateDiag] runSQLWithDetails.enter route=shared finalReason=remote server disabled (mapepireUseServer=false, mapepireServerMode=false, connectToRemoteMapepireServer=false) dedicatedEnabled=true dedicatedReason=connection cmdEntry.sharedSQLJob=false remoteServerEnabled=false remoteReason=mapepireUseServer=false, mapepireServerMode=false, connectToRemoteMapepireServer=false
+[Cmd Entry][runSQLWithDetails] route=shared-only rows=200 sql=select * from qiws.qcustcdt
+[Cmd Entry][JobRoute] runSQL.enter connObj=1 key=10.0.0.21|cozzi|22 dedicatedEnabled=true serverEnabled=false sharedSqlJobObj=1 sharedJobStatus=ready sharedJobId=904087/QUSER/QZDASOINIT sharedJobIdRaw=904087/QUSER/QZDASOINIT observedSharedJobId=904087/QUSER/QZDASOINIT dedicatedJobId=<none> status=ended rows=200
+[Cmd Entry][GateDiag] runSQLWithDetails.route.shared route=shared finalReason=remote server disabled (mapepireUseServer=false, mapepireServerMode=false, connectToRemoteMapepireServer=false) dedicatedEnabled=true dedicatedReason=connection cmdEntry.sharedSQLJob=false remoteServerEnabled=false remoteReason=mapepireUseServer=false, mapepireServerMode=false, connectToRemoteMapepireServer=false
+[Cmd Entry][JobRoute] runSQL.route.shared.dedicatedDisabled connObj=1 key=10.0.0.21|cozzi|22 dedicatedEnabled=true serverEnabled=false sharedSqlJobObj=1 sharedJobStatus=ready sharedJobId=904087/QUSER/QZDASOINIT sharedJobIdRaw=904087/QUSER/QZDASOINIT observedSharedJobId=904087/QUSER/QZDASOINIT dedicatedJobId=<none> status=ended
+[Cmd Entry][Route] SQLJob(shared): running statement(s) on shared SQL runner path.
+[Cmd Entry] Requesting up to 200 SQL rows from shared job.
+[Cmd Entry][ContinuationCandidate] source=shared keys=id, has_results, update_count, metadata, data, is_done, success, execution_time, fetchMore, close interestingKeys=id, is_done, fetchMore nested=n1={column_count, job, columns}
+[Cmd Entry][ContinuationCandidate] source=shared filtered={
+  "id": "query40",
+  "is_done": true,
+  "fetchMore": "[Function]"
+}
+[Cmd Entry][SQLDiag] shared execute signature=query.executeRows requestedRows=200
+[Cmd Entry] job.execute() returned object with .data array containing 12 rows
+[Cmd Entry][ContinuationCandidate] source=shared keys=id, has_results, update_count, metadata, data, is_done, success, execution_time, fetchMore, close interestingKeys=id, is_done, fetchMore nested=n1={column_count, job, columns}
+[Cmd Entry][ContinuationCandidate] source=shared filtered={
+  "id": "query40",
+  "is_done": true,
+  "fetchMore": "[Function]"
+}
+[Cmd Entry][ContinuationDump] route=shared requestedRows=200 summary top(id=query40,cont_id=<none>,is_done=true,fetchMore=true) nested(id=<none>,cont_id=<none>,is_done=<unknown>,fetchMore=false)
+[Cmd Entry][ContinuationDump] route=shared requestedRows=200 {
+  "id": "query40",
+  "has_results": true,
+  "update_count": -1,
+  "metadata": {
+    "column_count": 11,
+    "job": "904087/QUSER/QZDASOINIT",
+    "columns": [
+      {
+        "name": "CUSNUM",
+        "type": "NUMERIC",
+        "display_size": 8,
+        "label": "CUSNUM",
+        "precision": 6,
+        "scale": 0,
+        "autoIncrement": false,
+        "nullable": 0,
+        "readOnly": true,
+        "writeable": false,
+        "table": ""
+      },
+      {
+        "name": "LSTNAM",
+        "type": "CHAR",
+        "display_size": 8,
+        "label": "LSTNAM",
+        "precision": 8,
+        "scale": 0,
+        "autoIncrement": false,
+        "nullable": 0,
+        "readOnly": true,
+        "writeable": false,
+        "table": ""
+      },
+      {
+        "name": "INIT",
+        "type": "CHAR",
+        "display_size": 3,
+        "label": "INIT",
+        "precision": 3,
+        "scale": 0,
+        "autoIncrement": false,
+        "nullable": 0,
+        "readOnly": true,
+        "writeable": false,
+        "table": ""
+      },
+      {
+        "name": "STREET",
+        "type": "CHAR",
+        "display_size": 13,
+        "label": "STREET",
+        "precision": 13,
+        "scale": 0,
+        "autoIncrement": false,
+        "nullable": 0,
+        "readOnly": true,
+        "writeable": false,
+        "table": ""
+      },
+      {
+        "name": "CITY",
+        "type": "CHAR",
+        "display_size": 6,
+        "label": "CITY",
+        "precision": 6,
+        "scale": 0,
+        "autoIncrement": false,
+        "nullable": 0,
+        "readOnly": true,
+        "writeable": false,
+        "table": ""
+      },
+      {
+        "name": "STATE",
+        "type": "CHAR",
+        "display_size": 2,
+        "label": "STATE",
+        "precision": 2,
+        "scale": 0,
+        "autoIncrement": false,
+        "nullable": 0,
+        "readOnly": true,
+        "writeable": false,
+        "table": ""
+      },
+      {
+        "name": "ZIPCOD",
+        "type": "NUMERIC",
+        "display_size": 7,
+        "label": "ZIPCOD",
+        "precision": 5,
+        "scale": 0,
+        "autoIncrement": false,
+        "nullable": 0,
+        "readOnly": true,
+        "writeable": false,
+        "table": ""
+      },
+      {
+        "name": "CDTLMT",
+        "type": "NUMERIC",
+        "display_size": 6,
+        "label": "CDTLMT",
+        "precision": 4,
+        "scale": 0,
+        "autoIncrement": false,
+        "nullable": 0,
+        "readOnly": true,
+        "writeable": false,
+        "table": ""
+      },
+      {
+        "name": "CHGCOD",
+        "type": "NUMERIC",
+        "display_size": 3,
+        "label": "CHGCOD",
+        "precision": 1,
+        "scale": 0,
+        "autoIncrement": false,
+        "nullable": 0,
+        "readOnly": true,
+        "writeable": false,
+        "table": ""
+      },
+      {
+        "name": "BALDUE",
+        "type": "NUMERIC",
+        "display_size": 8,
+        "label": "BALDUE",
+        "precision": 6,
+        "scale": 2,
+        "autoIncrement": false,
+        "nullable": 0,
+        "readOnly": true,
+        "writeable": false,
+        "table": ""
+      },
+      {
+        "name": "CDTDUE",
+        "type": "NUMERIC",
+        "display_size": 8,
+        "label": "CDTDUE",
+        "precision": 6,
+        "scale": 2,
+        "autoIncrement": false,
+        "nullable": 0,
+        "readOnly": true,
+        "writeable": false,
+        "table": ""
+      }
+    ]
+  },
+  "data": "[data omitted: 12 row(s)]",
+  "is_done": true,
+  "success": true,
+  "execution_time": 26,
+  "fetchMore": "[Function]",
+  "close": "[Function]"
+}
+[Cmd Entry][SQLDiag] route=shared signature=query.executeRows requestedRows=200 extractedRows=12 reportedRows=<none> continuationFetchMore=true isDone=true
+[Cmd Entry] shared continuation tuple type=<none> id=query40 cont_id=<none> is_done=true fetchMore=true
+[Cmd Entry][SQLDiag] query.firstChunk rows=12 requested=200 continuationType=<none> hasFetchMore=true isDone=true contId=<none> id=query40
+[Cmd Entry][SQLPolicy] query.firstChunk rows=12 requested=200 tuple(type=<none>,id=query40,cont_id=<none>,is_done=true,hasFetchMore=true)
+[Cmd Entry][SQLPolicy] query.continuationDecision rawResult=true continuationAvailable=false reason=continuation-unusable (id=query40,cont_id=<none>,is_done=true,hasFetchMore=true)
+[Cmd Entry][SQLPolicy] query.branch continuationUnavailable action=singlePageOnly
+[Cmd Entry][SQLPolicy] query.end rows=12 hasMore=false sessionId=<none>
+[Cmd Entry][SQLDiag] query.end rows=12 hasMore=false sessionId=<none> fetchSize=500
+[Cmd Entry][SQLDiag] query.messageCreated text="12 rows returned (rows per fetch 500)" elapsedMs=26 rowCount=12 hasMoreRows=false sessionId=<none>
+[Cmd Entry][GateDiag] runSQLWithDetails.enter route=shared finalReason=remote server disabled (mapepireUseServer=false, mapepireServerMode=false, connectToRemoteMapepireServer=false) dedicatedEnabled=true dedicatedReason=connection cmdEntry.sharedSQLJob=false remoteServerEnabled=false remoteReason=mapepireUseServer=false, mapepireServerMode=false, connectToRemoteMapepireServer=false
+[Cmd Entry][runSQLWithDetails] route=shared-only rows=<none> sql=SELECT COLUMN_NAME, COLUMN_HEADING, COLUMN_TEXT, DATA_TYPE, LENGTH, NUMERIC_SCALE, DDS_TYPE, IS_IDENTITY, ORDINAL_POSITION
+FROM QSYS2.SYSCOLUMNS2
+WHERE TABLE_SCHEMA = 'QIWS'
+    AND TABLE_NAME = 'QCUSTCDT'
+ORDER BY ORDINAL_POSITION
+[Cmd Entry][JobRoute] runSQL.enter connObj=1 key=10.0.0.21|cozzi|22 dedicatedEnabled=true serverEnabled=false sharedSqlJobObj=1 sharedJobStatus=ready sharedJobId=904087/QUSER/QZDASOINIT sharedJobIdRaw=904087/QUSER/QZDASOINIT observedSharedJobId=904087/QUSER/QZDASOINIT dedicatedJobId=<none> status=ended rows=<none>
+[Cmd Entry][GateDiag] runSQLWithDetails.route.shared route=shared finalReason=remote server disabled (mapepireUseServer=false, mapepireServerMode=false, connectToRemoteMapepireServer=false) dedicatedEnabled=true dedicatedReason=connection cmdEntry.sharedSQLJob=false remoteServerEnabled=false remoteReason=mapepireUseServer=false, mapepireServerMode=false, connectToRemoteMapepireServer=false
+[Cmd Entry][JobRoute] runSQL.route.shared.dedicatedDisabled connObj=1 key=10.0.0.21|cozzi|22 dedicatedEnabled=true serverEnabled=false sharedSqlJobObj=1 sharedJobStatus=ready sharedJobId=904087/QUSER/QZDASOINIT sharedJobIdRaw=904087/QUSER/QZDASOINIT observedSharedJobId=904087/QUSER/QZDASOINIT dedicatedJobId=<none> status=ended
+[Cmd Entry][Route] SQLJob(shared): running statement(s) on shared SQL runner path.
+[Cmd Entry][ContinuationCandidate] source=shared keys=id, has_results, update_count, metadata, data, is_done, success, execution_time, fetchMore, close interestingKeys=id, is_done, fetchMore nested=n1={column_count, job, columns}
+[Cmd Entry][ContinuationCandidate] source=shared filtered={
+  "id": "query41",
+  "is_done": true,
+  "fetchMore": "[Function]"
+}
+[Cmd Entry][SQLDiag] shared execute signature=query.execute requestedRows=<none>
+[Cmd Entry] job.execute() returned object with .data array containing 11 rows
+[Cmd Entry][ContinuationCandidate] source=shared keys=id, has_results, update_count, metadata, data, is_done, success, execution_time, fetchMore, close interestingKeys=id, is_done, fetchMore nested=n1={column_count, job, columns}
+[Cmd Entry][ContinuationCandidate] source=shared filtered={
+  "id": "query41",
+  "is_done": true,
+  "fetchMore": "[Function]"
+}
+[Cmd Entry][ContinuationDump] route=shared requestedRows=<none> summary top(id=query41,cont_id=<none>,is_done=true,fetchMore=true) nested(id=<none>,cont_id=<none>,is_done=<unknown>,fetchMore=false)
+[Cmd Entry][ContinuationDump] route=shared requestedRows=<none> {
+  "id": "query41",
+  "has_results": true,
+  "update_count": -1,
+  "metadata": {
+    "column_count": 9,
+    "job": "904087/QUSER/QZDASOINIT",
+    "columns": [
+      {
+        "name": "COLUMN_NAME",
+        "type": "VARCHAR",
+        "display_size": 128,
+        "label": "COLUMN_NAME",
+        "precision": 128,
+        "scale": 0,
+        "autoIncrement": false,
+        "nullable": 1,
+        "readOnly": true,
+        "writeable": false,
+        "table": ""
+      },
+      {
+        "name": "COLUMN_HEADING",
+        "type": "NVARCHAR",
+        "display_size": 60,
+        "label": "COLUMN_HEADING",
+        "precision": 60,
+        "scale": 0,
+        "autoIncrement": false,
+        "nullable": 1,
+        "readOnly": true,
+        "writeable": false,
+        "table": ""
+      },
+      {
+        "name": "COLUMN_TEXT",
+        "type": "NVARCHAR",
+        "display_size": 50,
+        "label": "COLUMN_TEXT",
+        "precision": 50,
+        "scale": 0,
+        "autoIncrement": false,
+        "nullable": 1,
+        "readOnly": true,
+        "writeable": false,
+        "table": ""
+      },
+      {
+        "name": "DATA_TYPE",
+        "type": "VARCHAR",
+        "display_size": 8,
+        "label": "DATA_TYPE",
+        "precision": 8,
+        "scale": 0,
+        "autoIncrement": false,
+        "nullable": 1,
+        "readOnly": true,
+        "writeable": false,
+        "table": ""
+      },
+      {
+        "name": "LENGTH",
+        "type": "INTEGER",
+        "display_size": 11,
+        "label": "LENGTH",
+        "precision": 10,
+        "scale": 0,
+        "autoIncrement": false,
+        "nullable": 1,
+        "readOnly": true,
+        "writeable": false,
+        "table": ""
+      },
+      {
+        "name": "NUMERIC_SCALE",
+        "type": "INTEGER",
+        "display_size": 11,
+        "label": "NUMERIC_SCALE",
+        "precision": 10,
+        "scale": 0,
+        "autoIncrement": false,
+        "nullable": 1,
+        "readOnly": true,
+        "writeable": false,
+        "table": ""
+      },
+      {
+        "name": "DDS_TYPE",
+        "type": "CHAR",
+        "display_size": 1,
+        "label": "DDS_TYPE",
+        "precision": 1,
+        "scale": 0,
+        "autoIncrement": false,
+        "nullable": 1,
+        "readOnly": true,
+        "writeable": false,
+        "table": ""
+      },
+      {
+        "name": "IS_IDENTITY",
+        "type": "VARCHAR",
+        "display_size": 3,
+        "label": "IS_IDENTITY",
+        "precision": 3,
+        "scale": 0,
+        "autoIncrement": false,
+        "nullable": 1,
+        "readOnly": true,
+        "writeable": false,
+        "table": ""
+      },
+      {
+        "name": "ORDINAL_POSITION",
+        "type": "INTEGER",
+        "display_size": 11,
+        "label": "ORDINAL_POSITION",
+        "precision": 10,
+        "scale": 0,
+        "autoIncrement": false,
+        "nullable": 1,
+        "readOnly": true,
+        "writeable": false,
+        "table": ""
+      }
+    ]
+  },
+  "data": "[data omitted: 11 row(s)]",
+  "is_done": true,
+  "success": true,
+  "execution_time": 52,
+  "fetchMore": "[Function]",
+  "close": "[Function]"
+}
+[Cmd Entry][SQLDiag] route=shared signature=query.execute requestedRows=<none> extractedRows=11 reportedRows=<none> continuationFetchMore=true isDone=true
+[Cmd Entry] shared continuation tuple type=<none> id=query41 cont_id=<none> is_done=true fetchMore=true
+[Cmd Entry][JobRoute] getState.shared.serverDisabled connObj=1 key=10.0.0.21|cozzi|22 dedicatedEnabled=true serverEnabled=false sharedSqlJobObj=1 sharedJobStatus=ready sharedJobId=904087/QUSER/QZDASOINIT sharedJobIdRaw=904087/QUSER/QZDASOINIT observedSharedJobId=904087/QUSER/QZDASOINIT dedicatedJobId=<none> status=ended
+[Cmd Entry][JobRoute] getState.shared.serverDisabled connObj=1 key=10.0.0.21|cozzi|22 dedicatedEnabled=true serverEnabled=false sharedSqlJobObj=1 sharedJobStatus=ready sharedJobId=904087/QUSER/QZDASOINIT sharedJobIdRaw=904087/QUSER/QZDASOINIT observedSharedJobId=904087/QUSER/QZDASOINIT dedicatedJobId=<none> status=ended
+[Cmd Entry][JobRoute] getState.shared.serverDisabled connObj=1 key=10.0.0.21|cozzi|22 dedicatedEnabled=true serverEnabled=false sharedSqlJobObj=1 sharedJobStatus=ready sharedJobId=904087/QUSER/QZDASOINIT sharedJobIdRaw=904087/QUSER/QZDASOINIT observedSharedJobId=904087/QUSER/QZDASOINIT dedicatedJobId=<none> status=ended
+[Cmd Entry][JobRoute] getState.shared.serverDisabled connObj=1 key=10.0.0.21|cozzi|22 dedicatedEnabled=true serverEnabled=false sharedSqlJobObj=1 sharedJobStatus=ready sharedJobId=904087/QUSER/QZDASOINIT sharedJobIdRaw=904087/QUSER/QZDASOINIT observedSharedJobId=904087/QUSER/QZDASOINIT dedicatedJobId=<none> status=ended
+[Cmd Entry][JobRoute] getState.shared.serverDisabled connObj=1 key=10.0.0.21|cozzi|22 dedicatedEnabled=true serverEnabled=false sharedSqlJobObj=1 sharedJobStatus=ready sharedJobId=904087/QUSER/QZDASOINIT sharedJobIdRaw=904087/QUSER/QZDASOINIT observedSharedJobId=904087/QUSER/QZDASOINIT dedicatedJobId=<none> status=ended
+[Cmd Entry][SQLPolicy] query.start continuationOnly=true dedicatedUsable=false
+[Cmd Entry][SQLDiag] query.start dedicatedUsable=false maxRows=500 prefetchRows=200 unlimited=false userManagedLimiter=false
+[Cmd Entry][GateDiag] runSQLWithDetails.enter route=shared finalReason=remote server disabled (mapepireUseServer=false, mapepireServerMode=false, connectToRemoteMapepireServer=false) dedicatedEnabled=true dedicatedReason=connection cmdEntry.sharedSQLJob=false remoteServerEnabled=false remoteReason=mapepireUseServer=false, mapepireServerMode=false, connectToRemoteMapepireServer=false
+[Cmd Entry][runSQLWithDetails] route=shared-only rows=<none> sql=
+SELECT SYSTEM_SCHEMA_NAME, TYPE, ORDINAL_POSITION
+FROM QSYS2.LIBRARY_LIST_INFO
+ORDER BY ORDINAL_POSITION
+
+[Cmd Entry][JobRoute] runSQL.enter connObj=1 key=10.0.0.21|cozzi|22 dedicatedEnabled=true serverEnabled=false sharedSqlJobObj=1 sharedJobStatus=ready sharedJobId=904087/QUSER/QZDASOINIT sharedJobIdRaw=904087/QUSER/QZDASOINIT observedSharedJobId=904087/QUSER/QZDASOINIT dedicatedJobId=<none> status=ended rows=<none>
+[Cmd Entry][GateDiag] runSQLWithDetails.route.shared route=shared finalReason=remote server disabled (mapepireUseServer=false, mapepireServerMode=false, connectToRemoteMapepireServer=false) dedicatedEnabled=true dedicatedReason=connection cmdEntry.sharedSQLJob=false remoteServerEnabled=false remoteReason=mapepireUseServer=false, mapepireServerMode=false, connectToRemoteMapepireServer=false
+[Cmd Entry][JobRoute] runSQL.route.shared.dedicatedDisabled connObj=1 key=10.0.0.21|cozzi|22 dedicatedEnabled=true serverEnabled=false sharedSqlJobObj=1 sharedJobStatus=ready sharedJobId=904087/QUSER/QZDASOINIT sharedJobIdRaw=904087/QUSER/QZDASOINIT observedSharedJobId=904087/QUSER/QZDASOINIT dedicatedJobId=<none> status=ended
+[Cmd Entry][Route] SQLJob(shared): running statement(s) on shared SQL runner path.
+[Cmd Entry][ContinuationCandidate] source=shared keys=id, has_results, update_count, metadata, data, is_done, success, execution_time, fetchMore, close interestingKeys=id, is_done, fetchMore nested=n1={column_count, job, columns}
+[Cmd Entry][ContinuationCandidate] source=shared filtered={
+  "id": "query42",
+  "is_done": true,
+  "fetchMore": "[Function]"
+}
+[Cmd Entry][SQLDiag] shared execute signature=query.execute requestedRows=<none>
+[Cmd Entry] job.execute() returned object with .data array containing 10 rows
+[Cmd Entry][ContinuationCandidate] source=shared keys=id, has_results, update_count, metadata, data, is_done, success, execution_time, fetchMore, close interestingKeys=id, is_done, fetchMore nested=n1={column_count, job, columns}
+[Cmd Entry][ContinuationCandidate] source=shared filtered={
+  "id": "query42",
+  "is_done": true,
+  "fetchMore": "[Function]"
+}
+[Cmd Entry][ContinuationDump] route=shared requestedRows=<none> summary top(id=query42,cont_id=<none>,is_done=true,fetchMore=true) nested(id=<none>,cont_id=<none>,is_done=<unknown>,fetchMore=false)
+[Cmd Entry][ContinuationDump] route=shared requestedRows=<none> {
+  "id": "query42",
+  "has_results": true,
+  "update_count": -1,
+  "metadata": {
+    "column_count": 3,
+    "job": "904087/QUSER/QZDASOINIT",
+    "columns": [
+      {
+        "name": "SYSTEM_SCHEMA_NAME",
+        "type": "VARCHAR",
+        "display_size": 10,
+        "label": "SYSTEM_SCHEMA_NAME",
+        "precision": 10,
+        "scale": 0,
+        "autoIncrement": false,
+        "nullable": 1,
+        "readOnly": true,
+        "writeable": false,
+        "table": ""
+      },
+      {
+        "name": "TYPE",
+        "type": "VARCHAR",
+        "display_size": 15,
+        "label": "TYPE",
+        "precision": 15,
+        "scale": 0,
+        "autoIncrement": false,
+        "nullable": 1,
+        "readOnly": true,
+        "writeable": false,
+        "table": ""
+      },
+      {
+        "name": "ORDINAL_POSITION",
+        "type": "INTEGER",
+        "display_size": 11,
+        "label": "ORDINAL_POSITION",
+        "precision": 10,
+        "scale": 0,
+        "autoIncrement": false,
+        "nullable": 1,
+        "readOnly": true,
+        "writeable": false,
+        "table": ""
+      }
+    ]
+  },
+  "data": "[data omitted: 10 row(s)]",
+  "is_done": true,
+  "success": true,
+  "execution_time": 6,
+  "fetchMore": "[Function]",
+  "close": "[Function]"
+}
+[Cmd Entry][SQLDiag] route=shared signature=query.execute requestedRows=<none> extractedRows=10 reportedRows=<none> continuationFetchMore=true isDone=true
+[Cmd Entry] shared continuation tuple type=<none> id=query42 cont_id=<none> is_done=true fetchMore=true
+[Cmd Entry][GateDiag] runSQLWithDetails.enter route=shared finalReason=remote server disabled (mapepireUseServer=false, mapepireServerMode=false, connectToRemoteMapepireServer=false) dedicatedEnabled=true dedicatedReason=connection cmdEntry.sharedSQLJob=false remoteServerEnabled=false remoteReason=mapepireUseServer=false, mapepireServerMode=false, connectToRemoteMapepireServer=false
+[Cmd Entry][runSQLWithDetails] route=shared-only rows=<none> sql=VALUES CURRENT SCHEMA
+[Cmd Entry][JobRoute] runSQL.enter connObj=1 key=10.0.0.21|cozzi|22 dedicatedEnabled=true serverEnabled=false sharedSqlJobObj=1 sharedJobStatus=ready sharedJobId=904087/QUSER/QZDASOINIT sharedJobIdRaw=904087/QUSER/QZDASOINIT observedSharedJobId=904087/QUSER/QZDASOINIT dedicatedJobId=<none> status=ended rows=<none>
+[Cmd Entry][GateDiag] runSQLWithDetails.route.shared route=shared finalReason=remote server disabled (mapepireUseServer=false, mapepireServerMode=false, connectToRemoteMapepireServer=false) dedicatedEnabled=true dedicatedReason=connection cmdEntry.sharedSQLJob=false remoteServerEnabled=false remoteReason=mapepireUseServer=false, mapepireServerMode=false, connectToRemoteMapepireServer=false
+[Cmd Entry][JobRoute] runSQL.route.shared.dedicatedDisabled connObj=1 key=10.0.0.21|cozzi|22 dedicatedEnabled=true serverEnabled=false sharedSqlJobObj=1 sharedJobStatus=ready sharedJobId=904087/QUSER/QZDASOINIT sharedJobIdRaw=904087/QUSER/QZDASOINIT observedSharedJobId=904087/QUSER/QZDASOINIT dedicatedJobId=<none> status=ended
+[Cmd Entry][Route] SQLJob(shared): running statement(s) on shared SQL runner path.
+[Cmd Entry][ContinuationCandidate] source=shared keys=id, has_results, update_count, metadata, data, is_done, success, execution_time, fetchMore, close interestingKeys=id, is_done, fetchMore nested=n1={column_count, job, columns}
+[Cmd Entry][ContinuationCandidate] source=shared filtered={
+  "id": "query43",
+  "is_done": true,
+  "fetchMore": "[Function]"
+}
+[Cmd Entry][SQLDiag] shared execute signature=query.execute requestedRows=<none>
+[Cmd Entry] job.execute() returned object with .data array containing 1 rows
+[Cmd Entry][ContinuationCandidate] source=shared keys=id, has_results, update_count, metadata, data, is_done, success, execution_time, fetchMore, close interestingKeys=id, is_done, fetchMore nested=n1={column_count, job, columns}
+[Cmd Entry][ContinuationCandidate] source=shared filtered={
+  "id": "query43",
+  "is_done": true,
+  "fetchMore": "[Function]"
+}
+[Cmd Entry][ContinuationDump] route=shared requestedRows=<none> summary top(id=query43,cont_id=<none>,is_done=true,fetchMore=true) nested(id=<none>,cont_id=<none>,is_done=<unknown>,fetchMore=false)
+[Cmd Entry][ContinuationDump] route=shared requestedRows=<none> {
+  "id": "query43",
+  "has_results": true,
+  "update_count": -1,
+  "metadata": {
+    "column_count": 1,
+    "job": "904087/QUSER/QZDASOINIT",
+    "columns": [
+      {
+        "name": "00001",
+        "type": "VARCHAR",
+        "display_size": 128,
+        "label": "00001",
+        "precision": 128,
+        "scale": 0,
+        "autoIncrement": false,
+        "nullable": 0,
+        "readOnly": true,
+        "writeable": false,
+        "table": ""
+      }
+    ]
+  },
+  "data": "[data omitted: 1 row(s)]",
+  "is_done": true,
+  "success": true,
+  "execution_time": 2,
+  "fetchMore": "[Function]",
+  "close": "[Function]"
+}
+[Cmd Entry][SQLDiag] route=shared signature=query.execute requestedRows=<none> extractedRows=1 reportedRows=<none> continuationFetchMore=true isDone=true
+[Cmd Entry] shared continuation tuple type=<none> id=query43 cont_id=<none> is_done=true fetchMore=true
+[Cmd Entry][GateDiag] runSQLWithDetails.enter route=shared finalReason=remote server disabled (mapepireUseServer=false, mapepireServerMode=false, connectToRemoteMapepireServer=false) dedicatedEnabled=true dedicatedReason=connection cmdEntry.sharedSQLJob=false remoteServerEnabled=false remoteReason=mapepireUseServer=false, mapepireServerMode=false, connectToRemoteMapepireServer=false
+[Cmd Entry][runSQLWithDetails] route=shared-only rows=500 sql=WITH sf AS ( SELECT * FROM TABLE (qsys2.spooled_file_info(      USER_NAME => '*CURRENT', job_name => '*ALL')) SF   ORDER BY sf.creation_timestamp DESC   LIMIT 1 )  SELECT SF.CREATION_TIMESTAMP AS CREATED,  SF.QUALIFIED_JOB_NAME as JOB, sf.SPOOLED_FILE_NAME as SPLFNAME,  sd.SPOOLED_DATA FROM sf ,LATERAL (SELECT * FROM TABLE(systools.spooled_file_data(            JOB_NAME => SF.QUALIFIED_JOB_NAME,            SPOOLED_FILE_NAME => SF.SPOOLED_FILE_NAME,            SPOOLED_FILE_NUMBER => SF.SPOOLED_FILE_NUMBER)) spd) sd
+[Cmd Entry][JobRoute] runSQL.enter connObj=1 key=10.0.0.21|cozzi|22 dedicatedEnabled=true serverEnabled=false sharedSqlJobObj=1 sharedJobStatus=ready sharedJobId=904087/QUSER/QZDASOINIT sharedJobIdRaw=904087/QUSER/QZDASOINIT observedSharedJobId=904087/QUSER/QZDASOINIT dedicatedJobId=<none> status=ended rows=500
+[Cmd Entry][GateDiag] runSQLWithDetails.route.shared route=shared finalReason=remote server disabled (mapepireUseServer=false, mapepireServerMode=false, connectToRemoteMapepireServer=false) dedicatedEnabled=true dedicatedReason=connection cmdEntry.sharedSQLJob=false remoteServerEnabled=false remoteReason=mapepireUseServer=false, mapepireServerMode=false, connectToRemoteMapepireServer=false
+[Cmd Entry][JobRoute] runSQL.route.shared.dedicatedDisabled connObj=1 key=10.0.0.21|cozzi|22 dedicatedEnabled=true serverEnabled=false sharedSqlJobObj=1 sharedJobStatus=ready sharedJobId=904087/QUSER/QZDASOINIT sharedJobIdRaw=904087/QUSER/QZDASOINIT observedSharedJobId=904087/QUSER/QZDASOINIT dedicatedJobId=<none> status=ended
+[Cmd Entry][Route] SQLJob(shared): running statement(s) on shared SQL runner path.
+[Cmd Entry] Requesting up to 500 SQL rows from shared job.
+[Cmd Entry][ContinuationCandidate] source=shared keys=id, has_results, update_count, metadata, data, is_done, success, execution_time, fetchMore, close interestingKeys=id, is_done, fetchMore nested=n1={column_count, job, columns}
+[Cmd Entry][ContinuationCandidate] source=shared filtered={
+  "id": "query44",
+  "is_done": true,
+  "fetchMore": "[Function]"
+}
+[Cmd Entry][SQLDiag] shared execute signature=query.executeRows requestedRows=500
+[Cmd Entry] job.execute() returned object with .data array containing 125 rows
+[Cmd Entry][ContinuationCandidate] source=shared keys=id, has_results, update_count, metadata, data, is_done, success, execution_time, fetchMore, close interestingKeys=id, is_done, fetchMore nested=n1={column_count, job, columns}
+[Cmd Entry][ContinuationCandidate] source=shared filtered={
+  "id": "query44",
+  "is_done": true,
+  "fetchMore": "[Function]"
+}
+[Cmd Entry][ContinuationDump] route=shared requestedRows=500 summary top(id=query44,cont_id=<none>,is_done=true,fetchMore=true) nested(id=<none>,cont_id=<none>,is_done=<unknown>,fetchMore=false)
+[Cmd Entry][ContinuationDump] route=shared requestedRows=500 {
+  "id": "query44",
+  "has_results": true,
+  "update_count": -1,
+  "metadata": {
+    "column_count": 4,
+    "job": "904087/QUSER/QZDASOINIT",
+    "columns": [
+      {
+        "name": "CREATED",
+        "type": "TIMESTAMP",
+        "display_size": 19,
+        "label": "CREATED",
+        "precision": 19,
+        "scale": 0,
+        "autoIncrement": false,
+        "nullable": 1,
+        "readOnly": true,
+        "writeable": false,
+        "table": ""
+      },
+      {
+        "name": "JOB",
+        "type": "VARCHAR",
+        "display_size": 28,
+        "label": "JOB",
+        "precision": 28,
+        "scale": 0,
+        "autoIncrement": false,
+        "nullable": 1,
+        "readOnly": true,
+        "writeable": false,
+        "table": ""
+      },
+      {
+        "name": "SPLFNAME",
+        "type": "VARCHAR",
+        "display_size": 10,
+        "label": "SPLFNAME",
+        "precision": 10,
+        "scale": 0,
+        "autoIncrement": false,
+        "nullable": 1,
+        "readOnly": true,
+        "writeable": false,
+        "table": ""
+      },
+      {
+        "name": "SPOOLED_DATA",
+        "type": "VARCHAR",
+        "display_size": 378,
+        "label": "SPOOLED_DATA",
+        "precision": 378,
+        "scale": 0,
+        "autoIncrement": false,
+        "nullable": 1,
+        "readOnly": true,
+        "writeable": false,
+        "table": ""
+      }
+    ]
+  },
+  "data": "[data omitted: 125 row(s)]",
+  "is_done": true,
+  "success": true,
+  "execution_time": 128,
+  "fetchMore": "[Function]",
+  "close": "[Function]"
+}
+[Cmd Entry][SQLDiag] route=shared signature=query.executeRows requestedRows=500 extractedRows=125 reportedRows=<none> continuationFetchMore=true isDone=true
+[Cmd Entry] shared continuation tuple type=<none> id=query44 cont_id=<none> is_done=true fetchMore=true
+[Cmd Entry][SQLPolicy] query.end rows=125 hasMore=false sessionId=<none>
+[Cmd Entry][SQLDiag] query.end rows=125 hasMore=false sessionId=<none> fetchSize=500
+[Cmd Entry][SQLDiag] query.messageCreated text="125 rows returned (rows per fetch 500)" elapsedMs=<undefined> rowCount=125 hasMoreRows=false sessionId=<none>
+[Cmd Entry][GateDiag] runSQLWithDetails.enter route=shared finalReason=remote server disabled (mapepireUseServer=false, mapepireServerMode=false, connectToRemoteMapepireServer=false) dedicatedEnabled=true dedicatedReason=connection cmdEntry.sharedSQLJob=false remoteServerEnabled=false remoteReason=mapepireUseServer=false, mapepireServerMode=false, connectToRemoteMapepireServer=false
+[Cmd Entry][runSQLWithDetails] route=shared-only rows=<none> sql=VALUES CURRENT SCHEMA
+[Cmd Entry][JobRoute] runSQL.enter connObj=1 key=10.0.0.21|cozzi|22 dedicatedEnabled=true serverEnabled=false sharedSqlJobObj=1 sharedJobStatus=ready sharedJobId=904087/QUSER/QZDASOINIT sharedJobIdRaw=904087/QUSER/QZDASOINIT observedSharedJobId=904087/QUSER/QZDASOINIT dedicatedJobId=<none> status=ended rows=<none>
+[Cmd Entry][GateDiag] runSQLWithDetails.route.shared route=shared finalReason=remote server disabled (mapepireUseServer=false, mapepireServerMode=false, connectToRemoteMapepireServer=false) dedicatedEnabled=true dedicatedReason=connection cmdEntry.sharedSQLJob=false remoteServerEnabled=false remoteReason=mapepireUseServer=false, mapepireServerMode=false, connectToRemoteMapepireServer=false
+[Cmd Entry][JobRoute] runSQL.route.shared.dedicatedDisabled connObj=1 key=10.0.0.21|cozzi|22 dedicatedEnabled=true serverEnabled=false sharedSqlJobObj=1 sharedJobStatus=ready sharedJobId=904087/QUSER/QZDASOINIT sharedJobIdRaw=904087/QUSER/QZDASOINIT observedSharedJobId=904087/QUSER/QZDASOINIT dedicatedJobId=<none> status=ended
+[Cmd Entry][Route] SQLJob(shared): running statement(s) on shared SQL runner path.
+[Cmd Entry][ContinuationCandidate] source=shared keys=id, has_results, update_count, metadata, data, is_done, success, execution_time, fetchMore, close interestingKeys=id, is_done, fetchMore nested=n1={column_count, job, columns}
+[Cmd Entry][ContinuationCandidate] source=shared filtered={
+  "id": "query45",
+  "is_done": true,
+  "fetchMore": "[Function]"
+}
+[Cmd Entry][SQLDiag] shared execute signature=query.execute requestedRows=<none>
+[Cmd Entry] job.execute() returned object with .data array containing 1 rows
+[Cmd Entry][ContinuationCandidate] source=shared keys=id, has_results, update_count, metadata, data, is_done, success, execution_time, fetchMore, close interestingKeys=id, is_done, fetchMore nested=n1={column_count, job, columns}
+[Cmd Entry][ContinuationCandidate] source=shared filtered={
+  "id": "query45",
+  "is_done": true,
+  "fetchMore": "[Function]"
+}
+[Cmd Entry][ContinuationDump] route=shared requestedRows=<none> summary top(id=query45,cont_id=<none>,is_done=true,fetchMore=true) nested(id=<none>,cont_id=<none>,is_done=<unknown>,fetchMore=false)
+[Cmd Entry][ContinuationDump] route=shared requestedRows=<none> {
+  "id": "query45",
+  "has_results": true,
+  "update_count": -1,
+  "metadata": {
+    "column_count": 1,
+    "job": "904087/QUSER/QZDASOINIT",
+    "columns": [
+      {
+        "name": "00001",
+        "type": "VARCHAR",
+        "display_size": 128,
+        "label": "00001",
+        "precision": 128,
+        "scale": 0,
+        "autoIncrement": false,
+        "nullable": 0,
+        "readOnly": true,
+        "writeable": false,
+        "table": ""
+      }
+    ]
+  },
+  "data": "[data omitted: 1 row(s)]",
+  "is_done": true,
+  "success": true,
+  "execution_time": 2,
+  "fetchMore": "[Function]",
+  "close": "[Function]"
+}
+[Cmd Entry][SQLDiag] route=shared signature=query.execute requestedRows=<none> extractedRows=1 reportedRows=<none> continuationFetchMore=true isDone=true
+[Cmd Entry] shared continuation tuple type=<none> id=query45 cont_id=<none> is_done=true fetchMore=true
+[Cmd Entry][GateDiag] runSQLWithDetails.enter route=shared finalReason=remote server disabled (mapepireUseServer=false, mapepireServerMode=false, connectToRemoteMapepireServer=false) dedicatedEnabled=true dedicatedReason=connection cmdEntry.sharedSQLJob=false remoteServerEnabled=false remoteReason=mapepireUseServer=false, mapepireServerMode=false, connectToRemoteMapepireServer=false
+[Cmd Entry][runSQLWithDetails] route=shared-only rows=<none> sql=VALUES CURRENT PATH
+[Cmd Entry][JobRoute] runSQL.enter connObj=1 key=10.0.0.21|cozzi|22 dedicatedEnabled=true serverEnabled=false sharedSqlJobObj=1 sharedJobStatus=ready sharedJobId=904087/QUSER/QZDASOINIT sharedJobIdRaw=904087/QUSER/QZDASOINIT observedSharedJobId=904087/QUSER/QZDASOINIT dedicatedJobId=<none> status=ended rows=<none>
+[Cmd Entry][GateDiag] runSQLWithDetails.route.shared route=shared finalReason=remote server disabled (mapepireUseServer=false, mapepireServerMode=false, connectToRemoteMapepireServer=false) dedicatedEnabled=true dedicatedReason=connection cmdEntry.sharedSQLJob=false remoteServerEnabled=false remoteReason=mapepireUseServer=false, mapepireServerMode=false, connectToRemoteMapepireServer=false
+[Cmd Entry][JobRoute] runSQL.route.shared.dedicatedDisabled connObj=1 key=10.0.0.21|cozzi|22 dedicatedEnabled=true serverEnabled=false sharedSqlJobObj=1 sharedJobStatus=ready sharedJobId=904087/QUSER/QZDASOINIT sharedJobIdRaw=904087/QUSER/QZDASOINIT observedSharedJobId=904087/QUSER/QZDASOINIT dedicatedJobId=<none> status=ended
+[Cmd Entry][Route] SQLJob(shared): running statement(s) on shared SQL runner path.
+[Cmd Entry][ContinuationCandidate] source=shared keys=id, has_results, update_count, metadata, data, is_done, success, execution_time, fetchMore, close interestingKeys=id, is_done, fetchMore nested=n1={column_count, job, columns}
+[Cmd Entry][ContinuationCandidate] source=shared filtered={
+  "id": "query46",
+  "is_done": true,
+  "fetchMore": "[Function]"
+}
+[Cmd Entry][SQLDiag] shared execute signature=query.execute requestedRows=<none>
+[Cmd Entry] job.execute() returned object with .data array containing 1 rows
+[Cmd Entry][ContinuationCandidate] source=shared keys=id, has_results, update_count, metadata, data, is_done, success, execution_time, fetchMore, close interestingKeys=id, is_done, fetchMore nested=n1={column_count, job, columns}
+[Cmd Entry][ContinuationCandidate] source=shared filtered={
+  "id": "query46",
+  "is_done": true,
+  "fetchMore": "[Function]"
+}
+[Cmd Entry][ContinuationDump] route=shared requestedRows=<none> summary top(id=query46,cont_id=<none>,is_done=true,fetchMore=true) nested(id=<none>,cont_id=<none>,is_done=<unknown>,fetchMore=false)
+[Cmd Entry][ContinuationDump] route=shared requestedRows=<none> {
+  "id": "query46",
+  "has_results": true,
+  "update_count": -1,
+  "metadata": {
+    "column_count": 1,
+    "job": "904087/QUSER/QZDASOINIT",
+    "columns": [
+      {
+        "name": "00001",
+        "type": "VARCHAR",
+        "display_size": 8843,
+        "label": "00001",
+        "precision": 8843,
+        "scale": 0,
+        "autoIncrement": false,
+        "nullable": 0,
+        "readOnly": true,
+        "writeable": false,
+        "table": ""
+      }
+    ]
+  },
+  "data": "[data omitted: 1 row(s)]",
+  "is_done": true,
+  "success": true,
+  "execution_time": 3,
+  "fetchMore": "[Function]",
+  "close": "[Function]"
+}
+[Cmd Entry][SQLDiag] route=shared signature=query.execute requestedRows=<none> extractedRows=1 reportedRows=<none> continuationFetchMore=true isDone=true
+[Cmd Entry] shared continuation tuple type=<none> id=query46 cont_id=<none> is_done=true fetchMore=true
+[Cmd Entry][GateDiag] runSQLWithDetails.enter route=shared finalReason=remote server disabled (mapepireUseServer=false, mapepireServerMode=false, connectToRemoteMapepireServer=false) dedicatedEnabled=true dedicatedReason=connection cmdEntry.sharedSQLJob=false remoteServerEnabled=false remoteReason=mapepireUseServer=false, mapepireServerMode=false, connectToRemoteMapepireServer=false
+[Cmd Entry][runSQLWithDetails] route=shared-only rows=<none> sql=SELECT COLUMN_NAME, COLUMN_HEADING, COLUMN_TEXT, DATA_TYPE, LENGTH, NUMERIC_SCALE, DDS_TYPE, IS_IDENTITY, ORDINAL_POSITION
+FROM QSYS2.SYSCOLUMNS2
+WHERE TABLE_SCHEMA = '*LIBL'
+    AND TABLE_NAME = 'TABLE'
+ORDER BY ORDINAL_POSITION
+[Cmd Entry][JobRoute] runSQL.enter connObj=1 key=10.0.0.21|cozzi|22 dedicatedEnabled=true serverEnabled=false sharedSqlJobObj=1 sharedJobStatus=ready sharedJobId=904087/QUSER/QZDASOINIT sharedJobIdRaw=904087/QUSER/QZDASOINIT observedSharedJobId=904087/QUSER/QZDASOINIT dedicatedJobId=<none> status=ended rows=<none>
+[Cmd Entry][GateDiag] runSQLWithDetails.route.shared route=shared finalReason=remote server disabled (mapepireUseServer=false, mapepireServerMode=false, connectToRemoteMapepireServer=false) dedicatedEnabled=true dedicatedReason=connection cmdEntry.sharedSQLJob=false remoteServerEnabled=false remoteReason=mapepireUseServer=false, mapepireServerMode=false, connectToRemoteMapepireServer=false
+[Cmd Entry][JobRoute] runSQL.route.shared.dedicatedDisabled connObj=1 key=10.0.0.21|cozzi|22 dedicatedEnabled=true serverEnabled=false sharedSqlJobObj=1 sharedJobStatus=ready sharedJobId=904087/QUSER/QZDASOINIT sharedJobIdRaw=904087/QUSER/QZDASOINIT observedSharedJobId=904087/QUSER/QZDASOINIT dedicatedJobId=<none> status=ended
+[Cmd Entry][Route] SQLJob(shared): running statement(s) on shared SQL runner path.
+[Cmd Entry][ContinuationCandidate] source=shared keys=id, has_results, update_count, metadata, data, is_done, success, execution_time, fetchMore, close interestingKeys=id, is_done, fetchMore nested=n1={column_count, job, columns}
+[Cmd Entry][ContinuationCandidate] source=shared filtered={
+  "id": "query47",
+  "is_done": true,
+  "fetchMore": "[Function]"
+}
+[Cmd Entry][SQLDiag] shared execute signature=query.execute requestedRows=<none>
+[Cmd Entry] job.execute() returned object with .data array containing 0 rows
+[Cmd Entry][ContinuationCandidate] source=shared keys=id, has_results, update_count, metadata, data, is_done, success, execution_time, fetchMore, close interestingKeys=id, is_done, fetchMore nested=n1={column_count, job, columns}
+[Cmd Entry][ContinuationCandidate] source=shared filtered={
+  "id": "query47",
+  "is_done": true,
+  "fetchMore": "[Function]"
+}
+[Cmd Entry][ContinuationDump] route=shared requestedRows=<none> summary top(id=query47,cont_id=<none>,is_done=true,fetchMore=true) nested(id=<none>,cont_id=<none>,is_done=<unknown>,fetchMore=false)
+[Cmd Entry][ContinuationDump] route=shared requestedRows=<none> {
+  "id": "query47",
+  "has_results": true,
+  "update_count": -1,
+  "metadata": {
+    "column_count": 9,
+    "job": "904087/QUSER/QZDASOINIT",
+    "columns": [
+      {
+        "name": "COLUMN_NAME",
+        "type": "VARCHAR",
+        "display_size": 128,
+        "label": "COLUMN_NAME",
+        "precision": 128,
+        "scale": 0,
+        "autoIncrement": false,
+        "nullable": 1,
+        "readOnly": true,
+        "writeable": false,
+        "table": ""
+      },
+      {
+        "name": "COLUMN_HEADING",
+        "type": "NVARCHAR",
+        "display_size": 60,
+        "label": "COLUMN_HEADING",
+        "precision": 60,
+        "scale": 0,
+        "autoIncrement": false,
+        "nullable": 1,
+        "readOnly": true,
+        "writeable": false,
+        "table": ""
+      },
+      {
+        "name": "COLUMN_TEXT",
+        "type": "NVARCHAR",
+        "display_size": 50,
+        "label": "COLUMN_TEXT",
+        "precision": 50,
+        "scale": 0,
+        "autoIncrement": false,
+        "nullable": 1,
+        "readOnly": true,
+        "writeable": false,
+        "table": ""
+      },
+      {
+        "name": "DATA_TYPE",
+        "type": "VARCHAR",
+        "display_size": 8,
+        "label": "DATA_TYPE",
+        "precision": 8,
+        "scale": 0,
+        "autoIncrement": false,
+        "nullable": 1,
+        "readOnly": true,
+        "writeable": false,
+        "table": ""
+      },
+      {
+        "name": "LENGTH",
+        "type": "INTEGER",
+        "display_size": 11,
+        "label": "LENGTH",
+        "precision": 10,
+        "scale": 0,
+        "autoIncrement": false,
+        "nullable": 1,
+        "readOnly": true,
+        "writeable": false,
+        "table": ""
+      },
+      {
+        "name": "NUMERIC_SCALE",
+        "type": "INTEGER",
+        "display_size": 11,
+        "label": "NUMERIC_SCALE",
+        "precision": 10,
+        "scale": 0,
+        "autoIncrement": false,
+        "nullable": 1,
+        "readOnly": true,
+        "writeable": false,
+        "table": ""
+      },
+      {
+        "name": "DDS_TYPE",
+        "type": "CHAR",
+        "display_size": 1,
+        "label": "DDS_TYPE",
+        "precision": 1,
+        "scale": 0,
+        "autoIncrement": false,
+        "nullable": 1,
+        "readOnly": true,
+        "writeable": false,
+        "table": ""
+      },
+      {
+        "name": "IS_IDENTITY",
+        "type": "VARCHAR",
+        "display_size": 3,
+        "label": "IS_IDENTITY",
+        "precision": 3,
+        "scale": 0,
+        "autoIncrement": false,
+        "nullable": 1,
+        "readOnly": true,
+        "writeable": false,
+        "table": ""
+      },
+      {
+        "name": "ORDINAL_POSITION",
+        "type": "INTEGER",
+        "display_size": 11,
+        "label": "ORDINAL_POSITION",
+        "precision": 10,
+        "scale": 0,
+        "autoIncrement": false,
+        "nullable": 1,
+        "readOnly": true,
+        "writeable": false,
+        "table": ""
+      }
+    ]
+  },
+  "data": "[data omitted: 0 row(s)]",
+  "is_done": true,
+  "success": true,
+  "execution_time": 4,
+  "fetchMore": "[Function]",
+  "close": "[Function]"
+}
+[Cmd Entry][SQLDiag] route=shared signature=query.execute requestedRows=<none> extractedRows=0 reportedRows=<none> continuationFetchMore=true isDone=true
+[Cmd Entry] shared continuation tuple type=<none> id=query47 cont_id=<none> is_done=true fetchMore=true
+[Cmd Entry][JobRoute] getState.shared.serverDisabled connObj=1 key=10.0.0.21|cozzi|22 dedicatedEnabled=true serverEnabled=false sharedSqlJobObj=1 sharedJobStatus=ready sharedJobId=904087/QUSER/QZDASOINIT sharedJobIdRaw=904087/QUSER/QZDASOINIT observedSharedJobId=904087/QUSER/QZDASOINIT dedicatedJobId=<none> status=ended
+[Cmd Entry][JobRoute] getState.shared.serverDisabled connObj=1 key=10.0.0.21|cozzi|22 dedicatedEnabled=true serverEnabled=false sharedSqlJobObj=1 sharedJobStatus=ready sharedJobId=904087/QUSER/QZDASOINIT sharedJobIdRaw=904087/QUSER/QZDASOINIT observedSharedJobId=904087/QUSER/QZDASOINIT dedicatedJobId=<none> status=ended
+[Cmd Entry] Started SQL Pool Job 904119/QUSER/QZDASOINIT in 18701ms.
+[Cmd Entry][Pool] warmup:create max=3 size=1 busy=0 members=#1:904119/QUSER/QZDASOINIT:idle

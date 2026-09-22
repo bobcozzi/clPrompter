@@ -151,51 +151,34 @@ function toOptionalBoolean(value: unknown): boolean | undefined {
     return undefined;
 }
 
-function mergeColumnMetadata(
-    columns: string[],
-    primary: SqlColumnMetadata[] | undefined,
-    fallback: SqlColumnMetadata[] | undefined
-): SqlColumnMetadata[] {
-    const primaryByName = new Map((primary ?? []).map((entry) => [normalizeColumnKey(entry.name), entry]));
-    const fallbackByName = new Map((fallback ?? []).map((entry) => [normalizeColumnKey(entry.name), entry]));
-
-    return columns.map((column, index) => {
-        const primaryEntry = primaryByName.get(normalizeColumnKey(column)) ?? primary?.[index];
-        const fallbackEntry = fallbackByName.get(normalizeColumnKey(column)) ?? fallback?.[index];
-
-        const merged: SqlColumnMetadata = {
-            name: column,
-            label: primaryEntry?.label && primaryEntry.label.trim().length > 0
-                ? primaryEntry.label
-                : fallbackEntry?.label,
-            typeName: primaryEntry?.typeName && primaryEntry.typeName.trim().length > 0
-                ? primaryEntry.typeName
-                : fallbackEntry?.typeName,
-            displaySize: typeof primaryEntry?.displaySize === 'number'
-                ? primaryEntry.displaySize
-                : fallbackEntry?.displaySize,
-            scale: typeof primaryEntry?.scale === 'number'
-                ? primaryEntry.scale
-                : fallbackEntry?.scale,
-            textDescription: primaryEntry?.textDescription && primaryEntry.textDescription.trim().length > 0
-                ? primaryEntry.textDescription
-                : fallbackEntry?.textDescription,
-            ddsType: primaryEntry?.ddsType && primaryEntry.ddsType.trim().length > 0
-                ? primaryEntry.ddsType
-                : fallbackEntry?.ddsType,
-            isIdentity: typeof primaryEntry?.isIdentity === 'boolean'
-                ? primaryEntry.isIdentity
-                : fallbackEntry?.isIdentity,
-            schema: primaryEntry?.schema || fallbackEntry?.schema,
-            table: primaryEntry?.table || fallbackEntry?.table
-        };
-
-        if (!merged.label || merged.label.trim().length === 0) {
-            merged.label = column;
+function getMetadataField(candidate: Record<string, unknown>, ...aliases: string[]): unknown {
+    const normalizedAliases = aliases.map((alias) => alias.replace(/[^a-z0-9]/gi, '').toLowerCase());
+    for (const key of Object.keys(candidate)) {
+        const normalizedKey = key.replace(/[^a-z0-9]/gi, '').toLowerCase();
+        if (normalizedAliases.includes(normalizedKey)) {
+            return candidate[key];
         }
+    }
+    return undefined;
+}
 
-        return merged;
-    });
+function getMetadataFieldByPriority(candidate: Record<string, unknown>, ...aliases: string[]): unknown {
+    const normalizedEntries = new Map<string, unknown>();
+    for (const key of Object.keys(candidate)) {
+        const normalized = key.replace(/[^a-z0-9]/gi, '').toLowerCase();
+        if (!normalizedEntries.has(normalized)) {
+            normalizedEntries.set(normalized, candidate[key]);
+        }
+    }
+
+    for (const alias of aliases) {
+        const normalizedAlias = alias.replace(/[^a-z0-9]/gi, '').toLowerCase();
+        if (normalizedEntries.has(normalizedAlias)) {
+            return normalizedEntries.get(normalizedAlias);
+        }
+    }
+
+    return undefined;
 }
 
 function extractSqlColumnMetadata(raw: unknown, fallbackNames: string[]): SqlColumnMetadata[] {
@@ -240,93 +223,56 @@ function extractSqlColumnMetadata(raw: unknown, fallbackNames: string[]): SqlCol
 
     return metadata.map((entry, index) => {
         const candidate = entry && typeof entry === 'object' ? entry as Record<string, unknown> : {};
-        const rawName = String(
-            candidate.name
-            ?? candidate.Name
-            ?? candidate.COLUMN_NAME
-            ?? candidate.columnName
-            ?? candidate.ColumnName
-            ?? candidate.column_name
-            ?? candidate.NAME
-            ?? fallbackNames[index]
-            ?? ''
-        ).trim();
-        const rawLabel = String(
-            candidate.label
-            ?? candidate.Label
-            ?? candidate.lable
-            ?? candidate.Lable
-            ?? candidate.COLUMN_LABEL
-            ?? candidate.columnLabel
-            ?? candidate.ColumnLabel
-            ?? candidate.column_label
-            ?? candidate.LABEL
-            ?? candidate.COLUMN_HEADING
-            ?? candidate.columnHeading
-            ?? candidate.ColumnHeading
-            ?? candidate.column_heading
-            ?? candidate.heading
-            ?? candidate.Heading
-            ?? candidate.HEADING
-            ?? ''
-        ).trim();
+        const rawName = String(getMetadataField(
+            candidate,
+            'name', 'Name', 'COLUMN_NAME', 'columnName', 'ColumnName', 'column_name', 'NAME'
+        ) ?? fallbackNames[index] ?? '').trim();
+        const rawLabel = String(getMetadataField(
+            candidate,
+            'label', 'Label', 'lable', 'Lable', 'COLUMN_LABEL', 'columnLabel', 'ColumnLabel', 'column_label',
+            'LABEL', 'COLUMN_HEADING', 'columnHeading', 'ColumnHeading', 'column_heading', 'heading', 'Heading', 'HEADING'
+        ) ?? '').trim();
 
-        const displaySize = toOptionalNumber(candidate.displaySize)
-            ?? toOptionalNumber(candidate.DISPLAY_SIZE)
-            ?? toOptionalNumber(candidate.columnSize)
-            ?? toOptionalNumber(candidate.COLUMN_SIZE)
-            ?? toOptionalNumber(candidate.precision)
-            ?? toOptionalNumber(candidate.PRECISION)
-            ?? toOptionalNumber(candidate.length)
-            ?? toOptionalNumber(candidate.LENGTH);
+        const displaySize = toOptionalNumber(getMetadataFieldByPriority(
+            candidate,
+            'length', 'LENGTH',
+            'precision', 'PRECISION',
+            'displaySize', 'display_size', 'DISPLAY_SIZE',
+            'columnSize', 'column_size', 'COLUMN_SIZE'
+        ));
 
-        const typeName = candidate.typeName
-            ?? candidate.TYPE_NAME
-            ?? candidate.DATA_TYPE
-            ?? candidate.dataType
-            ?? candidate.data_type
-            ?? candidate.sqlType
-            ?? candidate.SQL_TYPE
-            ?? candidate.sql_type
-            ?? candidate.nativeType
-            ?? candidate.NATIVE_TYPE
-            ?? candidate.dbType
-            ?? candidate.DB_TYPE
-            ?? candidate.type
-            ?? candidate.TYPE
-            ?? candidate.typename
-            ?? candidate.TYPE_NAME_LONG;
+        const typeName = getMetadataField(
+            candidate,
+            'typeName', 'TYPE_NAME', 'DATA_TYPE', 'dataType', 'data_type', 'sqlType', 'SQL_TYPE', 'sql_type',
+            'nativeType', 'NATIVE_TYPE', 'dbType', 'DB_TYPE', 'type', 'TYPE', 'typename', 'TYPE_NAME_LONG'
+        );
 
         return {
             name: rawName || fallbackNames[index] || `COLUMN_${index + 1}`,
             label: rawLabel || rawName || fallbackNames[index] || undefined,
             typeName: typeName != null ? String(typeName) : undefined,
             displaySize,
-            scale: toOptionalNumber(candidate.scale)
-                ?? toOptionalNumber(candidate.SCALE)
-                ?? toOptionalNumber(candidate.numericScale)
-                ?? toOptionalNumber(candidate.NUMERIC_SCALE)
-                ?? toOptionalNumber(candidate.decimalDigits)
-                ?? toOptionalNumber(candidate.DECIMAL_DIGITS),
-            textDescription: candidate.textDescription
-                ? String(candidate.textDescription)
-                : candidate.COLUMN_TEXT
-                    ? String(candidate.COLUMN_TEXT)
-                    : candidate.column_text
-                        ? String(candidate.column_text)
-                        : undefined,
-            ddsType: candidate.ddsType
-                ? String(candidate.ddsType)
-                : candidate.DDS_TYPE
-                    ? String(candidate.DDS_TYPE)
-                    : candidate.dds_type
-                        ? String(candidate.dds_type)
-                        : undefined,
-            isIdentity: toOptionalBoolean(candidate.isIdentity)
-                ?? toOptionalBoolean(candidate.IS_IDENTITY)
-                ?? toOptionalBoolean(candidate.is_identity),
-            schema: typeof candidate.schema === 'string' ? candidate.schema : undefined,
-            table: typeof candidate.table === 'string' ? candidate.table : undefined
+            scale: toOptionalNumber(getMetadataField(
+                candidate,
+                'scale', 'numeric_scale', 'SCALE', 'numericScale', 'NUMERIC_SCALE', 'decimalDigits', 'decimal_digits', 'DECIMAL_DIGITS'
+            )),
+            textDescription: (() => {
+                const value = getMetadataField(candidate, 'textDescription', 'TEXT_DESCRIPTION', 'column_text', 'COLUMN_TEXT');
+                return value != null ? String(value) : undefined;
+            })(),
+            ddsType: (() => {
+                const value = getMetadataField(candidate, 'ddsType', 'DDS_TYPE', 'dds_type');
+                return value != null ? String(value) : undefined;
+            })(),
+            isIdentity: toOptionalBoolean(getMetadataField(candidate, 'isIdentity', 'IS_IDENTITY', 'is_identity')),
+            schema: (() => {
+                const value = getMetadataField(candidate, 'schema', 'SCHEMA');
+                return typeof value === 'string' ? value : undefined;
+            })(),
+            table: (() => {
+                const value = getMetadataField(candidate, 'table', 'TABLE');
+                return typeof value === 'string' ? value : undefined;
+            })()
         };
     }).map((entry, index) => ({
         ...entry,
@@ -413,131 +359,6 @@ function enrichMetadataWithInferredTypes(columns: string[], metadata: SqlColumnM
     });
 }
 
-function trimSqlIdentifier(value: string): string {
-    return value.trim().replace(/^"|"$/g, '').replace(/\s+/g, ' ').trim();
-}
-
-function splitSqlList(value: string): string[] {
-    const items: string[] = [];
-    let buffer = '';
-    let depth = 0;
-    let inSingleQuote = false;
-    let inDoubleQuote = false;
-
-    for (let i = 0; i < value.length; i++) {
-        const ch = value[i];
-        const next = value[i + 1];
-
-        if (inSingleQuote) {
-            buffer += ch;
-            if (ch === "'" && next === "'") {
-                buffer += next;
-                i++;
-            } else if (ch === "'") {
-                inSingleQuote = false;
-            }
-            continue;
-        }
-
-        if (inDoubleQuote) {
-            buffer += ch;
-            if (ch === '"' && next === '"') {
-                buffer += next;
-                i++;
-            } else if (ch === '"') {
-                inDoubleQuote = false;
-            }
-            continue;
-        }
-
-        if (ch === '(') {
-            depth++;
-            buffer += ch;
-            continue;
-        }
-
-        if (ch === ')') {
-            depth = Math.max(0, depth - 1);
-            buffer += ch;
-            continue;
-        }
-
-        if (ch === "'") {
-            inSingleQuote = true;
-            buffer += ch;
-            continue;
-        }
-
-        if (ch === '"') {
-            inDoubleQuote = true;
-            buffer += ch;
-            continue;
-        }
-
-        if (ch === ',' && depth === 0) {
-            items.push(buffer.trim());
-            buffer = '';
-            continue;
-        }
-
-        buffer += ch;
-    }
-
-    if (buffer.trim()) {
-        items.push(buffer.trim());
-    }
-
-    return items.filter(item => item.length > 0);
-}
-
-function parseSelectAliases(statement: string, fallbackNames: string[]): Map<string, string> {
-    const aliasMap = new Map<string, string>();
-    const match = statement.match(/\bSELECT\b([\s\S]*?)\bFROM\b/i);
-    if (!match) {
-        return aliasMap;
-    }
-
-    const selectList = match[1];
-    const items = splitSqlList(selectList);
-    items.forEach((item, index) => {
-        const normalizedName = fallbackNames[index] ?? '';
-        if (!normalizedName) {
-            return;
-        }
-
-        const aliasMatch = item.match(/(?:\bAS\b\s+|\s+)(?:"([^"]+)"|'([^']+)'|([A-Za-z0-9_#$@]+))\s*$/i);
-        const aliasValue = aliasMatch ? (aliasMatch[1] || aliasMatch[2] || aliasMatch[3] || '').trim() : '';
-        if (aliasValue) {
-            aliasMap.set(normalizedName.toUpperCase(), aliasValue);
-        }
-    });
-
-    return aliasMap;
-}
-
-function extractTableReference(statement: string): { schema?: string; table?: string } | undefined {
-    const match = statement.match(/\bFROM\b\s+((?:"[^"]+"|'[^']+'|[A-Za-z0-9_#$@]+)(?:\.(?:"[^"]+"|'[^']+'|[A-Za-z0-9_#$@]+))?)(?:\s+AS\s+|\s+|$)/i);
-    if (!match) {
-        return undefined;
-    }
-
-    const part = trimSqlIdentifier(match[1]);
-    if (!part) {
-        return undefined;
-    }
-
-    const normalized = part.replace(/\./g, '.');
-    const pieces = normalized.split('.');
-    if (pieces.length === 1) {
-        return { table: pieces[0].toUpperCase() };
-    }
-
-    return {
-        schema: pieces.slice(0, -1).join('.').toUpperCase(),
-        table: pieces[pieces.length - 1].toUpperCase()
-    };
-}
-
 async function runCmdEntrySql(
     connection: IBMi,
     jobManager: CommandEntryJobManager | undefined,
@@ -554,160 +375,6 @@ async function runCmdEntrySql(
     }
 
     return await connection.runSQL(sql, executeOptions as never) as Record<string, unknown>[];
-}
-
-async function fetchColumnMetadataFromCatalog(
-    connection: IBMi,
-    statement: string,
-    fallbackNames: string[],
-    jobManager?: CommandEntryJobManager
-): Promise<SqlColumnMetadata[]> {
-    if (fallbackNames.length === 0) {
-        return [];
-    }
-
-    const tableRef = extractTableReference(statement);
-    if (!tableRef?.table) {
-        return fallbackNames.map(name => ({ name, label: name }));
-    }
-    const tableName = tableRef.table;
-
-    const resolveCurrentSchema = async (): Promise<string | undefined> => {
-        try {
-            const rows = await runCmdEntrySql(connection, jobManager, 'VALUES CURRENT SCHEMA', { skipSyntaxCheck: true });
-            const row = rows?.[0];
-            if (!row) {
-                return undefined;
-            }
-            const value = Object.values(row)[0];
-            const schemaName = String(value ?? '').trim();
-            return schemaName ? schemaName.toUpperCase() : undefined;
-        } catch {
-            return undefined;
-        }
-    };
-
-    const parseSchemaList = (value: string): string[] => {
-        return value
-            .split(',')
-            .map(part => part.trim().replace(/^"|"$/g, ''))
-            .map(part => part.toUpperCase())
-            .filter(part => part.length > 0);
-    };
-
-    const resolveCurrentPathSchemas = async (): Promise<string[]> => {
-        try {
-            const rows = await runCmdEntrySql(connection, jobManager, 'VALUES CURRENT PATH', { skipSyntaxCheck: true });
-            const row = rows?.[0];
-            if (!row) {
-                return [];
-            }
-            const value = String(Object.values(row)[0] ?? '').trim();
-            if (!value) {
-                return [];
-            }
-            return parseSchemaList(value);
-        } catch {
-            return [];
-        }
-    };
-
-    const querySchema = async (schema: string): Promise<Record<string, unknown>[] | undefined> => {
-        const sql = `SELECT COLUMN_NAME, COLUMN_HEADING, COLUMN_TEXT, DATA_TYPE, LENGTH, NUMERIC_SCALE, DDS_TYPE, IS_IDENTITY, ORDINAL_POSITION
-FROM QSYS2.SYSCOLUMNS2
-WHERE TABLE_SCHEMA = '${schema.replace(/'/g, "''")}'
-    AND TABLE_NAME = '${tableName.replace(/'/g, "''")}'
-ORDER BY ORDINAL_POSITION`;
-
-        const rows = await runCmdEntrySql(connection, jobManager, sql, { skipSyntaxCheck: true });
-        return rows;
-    };
-
-    const schemaCandidates: string[] = [];
-    const addCandidate = (schema: string | undefined) => {
-        if (!schema) {
-            return;
-        }
-        const normalized = schema.trim().toUpperCase();
-        if (!normalized) {
-            return;
-        }
-        if (!schemaCandidates.includes(normalized)) {
-            schemaCandidates.push(normalized);
-        }
-    };
-
-    if (tableRef.schema) {
-        addCandidate(tableRef.schema);
-    } else {
-        addCandidate(await resolveCurrentSchema());
-        for (const pathSchema of await resolveCurrentPathSchemas()) {
-            addCandidate(pathSchema);
-        }
-    }
-
-    if (schemaCandidates.length === 0) {
-        return fallbackNames.map(name => ({ name, label: name }));
-    }
-
-    try {
-        let rows: Record<string, unknown>[] = [];
-        for (const schema of schemaCandidates) {
-            rows = await querySchema(schema) ?? [];
-            if (rows.length > 0) {
-                break;
-            }
-        }
-
-        if (!rows || rows.length === 0) {
-            return fallbackNames.map(name => ({ name, label: name }));
-        }
-
-        const byName = new Map<string, SqlColumnMetadata>();
-        for (const row of rows) {
-            const columnName = String(row.COLUMN_NAME ?? row.column_name ?? '').trim();
-            if (!columnName) {
-                continue;
-            }
-            const label = String(row.COLUMN_HEADING ?? row.column_heading ?? row.COLUMN_TEXT ?? row.column_text ?? '').trim();
-            const textDescription = String(row.COLUMN_TEXT ?? row.column_text ?? '').trim();
-            const typeName = String(row.DATA_TYPE ?? row.data_type ?? row.SYSTEM_TYPE_NAME ?? row.system_type_name ?? 'UNKNOWN').trim();
-            const lengthValue = row.LENGTH ?? row.length ?? row.CHARACTER_MAXIMUM_LENGTH ?? row.character_maximum_length;
-            const scaleValue = row.NUMERIC_SCALE ?? row.numeric_scale ?? row.SCALE ?? row.scale;
-            const ddsType = String(row.DDS_TYPE ?? row.dds_type ?? '').trim();
-            const isIdentity = toOptionalBoolean(row.IS_IDENTITY ?? row.is_identity);
-            byName.set(columnName.toUpperCase(), {
-                name: columnName,
-                label: label || columnName,
-                typeName: typeName || 'UNKNOWN',
-                displaySize: toOptionalNumber(lengthValue),
-                scale: toOptionalNumber(scaleValue),
-                textDescription: textDescription || undefined,
-                ddsType: ddsType || undefined,
-                isIdentity
-            });
-        }
-
-        const aliases = parseSelectAliases(statement, fallbackNames);
-        return fallbackNames.map((name, index) => {
-            const normalized = name.toUpperCase();
-            const aliasLabel = aliases.get(normalized);
-            const metadata = byName.get(normalized) ?? byName.get(name.toUpperCase());
-            const actualLabel = aliasLabel || metadata?.label || name;
-            return {
-                name,
-                label: actualLabel,
-                typeName: metadata?.typeName || 'UNKNOWN',
-                displaySize: metadata?.displaySize,
-                scale: metadata?.scale,
-                textDescription: metadata?.textDescription,
-                ddsType: metadata?.ddsType,
-                isIdentity: metadata?.isIdentity
-            };
-        });
-    } catch {
-        return fallbackNames.map(name => ({ name, label: name }));
-    }
 }
 
 async function tryRunSharedMapepireQuery(
@@ -1177,13 +844,7 @@ export class CommandEntryService {
         const runtimeMetadata = hasUsefulColumnMetadata(options?.columnMetadata)
             ? options?.columnMetadata
             : undefined;
-        const catalogMetadata = runtimeMetadata
-            ? undefined
-            : await fetchColumnMetadataFromCatalog(connection, statement, columns, this.jobManager);
-        const metadataFromSql = runtimeMetadata
-            ? mergeColumnMetadata(columns, runtimeMetadata, catalogMetadata)
-            : catalogMetadata;
-        const finalMetadata = enrichMetadataWithInferredTypes(columns, metadataFromSql, rows);
+        const finalMetadata = enrichMetadataWithInferredTypes(columns, runtimeMetadata, rows);
         return {
             statement,
             resultTitle: options?.resultTitle,
