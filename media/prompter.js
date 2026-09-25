@@ -22,7 +22,7 @@
  * SOFTWARE.
  */
 import { createCBInput } from './webview-assets/cbinput.js';
-import { CL_VARIABLE_PATTERN, getDefaultLengthForType, isValidNameValue, parseParenthesizedContent, getLengthClass, isSpecifiedFromChildDefault } from './promptHelpers.js';
+import { CL_VARIABLE_PATTERN, getDefaultLengthForType, isValidNameValue, parseParenthesizedContent, getLengthClass, isSpecifiedFromChildDefault, isInternalConstantElemShellParm } from './promptHelpers.js';
 const WEBVIEW_DEBUG_LOGS = false;
 function debugLog(...args) {
     if (WEBVIEW_DEBUG_LOGS) {
@@ -2948,6 +2948,10 @@ function loadForm() {
         const max = parseInt(parm.getAttribute('Max') || '1', 10);
         if (constant || type?.toLowerCase() === 'null')
             return;
+        if (isInternalConstantElemShellParm(parm)) {
+            debugLog(`[loadForm] Skipping internal constant-only ELEM parm: ${kwd}`);
+            return;
+        }
         if (max > 1) {
             const multiGroupDiv = document.createElement('div');
             multiGroupDiv.className = 'parm-multi-group';

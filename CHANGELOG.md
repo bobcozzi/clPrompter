@@ -2,6 +2,14 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.0.46] - 2026-09-25
+
+### What's Fixed
+- Generic command lookup (for example, if you type something like `rtv*` into Command entry) now ignores the F4=Prompt key if the command is a generic name.
+- Startup is now more streamlined.
+- SQL job support (i.e. Mapepire job management) has been improved to use Pool Jobs in some situations.
+- The Command Entry job connection settings (not the codefori connection) panel layout has been improved.
+
 ## [1.0.45] - 2026-09-22
 
 ### What's Improved

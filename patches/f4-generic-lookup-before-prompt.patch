@@ -1,0 +1,258 @@
+diff --git a/src/commandEntryView.ts b/src/commandEntryView.ts
+index b2098e0..39f2ce2 100644
+--- a/src/commandEntryView.ts
++++ b/src/commandEntryView.ts
+@@ -1005,6 +1005,19 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
+             }
+         }
+ 
++        const genericSelection = await this.resolveGenericCommandSelectionRequest(normalizedCommand, this.getConnection());
++        if (genericSelection !== undefined) {
++            if (!genericSelection) {
++                return;
++            }
++
++            normalizedCommand = genericSelection;
++            const normalizedForDisplay = applyUserCommandLabel(normalizedCommand, labeledCommand.labelPrefix);
++            if (normalizedForDisplay !== command) {
++                this.post({ type: 'setCommand', command: normalizedForDisplay });
++            }
++        }
++
+         const commandForPrompter = applyUserCommandLabel(normalizedCommand, labeledCommand.labelPrefix);
+ 
+         if (!normalizedCommand.trim()) { this.post({ type: 'notice', message: vscode.l10n.t('Enter a CL command to prompt.') }); return; }
+@@ -1031,6 +1044,121 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
+         }
+     }
+ 
++    private async resolveGenericCommandSelectionRequest(command: string, connection?: IBMi): Promise<string | null | undefined> {
++        const goCommandName = extractGoCommandName(command);
++        const selectSource = goCommandName !== undefined
++            ? `${goCommandName}*`
++            : command;
++        const selectCommand = /^([^\s]*)\*/.exec(selectSource);
++        if (selectCommand === null) {
++            return undefined;
++        }
++
++        if (!connection || !connection.sqlRunnerAvailable()) {
++            this.post({ type: 'notice', message: vscode.l10n.t('Not connected to IBM i, or the SQL runner is unavailable.') });
++            return null;
++        }
++
++        this.post({ type: 'notice', message: vscode.l10n.t('Selecting command...') });
++        const rawSelectName = String(selectCommand[1] || '').trim();
++        const normalizedSelectName = rawSelectName.includes('/')
++            ? connection.upperCaseName(rawSelectName)
++            : rawSelectName.toUpperCase();
++        const [name, library] = normalizedSelectName.split('/').reverse();
++
++        if (name.length > 10) {
++            this.post({ type: 'notice', message: vscode.l10n.t('{0} is not a valid command name', name) });
++            return null;
++        }
++
++        const lookupLibrary = library || '*LIBL';
++        const baseQuery = goCommandName !== undefined
++            ? `select OBJLIB, OBJNAME, OBJTEXT, COALESCE(NULLIF(TRIM(OBJTEXT), ''), OBJNAME) as SORTTEXT from table(QSYS2.OBJECT_STATISTICS('${lookupLibrary}', 'CMD', '${name}*')) order by SORTTEXT, OBJLIB, OBJNAME`
++            : `select OBJLIB, OBJNAME, OBJTEXT from table(QSYS2.OBJECT_STATISTICS('${lookupLibrary}', 'CMD', '${name}*'))`;
++        const wildcardRowLimit = this.resolveWildcardLookupRowLimit(connection);
++        const fetchRows = this.resolveWildcardLookupFetchRows(wildcardRowLimit);
++        const seen = new Set<string>();
++        const collected: Array<{ library: string; name: string; text: string | undefined }> = [];
++        const toCommandRows = (rows: Record<string, unknown>[]) => rows
++            .map(row => ({ library: String(row.OBJLIB), name: String(row.OBJNAME), text: row.OBJTEXT !== null ? String(row.OBJTEXT) : undefined }));
++        const appendUniqueRows = (rows: Array<{ library: string; name: string; text: string | undefined }>): number => {
++            let added = 0;
++            for (const row of rows) {
++                if (collected.length >= wildcardRowLimit) {
++                    break;
++                }
++                const key = `${row.library}/${row.name}`;
++                if (seen.has(key)) {
++                    continue;
++                }
++                seen.add(key);
++                collected.push(row);
++                added += 1;
++            }
++            return added;
++        };
++
++        let stagnantIterations = 0;
++        let pageResult = await this.jobManager.runSQLWithDetails(connection, baseQuery, { rows: fetchRows });
++        let continuation = pageResult.continuation;
++        let pageRows = toCommandRows(pageResult.rows);
++
++        while (pageRows.length > 0 && collected.length < wildcardRowLimit) {
++            const uniqueAdded = appendUniqueRows(pageRows);
++            if (uniqueAdded === 0) {
++                stagnantIterations += 1;
++                if (stagnantIterations >= 2) {
++                    break;
++                }
++            } else {
++                stagnantIterations = 0;
++            }
++
++            if (collected.length >= wildcardRowLimit) {
++                break;
++            }
++
++            if (this.jobManager.isContinuationUsable(continuation)) {
++                const more = await this.jobManager.continueSQLFromResult(pageResult.rawResult ?? pageResult, { targetRows: wildcardRowLimit - collected.length, statement: baseQuery });
++                const moreRows = toCommandRows(more.rows);
++                if (moreRows.length === 0) {
++                    break;
++                }
++                pageResult = {
++                    rows: more.rows,
++                    rawResult: more.rawResult ?? pageResult.rawResult,
++                    continuation: more.continuation ?? pageResult.continuation
++                };
++                continuation = more.continuation;
++                pageRows = moreRows;
++                continue;
++            }
++
++            break;
++        }
++
++        const suggestions = collected;
++
++        try {
++            if (suggestions.length > 0) {
++                const selection = (await vscode.window.showQuickPick(suggestions.map(s => ({ label: `${s.library}/${s.name}`, description: s.text })), { title: vscode.l10n.t('Select command') }))?.label;
++                if (selection !== undefined) {
++                    this.post({ type: 'setCommand', command: selection });
++                    this.post({ type: 'focusInput' });
++                    return selection;
++                }
++                this.post({ type: 'notice', message: undefined });
++                return null;
++            }
++
++            this.post({ type: 'notice', message: vscode.l10n.t('No selection match for {0} in {1}', name, library ? library : vscode.l10n.t('the library list')) });
++            return null;
++        } finally {
++            this.post({ type: 'focusInput' });
++            setTimeout(() => this.post({ type: 'focusInput' }), 50);
++        }
++    }
++
+     private async run(
+         command: string,
+         mode: CommandExecutionMode,
+@@ -1101,109 +1229,8 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
+             return;
+         }
+ 
+-        const goCommandName = extractGoCommandName(command);
+-        const selectSource = goCommandName !== undefined
+-            ? `${goCommandName}*`
+-            : command;
+-        const selectCommand = /^([^\s]*)\*/.exec(selectSource);
+-        if (selectCommand !== null) {
+-            this.post({ type: 'notice', message: vscode.l10n.t("Selecting command...") });
+-            const rawSelectName = String(selectCommand[1] || '').trim();
+-            const normalizedSelectName = rawSelectName.includes('/')
+-                ? connection.upperCaseName(rawSelectName)
+-                : rawSelectName.toUpperCase();
+-            const [name, library] = normalizedSelectName.split('/').reverse();
+-
+-            if (name.length > 10) {
+-                this.post({ type: 'notice', message: vscode.l10n.t("{0} is not a valid command name", name) });
+-            }
+-
+-            const lookupLibrary = library || '*LIBL';
+-            const baseQuery = goCommandName !== undefined
+-                ? `select OBJLIB, OBJNAME, OBJTEXT, COALESCE(NULLIF(TRIM(OBJTEXT), ''), OBJNAME) as SORTTEXT from table(QSYS2.OBJECT_STATISTICS('${lookupLibrary}', 'CMD', '${name}*')) order by SORTTEXT, OBJLIB, OBJNAME`
+-                : `select OBJLIB, OBJNAME, OBJTEXT from table(QSYS2.OBJECT_STATISTICS('${lookupLibrary}', 'CMD', '${name}*'))`;
+-            const wildcardRowLimit = this.resolveWildcardLookupRowLimit(connection);
+-            const fetchRows = this.resolveWildcardLookupFetchRows(wildcardRowLimit);
+-            const seen = new Set<string>();
+-            const collected: Array<{ library: string; name: string; text: string | undefined }> = [];
+-            const toCommandRows = (rows: Record<string, unknown>[]) => rows
+-                .map(row => ({ library: String(row.OBJLIB), name: String(row.OBJNAME), text: row.OBJTEXT !== null ? String(row.OBJTEXT) : undefined }));
+-            const appendUniqueRows = (rows: Array<{ library: string; name: string; text: string | undefined }>): number => {
+-                let added = 0;
+-                for (const row of rows) {
+-                    if (collected.length >= wildcardRowLimit) {
+-                        break;
+-                    }
+-                    const key = `${row.library}/${row.name}`;
+-                    if (seen.has(key)) {
+-                        continue;
+-                    }
+-                    seen.add(key);
+-                    collected.push(row);
+-                    added += 1;
+-                }
+-                return added;
+-            };
+-
+-            let stagnantIterations = 0;
+-            let pageResult = await this.jobManager.runSQLWithDetails(connection, baseQuery, { rows: fetchRows });
+-            let continuation = pageResult.continuation;
+-            let pageRows = toCommandRows(pageResult.rows);
+-
+-            while (pageRows.length > 0 && collected.length < wildcardRowLimit) {
+-                const uniqueAdded = appendUniqueRows(pageRows);
+-                if (uniqueAdded === 0) {
+-                    stagnantIterations += 1;
+-                    if (stagnantIterations >= 2) {
+-                        break;
+-                    }
+-                } else {
+-                    stagnantIterations = 0;
+-                }
+-
+-                if (collected.length >= wildcardRowLimit) {
+-                    break;
+-                }
+-
+-                if (this.jobManager.isContinuationUsable(continuation)) {
+-                    const more = await this.jobManager.continueSQLFromResult(pageResult.rawResult ?? pageResult, { targetRows: wildcardRowLimit - collected.length, statement: baseQuery });
+-                    const moreRows = toCommandRows(more.rows);
+-                    if (moreRows.length === 0) {
+-                        break;
+-                    }
+-                    pageResult = {
+-                        rows: more.rows,
+-                        rawResult: more.rawResult ?? pageResult.rawResult,
+-                        continuation: more.continuation ?? pageResult.continuation
+-                    };
+-                    continuation = more.continuation;
+-                    pageRows = moreRows;
+-                    continue;
+-                }
+-
+-                break;
+-            }
+-
+-            const suggestions = collected;
+-            const distinctLibraries = [...new Set(suggestions.map((entry) => entry.library))];
+-
+-            try {
+-                if (suggestions.length > 0) {
+-                    const selection = (await vscode.window.showQuickPick(suggestions.map(s => ({ label: `${s.library}/${s.name}`, description: s.text })), { title: vscode.l10n.t("Select command") }))?.label;
+-                    if (selection !== undefined) {
+-                        this.post({ type: 'setCommand', command: selection });
+-                        this.post({ type: 'focusInput' });
+-                    }
+-                    this.post({ type: 'notice', message: undefined });
+-                }
+-                else {
+-                    this.post({ type: 'notice', message: vscode.l10n.t("No selection match for {0} in {1}", name, library ? library : vscode.l10n.t("the library list")) });
+-                }
+-            } finally {
+-                this.post({ type: 'focusInput' });
+-                setTimeout(() => this.post({ type: 'focusInput' }), 50);
+-            }
+-
++        const genericSelection = await this.resolveGenericCommandSelectionRequest(command, connection);
++        if (genericSelection !== undefined) {
+             return;
+         }
+ 

@@ -37,7 +37,8 @@ import {
   getLengthClass,
   isSpecifiedFromChildDefault,
   isValidDataType,
-  isContainerType
+  isContainerType,
+  isInternalConstantElemShellParm
 } from './promptHelpers.js';
 
 import {
@@ -3322,6 +3323,11 @@ function loadForm(): void {
     const max = parseInt(parm.getAttribute('Max') || '1', 10);
 
     if (constant || type?.toLowerCase() === 'null') return;
+
+    if (isInternalConstantElemShellParm(parm)) {
+      debugLog(`[loadForm] Skipping internal constant-only ELEM parm: ${kwd}`);
+      return;
+    }
 
     if (max > 1) {
       const multiGroupDiv = document.createElement('div');

@@ -628,6 +628,43 @@ export async function activate(context: vscode.ExtensionContext) {
         }
         await setIbmiLoadedContext(true, 'code-for-ibmi-activated');
         code4i = baseExtension.exports;
+        let commandEntryConnectionHydrated = false;
+
+        const hydrateCommandEntryFromConnection = async (reason: string, attempt?: number): Promise<boolean> => {
+            if (commandEntryConnectionHydrated) {
+                return true;
+            }
+
+            const connection = code4i?.instance?.getConnection();
+            if (!connection) {
+                return false;
+            }
+
+            commandEntryConnectionHydrated = true;
+            if (reason === 'startup-connection-recheck') {
+                const attemptText = typeof attempt === 'number' ? ` attempt=${attempt}` : '';
+                safeOutputAppendLine(`[Cmd Entry][Startup] Delayed IBM i connection detected on startup recheck${attemptText}; applied Command Entry visibility.`);
+            }
+            await setConnectedContext(true, reason);
+            await prioritizeCommandEntryPanelOnConnect();
+            void commandEntry.handleConnectionAvailable(connection, { autoInitializeDedicatedJob: true });
+            return true;
+        };
+
+        const scheduleStartupConnectionHydration = (): void => {
+            const maxAttempts = 16;
+            let attempts = 0;
+            const timer = setInterval(() => {
+                attempts += 1;
+                void (async () => {
+                    const hydrated = await hydrateCommandEntryFromConnection('startup-connection-recheck', attempts);
+                    if (hydrated || attempts >= maxAttempts) {
+                        clearInterval(timer);
+                    }
+                })();
+            }, 250);
+            context.subscriptions.push({ dispose: () => clearInterval(timer) });
+        };
 
         const safeRegisterCode4iComponent = (label: string, component: unknown): void => {
             try {
@@ -831,6 +868,7 @@ export async function activate(context: vscode.ExtensionContext) {
         };
 
         safeSubscribeCode4iEvent('connected', 'clPrompter-connected-context', () => {
+            commandEntryConnectionHydrated = true;
             void setConnectedContext(true, 'ibmi-connected-event');
             void prioritizeCommandEntryPanelOnConnect();
             void commandEntry.handleConnectionAvailable(code4i?.instance?.getConnection(), { autoInitializeDedicatedJob: true });
@@ -855,6 +893,7 @@ export async function activate(context: vscode.ExtensionContext) {
         // registered components at connect time). The manual call below handles only
         // the case where the extension activates into an already-live session.
         safeSubscribeCode4iEvent('disconnected', 'clPrompter-connected-context', () => {
+            commandEntryConnectionHydrated = false;
             void setConnectedContext(false, 'ibmi-disconnected-event');
         });
         safeSubscribeCode4iEvent('disconnected', 'clPrompter-command-entry-cleanup', () => {
@@ -874,6 +913,7 @@ export async function activate(context: vscode.ExtensionContext) {
         // Start immediately if already connected when the extension activates.
         if (code4i.instance.getConnection()) {
             const initialConnection = code4i.instance.getConnection() as any;
+            commandEntryConnectionHydrated = true;
             void setConnectedContext(true, 'activate-existing-connection');
             void commandEntry.handleConnectionAvailable(initialConnection, { autoInitializeDedicatedJob: true });
             void applyCommandEntryStartupVisibility();
@@ -883,6 +923,8 @@ export async function activate(context: vscode.ExtensionContext) {
             // Run both UDTF checks in parallel, then prefetch — serialized relative
             // to prefetch so upload/compile steps don't race for SSH channels.
             Promise.allSettled([runCmdHelpCheck(), runCmdXmlCheck(), runCmdRunCheck()]).finally(() => prefetch());
+        } else {
+            scheduleStartupConnectionHydration();
         }
 
         // Ensure the interval is cleared when the extension is deactivated.
@@ -900,6 +942,7 @@ export async function activate(context: vscode.ExtensionContext) {
     }
     try {
         console.log('CL Prompter extension activated');
+        safeOutputAppendLine('[clPrompter] Status: activated');
 
         const startupConfig = vscode.workspace.getConfiguration('clPrompter');
         if (!startupConfig.get<boolean>('enableF4Key', true)) {

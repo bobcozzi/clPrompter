@@ -2,7 +2,7 @@
   "name": "clprompter",
   "displayName": "%displayName%",
   "description": "%description%",
-  "version": "1.0.45",
+  "version": "1.0.46",
   "author": {
     "name": "Bob Cozzi",
     "url": "https://github.com/bobcozzi"
@@ -887,7 +887,8 @@
     "test:name-validation": "tsc src/test/testNameTypeValidation.ts --outDir out --module commonjs --target es2020 --esModuleInterop --skipLibCheck && node out/test/testNameTypeValidation.js",
     "test:api": "tsc src/testAPICall.ts --outDir out --module commonjs --target es2020 --esModuleInterop --skipLibCheck && node out/testAPICall.js",
     "test:command-entry": "tsc src/commandEntryModel.ts src/commandEntryPrefixes.ts src/commandEntrySqlHelpers.ts src/commandEntrySqlSettings.ts src/commandEntryJobManager.ts src/sqlSyntaxChecker.ts src/test/testCommandEntry.ts --outDir out --module commonjs --target es2020 --esModuleInterop --skipLibCheck --rootDir src && node out/test/testCommandEntry.js",
-    "test:dep-qual-default": "tsc src/test/testDepQualDefault.ts --outDir out --module commonjs --target es2020 --esModuleInterop --skipLibCheck && node out/test/testDepQualDefault.js"
+    "test:dep-qual-default": "tsc src/test/testDepQualDefault.ts --outDir out --module commonjs --target es2020 --esModuleInterop --skipLibCheck && node out/test/testDepQualDefault.js",
+    "test:hidden-constant-elem-shell": "tsc src/test/testHiddenConstantElemShell.ts --outDir out --module commonjs --target es2020 --esModuleInterop --skipLibCheck && node out/test/testHiddenConstantElemShell.js"
   },
   "devDependencies": {
     "@types/node": "20.8.10",

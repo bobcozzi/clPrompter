@@ -84,6 +84,55 @@ export function getTypeCategory(type) {
         return 'UNKNOWN';
     }
 }
+function getDirectChildElementsByTagName(parent, tagName) {
+    const upperTagName = tagName.toUpperCase();
+    const out = [];
+    const children = parent.childNodes || [];
+    for (let i = 0; i < children.length; i++) {
+        const node = children[i];
+        if (node.nodeType !== 1)
+            continue;
+        const el = node;
+        if ((el.tagName || '').toUpperCase() === upperTagName) {
+            out.push(el);
+        }
+    }
+    return out;
+}
+// Detect non-promptable internal shell PARM entries that wrap constant ELEM values.
+// This is attribute/structure based and does not depend on a specific Kwd name.
+export function isInternalConstantElemShellParm(parm) {
+    if (!parm)
+        return false;
+    const type = String(parm.getAttribute('Type') || '').toUpperCase();
+    if (type !== 'ELEM')
+        return false;
+    // Promptable parms generally provide PosNbr and/or Prompt.
+    const hasPosNbr = parm.hasAttribute('PosNbr');
+    const hasPrompt = String(parm.getAttribute('Prompt') || '').trim().length > 0;
+    if (hasPosNbr || hasPrompt)
+        return false;
+    const elemParts = getDirectChildElementsByTagName(parm, 'Elem');
+    if (elemParts.length === 0)
+        return false;
+    return elemParts.every((elem) => {
+        const constant = String(elem.getAttribute('Constant') || '').trim();
+        if (!constant)
+            return false;
+        const hasNestedElems = getDirectChildElementsByTagName(elem, 'Elem').length > 0;
+        const hasNestedQuals = getDirectChildElementsByTagName(elem, 'Qual').length > 0;
+        if (hasNestedElems || hasNestedQuals)
+            return false;
+        const hasElemPrompt = String(elem.getAttribute('Prompt') || '').trim().length > 0;
+        if (hasElemPrompt)
+            return false;
+        const hasInputHints = elem.hasAttribute('DspInput') ||
+            elem.hasAttribute('Choice') ||
+            elem.hasAttribute('RangeMinVal') ||
+            elem.hasAttribute('RangeMaxVal');
+        return !hasInputHints;
+    });
+}
 // CL variable name pattern: &NAME or &NAME_QUALIFIER
 // Max: 22 chars total (& + up to 21)
 export const CL_VARIABLE_PATTERN = /^&[A-Z][A-Z0-9_]{0,21}$/i;
