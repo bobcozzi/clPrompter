@@ -7,6 +7,7 @@ import { CommandEntryHistory, CommandExecutionMode } from './commandEntryModel';
 import { detectCommandEntryPrefix } from './commandEntryPrefixes';
 import { CommandEntryService } from './commandEntryService';
 import { BUILT_IN_SQL_SNIPPETS, CommandEntrySqlSnippet } from './commandEntrySnippets';
+import { formatCLCommandText } from './formatCL';
 import { buildImmediateSessionContextSql, buildRunAfterSqlJobInitDefaults, getConnectionSqlSessionOptions, getConnectionSqlSettings, normalizeSchemaSessionContextValue, normalizeSessionContextValue, splitLibraryListTokens, splitRunAfterSqlJobInitStatements, updateConnectionSqlSettings } from './commandEntrySqlSettings';
 import { closeSqlResultPanel, configureSqlResultPanelAssets, notifySqlResultSessionClosed, setSqlResultPanelRequestHandler, showSqlResultPanel } from './sqlResultPanel';
 
@@ -69,6 +70,7 @@ export interface CodeSnippetRecord {
     label: string;
     codeTemplate: string;
     group: string;
+    singleRowResultView?: 'row' | 'column';
     order?: number;
     source: 'built-in' | 'user';
 }
@@ -78,6 +80,7 @@ interface CommandEntrySqlSnippetUser {
     label: string;
     stmt: string;
     group: string;
+    singleRowResultView?: 'row' | 'column';
     order?: number;
     createdAt: string;
     updatedAt: string;
@@ -427,15 +430,16 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
             label: snippet.label,
             codeTemplate: snippet.stmt,
             group: snippet.group,
+            singleRowResultView: snippet.singleRowResultView,
             order: snippet.order,
             source: snippet.source
         }));
     }
-    async createCodeSnippet(label: string, codeTemplate: string, group = 'Admin', order?: number): Promise<void> {
-        await this.addUserSqlSnippet(label, codeTemplate, group, order);
+    async createCodeSnippet(label: string, codeTemplate: string, group = 'Admin', order?: number, singleRowResultView?: 'row' | 'column'): Promise<void> {
+        await this.addUserSqlSnippet(label, codeTemplate, group, order, singleRowResultView);
     }
-    async updateCodeSnippet(id: string, label: string, codeTemplate: string, group?: string, order?: number): Promise<void> {
-        await this.updateUserSqlSnippet(id, label, codeTemplate, group, order);
+    async updateCodeSnippet(id: string, label: string, codeTemplate: string, group?: string, order?: number, singleRowResultView?: 'row' | 'column'): Promise<void> {
+        await this.updateUserSqlSnippet(id, label, codeTemplate, group, order, singleRowResultView);
     }
     async deleteCodeSnippet(id: string): Promise<void> {
         await this.deleteSqlSnippet(id);
@@ -485,6 +489,7 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
             | { type: 'saveResultSet'; columns: string[]; rows: string[][]; resultTitle?: string }
             | { type: 'copyCellToClipboard'; value: string }
             | { type: 'copyCellToCommandEntry'; value: string }
+            | { type: 'displayJoblog'; sqlJobId: string }
     ) {
         if (request.type === 'copyResultSet' || request.type === 'saveResultSet') {
             return undefined;
@@ -502,6 +507,11 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
             await vscode.commands.executeCommand('clprompter.openCommandEntry');
             this.setCommandText(value);
             this.post({ type: 'notice', message: vscode.l10n.t('Result cell copied to Command Entry.') });
+            return undefined;
+        }
+
+        if (request.type === 'displayJoblog') {
+            await this.displayJoblogForSqlJob(String(request.sqlJobId ?? ''));
             return undefined;
         }
 
@@ -873,7 +883,8 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
 
         const command = `SQL: ${resolution.resolved}`;
         const execution = await this.service.execute(connection, command, '*RUN', undefined, {
-            resultTitle: fullJoblogSnippet.label
+            resultTitle: fullJoblogSnippet.label,
+            autoColumnViewForSingleRowOverride: false
         });
         if (execution.failure) {
             this.safeOutputAppendLine(`[Cmd Entry] Display Joblog failed for ${qualifiedJob}: ${execution.failure}`);
@@ -1026,10 +1037,6 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
             }
 
             normalizedCommand = libraryCommandSelection;
-            const normalizedForDisplay = applyUserCommandLabel(normalizedCommand, labeledCommand.labelPrefix);
-            if (normalizedForDisplay !== command) {
-                this.post({ type: 'setCommand', command: normalizedForDisplay });
-            }
         }
 
         const commandForPrompter = applyUserCommandLabel(normalizedCommand, labeledCommand.labelPrefix);
@@ -1041,12 +1048,20 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
         }
         try {
             const result = await CLPrompter(this.context.extensionUri, commandForPrompter);
-            const promptedCommand = result && result.trim().length > 0 ? result : commandForPrompter;
-            const promptedForDisplay = hasLeadingLabelOrPrefix(promptedCommand)
-                ? String(promptedCommand).trimStart()
-                : applyUserCommandLabel(promptedCommand, labeledCommand.labelPrefix);
+            const promptedCommand = result.command && result.command.trim().length > 0 ? result.command : commandForPrompter;
+            const config = vscode.workspace.getConfiguration('clPrompter');
+            const convertCmdAndParmNameCase = config.get<'*UPPER' | '*LOWER' | '*NONE'>('convertCmdAndParmNameCase', '*UPPER');
+            const normalizedPromptedCommand = convertCmdAndParmNameCase === '*NONE'
+                ? promptedCommand
+                : formatCLCommandText(promptedCommand, convertCmdAndParmNameCase);
+            const promptedForDisplay = hasLeadingLabelOrPrefix(normalizedPromptedCommand)
+                ? String(normalizedPromptedCommand).trimStart()
+                : applyUserCommandLabel(normalizedPromptedCommand, labeledCommand.labelPrefix);
             if (promptedForDisplay !== command) {
                 this.post({ type: 'setCommand', command: promptedForDisplay });
+            }
+            if (result.action === 'submit') {
+                this.postCmdEntryNoticeText(vscode.l10n.t('Press Enter to run command.'));
             }
         } catch (error) {
             this.safeOutputAppendLine(`[Cmd Entry] Prompt failed: ${String(error)}`);
@@ -1206,6 +1221,7 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
             logToHistory?: boolean;
             logToCommandEntryLog?: boolean;
             resultTitle?: string;
+            singleRowResultView?: 'row' | 'column';
         } = {}
     ): Promise<void> {
         const promptPrefixResolution = resolvePromptPrefixedCommand(command);
@@ -1297,7 +1313,12 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
 
         try {
             const execution = await this.service.execute(connection, command, mode, this.activeExecutionId, {
-                resultTitle: options.resultTitle
+                resultTitle: options.resultTitle,
+                autoColumnViewForSingleRowOverride: options.singleRowResultView === 'row'
+                    ? false
+                    : options.singleRowResultView === 'column'
+                        ? true
+                        : undefined
             });
             let executionForPost = isSql
                 ? { ...execution, command: ensureSqlPrefixForRecall(execution.command, true) }
@@ -1536,6 +1557,7 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
                 label,
                 stmt,
                 group,
+                singleRowResultView: record.singleRowResultView,
                 order,
                 createdAt: String(record.createdAt || new Date().toISOString()),
                 updatedAt: String(record.updatedAt || new Date().toISOString())
@@ -1656,6 +1678,7 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
             label: snippet.label,
             stmt: snippet.stmt,
             group: snippet.group,
+            singleRowResultView: snippet.singleRowResultView,
             order: snippet.order,
             source: 'user',
             createdAt: snippet.createdAt,
@@ -1736,12 +1759,12 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
         return label.trim().length > 0;
     }
 
-    private normalizeImportedSnippets(raw: unknown): Array<{ label: string; stmt: string; group: string; order?: number }> {
+    private normalizeImportedSnippets(raw: unknown): Array<{ label: string; stmt: string; group: string; singleRowResultView?: 'row' | 'column'; order?: number }> {
         const sourceArray = Array.isArray(raw)
             ? raw
             : (raw && typeof raw === 'object' && Array.isArray((raw as any).snippets) ? (raw as any).snippets : []);
 
-        const normalized: Array<{ label: string; stmt: string; group: string; order?: number }> = [];
+        const normalized: Array<{ label: string; stmt: string; group: string; singleRowResultView?: 'row' | 'column'; order?: number }> = [];
         const seenLabels = new Set<string>();
         for (const item of sourceArray) {
             if (!item || typeof item !== 'object') {
@@ -1752,6 +1775,10 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
             const label = String(record.label ?? record.name ?? '').trim();
             const stmt = String(record.stmt ?? record.sqlTemplate ?? record.codeTemplate ?? record.snippetText ?? record.text ?? record.command ?? '').trim();
             const group = String(record.group ?? record.category ?? 'Admin').trim() || 'Admin';
+            const singleRowRaw = String(record.singleRowResultView ?? record.singleRowView ?? '').trim().toLowerCase();
+            const singleRowResultView = singleRowRaw === 'row' || singleRowRaw === 'column'
+                ? (singleRowRaw as 'row' | 'column')
+                : undefined;
             const order = normalizeSnippetOrder((record as { order?: unknown; sequence?: unknown }).order ?? (record as { sequence?: unknown }).sequence);
             if (!this.isValidSnippetLabel(label) || !stmt) {
                 continue;
@@ -1762,7 +1789,7 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
                 continue;
             }
             seenLabels.add(key);
-            normalized.push({ label, stmt, group, order });
+            normalized.push({ label, stmt, group, singleRowResultView, order });
         }
 
         return normalized.slice(0, SQL_SNIPPETS_MAX);
@@ -1795,6 +1822,7 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
                     label: snippet.label,
                     codeTemplate: snippet.stmt,
                     group: snippet.group,
+                    singleRowResultView: snippet.singleRowResultView,
                     order: snippet.order,
                     createdAt: snippet.createdAt,
                     updatedAt: snippet.updatedAt
@@ -1872,6 +1900,7 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
                     label: item.label,
                     stmt: item.stmt,
                     group: item.group,
+                    singleRowResultView: item.singleRowResultView,
                     order: item.order,
                     createdAt: now,
                     updatedAt: now
@@ -1893,6 +1922,7 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
                             label: item.label,
                             stmt: item.stmt,
                             group: item.group,
+                            singleRowResultView: item.singleRowResultView,
                             order: item.order,
                             createdAt: now,
                             updatedAt: now
@@ -1907,6 +1937,7 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
                         existingMatch.label = item.label;
                         existingMatch.stmt = item.stmt;
                         existingMatch.group = item.group;
+                        existingMatch.singleRowResultView = item.singleRowResultView;
                         existingMatch.order = item.order;
                         existingMatch.updatedAt = now;
                         updated += 1;
@@ -2029,7 +2060,8 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
                 sourceType: 'snippet',
                 logToHistory: this.shouldAddToHistory('snippet', sqlLike),
                 logToCommandEntryLog: this.shouldAddToCommandEntryLog('snippet', sqlLike),
-                resultTitle: snippet.label
+                resultTitle: snippet.label,
+                singleRowResultView: snippet.singleRowResultView
             });
         } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
@@ -2038,7 +2070,7 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
         }
     }
 
-    private async addUserSqlSnippet(label: string, stmt: string, group = 'Admin', order?: number): Promise<void> {
+    private async addUserSqlSnippet(label: string, stmt: string, group = 'Admin', order?: number, singleRowResultView?: 'row' | 'column'): Promise<void> {
         const trimmedLabel = label.trim();
         const trimmedStmt = stmt.trim();
         const trimmedGroup = group.trim() || 'Admin';
@@ -2055,7 +2087,16 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
         const now = new Date().toISOString();
         const id = this.createUserSnippetId();
         const userSnippets = this.getUserSqlSnippets();
-        userSnippets.push({ id, label: trimmedLabel, stmt: trimmedStmt, group: trimmedGroup, order: normalizedOrder, createdAt: now, updatedAt: now });
+        userSnippets.push({
+            id,
+            label: trimmedLabel,
+            stmt: trimmedStmt,
+            group: trimmedGroup,
+            singleRowResultView,
+            order: normalizedOrder,
+            createdAt: now,
+            updatedAt: now
+        });
         await this.setUserSqlSnippets(userSnippets);
 
         const snippetOrder = this.getSqlSnippetOrder();
@@ -2064,7 +2105,7 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
         this.notifyCodeSnippetsChanged();
     }
 
-    private async updateUserSqlSnippet(id: string, label: string, stmt: string, group?: string, order?: number): Promise<void> {
+    private async updateUserSqlSnippet(id: string, label: string, stmt: string, group?: string, order?: number, singleRowResultView?: 'row' | 'column'): Promise<void> {
         const trimmedLabel = label.trim();
         const trimmedStmt = stmt.trim();
         const trimmedGroup = group?.trim();
@@ -2092,6 +2133,7 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
                 label: trimmedLabel,
                 stmt: trimmedStmt,
                 group: trimmedGroup || builtIn.group || 'Admin',
+                singleRowResultView,
                 order: normalizedOrder,
                 createdAt: now,
                 updatedAt: now
@@ -2106,6 +2148,7 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
             label: trimmedLabel,
             stmt: trimmedStmt,
             group: trimmedGroup || userSnippets[index].group || 'Admin',
+            singleRowResultView,
             order: normalizedOrder,
             updatedAt: new Date().toISOString()
         };

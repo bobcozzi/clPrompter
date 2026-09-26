@@ -265,8 +265,8 @@
         }
 
         table {
-            width: 100%;
-            min-width: 100%;
+            width: max-content;
+            min-width: 0;
             border-collapse: collapse;
             table-layout: auto;
         }
@@ -384,6 +384,11 @@
             white-space: pre-wrap;
             word-break: break-word;
             max-width: 240px;
+        }
+
+        tbody td.sql-wide-cell {
+            min-width: 320px;
+            max-width: 640px;
         }
 
         tbody td.sql-null-cell {

@@ -25,6 +25,7 @@ interface SqlPagingSession {
     columns: string[];
     fetchSize: number;
     prefetchSize: number;
+    autoColumnViewForSingleRowOverride?: boolean;
     continuation?: SqlContinuationTuple;
     continuationRawResult?: unknown;
     hasMoreRows: boolean;
@@ -181,6 +182,17 @@ function getMetadataFieldByPriority(candidate: Record<string, unknown>, ...alias
     return undefined;
 }
 
+function getFirstPositiveMetadataNumber(candidate: Record<string, unknown>, aliases: string[]): number | undefined {
+    for (const alias of aliases) {
+        const value = toOptionalNumber(getMetadataField(candidate, alias));
+        if (typeof value === 'number' && value > 0) {
+            return value;
+        }
+    }
+
+    return undefined;
+}
+
 function extractSqlColumnMetadata(raw: unknown, fallbackNames: string[]): SqlColumnMetadata[] {
     const collectMetadataEntries = (value: unknown): unknown[] => {
         if (Array.isArray(value)) {
@@ -233,13 +245,19 @@ function extractSqlColumnMetadata(raw: unknown, fallbackNames: string[]): SqlCol
             'LABEL', 'COLUMN_HEADING', 'columnHeading', 'ColumnHeading', 'column_heading', 'heading', 'Heading', 'HEADING'
         ) ?? '').trim();
 
-        const displaySize = toOptionalNumber(getMetadataFieldByPriority(
-            candidate,
-            'length', 'LENGTH',
-            'precision', 'PRECISION',
+        const displaySize = getFirstPositiveMetadataNumber(candidate, [
             'displaySize', 'display_size', 'DISPLAY_SIZE',
-            'columnSize', 'column_size', 'COLUMN_SIZE'
-        ));
+            'columnSize', 'column_size', 'COLUMN_SIZE',
+            'length', 'LENGTH',
+            'columnLength', 'column_length', 'COLUMN_LENGTH',
+            'maxLength', 'max_length', 'MAX_LENGTH',
+            'maximumLength', 'maximum_length', 'MAXIMUM_LENGTH',
+            'charLength', 'char_length', 'CHAR_LENGTH',
+            'characterMaximumLength', 'character_maximum_length', 'CHARACTER_MAXIMUM_LENGTH',
+            'octetLength', 'octet_length', 'OCTET_LENGTH',
+            'bytes', 'BYTES',
+            'precision', 'PRECISION'
+        ]);
 
         const typeName = getMetadataField(
             candidate,
@@ -279,6 +297,54 @@ function extractSqlColumnMetadata(raw: unknown, fallbackNames: string[]): SqlCol
         name: entry.name || fallbackNames[index] || `COLUMN_${index + 1}`,
         label: entry.label || entry.name || fallbackNames[index] || undefined
     }));
+}
+
+function extractColumnsNodeForLogging(raw: unknown): { source: string; node: unknown } | undefined {
+    if (!raw || typeof raw !== 'object') {
+        return undefined;
+    }
+
+    const candidate = raw as Record<string, unknown>;
+    const directKeys = ['columns', 'columnMetadata', 'metadata', 'fields', 'result'] as const;
+    for (const key of directKeys) {
+        const value = candidate[key];
+        if (Array.isArray(value)) {
+            return { source: key, node: value };
+        }
+    }
+
+    const nestedMetadata = candidate.metadata && typeof candidate.metadata === 'object' && !Array.isArray(candidate.metadata)
+        ? candidate.metadata as Record<string, unknown>
+        : undefined;
+    if (nestedMetadata) {
+        const nestedKeys = ['columns', 'columnMetadata', 'fields', 'metadata'] as const;
+        for (const key of nestedKeys) {
+            const value = nestedMetadata[key];
+            if (Array.isArray(value)) {
+                return { source: `metadata.${key}`, node: value };
+            }
+        }
+    }
+
+    return undefined;
+}
+
+function compactJsonForLog(value: unknown, maxChars: number): string {
+    try {
+        const json = JSON.stringify(value);
+        if (!json) {
+            return '<empty-json>';
+        }
+        if (json.length <= maxChars) {
+            return json;
+        }
+
+        const head = json.slice(0, Math.max(0, Math.floor(maxChars * 0.65)));
+        const tail = json.slice(Math.max(0, json.length - Math.floor(maxChars * 0.25)));
+        return `${head}... [truncated ${json.length - (head.length + tail.length)} chars] ...${tail}`;
+    } catch (error) {
+        return `<unserializable: ${error instanceof Error ? error.message : String(error)}>`;
+    }
 }
 
 function inferTypeNameFromValue(value: unknown): { typeName: string } {
@@ -656,6 +722,17 @@ export class CommandEntryService {
         this.jobManager?.logInfo(`[Cmd Entry][SQLPolicy] ${message}`);
     }
 
+    private logColumnsNodeMetadata(raw: unknown, context: string): void {
+        const resolved = extractColumnsNodeForLogging(raw);
+        if (!resolved) {
+            this.logSqlInfo(`${context}.columnsNode source=<missing>`);
+            return;
+        }
+
+        const count = Array.isArray(resolved.node) ? resolved.node.length : 0;
+        this.logSqlInfo(`${context}.columnsNode source=${resolved.source} count=${count} json=${compactJsonForLog(resolved.node, 2200)}`);
+    }
+
     private buildConnectionKey(connection: IBMi): string {
         return `${connection.currentConnectionName}|${connection.currentUser}|${connection.currentHost}|${connection.currentPort}`;
     }
@@ -708,6 +785,7 @@ export class CommandEntryService {
                     : [];
 
         const metadataSource = detailedRawResult ?? rawResult;
+        this.logColumnsNodeMetadata(metadataSource, 'runSqlRows');
         const metadata = extractSqlColumnMetadata(metadataSource, deriveSqlColumns(normalizedRows));
         const elapsedMs = typeof rawResult === 'object' && rawResult !== null && !Array.isArray(rawResult)
             ? (() => {
@@ -741,6 +819,7 @@ export class CommandEntryService {
 
         if (this.jobManager) {
             const detailed = await this.jobManager.runSQLWithDetails(connection, statement, { rows });
+            this.logColumnsNodeMetadata(detailed.rawResult ?? detailed.rows, 'runSqlRowsWithDetails');
             const metadata = extractSqlColumnMetadata(detailed.rawResult ?? detailed.rows, deriveSqlColumns(detailed.rows));
             return { ...detailed, metadata };
         }
@@ -802,6 +881,7 @@ export class CommandEntryService {
 
             rows.push(...continuationResult.rows);
             if (!hasUsefulColumnMetadata(metadata)) {
+                this.logColumnsNodeMetadata(continuationResult.rawResult ?? continuationResult.rows, 'runDedicatedSqlWithPaging.continuation');
                 const continuationMetadata = extractSqlColumnMetadata(
                     continuationResult.rawResult ?? continuationResult.rows,
                     deriveSqlColumns(continuationResult.rows)
@@ -837,9 +917,12 @@ export class CommandEntryService {
             columnMetadata?: SqlColumnMetadata[];
             resultTitle?: string;
             elapsedMs?: number;
+            autoColumnViewForSingleRowOverride?: boolean;
         }
     ) {
-        const autoColumnViewForSingleRow = getConnectionSqlSettings(this.context, connection).autoColumnViewForSingleRow;
+        const autoColumnViewForSingleRow = typeof options?.autoColumnViewForSingleRowOverride === 'boolean'
+            ? options.autoColumnViewForSingleRowOverride
+            : getConnectionSqlSettings(this.context, connection).autoColumnViewForSingleRow;
         const columns = deriveSqlColumns(rows);
         const runtimeMetadata = hasUsefulColumnMetadata(options?.columnMetadata)
             ? options?.columnMetadata
@@ -953,7 +1036,8 @@ export class CommandEntryService {
                     prefetchSize: session.prefetchSize,
                     columnMetadata: session.columnMetadata,
                     resultTitle: session.resultTitle,
-                    elapsedMs: undefined
+                    elapsedMs: undefined,
+                    autoColumnViewForSingleRowOverride: session.autoColumnViewForSingleRowOverride
                 });
                 await this.closeSqlSession(session.id);
                 return payload;
@@ -976,7 +1060,8 @@ export class CommandEntryService {
             prefetchSize: session.prefetchSize,
             columnMetadata: session.columnMetadata,
             resultTitle: session.resultTitle,
-            elapsedMs: undefined
+            elapsedMs: undefined,
+            autoColumnViewForSingleRowOverride: session.autoColumnViewForSingleRowOverride
         });
 
         if (!hasMoreRows) {
@@ -991,7 +1076,7 @@ export class CommandEntryService {
         command: string,
         mode: CommandExecutionMode,
         id?: string,
-        options?: { resultTitle?: string }
+        options?: { resultTitle?: string; autoColumnViewForSingleRowOverride?: boolean }
     ): Promise<CommandExecution> {
         const started = Date.now();
         const startedDate = new Date(started);
@@ -1053,6 +1138,7 @@ export class CommandEntryService {
                                 // Reuse the prefetch setting as sqlmore chunk size.
                                 fetchSize: prefetchSize,
                                 prefetchSize,
+                                autoColumnViewForSingleRowOverride: options?.autoColumnViewForSingleRowOverride,
                                 continuation: initialChunk.continuation,
                                 continuationRawResult: initialChunk.rawResult,
                                 hasMoreRows: true,
@@ -1122,7 +1208,8 @@ export class CommandEntryService {
                         prefetchSize: (unlimited || userManagedRowLimiter) ? undefined : Math.min(maxRows, prefetchRows),
                         columnMetadata,
                         resultTitle: options?.resultTitle,
-                        elapsedMs: queryElapsedMs
+                        elapsedMs: queryElapsedMs,
+                        autoColumnViewForSingleRowOverride: options?.autoColumnViewForSingleRowOverride
                     })
                 };
             }

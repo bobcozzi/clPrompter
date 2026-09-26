@@ -634,6 +634,47 @@ export function extractCommentFromCommand(input: string): { command: string; com
   return { command: input };
 }
 
+type CmdAndParmCaseOption = '*UPPER' | '*LOWER' | '*NONE';
+
+export function applyCmdAndParmNameCase(ast: CLNode, label: string | undefined, convertCmdAndParmNameCase: CmdAndParmCaseOption): { ast: CLNode; label?: string } {
+  if (convertCmdAndParmNameCase === '*NONE') {
+    return { ast, label };
+  }
+
+  const lowercase = 'abcdefghijklmnopqrstuvwxyz';
+  const uppercase = lowercase.toUpperCase();
+  let fromCase = '';
+  let toCase = '';
+
+  if (convertCmdAndParmNameCase === '*UPPER') {
+    fromCase = lowercase;
+    toCase = uppercase;
+  } else if (convertCmdAndParmNameCase === '*LOWER') {
+    fromCase = uppercase;
+    toCase = lowercase;
+  }
+
+  // Import translateCase from formatCL
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const { translateCase } = require('./formatCL');
+
+  if (ast.name) {
+    ast.name = translateCase(ast.name, fromCase, toCase);
+  }
+
+  for (const param of ast.parameters) {
+    if (param.name) {
+      param.name = translateCase(param.name, fromCase, toCase);
+    }
+  }
+
+  if (label) {
+    label = translateCase(label, fromCase, toCase);
+  }
+
+  return { ast, label };
+}
+
 
 export function formatCLCmd(label: string | undefined, cmdName: string, parmStr: string, comment?: string): string {
   // Extract comment from parmStr if present (and no comment already provided)
@@ -664,41 +705,7 @@ export function formatCLCmd(label: string | undefined, cmdName: string, parmStr:
   const convertCmdAndParmNameCase = config.get('convertCmdAndParmNameCase', '*UPPER') as '*UPPER' | '*LOWER' | '*NONE';
 
   // Apply case conversion to command name and parameter keywords
-  if (convertCmdAndParmNameCase !== '*NONE') {
-    const lowercase = 'abcdefghijklmnopqrstuvwxyz';
-    const uppercase = lowercase.toUpperCase();
-    let fromCase = '';
-    let toCase = '';
-
-    if (convertCmdAndParmNameCase === '*UPPER') {
-      fromCase = lowercase;
-      toCase = uppercase;
-    } else if (convertCmdAndParmNameCase === '*LOWER') {
-      fromCase = uppercase;
-      toCase = lowercase;
-    }
-
-    // Import translateCase from formatCL
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const { translateCase } = require('./formatCL');
-
-    // Convert command name
-    if (ast.name) {
-      ast.name = translateCase(ast.name, fromCase, toCase);
-    }
-
-    // Convert parameter keywords
-    for (const param of ast.parameters) {
-      if (param.name) {
-        param.name = translateCase(param.name, fromCase, toCase);
-      }
-    }
-
-    // Convert label if present
-    if (label) {
-      label = translateCase(label, fromCase, toCase);
-    }
-  }
+  ({ ast, label } = applyCmdAndParmNameCase(ast, label, convertCmdAndParmNameCase));
 
   // Use the unified formatter (v2)
   try {

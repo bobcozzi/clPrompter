@@ -322,7 +322,10 @@ class CodeSnippetEditorPanel {
             'clprompter.codeSnippetEditor',
             snippet ? `Edit Code Snippet: ${snippet.label}` : 'New Code Snippet',
             vscode.ViewColumn.Active,
-            { enableScripts: true }
+            {
+                enableScripts: true,
+                localResourceRoots: [vscode.Uri.joinPath(context.extensionUri, 'media')]
+            }
         );
         this.panel = panel;
 
@@ -342,6 +345,9 @@ class CodeSnippetEditorPanel {
                         const label = String(message.label || '').trim();
                         const codeTemplate = String(message.codeTemplate || '').trim();
                         const group = String(message.group || '').trim() || 'Admin';
+                        const singleRowResultView = message.singleRowResultView === 'row' || message.singleRowResultView === 'column'
+                            ? message.singleRowResultView
+                            : undefined;
                         if (!label || !codeTemplate) {
                             panel.webview.postMessage({ type: 'error', message: vscode.l10n.t('Label and Code Snippet text are required.') });
                             return;
@@ -351,9 +357,9 @@ class CodeSnippetEditorPanel {
                             : undefined;
 
                         if (snippet && snippet.source === 'user') {
-                            await commandEntry.updateCodeSnippet(snippet.id, label, codeTemplate, group, parsedOrder);
+                            await commandEntry.updateCodeSnippet(snippet.id, label, codeTemplate, group, parsedOrder, singleRowResultView);
                         } else {
-                            await commandEntry.createCodeSnippet(label, codeTemplate, group, parsedOrder);
+                            await commandEntry.createCodeSnippet(label, codeTemplate, group, parsedOrder, singleRowResultView);
                         }
                         panel.dispose();
                         break;
@@ -362,6 +368,9 @@ class CodeSnippetEditorPanel {
                         const label = String(message.label || '').trim();
                         const codeTemplate = String(message.codeTemplate || '').trim();
                         const group = String(message.group || '').trim() || 'Admin';
+                        const singleRowResultView = message.singleRowResultView === 'row' || message.singleRowResultView === 'column'
+                            ? message.singleRowResultView
+                            : undefined;
                         if (!label || !codeTemplate) {
                             panel.webview.postMessage({ type: 'error', message: vscode.l10n.t('Label and Code Snippet text are required.') });
                             return;
@@ -371,10 +380,10 @@ class CodeSnippetEditorPanel {
                             : undefined;
 
                         if (snippet && snippet.source === 'user') {
-                            await commandEntry.updateCodeSnippet(snippet.id, label, codeTemplate, group, parsedOrder);
+                            await commandEntry.updateCodeSnippet(snippet.id, label, codeTemplate, group, parsedOrder, singleRowResultView);
                             await commandEntry.executeCodeSnippetById(snippet.id);
                         } else {
-                            await commandEntry.createCodeSnippet(label, codeTemplate, group, parsedOrder);
+                            await commandEntry.createCodeSnippet(label, codeTemplate, group, parsedOrder, singleRowResultView);
                             const created = commandEntry.listCodeSnippets().find((entry) => entry.label.toUpperCase() === label.toUpperCase() && entry.source === 'user');
                             if (created) {
                                 await commandEntry.executeCodeSnippetById(created.id);
@@ -392,98 +401,91 @@ class CodeSnippetEditorPanel {
             }
         });
 
-        panel.webview.html = this.editorHtml(panel.webview);
+        panel.webview.html = this.editorHtml(panel.webview, context.extensionUri);
     }
 
-    private static editorHtml(webview: vscode.Webview): string {
+    private static editorHtml(webview: vscode.Webview, extensionUri: vscode.Uri): string {
         const nonce = Array.from({ length: 32 }, () => 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789'.charAt(Math.floor(Math.random() * 62))).join('');
+        const cssUri = webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'media', 'commandEntrySnippetEditor.css'));
         return `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource}; script-src 'nonce-${nonce}';" />
-    <style>
-        * { box-sizing: border-box; }
-        body { margin: 0; padding: 16px 18px; font-family: var(--vscode-font-family); color: var(--vscode-foreground); background: var(--vscode-editor-background); }
-        .form-shell { width: 100%; overflow-x: auto; }
-        .form-table { border-collapse: separate; border-spacing: 0 10px; min-width: 1120px; width: 100%; }
-        .form-table th { width: 220px; text-align: left; vertical-align: top; font-size: 12px; color: var(--vscode-descriptionForeground); padding: 10px 8px 0 0; letter-spacing: 0.02em; font-weight: 600; white-space: nowrap; }
-        .form-table td { min-width: 860px; }
-        input, textarea { font: inherit; color: var(--vscode-input-foreground); background: var(--vscode-input-background); border: 1px solid var(--vscode-input-border, transparent); border-radius: 8px; padding: 9px 10px; }
-        input { height: 38px; }
-        input { width: 100%; }
-        input:focus, textarea:focus { outline: 1px solid var(--vscode-focusBorder); outline-offset: 0; }
-        textarea { width: min(100%, 80ch); min-height: calc(12 * 1.4em + 18px); resize: both; line-height: 1.4; font-family: var(--vscode-editor-font-family, var(--vscode-font-family)); }
-        .vars { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
-        button { height: 34px; border-radius: 8px; border: 1px solid var(--vscode-button-border, transparent); padding: 0 14px; font: inherit; font-weight: 600; letter-spacing: 0.01em; cursor: pointer; transition: background-color 120ms ease, transform 120ms ease; background: var(--vscode-button-secondaryBackground, var(--vscode-button-background)); color: var(--vscode-button-secondaryForeground, var(--vscode-button-foreground)); box-shadow: 0 1px 0 rgba(0, 0, 0, 0.2); }
-        button:hover { background: var(--vscode-button-secondaryHoverBackground, var(--vscode-button-hoverBackground)); transform: translateY(-1px); }
-        button:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: 1px; }
-        button:disabled { opacity: 0.65; cursor: not-allowed; transform: none; }
-        .vars button { height: 30px; padding: 0 10px; font-weight: 500; }
-        .actions { display: flex; gap: 10px; margin-top: 2px; }
-        .primary { background: var(--vscode-button-background); color: var(--vscode-button-foreground); border-color: var(--vscode-button-border, transparent); }
-        .primary:hover { background: var(--vscode-button-hoverBackground); }
-        .error { min-height: 1.3em; margin-top: 2px; color: var(--vscode-errorForeground, #f14c4c); }
-        @media (max-width: 1120px) {
-            .actions { flex-wrap: wrap; }
-        }
-    </style>
+  <link rel="stylesheet" href="${cssUri}">
 </head>
 <body>
-    <div class="form-shell">
-        <table class="form-table" role="presentation">
-            <tbody>
-                <tr>
-                    <th><label for="snippet-label">Title</label></th>
-                    <td>
+    <div class="editor-shell">
+        <div class="editor-header">
+            <h1 class="editor-title">Code Snippet Editor</h1>
+            <h2 class="editor-subtitle">Change Cmd Entry Code Snippet</h2>
+        </div>
+        <div class="form">
+            <div class="field-grid">
+                <div class="field-label"><label for="snippet-label">Title</label></div>
+                <div class="field-control">
+                    <div class="control-wrap narrow">
                         <input id="snippet-label" type="text" maxlength="120" />
-                    </td>
-                </tr>
-                <tr>
-                    <th><label for="snippet-group">Group</label></th>
-                    <td>
+                    </div>
+                </div>
+
+                <div class="field-label"><label for="snippet-group">Group</label></div>
+                <div class="field-control">
+                    <div class="control-wrap narrow">
                         <input id="snippet-group" type="text" list="group-options" />
                         <datalist id="group-options"></datalist>
-                    </td>
-                </tr>
-                <tr>
-                    <th><label for="snippet-order">Sequence</label></th>
-                    <td>
-                        <input id="snippet-order" type="number" min="0" step="1" placeholder="Optional sequence (lower appears first)" />
-                    </td>
-                </tr>
-                <tr>
-                    <th><label for="snippet-code">Code Snippet Text</label></th>
-                    <td>
-                        <textarea id="snippet-code" rows="12" cols="80" style="resize: both;"></textarea>
-                        <div class="vars" id="vars">
+                    </div>
+                </div>
+
+                <div class="field-label"><label for="snippet-order">Sequence</label></div>
+                <div class="field-control">
+                    <div class="control-wrap narrow">
+                        <input id="snippet-order" type="number" min="0" step="1" placeholder="Optional" />
+                    </div>
+                </div>
+
+                <div class="field-label"><label for="snippet-single-row-view">Single-row results view mode</label></div>
+                <div class="field-control">
+                    <div class="control-wrap narrow">
+                        <select id="snippet-single-row-view">
+                            <option value="">Use Settings Value</option>
+                            <option value="column">Column View (Pivot)</option>
+                            <option value="row">Row View</option>
+                        </select>
+                        <div class="hint">User can pivot single row results at runtime.</div>
+                    </div>
+                </div>
+
+                <div class="field-label"><label for="snippet-code">Code Snippet</label></div>
+                <div class="field-control">
+                    <div class="control-wrap">
+                        <textarea id="snippet-code" rows="12" cols="80"></textarea>
+                        <p class="token-title">Click variable button to insert into Snippet at the cursor location</p>
+                        <div class="token-bar" id="vars">
                             <button type="button" data-token="\${sqlJobId}">+ \${sqlJobId}</button>
                             <button type="button" data-token="\${sqlJobName}">+ \${sqlJobName}</button>
                             <button type="button" data-token="\${sqlJobNumber}">+ \${sqlJobNumber}</button>
                             <button type="button" data-token="\${currentUser}">+ \${currentUser}</button>
                             <button type="button" data-token="\${currentLibrary}">+ \${currentLibrary}</button>
                         </div>
-                    </td>
-                </tr>
-                <tr>
-                    <th></th>
-                    <td>
-                        <div class="actions">
-                            <button id="save" class="primary" type="button">Save</button>
-                            <button id="save-run" type="button">Save + Run</button>
-                            <button id="cancel" type="button">Cancel</button>
-                        </div>
-                    </td>
-                </tr>
-                <tr>
-                    <th></th>
-                    <td>
-                        <div id="error" class="error"></div>
-                    </td>
-                </tr>
-            </tbody>
-        </table>
+                    </div>
+                </div>
+
+                <div class="field-label"></div>
+                <div class="field-control">
+                    <div class="actions">
+                        <button id="save" class="primary" type="button">Save</button>
+                        <button id="cancel" type="button">Cancel</button>
+                    </div>
+                </div>
+
+                <div class="field-label"></div>
+                <div class="field-control">
+                    <div id="error" class="error"></div>
+                </div>
+            </div>
+        </div>
     </div>
 
   <script nonce="${nonce}">
@@ -491,12 +493,12 @@ class CodeSnippetEditorPanel {
     const label = document.getElementById('snippet-label');
     const group = document.getElementById('snippet-group');
     const order = document.getElementById('snippet-order');
+    const singleRowView = document.getElementById('snippet-single-row-view');
     const groupOptions = document.getElementById('group-options');
     const code = document.getElementById('snippet-code');
     const vars = document.getElementById('vars');
     const errorEl = document.getElementById('error');
     const save = document.getElementById('save');
-    const saveRun = document.getElementById('save-run');
     const cancel = document.getElementById('cancel');
     let currentSnippet = null;
 
@@ -531,12 +533,14 @@ class CodeSnippetEditorPanel {
 
     save.addEventListener('click', () => {
       clearError();
-            vscode.postMessage({ type: 'save', label: label.value, group: group.value, order: order.value, codeTemplate: code.value });
-    });
-
-    saveRun.addEventListener('click', () => {
-      clearError();
-            vscode.postMessage({ type: 'saveRun', label: label.value, group: group.value, order: order.value, codeTemplate: code.value });
+                        vscode.postMessage({
+                            type: 'save',
+                            label: label.value,
+                            group: group.value,
+                            order: order.value,
+                            singleRowResultView: singleRowView.value,
+                            codeTemplate: code.value
+                        });
     });
 
     cancel.addEventListener('click', () => vscode.postMessage({ type: 'cancel' }));
@@ -549,6 +553,9 @@ class CodeSnippetEditorPanel {
         code.value = currentSnippet?.codeTemplate || '';
         group.value = currentSnippet?.group || 'Admin';
         order.value = Number.isFinite(Number(currentSnippet?.order)) ? String(Math.trunc(Number(currentSnippet.order))) : '';
+                singleRowView.value = currentSnippet?.singleRowResultView === 'row' || currentSnippet?.singleRowResultView === 'column'
+                    ? currentSnippet.singleRowResultView
+                    : '';
 
         groupOptions.replaceChildren();
         const groups = Array.isArray(message.availableGroups) ? message.availableGroups : [];

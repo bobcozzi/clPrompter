@@ -56,6 +56,7 @@ interface SqlResultPanelL10n {
     saveResultSet: string;
     copyToClipboard: string;
     copyToCommandEntry: string;
+    displayJoblog: string;
 }
 
 type ExportFormat = 'csv' | 'tsv' | 'json' | 'md';
@@ -117,7 +118,8 @@ function getSqlResultPanelL10n(): SqlResultPanelL10n {
         copyResultSet: vscode.l10n.t('Copy result set'),
         saveResultSet: vscode.l10n.t('Save result set'),
         copyToClipboard: vscode.l10n.t('Copy to Clipboard'),
-        copyToCommandEntry: vscode.l10n.t('Copy to Command Entry')
+        copyToCommandEntry: vscode.l10n.t('Copy to Command Entry'),
+        displayJoblog: vscode.l10n.t('Display Joblog')
     };
 }
 
@@ -144,6 +146,7 @@ type SqlResultPanelRequest =
     | { type: 'saveResultSet'; columns: string[]; rows: string[][]; resultTitle?: string }
     | { type: 'copyCellToClipboard'; value: string }
     | { type: 'copyCellToCommandEntry'; value: string }
+    | { type: 'displayJoblog'; sqlJobId: string }
     | { type: 'closeSession'; sessionId: string };
 
 type SqlResultPanelRequestHandler = (request: SqlResultPanelRequest) => Promise<SqlResultPayload | undefined>;
@@ -578,6 +581,14 @@ class SqlResultPanel {
             return;
         }
 
+        if (request.type === 'displayJoblog') {
+            await this.requestHandler({
+                type: 'displayJoblog',
+                sqlJobId: String((request as { sqlJobId?: string }).sqlJobId ?? '')
+            });
+            return;
+        }
+
         if (request.type === 'rerunSql') {
             const statement = String(request.statement || '').trim();
             if (!statement) {
@@ -657,6 +668,7 @@ function renderSqlResultHtml(result: SqlResultPayload, cspSource: string, script
     const colHeaders = columns.map((column, index) => {
         const profile = profiles[column];
         const classes = ['sortable-col'];
+        classes.push(columnCssClass(column));
         if (shouldRightAlign(profile.kind)) {
             classes.push('align-right');
         }
@@ -736,10 +748,12 @@ function buildClientPayload(result: SqlResultPayload, l10n: SqlResultPanelL10n) 
             const profile = profiles[column];
             const alignClass = shouldRightAlign(profile.kind) ? 'align-right' : '';
             const cellClass = (row[column] === null || row[column] === undefined) ? 'sql-null-cell' : '';
+            const columnClass = columnCssClass(column);
             const sortKeys = buildSortKeys(row[column], profile.kind);
             return {
                 alignClass,
                 cellClass,
+                columnClass,
                 html: formatCell(row[column], profile),
                 rawText: sortableTextValue(row[column]),
                 sortKind: sortKeys.sortKind,
@@ -766,10 +780,10 @@ function buildClientPayload(result: SqlResultPayload, l10n: SqlResultPanelL10n) 
     };
 }
 
-function renderRowCellsHtml(rowCells: Array<Array<{ alignClass?: string; cellClass?: string; html: string; rawText?: string }>>): string {
+function renderRowCellsHtml(rowCells: Array<Array<{ alignClass?: string; cellClass?: string; columnClass?: string; html: string; rawText?: string }>>): string {
     return rowCells.map((cells, index) => {
         const tds = cells.map((cell) => {
-            const classes = [cell.alignClass, cell.cellClass].filter(Boolean).join(' ');
+            const classes = [cell.alignClass, cell.cellClass, cell.columnClass].filter(Boolean).join(' ');
             const classAttr = classes ? ` class="${classes}"` : '';
             const rawValueAttr = ` data-raw-value="${escapeHtml(cell.rawText ?? '')}"`;
             return `<td${classAttr}${rawValueAttr}>${cell.html}</td>`;
@@ -900,6 +914,14 @@ function buildSortKeys(value: unknown, preferredKind: ColumnKind): CellSortKeys 
 
 function normalizeColumnKey(value: string | undefined): string {
     return (value ?? '').trim().toUpperCase();
+}
+
+function columnCssClass(columnName: string): string {
+    const normalized = normalizeColumnKey(columnName)
+        .replace(/[^A-Z0-9]+/g, '-')
+        .replace(/^-+|-+$/g, '');
+
+    return normalized ? `sql-col-${normalized.toLowerCase()}` : 'sql-col-unknown';
 }
 
 function findMetadataForColumn(columnName: string, metadata: SqlColumnMetadata[] | undefined): SqlColumnMetadata | undefined {

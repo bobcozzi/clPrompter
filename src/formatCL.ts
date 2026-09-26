@@ -26,8 +26,8 @@
 import * as vscode from 'vscode';
 
 import { DOMParser } from '@xmldom/xmldom';
-import { ParmMeta } from './types';
-import { tokenizeCL, parseCL, CL_VARIABLE_PATTERN } from './tokenizeCL';
+import { CLNode, CLValue, ParmMeta } from './types';
+import { applyCmdAndParmNameCase, tokenizeCL, parseCL, CL_VARIABLE_PATTERN } from './tokenizeCL';
 import { collectCLCmdFromLine } from './extractor';
 import { formatCLCommand_v2 } from './tokenLayoutFormatter';
 import { isValidNameValue } from './promptHelpers';
@@ -874,12 +874,10 @@ export function formatCLSource(
     // Tokenize and format the command using formatCL_SEU
     try {
       const tokens = tokenizeCL(command);
-      const node = parseCL(tokens, trailingComment);
+      let node = parseCL(tokens, trailingComment);
 
-      // Apply case conversion to the command name if needed
-      if (options.cvtcase !== '*NONE' && node.name) {
-        node.name = translateCase(node.name, fromCase, toCase);
-      }
+      // Apply case conversion to the command name and parameter keywords if needed
+      ({ ast: node, label } = applyCmdAndParmNameCase(node, label, options.cvtcase));
 
       // Format using the proper CL formatter
       // Get VS Code configuration for formatting
@@ -917,6 +915,90 @@ export function formatCLSource(
   }
 
   return outputLines;
+}
+
+export function formatCLCommandText(commandText: string, cvtcase: CaseOption): string {
+  const text = String(commandText ?? '');
+  if (!text.trim() || cvtcase === '*NONE') {
+    return text;
+  }
+
+  const firstLine = text.split(/\r?\n/)[0] ?? '';
+  const firstLineTrimmed = firstLine.trim();
+  if (!firstLineTrimmed) {
+    return text;
+  }
+
+  const commandMatch = firstLineTrimmed.match(/^([^\s]+)(?:\s+([\s\S]*))?$/);
+  if (!commandMatch) {
+    return text;
+  }
+
+  const cmdName = commandMatch[1];
+  const parmStr = commandMatch[2] ?? '';
+
+  try {
+    const { tokenizeCL, parseCL, applyCmdAndParmNameCase } = require('./tokenizeCL');
+    const tokens = tokenizeCL(`${cmdName} ${parmStr}`.trim());
+    let ast: CLNode = parseCL(tokens);
+    ({ ast } = applyCmdAndParmNameCase(ast, undefined, cvtcase));
+    return serializeCLNodePlain(ast);
+  } catch {
+    return text;
+  }
+}
+
+function serializeCLNodePlain(node: CLNode): string {
+  const parts: string[] = [];
+
+  if (node.name) {
+    parts.push(node.name);
+  }
+
+  for (const parm of node.parameters) {
+    const serializedValue = serializeCLValuePlain(parm.value);
+    if (parm.name.startsWith('__pos')) {
+      if (serializedValue) {
+        parts.push(serializedValue);
+      }
+      continue;
+    }
+
+    parts.push(`${parm.name}(${serializedValue})`);
+  }
+
+  if (node.comment) {
+    parts.push(node.comment);
+  }
+
+  return parts.join(' ');
+}
+
+function serializeCLValuePlain(value: CLValue | any): string {
+  if (typeof value === 'string') {
+    return value;
+  }
+
+  if (Array.isArray(value)) {
+    return value.map((item) => serializeCLValuePlain(item)).filter(item => item.length > 0).join(' ');
+  }
+
+  if (value && typeof value === 'object') {
+    if ('type' in value && value.type === 'expression' && Array.isArray(value.tokens)) {
+      const exprText = value.tokens.map((token: { value: string }) => token.value).join('');
+      return value.wrapped ? `(${exprText})` : exprText;
+    }
+
+    if ('function' in value && Array.isArray(value.args)) {
+      return `${value.function}(${value.args.map((arg: CLValue) => serializeCLValuePlain(arg)).join(' ')})`;
+    }
+
+    if ('type' in value && value.type === 'command_call' && typeof value.name === 'string' && Array.isArray(value.parameters)) {
+      return serializeCLNodePlain(value as CLNode);
+    }
+  }
+
+  return '';
 }
 
 // --- Helper Functions ---

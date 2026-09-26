@@ -30,7 +30,7 @@ import * as os from 'os';
 import { CodeForIBMi } from "@halcyontech/vscode-ibmi-types";
 export let code4i: CodeForIBMi;
 import { Extension, extensions } from "vscode";
-import { CmdHelpChecker, CmdRunChecker, CmdXmlChecker } from './components/hostFunctions';
+import { CmdHelpChecker, CmdRunChecker, CmdXmlChecker, FieldListChecker } from './components/hostFunctions';
 
 import { initializePrompter, CLPrompter, CLPrompterCallback } from './clPrompter';
 import { CommandEntryViewProvider } from './commandEntryView';
@@ -64,6 +64,7 @@ import {
     safeExtractKwdArg,
     rewriteLeadingPositionalsByList
 } from './tokenizeCL';
+import { clearClPrompterOutputChannel, setClPrompterOutputChannel } from './clPrompterOutput';
 
 let baseExtension: Extension<CodeForIBMi> | undefined;
 let sharedCommandEntryService: CommandEntryService | undefined;
@@ -444,6 +445,8 @@ export async function activate(context: vscode.ExtensionContext) {
     };
 
     const commandEntryOutput = vscode.window.createOutputChannel('CLPROMPTER');
+    setClPrompterOutputChannel(commandEntryOutput);
+    context.subscriptions.push({ dispose: clearClPrompterOutputChannel });
 
     const safeOutputAppendLine = (message: string): void => {
         try {
@@ -652,7 +655,7 @@ export async function activate(context: vscode.ExtensionContext) {
         };
 
         const scheduleStartupConnectionHydration = (): void => {
-            const maxAttempts = 16;
+            const maxAttempts = 32;
             let attempts = 0;
             const timer = setInterval(() => {
                 attempts += 1;
@@ -662,7 +665,7 @@ export async function activate(context: vscode.ExtensionContext) {
                         clearInterval(timer);
                     }
                 })();
-            }, 250);
+            }, 500);
             context.subscriptions.push({ dispose: () => clearInterval(timer) });
         };
 
@@ -686,7 +689,7 @@ export async function activate(context: vscode.ExtensionContext) {
             }
         };
 
-        // Register the CMD_HELP and CMD_XML UDTF components so Code for IBM i
+        // Register the managed UDTF components so Code for IBM i
         // automatically checks and installs/updates them on every NEW connection.
         const cmdHelpChecker = new CmdHelpChecker();
         safeRegisterCode4iComponent('CmdHelpChecker', cmdHelpChecker);
@@ -694,6 +697,8 @@ export async function activate(context: vscode.ExtensionContext) {
         safeRegisterCode4iComponent('CmdXmlChecker', cmdXmlChecker);
         const cmdRunChecker = new CmdRunChecker();
         safeRegisterCode4iComponent('CmdRunChecker', cmdRunChecker);
+        const fieldListChecker = new FieldListChecker();
+        safeRegisterCode4iComponent('FieldListChecker', fieldListChecker);
 
         // If the extension activates while a connection is already live (e.g. lazy
         // activation), the ComponentManager won't have called our component for the
@@ -750,6 +755,24 @@ export async function activate(context: vscode.ExtensionContext) {
                 console.error(`[clPrompter] CmdRunChecker manual check failed: ${e}`);
             } finally {
                 cmdRunCheckRunning = false;
+            }
+        };
+
+        let fieldListCheckRunning = false;
+        const runFieldListCheck = async () => {
+            if (fieldListCheckRunning) { return; }
+            fieldListCheckRunning = true;
+            try {
+                const conn = code4i?.instance?.getConnection();
+                if (!conn) { return; }
+                const state = await fieldListChecker.getRemoteState(conn, '');
+                if (state.status !== 'Installed') {
+                    await fieldListChecker.update(conn, '');
+                }
+            } catch (e) {
+                console.error(`[clPrompter] FieldListChecker manual check failed: ${e}`);
+            } finally {
+                fieldListCheckRunning = false;
             }
         };
 
@@ -920,9 +943,9 @@ export async function activate(context: vscode.ExtensionContext) {
             patchRunSQL(initialConnection);
             logMapepireConnectionDump(initialConnection, 'activate-existing-connection');
             startKeepAlive();
-            // Run both UDTF checks in parallel, then prefetch — serialized relative
+            // Run UDTF checks in parallel, then prefetch — serialized relative
             // to prefetch so upload/compile steps don't race for SSH channels.
-            Promise.allSettled([runCmdHelpCheck(), runCmdXmlCheck(), runCmdRunCheck()]).finally(() => prefetch());
+            Promise.allSettled([runCmdHelpCheck(), runCmdXmlCheck(), runCmdRunCheck(), runFieldListCheck()]).finally(() => prefetch());
         } else {
             scheduleStartupConnectionHydration();
         }

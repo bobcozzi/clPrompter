@@ -2,6 +2,17 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.0.48] - 2026-09-26
+
+### What's New
+- The Cmd Entry Code Snippets editor is now available. Right-click any snippet entry to edit it. Shipped snippets are refreshed when a new release is installed, so save your customized version with a different name, or save it to a Group named `User`, because those are not overlaid during extension updates.
+- The CHGLIBL and CHGCURLIB commands no longer appear in Command Entry until after returning from the prompter.
+- The command prompter launched from Command Entry now respects the CL Formatting settings the user has already established. Settings such as converting the command name or parameter keywords to upper or lower case are now honored.
+- All functions now use the verification signature test required for CodeFori extensions.
+- The FIELD_LIST UDTF is now included, although it is not currently used by this extension.
+- Reminder: the C/C++ compilers must be installed to compile the shipped/included SQL functions initially.
+
+
 ## [1.0.47] - 2026-09-25
 
 ### What's New

@@ -48,6 +48,7 @@ const { buildCancelSqlJobCommand, CMD_RUN_SQL, normalizeSqlJobId } = requireFrom
 const { CommandEntryJobManager, buildJoblogQueryForSqlJob, collectRunAfterSqlJobInit, resolveRunAfterSqlJobInitMode, resolveSqlNamingMode } = requireFromOut('commandEntryJobManager');
 const { buildImmediateSessionContextSql, buildRunAfterSqlJobInitDefaults, expandStartupScriptPlaceholders, normalizeSchemaSessionContextValue, normalizeSessionContextValue, splitRunAfterSqlJobInitStatements } = requireFromOut('commandEntrySqlSettings');
 const { buildChgCurlibCommandFromCurrentLibrary, buildChgLiblCommandFromLibraryList } = requireFromOut('commandEntryChgLibl');
+const { formatCLCommandText } = requireFromOut('formatCL');
 const { checkSQLForExecution } = requireFromOut('sqlSyntaxChecker');
 
 const messages = mapCommandMessages([
@@ -126,6 +127,8 @@ assert.strictEqual(buildChgCurlibCommandFromCurrentLibrary('?CHGCURLIB', 'MYLIB'
 assert.strictEqual(buildChgCurlibCommandFromCurrentLibrary('CHGCURLIB CURLIB(QGPL)', 'MYLIB'), undefined);
 assert.strictEqual(buildChgCurlibCommandFromCurrentLibrary('CHGCURLIB', ''), undefined);
 assert.strictEqual(buildChgCurlibCommandFromCurrentLibrary('CHGCURLIB', undefined, ['CURRENT:MYLIB', 'QGPL']), 'CHGCURLIB CURLIB(MYLIB)');
+assert.strictEqual(formatCLCommandText('chglibl libl(qgpl qtEmp) curlib(mylib)', '*UPPER'), 'CHGLIBL LIBL(qgpl qtEmp) CURLIB(mylib)');
+assert.strictEqual(formatCLCommandText('CHGLIBL LIBL(QGPL QTEMP) CURLIB(MYLIB)', '*NONE'), 'CHGLIBL LIBL(QGPL QTEMP) CURLIB(MYLIB)');
 
 (async () => {
     const connection = {

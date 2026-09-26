@@ -3,6 +3,7 @@ export interface CommandEntrySqlSnippet {
     label: string;
     stmt: string;
     group: string;
+    singleRowResultView?: 'row' | 'column';
     order?: number;
     source: 'built-in' | 'user';
     createdAt?: string;
@@ -33,6 +34,7 @@ export const BUILT_IN_SQL_SNIPPETS: ReadonlyArray<CommandEntrySqlSnippet> = [
             'ORDER BY ORDINAL_POSITION DESC FETCH FIRST 200 ROWS ONLY'
         ].join(' '),
         group: 'Job Info',
+        singleRowResultView: 'row',
         order: 10,
         source: 'built-in'
     },
@@ -57,6 +59,7 @@ export const BUILT_IN_SQL_SNIPPETS: ReadonlyArray<CommandEntrySqlSnippet> = [
             'ORDER BY ORDINAL_POSITION DESC'
         ].join(' '),
         group: 'Job Info',
+        singleRowResultView: 'row',
         order: 20,
         source: 'built-in'
     },
@@ -205,6 +208,7 @@ export const BUILT_IN_SQL_SNIPPETS: ReadonlyArray<CommandEntrySqlSnippet> = [
             'ORDER BY ORDINAL_POSITION'
         ].join(' '),
         group: 'Admin',
+        singleRowResultView: 'row',
         order: 30,
         source: 'built-in'
     },
@@ -221,6 +225,7 @@ export const BUILT_IN_SQL_SNIPPETS: ReadonlyArray<CommandEntrySqlSnippet> = [
             'ORDER BY ORDINAL_POSITION'
         ].join(' '),
         group: 'Admin',
+        singleRowResultView: 'row',
         order: 40,
         source: 'built-in'
     },
@@ -237,6 +242,7 @@ export const BUILT_IN_SQL_SNIPPETS: ReadonlyArray<CommandEntrySqlSnippet> = [
             'ORDER BY ORDINAL_POSITION'
         ].join(' '),
         group: 'Admin',
+        singleRowResultView: 'row',
         order: 40,
         source: 'built-in'
     },
@@ -253,6 +259,7 @@ export const BUILT_IN_SQL_SNIPPETS: ReadonlyArray<CommandEntrySqlSnippet> = [
             'ORDER BY ORDINAL_POSITION'
         ].join(' '),
         group: 'Admin',
+        singleRowResultView: 'row',
         order: 50,
         source: 'built-in'
     },
@@ -280,6 +287,7 @@ export const BUILT_IN_SQL_SNIPPETS: ReadonlyArray<CommandEntrySqlSnippet> = [
             " ORDER BY CREATION_TIMESTAMP"
         ].join(' '),
         group: 'SPOOLED Files',
+        singleRowResultView: 'row',
         order: 10,
         source: 'built-in'
     },
@@ -302,6 +310,7 @@ export const BUILT_IN_SQL_SNIPPETS: ReadonlyArray<CommandEntrySqlSnippet> = [
             '           SPOOLED_FILE_NUMBER => SF.SPOOLED_FILE_NUMBER)) spd) sd'
         ].join(' '),
         group: 'SPOOLED Files',
+        singleRowResultView: 'row',
         order: 20,
         source: 'built-in'
     }

@@ -33,6 +33,11 @@ import * as vscode from 'vscode';
 import { DOMParser } from '@xmldom/xmldom';
 import { getCMDXML } from './getcmdxml';
 
+export interface CLPrompterResult {
+    command: string;
+    action: 'submit' | 'cancel' | 'error';
+}
+
 const API_DEBUG_LOGS = false;
 function debugLog(...args: unknown[]): void {
     if (API_DEBUG_LOGS) {
@@ -130,7 +135,7 @@ function extractCmdLabel(cmdString: string): string {
 export async function CLPrompter(
     extensionUri: vscode.Uri,
     commandString: string
-): Promise<string | null>;
+): Promise<CLPrompterResult>;
 
 /**
  * Prompt a CL command and return the updated command string (simplified version)
@@ -151,13 +156,13 @@ export async function CLPrompter(
  */
 export async function CLPrompter(
     commandString: string
-): Promise<string | null>;
+): Promise<CLPrompterResult>;
 
 // Implementation
 export async function CLPrompter(
     extensionUriOrCommand: vscode.Uri | string,
     commandString?: string
-): Promise<string | null> {
+): Promise<CLPrompterResult> {
     // Determine which overload was called
     let extensionUri: vscode.Uri;
     let command: string;
@@ -180,7 +185,7 @@ export async function CLPrompter(
         throw new Error('CLPrompter not initialized. Make sure the clPrompter extension is activated.');
     }
 
-    return new Promise<string | null>(async (resolve) => {
+    return new Promise<CLPrompterResult>(async (resolve) => {
         try {
             // Extract command name and label from the input string
             const cmdName = extractCmdName(command);
@@ -188,7 +193,7 @@ export async function CLPrompter(
 
             if (!cmdName || cmdName.trim() === '') {
                 console.error('[CLPrompter] No command name found in command string:', command);
-                resolve(command); // Return original command on error
+                resolve({ command, action: 'error' }); // Return original command on error
                 return;
             }
 
@@ -202,7 +207,7 @@ export async function CLPrompter(
             } catch (error) {
                 console.error('[CLPrompter] Failed to get command XML:', error);
                 vscode.window.showErrorMessage(vscode.l10n.t('Failed to get command definition for {cmdName}', { cmdName }));
-                resolve(command); // Return original command on error
+                resolve({ command, action: 'error' }); // Return original command on error
                 return;
             }
 
@@ -223,7 +228,7 @@ export async function CLPrompter(
             // (command not found / invalid). getCMDXML already showed the warning.
             if (!cmdPrompt) {
                 debugLog(`[clPrompter] '${cmdName}' returned no command definition — aborting prompter.`);
-                resolve(command);
+                resolve({ command, action: 'error' });
                 return;
             }
 
@@ -262,11 +267,11 @@ export async function CLPrompter(
                     if (result === null) {
                         // User cancelled - return original command
                         debugLog('[CLPrompter] User cancelled, returning original command');
-                        resolve(command);
+                        resolve({ command, action: 'cancel' });
                     } else {
                         // User submitted - return the updated command
                         debugLog('[CLPrompter] User submitted, returning updated command:', result);
-                        resolve(result);
+                        resolve({ command: result, action: 'submit' });
                     }
                 },
                 false
@@ -277,7 +282,7 @@ export async function CLPrompter(
                 debugLog('[CLPrompter] Panel disposed');
                 // If the promise hasn't been resolved yet, resolve with original command
                 try {
-                    resolve(command);
+                    resolve({ command, action: 'cancel' });
                 } catch (e) {
                     // Promise already resolved, ignore
                     debugLog('[CLPrompter] Promise already resolved');
@@ -287,7 +292,7 @@ export async function CLPrompter(
         } catch (error) {
             console.error('[CLPrompter] Unexpected error:', error);
             vscode.window.showErrorMessage(vscode.l10n.t('CL Prompter error: {error}', { error: String(error) }));
-            resolve(command); // Return original command on error
+            resolve({ command, action: 'error' });
         }
     });
 }
@@ -308,7 +313,7 @@ export function CLPrompterCallback(
     callback: (result: string | null) => void
 ): void {
     CLPrompter(extensionUri, commandString)
-        .then(result => callback(result))
+        .then(result => callback(result.command))
         .catch(error => {
             console.error('[CLPrompter] Error:', error);
             callback(commandString); // Return original on error

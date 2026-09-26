@@ -9,6 +9,9 @@ import { getCmdRunCPPSrc } from './cmdRun/cmdRunCppSource';
 import { getCmdRunSQLSrc } from './cmdRun/cmdRunSqlSource';
 import { getCmdXmlCPPSrc } from './cmdXml/cmdXmlCppSource';
 import { getCmdXmlSQLSrc } from './cmdXml/cmdXmlSqlSource';
+import { getFieldListCPPSrc } from './fieldList/fieldListCppSource';
+import { getFieldListSQLSrc } from './fieldList/fieldListSqlSource';
+import { appendClPrompterOutputLine } from '../clPrompterOutput';
 
 // ---------------------------------------------------------------------------
 // Shared utilities
@@ -22,15 +25,27 @@ import { getCmdXmlSQLSrc } from './cmdXml/cmdXmlSqlSource';
  * Exported so getcmdxml.ts can reuse it without duplication.
  */
 export function getUDTFLibrary(connection: IBMi): string {
-    const configured = vscode.workspace
-        .getConfiguration('clPrompter')
-        .get<string>('udtfSupportLibrary', '*TEMPLIB')
-        .trim()
-        .toUpperCase();
+    const configured = getConfiguredUDTFSupportLibrary();
     if (!configured || configured === '*TEMPLIB') {
         const tempLib = (connection.getConfig().tempLibrary as string | undefined)?.trim().toUpperCase();
         return tempLib || 'ILEDITOR';
     }
+    return configured;
+}
+
+function getConfiguredUDTFSupportLibrary(): string {
+    return vscode.workspace
+        .getConfiguration('clPrompter')
+        .get<string>('udtfSupportLibrary', '*TEMPLIB')
+        .trim()
+        .toUpperCase();
+}
+
+function getSignatureLibraryForIdentification(): string {
+    const configured = getConfiguredUDTFSupportLibrary();
+    // Signature identification must be stable even before a connection exists.
+    // Keep the configured token as-is (*TEMPLIB or explicit library) so Code for
+    // IBM i compares deterministic local/remote values during startup checks.
     return configured;
 }
 
@@ -66,7 +81,7 @@ WHERE ROUTINE_SCHEMA = '${schema.toUpperCase()}' \
  * this class implements the shared 6-step install pipeline:
  *   1. Upload C++ source to a temp IFS path
  *   2. Ensure the target library exists (CRTLIB)
- *   3. Compile the module (CRTCPPMOD)
+ *   3. Compile the module (CRTSQLCPPI)
  *   4. Link the program (CRTPGM)
  *   5. Upload the SQL DDL
  *   6. Create/replace the UDTF (RUNSQLSTM)
@@ -74,7 +89,7 @@ WHERE ROUTINE_SCHEMA = '${schema.toUpperCase()}' \
 abstract class UDTFChecker implements IBMiComponent {
     /** Unique component name — must match the static ID of each subclass. */
     abstract readonly id: string;
-    /** IBM i program name for CRTCPPMOD/CRTPGM, e.g. 'CMDHELP' or 'CMDXML'. */
+    /** IBM i program name for CRTSQLCPPI/CRTPGM, e.g. 'CMDHELP' or 'CMDXML'. */
     abstract readonly PGM_NAME: string;
     /** SQL specific-routine name, e.g. 'cmd_help' or 'cmd_xml'. */
     abstract readonly UDTF_SPECIFIC: string;
@@ -83,15 +98,20 @@ abstract class UDTFChecker implements IBMiComponent {
     abstract getCPPSrc(): string;
     abstract getSQLSrc(library: string, version: number): string;
 
+    private getSignatureForLibrary(library: string): string {
+        return createHash('sha256')
+            .update(this.getCPPSrc())
+            .update(this.getSQLSrc(library, this.currentVersion))
+            .digest('hex');
+    }
+
     getIdentification(): ComponentIdentification {
         // Code for IBM i 3.x identifies managed components by a stable content
         // signature in addition to their human-readable version. Include both
         // generated artifacts so a changed UDTF is distinguishable even before
         // its version is bumped.
-        const signature = createHash('sha256')
-            .update(this.getCPPSrc())
-            .update(this.getSQLSrc('__CLPROMPTER_SIGNATURE__', this.currentVersion))
-            .digest('hex');
+        const signatureLibrary = getSignatureLibraryForIdentification();
+        const signature = this.getSignatureForLibrary(signatureLibrary);
         return { name: this.id, version: this.currentVersion, signature };
     }
 
@@ -122,6 +142,7 @@ abstract class UDTFChecker implements IBMiComponent {
             const content = connection.getContent();
             const encoder = new TextEncoder();
             const library = getUDTFLibrary(connection);
+            const runtimeSignature = this.getIdentification().signature;
             console.log(`[clPrompter] ${this.id}.update() — tempDir=${tempDir}, library=${library}`);
 
             // ── Step 1: upload C++ source ──────────────────────────────────
@@ -136,14 +157,14 @@ abstract class UDTFChecker implements IBMiComponent {
                 console.error(`[clPrompter] writeStreamfileRaw(cpp) threw: ${e}`);
                 return {
                     status: 'Error',
-                    remoteSignature: this.getIdentification().signature
+                    remoteSignature: runtimeSignature
                 };
             }
             if (cppUploadErr) {
                 console.error(`[clPrompter] writeStreamfileRaw(cpp) failed: ${cppUploadErr}`);
                 return {
                     status: 'Error',
-                    remoteSignature: this.getIdentification().signature
+                    remoteSignature: runtimeSignature
                 };
             }
             const cppVerify = await connection.runCommand({ command: `ls -la '${cppPath}'`, environment: 'pase' });
@@ -154,17 +175,22 @@ abstract class UDTFChecker implements IBMiComponent {
             console.log(`[clPrompter] ${this.id}.update() — CRTLIB(${library}) code=${crtlibResult.code}: ${crtlibResult.stderr}`);
             // Non-zero just means library already existed — that's fine.
 
-            // ── Step 2: CRTCPPMOD ─────────────────────────────────────────
-            const crtcppmodCmd = `CRTCPPMOD MODULE(${library}/${this.PGM_NAME}) SRCSTMF('${cppPath}') LANGLVL(*EXTENDED0X) SYSIFCOPT(*IFS64IO) OUTPUT(*PRINT)`;
-            console.log(`[clPrompter] ${this.id}.update() — running: ${crtcppmodCmd}`);
-            const moduleResult = await connection.runCommand({ command: crtcppmodCmd, noLibList: true });
+            // ── Step 2: CRTSQLCPPI ─────────────────────────────────────────
+            const crtcppiCompileOpts = `LANGLVL(*EXTENDED0X) SYSIFCOPT(*IFS64IO)`;
+            const crtcppiBaseCmd = `CRTSQLCPPI OBJ(${library}/${this.PGM_NAME}) SRCSTMF('${cppPath}')`;
+            const crtcppiStaticParms = `CVTCCSID(*JOB) OUTPUT(*PRINT)`;
+            const crtcppiCompileOptParm = `COMPILEOPT('${crtcppiCompileOpts}')`;
+            const crtcppiCmd = `${crtcppiBaseCmd} ${crtcppiStaticParms} ${crtcppiCompileOptParm}`;
+            appendClPrompterOutputLine(`[clPrompter] ${this.id}.update() — compile external program command: ${crtcppiCmd}`);
+            console.log(`[clPrompter] ${this.id}.update() — running: ${crtcppiCmd}`);
+            const moduleResult = await connection.runCommand({ command: crtcppiCmd, noLibList: true });
             if (moduleResult.code !== 0) {
-                console.error(`[clPrompter] CRTCPPMOD failed (code=${moduleResult.code})`);
-                console.error(`[clPrompter] CRTCPPMOD stdout: ${moduleResult.stdout}`);
-                console.error(`[clPrompter] CRTCPPMOD stderr: ${moduleResult.stderr}`);
+                console.error(`[clPrompter] CRTSQLCPPI failed (code=${moduleResult.code})`);
+                console.error(`[clPrompter] CRTSQLCPPI stdout: ${moduleResult.stdout}`);
+                console.error(`[clPrompter] CRTSQLCPPI stderr: ${moduleResult.stderr}`);
                 return {
                     status: 'Error',
-                    remoteSignature: this.getIdentification().signature
+                    remoteSignature: runtimeSignature
                 };
             }
 
@@ -177,7 +203,7 @@ abstract class UDTFChecker implements IBMiComponent {
                 console.error(`[clPrompter] CRTPGM failed for ${this.PGM_NAME}: ${pgmResult.stderr}`);
                 return {
                     status: 'Error',
-                    remoteSignature: this.getIdentification().signature
+                    remoteSignature: runtimeSignature
                 };
             }
 
@@ -191,7 +217,7 @@ abstract class UDTFChecker implements IBMiComponent {
                 console.error(`[clPrompter] writeStreamfileRaw(sql) failed: ${sqlUploadErr}`);
                 return {
                     status: 'Error',
-                    remoteSignature: this.getIdentification().signature
+                    remoteSignature: runtimeSignature
                 };
             }
 
@@ -203,22 +229,25 @@ abstract class UDTFChecker implements IBMiComponent {
             }
 
             // ── Step 6: RUNSQLSTM to create/replace the UDTF ──────────────
+            const runsqlstmCmd = `RUNSQLSTM SRCSTMF('${sqlPath}') COMMIT(*NONE) NAMING(*SYS)`;
+            appendClPrompterOutputLine(`[clPrompter] ${this.id}.update() — create/replace function command: ${runsqlstmCmd}`);
+            appendClPrompterOutputLine(`[clPrompter] ${this.id}.update() — running: ${runsqlstmCmd}`);
             const sqlResult = await connection.runCommand({
-                command: `RUNSQLSTM SRCSTMF('${sqlPath}') COMMIT(*NONE) NAMING(*SYS)`,
+                command: runsqlstmCmd,
                 noLibList: true
             });
             if (sqlResult.code !== 0) {
                 console.error(`[clPrompter] RUNSQLSTM failed for ${this.UDTF_SPECIFIC}: ${sqlResult.stderr}`);
                 return {
                     status: 'Error',
-                    remoteSignature: this.getIdentification().signature
+                    remoteSignature: runtimeSignature
                 };
             }
 
             console.log(`[clPrompter] ${this.UDTF_SPECIFIC} UDTF installed in ${library} (version ${this.currentVersion})`);
             return {
                 status: 'Installed',
-                remoteSignature: this.getIdentification().signature
+                remoteSignature: runtimeSignature
             };
         });
     }
@@ -274,4 +303,18 @@ export class CmdRunChecker extends UDTFChecker {
 
     getCPPSrc(): string { return getCmdRunCPPSrc(); }
     getSQLSrc(library: string, version: number): string { return getCmdRunSQLSrc(library, version); }
+}
+
+/**
+ * Manages the FIELD_LIST UDTF — returns field metadata similar to DSPFFD.
+ */
+export class FieldListChecker extends UDTFChecker {
+    static readonly ID = 'clPrompter.FieldListChecker';
+    readonly id = FieldListChecker.ID;
+    readonly PGM_NAME = 'FIELDLIST';
+    readonly UDTF_SPECIFIC = 'field_list';
+    readonly currentVersion = 1;
+
+    getCPPSrc(): string { return getFieldListCPPSrc(); }
+    getSQLSrc(library: string, version: number): string { return getFieldListSQLSrc(library, version); }
 }

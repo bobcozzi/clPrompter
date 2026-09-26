@@ -134,7 +134,7 @@
 
         var integerType = /^(SMALLINT|INTEGER|INT|BIGINT)$/i.test(upperType);
         var decimalType = /^(NUMERIC|DECIMAL|DEC|DECFLOAT|NUM)$/i.test(upperType);
-        var charLikeType = /^(CHAR|CHARACTER|VARCHAR|CLOB|DBCLOB|GRAPHIC|VARGRAPHIC|BINARY|VARBINARY)$/i.test(upperType);
+        var charLikeType = /^(NCHAR|NVARCHAR|CHAR|CHARACTER|VARCHAR|CLOB|DBCLOB|GRAPHIC|VARGRAPHIC|BINARY|VARBINARY|NCHAR VARYING|NATIONAL CHAR|NATIONAL CHARACTER|NATIONAL CHAR VARYING|NATIONAL CHARACTER VARYING)$/i.test(upperType);
 
         if (displaySize) {
             if (integerType) {
@@ -382,6 +382,7 @@
     var autoColumnViewForSingleRow = !!initialPayload.autoColumnViewForSingleRow;
     var rows = Array.isArray(initialPayload.rowCells) ? initialPayload.rowCells.slice() : [];
     var activeCellRawValue = '';
+    var activeCellJobId = '';
 
     function getCellRawValue(cell) {
         if (!cell || typeof cell !== 'object') {
@@ -416,23 +417,36 @@
     cellContextMenu.className = 'cell-context-menu';
     cellContextMenu.innerHTML = ''
         + '<button type="button" data-action="copy-cell-clipboard"></button>'
-        + '<button type="button" data-action="copy-cell-command"></button>';
+        + '<button type="button" data-action="copy-cell-command"></button>'
+        + '<button type="button" data-action="display-joblog"></button>';
     document.body.appendChild(cellContextMenu);
 
     var copyClipboardBtn = cellContextMenu.querySelector('[data-action="copy-cell-clipboard"]');
     var copyCommandEntryBtn = cellContextMenu.querySelector('[data-action="copy-cell-command"]');
+    var displayJoblogBtn = cellContextMenu.querySelector('[data-action="display-joblog"]');
+
+    function asPotentialJobId(rawValue) {
+        var trimmed = String(rawValue || '').trim();
+        // IBM i qualified job style: 6-digit number / user / job name.
+        if (/^\d{6}\/[^\/\s]+\/[^\/\s]+$/.test(trimmed)) {
+            return trimmed;
+        }
+        return '';
+    }
 
     function hideCellContextMenu() {
         cellContextMenu.classList.remove('is-visible');
     }
 
     function showCellContextMenu(x, y) {
-        if (!copyClipboardBtn || !copyCommandEntryBtn) {
+        if (!copyClipboardBtn || !copyCommandEntryBtn || !displayJoblogBtn) {
             return;
         }
 
         copyClipboardBtn.textContent = t('copyToClipboard', 'Copy to Clipboard');
         copyCommandEntryBtn.textContent = t('copyToCommandEntry', 'Copy to Command Entry');
+        displayJoblogBtn.textContent = t('displayJoblog', 'Display Joblog');
+        displayJoblogBtn.style.display = activeCellJobId ? '' : 'none';
         cellContextMenu.style.left = '0px';
         cellContextMenu.style.top = '0px';
         cellContextMenu.classList.add('is-visible');
@@ -470,6 +484,7 @@
         event.preventDefault();
         event.stopPropagation();
         activeCellRawValue = rawValue;
+        activeCellJobId = asPotentialJobId(rawValue);
         showCellContextMenu(event.clientX, event.clientY);
     }
 
@@ -486,6 +501,15 @@
         copyCommandEntryBtn.addEventListener('click', function () {
             if (vscode.postMessage) {
                 vscode.postMessage({ type: 'copyCellToCommandEntry', value: activeCellRawValue });
+            }
+            hideCellContextMenu();
+        });
+    }
+
+    if (displayJoblogBtn) {
+        displayJoblogBtn.addEventListener('click', function () {
+            if (activeCellJobId && vscode.postMessage) {
+                vscode.postMessage({ type: 'displayJoblog', sqlJobId: activeCellJobId });
             }
             hideCellContextMenu();
         });
@@ -552,6 +576,82 @@
     var stopLoadAllRequested = false;
     var pagingDiagEnabled = true;
     var autoPagingSpacer = null;
+    var wideColumnDisplaySizeThreshold = 1000;
+    var wideColumnClassName = 'sql-wide-cell';
+    var wideColumnMinWidthPx = 320;
+
+    function getColumnDisplaySize(columnName, metadata, index) {
+        var entry = findMetadataForColumn(columnName, metadata, index);
+        if (!entry || typeof entry !== 'object') {
+            return 0;
+        }
+
+        var candidates = [
+            entry.displaySize,
+            entry.display_size,
+            entry.columnSize,
+            entry.column_size,
+            entry.length,
+            entry.columnLength,
+            entry.column_length,
+            entry.maxLength,
+            entry.max_length,
+            entry.maximumLength,
+            entry.maximum_length,
+            entry.charLength,
+            entry.char_length,
+            entry.characterMaximumLength,
+            entry.character_maximum_length,
+            entry.octetLength,
+            entry.octet_length,
+            entry.bytes,
+            entry.precision
+        ];
+
+        for (var i = 0; i < candidates.length; i++) {
+            var size = Number(candidates[i]);
+            if (isFinite(size) && size > 0) {
+                return Math.floor(size);
+            }
+        }
+
+        return 0;
+    }
+
+    function shouldUseWideCellClass(columnName, metadata, index) {
+        var entry = findMetadataForColumn(columnName, metadata, index);
+        if (!entry || typeof entry !== 'object') {
+            return false;
+        }
+
+        var displaySize = getColumnDisplaySize(columnName, metadata, index);
+        if (displaySize < wideColumnDisplaySizeThreshold) {
+            return false;
+        }
+
+        var typeName = String(entry.typeName || entry.type || '').trim().toUpperCase();
+        var textLike = /^(NCHAR|NVARCHAR|CHAR|CHARACTER|VARCHAR|CLOB|DBCLOB|GRAPHIC|VARGRAPHIC|BINARY|VARBINARY|LONG VARCHAR|LONG VARGRAPHIC|NCHAR VARYING|NATIONAL CHAR|NATIONAL CHARACTER|NATIONAL CHAR VARYING|NATIONAL CHARACTER VARYING)$/i.test(typeName);
+        if (textLike) {
+            return true;
+        }
+
+        // java.sql.Types codes for string/national string/LOB text types.
+        var jdbcTypeCode = Number(typeName);
+        if (isFinite(jdbcTypeCode)) {
+            if (jdbcTypeCode === 1 || jdbcTypeCode === 12 || jdbcTypeCode === -1 || jdbcTypeCode === -9 || jdbcTypeCode === -15 || jdbcTypeCode === -16 || jdbcTypeCode === 2005 || jdbcTypeCode === 2011) {
+                return true;
+            }
+        }
+
+        // Defensive fallback for known joblog-style message columns when type metadata is sparse.
+        var normalizedColumnName = normalizeColumnKey(columnName);
+        if (/MESSAGE_TEXT|MESSAGESECONDLEVELTEXT|MESSAGE_SECOND_LEVEL_TEXT|MSG_SECOND_LVL|SECLVLMSG|MSGTEXT/.test(normalizedColumnName)) {
+            return true;
+        }
+
+        // If the host provides a large positive size but omits type details, prefer wider wrapping.
+        return typeName.length === 0;
+    }
 
     function logPagingDiag(reason) {
         if (!pagingDiagEnabled || !tableWrap) {
@@ -706,6 +806,12 @@
             if (!isFinite(widthPx) || widthPx < minColumnWidthPx) {
                 continue;
             }
+
+            if (shouldUseWideCellClass(String(currentColumns[colIndex] || ''), currentColumnMetadata, colIndex) && widthPx < wideColumnMinWidthPx) {
+                // Ignore stale narrow persisted widths for large text columns.
+                continue;
+            }
+
             var safeWidth = Math.round(widthPx);
             var cellColumnIndex = colIndex + 2;
             css.push(
@@ -1371,8 +1477,9 @@
             var anchors = getAutoPageAnchors();
             var totalPages = Math.max(1, anchors.length);
             var pageNumber = getAutoPageIndexFromScrollAnchors(anchors);
-            var canPageBackward = pageNumber > 0;
-            var canPageForward = pageNumber < (totalPages - 1);
+            var maxScrollable = Math.max(0, tableWrap.scrollHeight - tableWrap.clientHeight);
+            var canPageBackward = tableWrap.scrollTop > 0;
+            var canPageForward = maxScrollable > 1 && tableWrap.scrollTop < (maxScrollable - 1);
             pageIndex = pageNumber;
 
             if (firstBtn) { setPagingButtonState(firstBtn, !canPageBackward); }
@@ -1407,6 +1514,9 @@
                     }
                     if (cell.cellClass) {
                         classNames.push(cell.cellClass);
+                    }
+                    if (shouldUseWideCellClass(String(currentColumns[c] || ''), currentColumnMetadata, c)) {
+                        classNames.push(wideColumnClassName);
                     }
                     classNames.push('sql-result-cell');
                     var alignClass = classNames.length > 0 ? ' class="' + classNames.join(' ') + '"' : '';
@@ -1705,6 +1815,9 @@
                         document.body.classList.remove('is-col-resizing');
                         if (didMove) {
                             suppressSortUntil = Date.now() + 250;
+                            requestAnimationFrame(function () {
+                                refreshAutoPagingLayout('columnResize');
+                            });
                         }
                         saveWidths();
                         setStatus(formatTemplate(t('resizedColumnTemplate', 'Resized column {column}.'), {
@@ -1927,6 +2040,10 @@
             refreshAutoPagingLayout('tableWrapResize');
         });
         resizeObserver.observe(tableWrap);
+        var resultTable = tableWrap.querySelector('table');
+        if (resultTable) {
+            resizeObserver.observe(resultTable);
+        }
     }
 
     document.addEventListener('visibilitychange', function () {
