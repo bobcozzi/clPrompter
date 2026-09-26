@@ -1,3 +1,4 @@
+/// <reference types="node" />
 import * as assert from 'assert';
 
 // Mock vscode before requiring modules that import it.
@@ -26,7 +27,8 @@ function requireFromOut(moduleName: string): any {
     const candidates = [
         `./${moduleName}`,
         `../${moduleName}`,
-        `../src/${moduleName}`
+        `../../src/${moduleName}`,
+        `../../out/${moduleName}`
     ];
 
     for (const candidate of candidates) {
@@ -45,13 +47,14 @@ const { detectCommandEntryPrefix } = requireFromOut('commandEntryPrefixes');
 const { buildCancelSqlJobCommand, CMD_RUN_SQL, normalizeSqlJobId } = requireFromOut('commandEntrySqlHelpers');
 const { CommandEntryJobManager, buildJoblogQueryForSqlJob, collectRunAfterSqlJobInit, resolveRunAfterSqlJobInitMode, resolveSqlNamingMode } = requireFromOut('commandEntryJobManager');
 const { buildImmediateSessionContextSql, buildRunAfterSqlJobInitDefaults, expandStartupScriptPlaceholders, normalizeSchemaSessionContextValue, normalizeSessionContextValue, splitRunAfterSqlJobInitStatements } = requireFromOut('commandEntrySqlSettings');
+const { buildChgCurlibCommandFromCurrentLibrary, buildChgLiblCommandFromLibraryList } = requireFromOut('commandEntryChgLibl');
 const { checkSQLForExecution } = requireFromOut('sqlSyntaxChecker');
 
 const messages = mapCommandMessages([
     { ORDINAL_POSITION: 2, MSGID: 'CPF0001', MSGSEV: 40, MSGTYPE: 'ESCAPE', MSGTEXT: 'Failed', SECLVLMSG: 'Details' },
     { ORDINAL_POSITION: 1, MSGID: 'CPC0000', MSGSEV: 0, MSGTYPE: 'COMPLETION', MSGTEXT: 'Done', SECLVLMSG: '' },
 ]);
-assert.deepStrictEqual(messages.map(message => message.ordinalPosition), [1, 2]);
+assert.deepStrictEqual(messages.map((message: any) => message.ordinalPosition), [1, 2]);
 assert.strictEqual(messages[1].kind, 'error');
 assert.strictEqual(classifyMessage(10, 'STATUS'), 'info');
 assert.strictEqual(classifyMessage(0, 'INQUIRY'), 'info');
@@ -110,6 +113,19 @@ assert.strictEqual(expandStartupScriptPlaceholders('CHGCURLIB CURLIB(&CURLIB)', 
 assert.strictEqual(expandStartupScriptPlaceholders('CHGLIBL LIBL(&LIBL)', 'COZTEST', ['QGPL', 'QTEMP']), 'CHGLIBL LIBL(QGPL QTEMP)');
 assert.strictEqual(expandStartupScriptPlaceholders('CHGCURLIB CURLIB(&CURLIB)', '', ['QGPL']), 'CHGCURLIB CURLIB(*CRTDFT)');
 assert.strictEqual(expandStartupScriptPlaceholders('CHGCURLIB PICKLES', 'COZTEST', ['QGPL']), 'CHGCURLIB PICKLES');
+assert.strictEqual(buildChgLiblCommandFromLibraryList('CHGLIBL', ['QGPL', 'QTEMP', 'MYLIB']), 'CHGLIBL LIBL(QGPL QTEMP MYLIB)');
+assert.strictEqual(buildChgLiblCommandFromLibraryList('?CHGLIBL', ['QGPL', 'QTEMP']), 'CHGLIBL LIBL(QGPL QTEMP)');
+assert.strictEqual(buildChgLiblCommandFromLibraryList('CHGLIBL LIBL(QGPL)', ['QGPL', 'QTEMP']), undefined);
+assert.strictEqual(buildChgLiblCommandFromLibraryList('CHGLIBL', ['QGPL', 'QTEMP'], 'MYLIB'), 'CHGLIBL LIBL(QGPL QTEMP) CURLIB(MYLIB)');
+assert.strictEqual(buildChgLiblCommandFromLibraryList('CHGLIBL', ['QGPL', 'QTEMP'], ''), 'CHGLIBL LIBL(QGPL QTEMP)');
+assert.strictEqual(buildChgLiblCommandFromLibraryList('CHGLIBL LIBL(QGPL QTEMP)', ['QGPL', 'QTEMP'], 'MYLIB'), 'CHGLIBL LIBL(QGPL QTEMP) CURLIB(MYLIB)');
+assert.strictEqual(buildChgLiblCommandFromLibraryList('CHGLIBL CURLIB(ACCTLIB)', ['QGPL', 'QTEMP'], ''), 'CHGLIBL CURLIB(ACCTLIB) LIBL(QGPL QTEMP)');
+assert.strictEqual(buildChgLiblCommandFromLibraryList('CHGLIBL', ['CURRENT:MYLIB', 'QGPL', 'QTEMP']), 'CHGLIBL LIBL(QGPL QTEMP) CURLIB(MYLIB)');
+assert.strictEqual(buildChgCurlibCommandFromCurrentLibrary('CHGCURLIB', 'MYLIB'), 'CHGCURLIB CURLIB(MYLIB)');
+assert.strictEqual(buildChgCurlibCommandFromCurrentLibrary('?CHGCURLIB', 'MYLIB'), 'CHGCURLIB CURLIB(MYLIB)');
+assert.strictEqual(buildChgCurlibCommandFromCurrentLibrary('CHGCURLIB CURLIB(QGPL)', 'MYLIB'), undefined);
+assert.strictEqual(buildChgCurlibCommandFromCurrentLibrary('CHGCURLIB', ''), undefined);
+assert.strictEqual(buildChgCurlibCommandFromCurrentLibrary('CHGCURLIB', undefined, ['CURRENT:MYLIB', 'QGPL']), 'CHGCURLIB CURLIB(MYLIB)');
 
 (async () => {
     const connection = {

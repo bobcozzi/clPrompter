@@ -1,5 +1,6 @@
 import IBMi from '@halcyontech/vscode-ibmi-types/api/IBMi';
 import * as vscode from 'vscode';
+import { buildChgCurlibCommandFromCurrentLibrary, buildChgLiblCommandFromLibraryList } from './commandEntryChgLibl';
 import { CLPrompter } from './clPrompter';
 import { CommandEntryJobManager } from './commandEntryJobManager';
 import { CommandEntryHistory, CommandExecutionMode } from './commandEntryModel';
@@ -1018,6 +1019,19 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
             }
         }
 
+        const libraryCommandSelection = await this.resolveLibraryCommandPrefill(normalizedCommand, this.getConnection());
+        if (libraryCommandSelection !== undefined) {
+            if (!libraryCommandSelection) {
+                return;
+            }
+
+            normalizedCommand = libraryCommandSelection;
+            const normalizedForDisplay = applyUserCommandLabel(normalizedCommand, labeledCommand.labelPrefix);
+            if (normalizedForDisplay !== command) {
+                this.post({ type: 'setCommand', command: normalizedForDisplay });
+            }
+        }
+
         const commandForPrompter = applyUserCommandLabel(normalizedCommand, labeledCommand.labelPrefix);
 
         if (!normalizedCommand.trim()) { this.post({ type: 'notice', message: vscode.l10n.t('Enter a CL command to prompt.') }); return; }
@@ -1041,6 +1055,31 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
             this.post({ type: 'focusInput' });
             // Webview focus can race panel disposal, so retry once.
             setTimeout(() => this.post({ type: 'focusInput' }), 50);
+        }
+    }
+
+    private async resolveLibraryCommandPrefill(command: string, connection?: IBMi): Promise<string | null | undefined> {
+        if (!command || !/^(CHGLIBL|CHGCURLIB)\b/i.test(command.trim())) {
+            return undefined;
+        }
+
+        const connectionValue = connection ?? this.getConnection();
+        if (!connectionValue || !connectionValue.sqlRunnerAvailable()) {
+            return undefined;
+        }
+
+        try {
+            const config = await this.jobManager.getConfig(connectionValue);
+            const libraryList = config?.libraryList ?? [];
+            const builtChgLiblCommand = buildChgLiblCommandFromLibraryList(command, libraryList, config?.currentLibrary);
+            if (builtChgLiblCommand) {
+                return builtChgLiblCommand;
+            }
+
+            const builtChgCurlibCommand = buildChgCurlibCommandFromCurrentLibrary(command, config?.currentLibrary, libraryList);
+            return builtChgCurlibCommand ?? undefined;
+        } catch {
+            return undefined;
         }
     }
 

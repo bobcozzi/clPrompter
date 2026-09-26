@@ -2,6 +2,12 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.0.47] - 2026-09-25
+
+### What's New
+- Command entry now processing the CHGLIBL and CHGCURLIB commands by pre-filing them, when prompted with the current library list and current library. This occurs if no parameters are specified for the LIBL and/or CURLIB parameter.
+
+
 ## [1.0.46] - 2026-09-25
 
 ### What's Fixed

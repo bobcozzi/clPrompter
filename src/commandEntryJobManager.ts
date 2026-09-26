@@ -378,6 +378,7 @@ type DedicatedRouteDecision = {
 const LIBRARY_LIST_INFO_SQL = `
 SELECT SYSTEM_SCHEMA_NAME, TYPE, ORDINAL_POSITION
 FROM QSYS2.LIBRARY_LIST_INFO
+WHERE TYPE IN ('CURRENT', 'USER')
 ORDER BY ORDINAL_POSITION
 `;
 
@@ -1982,11 +1983,12 @@ export class CommandEntryJobManager {
                 }
 
                 const type = this.readRowString(row, 'TYPE')?.trim().toUpperCase();
-                if (type === 'CURRENT') {
-                    currentLibrary = schemaName;
+                if (type !== 'CURRENT' && type !== 'USER') {
+                    continue;
                 }
 
                 if (type === 'CURRENT') {
+                    currentLibrary = schemaName;
                     continue;
                 }
 
