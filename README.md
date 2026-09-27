@@ -1,6 +1,6 @@
 # CL Prompter and Formatter — Professional IBM i CL Tools for VS Code
 
-A professional CL (Control Language) prompter and formatter for VS Code that brings the familiar IBM i F4 CL prompter experience, intelligent code formatting, and a dedicated CL Command Entry workspace to your modern IBM i development environment. Works seamlessly with the vscode-for-ibmi extension (Code4IBMi).
+A professional CL (Control Language) prompter and formatter for VS Code, IBM i and other compatible IDE environments. It brings the familiar IBM i F4=Prompt CL prompter, intelligent CL source code formatting, and a dedicated CL Command Entry workspace to your modern IBM i development environment. It works seamlessly with the vscode-ibmi extension (Code4IBMi).
 
 ## Available on
 
@@ -11,13 +11,13 @@ A professional CL (Control Language) prompter and formatter for VS Code that bri
 
 This extension provides three complementary capabilities for IBM i CL development:
 
-**CL Prompting** — A fully functional IBM i command prompter that interprets IBM i `*CMD` objects directly, supporting both IBM-supplied and user-defined commands with complete prompting accuracy. Nested prompting, parameter validation, and command definition handling are preserved, allowing developers to interact with the IBM i command model from VS Code.
+**CL Prompting** — A fully functional IBM i command prompter that interprets IBM i `*CMD` objects directly, supporting both IBM-supplied and user-defined commands. Nested prompting, parameter validation, and command definition handling are preserved, allowing developers to interact with the IBM i CL commands from VS Code.
 
-**CL Formatting** — Professional formatting for CL source, with support for individual statements or entire files. The formatter understands CL syntax, preserves comments, properly handles qualified names, and respects your formatting preferences.
+**CL Formatting** — Traditional formatting for CL source, with support for individual statements or entire source files. The formatter understands CL syntax, preserves comments, properly handles qualified names, and allows you to customize formatting with your own preferences.
 
-**CL Command Entry** — A dedicated VS Code side-panel workspace for entering and running non-interactive IBM i CL commands such as `CPYF` and `CHGJOB`, with CL Prompting support and detailed message output from the command's execution. In addition, SQL statements may be run using the `SQL:` prefix, for example: `SQL: update orders set cost = 1.00 where ITMNBR = 'A3742'`
+**CL Command Entry** — A dedicated VS Code bottom-panel workspace for entering and running non-interactive IBM i CL commands. CL prompting is supported, and the panel includes command-entry-screen-like message output from each command's execution. In addition, SQL statements can be run directly from the command entry panel using the `SQL:` prefix, for example: `SQL: update orders set price = 12.27 where ITMNBR = 'A3741'`
 
-**CL Syntax Checking** — Full CL syntax checking was originally created for this extension; it has now been merged with the **IBM** `vscode-clle` extension, where it is shipped and installed. It is no longer provided by this extension.
+**CL Syntax Checking** — Full CL syntax checking validates each CL command for proper syntax while editing CL source members. This feature has been merged into the IBM `vscode-clle` extension, where it is shipped and installed. It is no longer provided with the CLPROMPTER extension.
 
 Together, these capabilities allow developers to work with CL commands and source code outside of the traditional green-screen experience—without sacrificing fidelity, behavior, or control. The extension also exposes a callable API, making it suitable for automation, extension integration, and AI-assisted workflows.
 
@@ -105,9 +105,9 @@ Notes:
 
 ### Limitations and Behavior Notes
 
-- **Interactive CL commands are not supported in the Command Entry panel** — Commands like `WRKOBJ`, `WRKACTJOB`, and `DSPLIBL OUTPUT(*)` do not display the 5250 style interactive UI and therefore are not support. Unpredictable results may occur.
-- **Cancel Request is disabled in Shared Job mode** — The cancel action feature is implemented when the Shared CODE for IBM i SQL job is used. In private SQL Job mode, the cancel request is attempted to cancel a long-running SQL statement but is not guaranteed to cancel the request.
-- **Prompt does not auto-run** — After prompting a CL command, the command string is returned to the input command line but not automatically run. To run the command, press `Enter` or the **Run** button. Note that this is purposely different from the classic IBM i 52520 Command Entry screen's behavior.
+- **Interactive CL commands are not supported in the Command Entry panel** — Commands like `WRKOBJ`, `WRKACTJOB`, and `DSPLIBL OUTPUT(*)` do not display the 5250-style interactive UI and therefore are not supported. Unpredictable results may occur.
+- **Cancel Request is disabled in Shared Job mode** — The cancel action feature is available when a private Code for IBM i SQL job is used for Command Entry. In private SQL job mode, the cancel request attempts to cancel the SQL statement running from Command Entry. While it often works as expected, in some cases it may not succeed.
+- **Prompt does not auto-run** — After prompting a CL command, the command string is returned to the input command line but is not automatically run. To run the command, press `Enter` or the **Run** button. Note that this is intentionally different from the classic IBM i 5250 Command Entry screen's behavior.
 - **SQL fetch window is configurable** — CL Command Entry SQL statements (`sql: ...`) use these settings:
   - `clPrompter.cmdEntryLimitSqlFetch` controls whether SQL rows are loaded incrementally.
   - `clPrompter.cmdEntrySqlFetchRowLimit` sets the maximum rows per fetch (for example `1000` or `2000`) for manual **Load more rows** requests.
@@ -140,11 +140,11 @@ Included with Command Entry is an executable Code Snippet view that allows you t
 - **Visual Focus Indicator** — Clear arrow (▶) indicator shows which input field currently has focus, making it easy to navigate through complex command parameters.
 - **Tab Navigation** — Press TAB to move seamlessly between input fields, just like traditional 5250 prompting.
 - **Comment Preservation** — Trailing comments on your CL commands are automatically preserved and properly formatted when you submit the prompter.
-- **Help Text** - Simlar to the 5250 CL promtper, CL Command Help is provided for each parameter. Look for the `?` near the parameter to call up that parameters online helptext. The helptext engine used by CL Prompter is must more efficient that other interfaces CL helptext so there is little to no lag between requesting the Helptext and viewing it.
-- **F3=Exit** — Press `F3` during prompting to cancel and return to your code without changes. Users may also use the `ESC` key instead of `F3`.
-- **Enter=Apply** — Press Enter during a prompter to returns the completed CL command string to the editor.
-- **F12=Cancel** - Press `F12` during prompter to cancel the prompter and return the current Command string, including any invalid parameter values, to the editor.
-- **Focus based validation** - Each parameter's restrictions are validated when you attempt to move the cursor out of the parameter's input field. A message is immediately displayed near the parameter. Resolve the issue before continuing, or press F3 to return without fixing the issue.
+- **Help Text** — Similar to the 5250 CL prompter, CL command help is provided for each parameter. Look for the `?` near a parameter to open that parameter's online help text. The help-text engine used by CL Prompter is much more efficient than other interfaces' CL help text, so there is little to no lag between requesting the help and viewing it.
+- **F3=Exit** — Press `F3` during prompting to cancel and return to your code without changes. You may also use the `ESC` key instead of `F3`.
+- **Enter=Apply** — Press `Enter` during prompting to return the completed CL command string to the editor.
+- **F12=Cancel** — Press `F12` during prompting to cancel the prompter and return the current command string, including any invalid parameter values, to the editor.
+- **Focus-based validation** — Each parameter's restrictions are validated when you attempt to move the cursor out of the parameter's input field. A message is immediately displayed near the parameter. Resolve the issue before continuing or press `F3` to return without fixing it.
 
 ### CL Formatter Features
 
@@ -166,7 +166,7 @@ Included with Command Entry is an executable Code Snippet view that allows you t
 - **Command Entry Startup Visibility** — Enable or disable **Show Command Entry in Panel at Startup** to control whether the CL Command Entry panel appears automatically when the extension starts.
 - **Open/Close Command Entry Commands** — Use **CLPROMPTER: Open CL Command Entry** and **CLPROMPTER: Close CL Command Entry** from the Command Palette to explicitly show or hide the CL Command Entry panel.
 
-### Diagnostic Tools (for interal use and troubleshooting)
+### Diagnostic Tools (for internal use and troubleshooting)
 
 - **Save Command XML** — Optionally save the IBM i command definition XML to a file for analysis.
 - **Save Prompter HTML** — Optionally save the generated prompter HTML for diagnostic purposes when reporting issues.
