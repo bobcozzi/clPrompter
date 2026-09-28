@@ -8,6 +8,7 @@
   const minTextareaRows = 2;
   const defaultCommandRows = 3;
   const command = document.getElementById('command'), mode = document.getElementById('mode'), severityFilter = document.getElementById('message-severity-filter');
+  window.clPrompterInstallInternalCutHandler?.(command);
   const run = document.getElementById('run'), prompt = document.getElementById('prompt'), cmdEntryHelp = document.getElementById('cmdentry-help'), cmdEntrySettings = document.getElementById('cmdentry-settings'), toolbarMenu = document.getElementById('toolbar-menu'), toolbarMenuList = document.getElementById('toolbar-menu-list'), menuViewLog = document.getElementById('menu-view-log'), menuClearLog = document.getElementById('menu-clear-log'), menuClearSqlLog = document.getElementById('menu-clear-sql-log'), menuClearSqlHistory = document.getElementById('menu-clear-sql-history'), menuToggleSqlLog = document.getElementById('menu-toggle-sql-log'), menuToggleMessageDetails = document.getElementById('menu-toggle-message-details'), menuConnectionSettings = document.getElementById('menu-connection-settings'), menuUseSharedSqlJob = document.getElementById('menu-use-shared-sql-job'), menuUsePrivateSqlJob = document.getElementById('menu-use-private-sql-job'), menuStartNewJob = document.getElementById('menu-start-new-job'), menuClearHistory = document.getElementById('menu-clear-history'), menuRunMode = document.getElementById('menu-run-mode'), menuRunModeList = document.getElementById('menu-run-mode-list'), menuRunModeWrap = menuRunMode ? menuRunMode.closest('.toolbar-submenu-wrap') : null, menuRunModeRun = document.getElementById('menu-run-mode-run'), menuRunModeLimit = document.getElementById('menu-run-mode-limit'), menuRunModeCheck = document.getElementById('menu-run-mode-check'), historyPrev = document.getElementById('history-prev'), historyNext = document.getElementById('history-next'), statusJobMenu = document.getElementById('status-job-menu'), statusJobMenuCopy = document.getElementById('status-job-menu-copy'), statusJobMenuDisplayJoblog = document.getElementById('status-job-menu-display-joblog'), statusJobMenuToggleSqlJob = document.getElementById('status-job-menu-toggle-sql-job'), statusJobMenuConnectionSettings = document.getElementById('status-job-menu-connection-settings'), statusJobMenuReconnectServerJob = document.getElementById('status-job-menu-reconnect-server-job');
   const statusText = document.getElementById('status-text'), statusIdentity = document.getElementById('status-identity'), statusJobId = document.getElementById('status-jobid'), results = document.getElementById('results');
   let historyIndex = -1, runningStartedAt, runningTimerId, runningStatusPrefix = l10n.runningStatusPrefix || 'Running…', historyDraft = '', sqlJobPollingId;
@@ -21,6 +22,7 @@
   let canStartNewJob = false;
   let messageDetailsMode = 'SHOW';
   let logSqlStatementsToCommandLog = false;
+  const latestExecutionPinnedByConnection = Object.create(null);
   let baseMinHeightPx = 0, autoResizing = false;
   let runModeSubmenuCloseTimer;
   const parseConnectionScopeKey = value => {
@@ -107,6 +109,18 @@
         buckets[state.activeConnectionScopeKey] = [];
       }
     }
+  };
+  const shouldPinLatestExecutionForActiveConnection = () => {
+    const activeKey = normalizeConnectionScopeKey(state.activeConnectionScopeKey);
+    return !!latestExecutionPinnedByConnection[activeKey];
+  };
+  const setPinLatestExecutionForActiveConnection = value => {
+    const activeKey = normalizeConnectionScopeKey(state.activeConnectionScopeKey);
+    if (value) {
+      latestExecutionPinnedByConnection[activeKey] = true;
+      return;
+    }
+    delete latestExecutionPinnedByConnection[activeKey];
   };
   const applyAppearancePreferences = (commandTextColor, sqlStatementColor) => {
     const value = String(commandTextColor || '').trim();
@@ -698,12 +712,17 @@
       ? 'Use the Code for IBM i SQL job for Command Entry'
       : 'Use a private SQL job for Command Entry';
   };
+  const shouldPinLatestExecutionForConnection = key => {
+    const normalizedKey = normalizeConnectionScopeKey(key);
+    return !!latestExecutionPinnedByConnection[normalizedKey];
+  };
   const applyMessageDetailsMode = () => {
     const expand = areMessageDetailsShown();
     const buckets = ensureExecutionBuckets();
-    Object.values(buckets).forEach(executions => {
+    Object.entries(buckets).forEach(([connectionKey, executions]) => {
+      const pinFirstExecution = shouldPinLatestExecutionForConnection(connectionKey);
       executions.forEach((execution, index) => {
-        execution.collapsed = !expand && index > 0;
+        execution.collapsed = !expand && (pinFirstExecution ? index > 0 : index >= 0);
         (execution.messages || []).forEach(message => {
           message.firstLevelExpanded = expand;
           message.expanded = expand;
@@ -831,10 +850,12 @@
     results.replaceChildren();
     const minSeverity = Number(state.filterSeverity || 0);
     const executions = getActiveExecutions();
+    const pinFirstExecution = shouldPinLatestExecutionForActiveConnection();
     executions.forEach((execution, index) => {
       const isLatest = index === 0;
+      const isPinnedLatest = isLatest && pinFirstExecution;
       const article = document.createElement('article');
-      article.className = `execution${isLatest ? ' latest' : ''}`;
+      article.className = `execution${isPinnedLatest ? ' latest' : ''}`;
       if (execution.collapsed) { article.classList.add('collapsed'); }
       const header = document.createElement('header');
       let errorSeverity = (execution.messages || [])
@@ -1536,6 +1557,7 @@
     const message = event.data; switch (message.type) {
       case 'initialize':
         setActiveConnectionScope(message.connectionScopeKey);
+        setPinLatestExecutionForActiveConnection(false);
         state.history = message.history || [];
         if (message.clearHistoryOnStartup) {
           const buckets = ensureExecutionBuckets();
@@ -1624,6 +1646,7 @@
       case 'execution': {
         const shouldAddToCommandEntryLog = message.addToCommandEntryLog !== false;
         if (shouldAddToCommandEntryLog) {
+          setPinLatestExecutionForActiveConnection(true);
           const buckets = ensureExecutionBuckets();
           buckets[state.activeConnectionScopeKey] = [
             { ...message.execution, messages: (message.execution.messages || []).slice(0, maxMessages) },

@@ -17,6 +17,7 @@ export type ConnectionSqlSessionOptions = {
     timfmt?: string;
     initialSchema?: string;
     initialPath?: string;
+    lobThreshold?: number;
 };
 
 export type ConnectionSqlSettings = {
@@ -108,6 +109,19 @@ function readBooleanSetting(value: unknown): boolean | undefined {
         }
         if (normalized === 'false' || normalized === '*no' || normalized === 'no') {
             return false;
+        }
+    }
+    return undefined;
+}
+
+function readIntegerSetting(value: unknown): number | undefined {
+    if (typeof value === 'number' && Number.isInteger(value) && value >= 0) {
+        return value;
+    }
+    if (typeof value === 'string') {
+        const parsed = Number(value.trim());
+        if (Number.isInteger(parsed) && parsed >= 0) {
+            return parsed;
         }
     }
     return undefined;
@@ -441,6 +455,7 @@ export function getDefaultConnectionSqlSessionOptions(): ConnectionSqlSessionOpt
         timfmt: undefined,
         initialSchema: undefined,
         initialPath: undefined,
+        lobThreshold: 32767,
     };
 }
 
@@ -466,6 +481,7 @@ export function getConnectionSqlSessionOptions(connection?: IBMi): ConnectionSql
         timfmt: normalizeSqlOptionValue(raw.timfmt) ?? defaults.timfmt,
         initialSchema: normalizeInitialSchemaValue(raw.initialSchema) ?? defaults.initialSchema,
         initialPath: normalizeSessionContextValueForTarget(raw.initialPath, 'path') ?? defaults.initialPath,
+        lobThreshold: readIntegerSetting((raw as Record<string, unknown>).lobThreshold) ?? defaults.lobThreshold,
     };
 }
 

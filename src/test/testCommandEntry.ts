@@ -83,6 +83,7 @@ assert.deepStrictEqual(collectRunAfterSqlJobInit({ cmdEntry: { runAfterSqlJobIni
 assert.deepStrictEqual(collectRunAfterSqlJobInit({ clPrompter: { cmdEntry: { runAfterSqlJobInit: ['SET SYSIBMADM.SELFCODES = 1'] } } }), ['SET SYSIBMADM.SELFCODES = 1']);
 assert.deepStrictEqual(splitRunAfterSqlJobInitStatements('cl: dspjoblog;\nsql: values 1;'), ['cl: dspjoblog', 'sql: values 1']);
 assert.deepStrictEqual(splitRunAfterSqlJobInitStatements(["cl: dspjoblog;", 'values 1;']), ['cl: dspjoblog', 'values 1']);
+assert.deepStrictEqual(splitRunAfterSqlJobInitStatements('CHGLIBL LIBL(&LIBL);'), ['CHGLIBL LIBL(&LIBL)']);
 assert.deepStrictEqual(splitRunAfterSqlJobInitStatements("values 'a; b';"), ["values 'a; b'"]);
 assert.deepStrictEqual(splitRunAfterSqlJobInitStatements("select\n 1;\nvalues 2;"), ['select 1', 'values 2']);
 assert.deepStrictEqual(resolveRunAfterSqlJobInitMode('SQL: values 1'), { mode: 'sql', command: 'values 1' });

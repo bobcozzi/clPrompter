@@ -2,6 +2,19 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.0.49] - 2026-09-28
+
+### What's Improved
+- The Command Entry input panel and the SQL Job Settings configuration panel text areas override VSCODE's default copy/cut/paste behavior for the "cut" operations to make it feel more natural.
+- The SQL Job Settings panel now includes a LOB threshold setting, defaulting to 32767 bytes, so larger LOBs can be fetched in pieces to reduce peak memory use and potentially reduce host server processing.
+
+### What's Fixed
+- Saving Command Entry connection settings now clears the dirty-state flag so Exit no longer keeps asking about unsaved changes after a successful Save.
+
+### What's Changed
+- The layout of the Connection Settings (for Command Entry) have bee redsigned and made much more intuitive and better organized.
+- On fresh VS Code startup, Command Entry no longer force-highlights and expands the most recent historical log entry; once a new command runs in-session, the newest entry is again kept expanded and highlighted as before.
+
 ## [1.0.48] - 2026-09-26
 
 ### What's New

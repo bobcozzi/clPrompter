@@ -2576,6 +2576,10 @@ export class CommandEntryJobManager {
             jdbc['time format'] = mappedTime;
         }
 
+        if (Number.isInteger(sessionOptions.lobThreshold) && (sessionOptions.lobThreshold ?? -1) >= 0) {
+            jdbc['lob threshold'] = sessionOptions.lobThreshold;
+        }
+
         const commit = sessionOptions.commit;
         if (commit) {
             switch (commit) {

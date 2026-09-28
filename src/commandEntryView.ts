@@ -273,6 +273,7 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
     private remainingSqlNotLoggedFeedbackCount = SQL_NOT_LOGGED_FEEDBACK_MAX_PER_SESSION;
     private cmdEntryHelpPanel: vscode.WebviewPanel | undefined;
     private cmdEntrySettingsPanel: vscode.WebviewPanel | undefined;
+    private cmdEntrySettingsDirty = false;
     private startupScriptLogPanel: vscode.WebviewPanel | undefined;
     private readonly output: vscode.OutputChannel;
     private readonly jobManager: CommandEntryJobManager;
@@ -2589,7 +2590,30 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
 
         this.cmdEntrySettingsPanel.onDidDispose(() => {
             this.cmdEntrySettingsPanel = undefined;
+            this.cmdEntrySettingsDirty = false;
         });
+        this.cmdEntrySettingsPanel.onDidChangeViewState(() => {
+            if (!this.cmdEntrySettingsPanel || this.cmdEntrySettingsPanel.visible || !this.cmdEntrySettingsDirty) {
+                return;
+            }
+
+            void (async () => {
+                const exitWithoutSavingLabel = vscode.l10n.t('Exit without saving');
+                const selection = await vscode.window.showWarningMessage(
+                    vscode.l10n.t('You have unsaved changes. Exit without saving?'),
+                    { modal: true },
+                    exitWithoutSavingLabel
+                );
+                if (selection !== exitWithoutSavingLabel) {
+                    this.cmdEntrySettingsPanel?.reveal(vscode.ViewColumn.Beside, true);
+                    return;
+                }
+                this.cmdEntrySettingsDirty = false;
+                this.cmdEntrySettingsPanel?.dispose();
+            })();
+        });
+
+        this.cmdEntrySettingsDirty = false;
 
         try {
             this.cmdEntrySettingsPanel.webview.html = await this.buildConnectionSettingsHtml(this.cmdEntrySettingsPanel.webview, connection);
@@ -2599,7 +2623,11 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
             this.cmdEntrySettingsPanel.webview.html = `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><style>body{font-family:var(--vscode-font-family,sans-serif);background:var(--vscode-editor-background);color:var(--vscode-editor-foreground);padding:20px}p{margin:0 0 12px}.error{color:var(--vscode-testing-iconFailed,#f85149)}</style></head><body><h2>Command Entry Connection Settings</h2><p>Connection settings are unavailable while the IBM i Mapepire endpoint is unreachable.</p><p class="error">${this.escapeHtmlAttribute(failure)}</p></body></html>`;
         }
 
-        this.cmdEntrySettingsPanel.webview.onDidReceiveMessage(async (message: { type?: string; useSharedJob?: boolean; naming?: string; commit?: string; autoCommit?: string; trueAutocommit?: string; extendedMetadata?: boolean; runStartupScript?: boolean; currentLibrary?: string; libraryList?: string; runAfterSqlJobInit?: string; datfmt?: string; timfmt?: string; initialSchema?: string; initialPath?: string; autoColumnViewForSingleRow?: boolean; hasUnsavedChanges?: boolean; sqlJobId?: string }) => {
+        this.cmdEntrySettingsPanel.webview.onDidReceiveMessage(async (message: { type?: string; useSharedJob?: boolean; naming?: string; commit?: string; autoCommit?: string; trueAutocommit?: string; extendedMetadata?: boolean; runStartupScript?: boolean; currentLibrary?: string; libraryList?: string; runAfterSqlJobInit?: string; datfmt?: string; timfmt?: string; lobThreshold?: string; initialSchema?: string; initialPath?: string; autoColumnViewForSingleRow?: boolean; hasUnsavedChanges?: boolean; dirty?: boolean; sqlJobId?: string }) => {
+            if (message.type === 'settingsDirtyState') {
+                this.cmdEntrySettingsDirty = !!message.dirty;
+                return;
+            }
             if (message.type === 'setSqlJobMode') {
                 await this.setSharedSqlJobMode(Boolean(message.useSharedJob), 'command');
                 if (this.cmdEntrySettingsPanel) {
@@ -2663,6 +2691,11 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
                 }
                 const normalizedRunAfterSqlJobInit = this.normalizeRunAfterSqlJobInitForSave(message.runAfterSqlJobInit);
                 const normalizedRunAfterSqlJobInitText = this.normalizeRunAfterSqlJobInitTextForSave(message.runAfterSqlJobInit);
+                const normalizedLobThreshold = this.normalizeLobThresholdForSave(message.lobThreshold);
+                if ((message.lobThreshold ?? '').trim().length > 0 && normalizedLobThreshold === undefined) {
+                    this.postCmdEntryNoticeText(vscode.l10n.t('LOB threshold must be an integer from 0 to 16777216.'), true);
+                    return;
+                }
 
                 const nextOptions = {
                     naming: message.naming === 'system' ? 'system' as const : 'sql' as const,
@@ -2678,6 +2711,7 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
                     runAfterSqlJobInit: normalizedRunAfterSqlJobInit,
                     datfmt: message.datfmt || undefined,
                     timfmt: message.timfmt || undefined,
+                    lobThreshold: normalizedLobThreshold,
                     initialSchema: normalizedSchema,
                     initialPath: normalizedPath,
                 };
@@ -2697,10 +2731,12 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
                         runAfterSqlJobInit: nextOptions.runAfterSqlJobInit,
                         datfmt: nextOptions.datfmt,
                         timfmt: nextOptions.timfmt,
+                        lobThreshold: nextOptions.lobThreshold,
                         initialSchema: nextOptions.initialSchema,
                         initialPath: nextOptions.initialPath,
                     }
                 });
+                this.cmdEntrySettingsDirty = false;
                 const settingsSavedNotice = vscode.l10n.t('Settings saved.');
                 this.postCmdEntryNoticeText(settingsSavedNotice, true);
 
@@ -2877,8 +2913,9 @@ FETCH FIRST 1 ROW ONLY`;
                     this.postCmdEntryNoticeText(vscode.l10n.t('No startup script log has been generated yet for this connection.'), true);
                 }
             }
-            if (message.type === 'closeCmdEntrySettings') {
-                if (message.hasUnsavedChanges) {
+            if (message.type === 'requestCloseCmdEntrySettings' || message.type === 'closeCmdEntrySettings') {
+                const hasDirty = message.type === 'closeCmdEntrySettings' ? !!message.hasUnsavedChanges : this.cmdEntrySettingsDirty;
+                if (hasDirty) {
                     const exitWithoutSavingLabel = vscode.l10n.t('Exit without saving');
                     const selection = await vscode.window.showWarningMessage(
                         vscode.l10n.t('You have unsaved changes. Exit without saving?'),
@@ -2889,6 +2926,7 @@ FETCH FIRST 1 ROW ONLY`;
                         return;
                     }
                 }
+                this.cmdEntrySettingsDirty = false;
                 this.cmdEntrySettingsPanel?.dispose();
             }
             if (message.type === 'reconnectPrivateSqlJob') {
@@ -2930,6 +2968,11 @@ FETCH FIRST 1 ROW ONLY`;
                 }
                 const normalizedRunAfterSqlJobInit = this.normalizeRunAfterSqlJobInitForSave(message.runAfterSqlJobInit);
                 const normalizedRunAfterSqlJobInitText = this.normalizeRunAfterSqlJobInitTextForSave(message.runAfterSqlJobInit);
+                const normalizedLobThreshold = this.normalizeLobThresholdForSave(message.lobThreshold);
+                if ((message.lobThreshold ?? '').trim().length > 0 && normalizedLobThreshold === undefined) {
+                    this.postCmdEntryNoticeText(vscode.l10n.t('LOB threshold must be an integer from 0 to 16777216.'), true);
+                    return;
+                }
 
                 await updateConnectionSqlSettings(this.context, reconnectConnection, {
                     sessionOptions: {
@@ -2946,6 +2989,7 @@ FETCH FIRST 1 ROW ONLY`;
                         runAfterSqlJobInit: normalizedRunAfterSqlJobInit,
                         datfmt: message.datfmt || undefined,
                         timfmt: message.timfmt || undefined,
+                        lobThreshold: normalizedLobThreshold,
                         initialSchema: normalizedSchema,
                         initialPath: normalizedPath,
                     }
@@ -3131,6 +3175,20 @@ FETCH FIRST 1 ROW ONLY`;
         return normalized.trim().length > 0 ? normalized : undefined;
     }
 
+    private normalizeLobThresholdForSave(value: string | undefined): number | undefined {
+        const trimmed = (value ?? '').trim();
+        if (!trimmed) {
+            return undefined;
+        }
+
+        const parsed = Number(trimmed);
+        if (!Number.isInteger(parsed) || parsed < 0 || parsed > 16777216) {
+            return undefined;
+        }
+
+        return parsed;
+    }
+
     private currentSharedSqlJobDisplayId(connection = this.getConnection()): string | undefined {
         const raw = String(connection?.getSqlJobId?.() ?? '').trim();
         return raw.length > 0 ? raw : undefined;
@@ -3246,6 +3304,7 @@ FETCH FIRST 1 ROW ONLY`;
         reconnectJobId?: string,
         settingsStatusMessage = ''
     ): Promise<string> {
+        const internalCut = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'media', 'internalCut.js'));
         const isDedicatedUsable = this.jobManager.isDedicatedUsable(connection);
         const remoteMapepireEnabled = this.jobManager.isRemoteMapepireServerEnabled(connection);
         const useSharedJob = this.isUsingSharedSqlJob(connection);
@@ -3294,6 +3353,9 @@ FETCH FIRST 1 ROW ONLY`;
         const setCurrentLibraryAfterConnect = sessionOptions.setCurrentLibraryAfterConnect !== false;
         const initialSchema = this.normalizeInitialSessionValue(sessionOptions.initialSchema ?? liveSessionContext.currentSchema);
         const initialPath = this.normalizeInitialSessionValue(sessionOptions.initialPath ?? liveSessionContext.currentPath);
+        const lobThreshold = Number.isInteger(sessionOptions.lobThreshold) && (sessionOptions.lobThreshold ?? -1) >= 0
+            ? sessionOptions.lobThreshold
+            : 32767;
         const runAfterSqlJobInitDefaults = buildRunAfterSqlJobInitDefaults({
             ...sessionOptions,
             currentLibrary: currentLibrary || undefined,
@@ -3316,6 +3378,7 @@ FETCH FIRST 1 ROW ONLY`;
         const runAfterSqlJobInitEscaped = this.escapeHtmlAttribute(runAfterSqlJobInitValue);
         const initialSchemaEscaped = this.escapeHtmlAttribute(initialSchema);
         const initialPathEscaped = this.escapeHtmlAttribute(initialPath);
+        const lobThresholdEscaped = this.escapeHtmlAttribute(String(lobThreshold));
         const reconnectingLabel = vscode.l10n.t('Reconnecting...');
         const reconnectSuccessLabel = vscode.l10n.t('Reconnect successful');
         const reconnectButtonLabel = reconnectStatus === 'reconnecting'
@@ -3341,25 +3404,37 @@ FETCH FIRST 1 ROW ONLY`;
         const autoCommitLabel = vscode.l10n.t('Auto Commit');
         const trueAutocommitLabel = vscode.l10n.t('True Autocommit');
         const extendedMetadataLabel = vscode.l10n.t('Extended Metadata');
-        const extendedMetadataHelpText = vscode.l10n.t('Enables better SQL column information.');
+        const extendedMetadataHelpText = vscode.l10n.t('Enables better SQL column information (recommended).');
+        const namingHelpText = vscode.l10n.t('Controls SQL object naming style: *SQL supports schema.object naming. When the schema is unspecified, the current schema (often CURRENT USER) is used; *SYS supports library/object or schema.object naming and uses *LIBL for unqualified file names.');
+        const commitHelpText = vscode.l10n.t('Sets transaction isolation/commit behavior for statements run in this SQL job. *NONE avoids commitment control; other values participate in transactions.');
+        const autoCommitHelpText = vscode.l10n.t('When *YES, each statement commits automatically. When *NO, commits and rollbacks are explicit based on COMMIT settings.');
+        const trueAutocommitHelpText = vscode.l10n.t('Driver-level autocommit mode. Usually leave this aligned with Auto Commit unless you need specific transaction behavior.');
+        const datfmtHelpText = vscode.l10n.t('Default date format for this SQL job when dates are converted to character values.');
+        const timfmtHelpText = vscode.l10n.t('Default time format for this SQL job when times are converted to character values.');
+        const lobThresholdFieldHelpText = vscode.l10n.t('LOBs above this byte threshold are fetched in pieces to reduce peak memory usage and smooth IBM i server job resource pressure. End users typically see no functional UI change. (Recommend: 32767)');
+        const extendedMetadataFieldHelpText = vscode.l10n.t('Requests richer column metadata from the driver; this improves result formatting at a small metadata overhead.');
         const currentLibraryLabel = vscode.l10n.t('Value for &CURLIB (current Library):');
         const libraryListLabel = vscode.l10n.t('Value for &LIBL (library list):');
-        const runAfterSqlJobInitLabel = vscode.l10n.t('Start up Script');
+        const runAfterSqlJobInitLabel = vscode.l10n.t('Start Up Script');
+        const runAfterSqlJobInitSubheadLabel = vscode.l10n.t('Script');
+        const libraryListVariablesLabel = vscode.l10n.t('Library List Variables');
         const runStartupScriptLabel = vscode.l10n.t('Run startup script after connection is established');
-        const runStartupScriptHelpText = vscode.l10n.t('Disable this to keep the script text without executing it.');
+        const runStartupScriptHelpText = vscode.l10n.t('Disable the option above to avoid running the Start Up script.');
         const runAfterSqlJobInitHelpText = vscode.l10n.t('Type the startup script using CL cmd or SQL stmt. Embed &CURLIB or &LIBL where needed (for example, CHGCURLIB &CURLIB). Terminate each stmt with a semicolon.');
         const viewStartupScriptLogLabel = vscode.l10n.t('View Last Startup Log');
         const mapepireSqlJobSettingsTitle = vscode.l10n.t('Mapepire SQL Job Settings');
         const getCurrentUserSettingsHint = vscode.l10n.t('Retrieve Library List from User Profile now');
         const datfmtLabel = vscode.l10n.t('DATFMT');
         const timfmtLabel = vscode.l10n.t('TIMFMT');
+        const lobThresholdLabel = vscode.l10n.t('LOB threshold (bytes)');
+        const lobThresholdHelpText = vscode.l10n.t('LOBs larger than this size are fetched in pieces by the SQL job.');
         const schemaLabel = vscode.l10n.t('SCHEMA');
         const pathLabel = vscode.l10n.t('PATH');
         const applyNowLabel = vscode.l10n.t('Apply now');
         const applyNowHelpText = vscode.l10n.t('Applies both values shown above to the active SQL job.');
         const autoColumnViewLabel = vscode.l10n.t('Use Column View when result set size is 1 row');
         const autoColumnViewHelpText = vscode.l10n.t('When enabled, an SQL run from Command Entry that returns exactly one row automatically switches to the custom Column View presentation.');
-        const getCurrentUserSettingsLabel = vscode.l10n.t('Get from current user');
+        const getCurrentUserSettingsLabel = vscode.l10n.t('Retrieve from Current User Now');
         const saveLabel = vscode.l10n.t('Save');
         const exitLabel = vscode.l10n.t('Exit');
         const unsavedExitPrompt = vscode.l10n.t('You have unsaved changes. Exit without saving?');
@@ -3378,6 +3453,14 @@ FETCH FIRST 1 ROW ONLY`;
         const trueAutocommitDisabled = sessionOptions.autoCommit !== true || !(sessionOptions.commit === '*CHG' || sessionOptions.commit === '*CS' || sessionOptions.commit === '*RR') ? 'disabled' : '';
         const trueAutocommitChecked = trueAutocommitValue ? 'selected' : '';
         const settingsStatusEscaped = this.escapeHtmlAttribute(settingsStatusMessage);
+        const namingHelpTextEscaped = this.escapeHtmlAttribute(namingHelpText);
+        const commitHelpTextEscaped = this.escapeHtmlAttribute(commitHelpText);
+        const autoCommitHelpTextEscaped = this.escapeHtmlAttribute(autoCommitHelpText);
+        const trueAutocommitHelpTextEscaped = this.escapeHtmlAttribute(trueAutocommitHelpText);
+        const datfmtHelpTextEscaped = this.escapeHtmlAttribute(datfmtHelpText);
+        const timfmtHelpTextEscaped = this.escapeHtmlAttribute(timfmtHelpText);
+        const lobThresholdFieldHelpTextEscaped = this.escapeHtmlAttribute(lobThresholdFieldHelpText);
+        const extendedMetadataFieldHelpTextEscaped = this.escapeHtmlAttribute(extendedMetadataFieldHelpText);
 
         return `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><style>
             body { font-family: var(--vscode-font-family, sans-serif); background: var(--vscode-editor-background); color: var(--vscode-editor-foreground); margin: 0; padding: 20px; }
@@ -3406,10 +3489,30 @@ FETCH FIRST 1 ROW ONLY`;
             .field { display: grid; grid-template-columns: 120px 1fr; gap: 10px; align-items: center; margin: 8px 0; }
             .field-inline { display: flex; align-items: center; gap: 8px; width: 100%; }
             .field-inline input, .field-inline textarea { flex: 1; }
-            .settings-fieldset { border: 1px solid var(--vscode-panel-border); border-radius: 6px; margin: 12px 0 4px; padding: 10px 12px 8px; }
-            .settings-fieldset legend { padding: 0 6px; font-weight: 600; }
-            .startup-script-fieldset { border: 1px solid var(--vscode-panel-border); border-radius: 6px; margin: 12px 0 4px; padding: 10px 12px 8px; }
-            .startup-script-fieldset legend { padding: 0 6px; font-weight: 600; }
+            .mapepire-settings-fieldset .field { grid-template-columns: 150px minmax(220px, 360px); }
+            .mapepire-settings-fieldset .field > .field-help-inline { justify-self: start; width: min(100%, 360px); }
+            .mapepire-settings-fieldset .field-help-inline > select,
+            .mapepire-settings-fieldset .field-help-inline > input { flex: 1; min-width: 0; }
+            .mapepire-settings-fieldset .row { max-width: 520px; }
+            .field-help-inline { display: inline-flex; align-items: center; gap: 8px; }
+            .help-hint { position: relative; display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; min-width: 18px; padding: 0; border-radius: 999px; border: 1px solid color-mix(in srgb, var(--vscode-focusBorder, var(--vscode-panel-border)) 52%, var(--vscode-panel-border)); background: color-mix(in srgb, var(--vscode-editor-background) 72%, var(--vscode-sideBar-background)); color: var(--vscode-descriptionForeground, var(--vscode-foreground)); font-size: 11px; font-weight: 700; line-height: 1; cursor: pointer; user-select: none; }
+            .help-hint:hover,
+            .help-hint:focus-visible { border-color: var(--vscode-focusBorder, var(--vscode-panel-border)); color: var(--vscode-foreground); }
+            .help-hint::after { content: attr(data-help); position: absolute; left: calc(100% + 10px); top: 50%; transform: translateY(-50%); min-width: 240px; max-width: 360px; padding: 8px 10px; border-radius: 6px; border: 1px solid color-mix(in srgb, var(--vscode-focusBorder, var(--vscode-panel-border)) 45%, var(--vscode-panel-border)); background: color-mix(in srgb, var(--vscode-editor-background) 90%, black); color: var(--vscode-editor-foreground); box-shadow: 0 6px 18px color-mix(in srgb, var(--vscode-widget-shadow, black) 45%, transparent); opacity: 0; visibility: hidden; pointer-events: none; transition: opacity 120ms ease; text-align: left; white-space: normal; z-index: 20; }
+            .help-hint::before { content: ''; position: absolute; left: calc(100% + 4px); top: 50%; transform: translateY(-50%); border-top: 6px solid transparent; border-bottom: 6px solid transparent; border-right: 6px solid color-mix(in srgb, var(--vscode-focusBorder, var(--vscode-panel-border)) 45%, var(--vscode-panel-border)); opacity: 0; visibility: hidden; pointer-events: none; z-index: 21; }
+            .help-hint:hover::after,
+            .help-hint:hover::before,
+            .help-hint:focus-visible::after,
+            .help-hint:focus-visible::before { opacity: 1; visibility: visible; }
+            .mapepire-checkbox-row { display: flex; align-items: center; gap: 8px; }
+            .settings-fieldset { border: 1px solid color-mix(in srgb, var(--vscode-focusBorder, var(--vscode-panel-border)) 40%, var(--vscode-panel-border)); border-radius: 8px; margin: 12px 0 4px; padding: 10px 12px 8px; background: color-mix(in srgb, var(--vscode-editor-background) 72%, var(--vscode-sideBar-background)); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--vscode-panel-border) 72%, transparent); }
+            .settings-fieldset legend { padding: 0 6px; font-weight: 700; color: var(--vscode-foreground); background: color-mix(in srgb, var(--vscode-editor-background) 82%, var(--vscode-sideBar-background)); border: 1px solid color-mix(in srgb, var(--vscode-focusBorder, var(--vscode-panel-border)) 28%, var(--vscode-panel-border)); border-radius: 6px; }
+            .startup-script-fieldset { border: 1px solid color-mix(in srgb, var(--vscode-focusBorder, var(--vscode-panel-border)) 55%, var(--vscode-panel-border)); border-radius: 8px; margin: 12px 0 4px; padding: 10px 12px 8px; background: color-mix(in srgb, var(--vscode-editor-background) 64%, var(--vscode-sideBar-background)); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--vscode-focusBorder, var(--vscode-panel-border)) 18%, transparent); }
+            .startup-script-fieldset legend { padding: 0 6px; font-weight: 700; color: var(--vscode-foreground); background: color-mix(in srgb, var(--vscode-editor-background) 82%, var(--vscode-sideBar-background)); border: 1px solid color-mix(in srgb, var(--vscode-focusBorder, var(--vscode-panel-border)) 32%, var(--vscode-panel-border)); border-radius: 6px; }
+            .script-details-fieldset { margin-top: 8px; border-color: color-mix(in srgb, var(--vscode-focusBorder, var(--vscode-panel-border)) 60%, var(--vscode-panel-border)); background: color-mix(in srgb, var(--vscode-editor-background) 68%, var(--vscode-sideBar-background)); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--vscode-focusBorder, var(--vscode-panel-border)) 24%, transparent); }
+            .library-vars-fieldset { margin-top: 20px; border-color: color-mix(in srgb, var(--vscode-textLink-foreground, var(--vscode-panel-border)) 40%, var(--vscode-panel-border)); background: color-mix(in srgb, var(--vscode-editor-background) 76%, var(--vscode-sideBar-background)); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--vscode-textLink-foreground, var(--vscode-panel-border)) 14%, transparent); }
+            .startup-script-subhead { margin: 10px 0 4px; font-weight: 600; }
+            .startup-script-help { margin: 4px 0 8px; }
             .startup-script-examples { margin: 4px 0 8px 18px; padding: 0; }
             .startup-script-examples li { margin: 2px 0; }
             .reset-button { width: 28px; min-width: 28px; height: 28px; padding: 0; border-radius: 999px; display: inline-flex; align-items: center; justify-content: center; font-size: 18px; line-height: 1; font-weight: 400; }
@@ -3468,29 +3571,36 @@ FETCH FIRST 1 ROW ONLY`;
                 <div class="section">
                                 <div><strong>${connectionSettingsTitle}</strong></div>
                                 <div class="small">${applyOnReconnectLabel}</div>
-                                <fieldset class="settings-fieldset">
+                                <fieldset class="settings-fieldset mapepire-settings-fieldset">
                                     <legend>${mapepireSqlJobSettingsTitle}</legend>
-                                    <div class="field"><label for="session-naming">${namingLabel}</label><select id="session-naming" ${sessionControlsDisabled}><option value="sql" ${sessionOptions.naming === 'sql' ? 'selected' : ''}>*SQL</option><option value="system" ${sessionOptions.naming === 'system' ? 'selected' : ''}>*SYS</option></select></div>
-                                    <div class="field"><label for="session-commit">${commitLabel}</label><select id="session-commit" ${sessionControlsDisabled}><option value="">${noOverrideLabel}</option><option value="*AUTO" ${sessionOptions.commit === '*AUTO' ? 'selected' : ''}>*AUTO</option><option value="*NONE" ${sessionOptions.commit === '*NONE' ? 'selected' : ''}>*NONE</option><option value="*CHG" ${sessionOptions.commit === '*CHG' ? 'selected' : ''}>*CHG</option><option value="*CS" ${sessionOptions.commit === '*CS' ? 'selected' : ''}>*CS</option><option value="*RR" ${sessionOptions.commit === '*RR' ? 'selected' : ''}>*RR</option></select></div>
-                                    <div class="field"><label for="session-auto-commit">${autoCommitLabel}</label><select id="session-auto-commit" ${sessionControlsDisabled}><option value="">${noOverrideLabel}</option><option value="*YES" ${sessionOptions.autoCommit === true ? 'selected' : ''}>*YES</option><option value="*NO" ${sessionOptions.autoCommit === false ? 'selected' : ''}>*NO</option></select></div>
-                                    <div class="field"><label for="session-true-autocommit">${trueAutocommitLabel}</label><select id="session-true-autocommit" ${sessionControlsDisabled} ${trueAutocommitDisabled}><option value="">${noOverrideLabel}</option><option value="*YES" ${trueAutocommitChecked}>*YES</option><option value="*NO" ${!trueAutocommitValue ? 'selected' : ''}>*NO</option></select></div>
-                                    <div class="field"><label for="session-datfmt">${datfmtLabel}</label><select id="session-datfmt" ${sessionControlsDisabled}><option value="">${noOverrideLabel}</option><option value="*ISO" ${sessionOptions.datfmt === '*ISO' ? 'selected' : ''}>*ISO</option><option value="*USA" ${sessionOptions.datfmt === '*USA' ? 'selected' : ''}>*USA</option><option value="*EUR" ${sessionOptions.datfmt === '*EUR' ? 'selected' : ''}>*EUR</option><option value="*JIS" ${sessionOptions.datfmt === '*JIS' ? 'selected' : ''}>*JIS</option><option value="*MDY" ${sessionOptions.datfmt === '*MDY' ? 'selected' : ''}>*MDY</option><option value="*DMY" ${sessionOptions.datfmt === '*DMY' ? 'selected' : ''}>*DMY</option><option value="*YMD" ${sessionOptions.datfmt === '*YMD' ? 'selected' : ''}>*YMD</option></select></div>
-                                    <div class="field"><label for="session-timfmt">${timfmtLabel}</label><select id="session-timfmt" ${sessionControlsDisabled}><option value="">${noOverrideLabel}</option><option value="*HMS" ${sessionOptions.timfmt === '*HMS' ? 'selected' : ''}>*HMS</option><option value="*ISO" ${sessionOptions.timfmt === '*ISO' ? 'selected' : ''}>*ISO</option><option value="*USA" ${sessionOptions.timfmt === '*USA' ? 'selected' : ''}>*USA</option><option value="*EUR" ${sessionOptions.timfmt === '*EUR' ? 'selected' : ''}>*EUR</option><option value="*JIS" ${sessionOptions.timfmt === '*JIS' ? 'selected' : ''}>*JIS</option></select></div>
-                                    <div class="row"><label><input id="session-extended-metadata" type="checkbox" ${extendedMetadataChecked} ${sessionControlsDisabled}> ${extendedMetadataLabel}</label></div>
+                                    <div class="field"><label for="session-naming">${namingLabel}</label><div class="field-help-inline"><select id="session-naming" ${sessionControlsDisabled}><option value="sql" ${sessionOptions.naming === 'sql' ? 'selected' : ''}>*SQL</option><option value="system" ${sessionOptions.naming === 'system' ? 'selected' : ''}>*SYS</option></select><button type="button" class="help-hint" aria-label="${namingHelpTextEscaped}" data-help="${namingHelpTextEscaped}">?</button></div></div>
+                                    <div class="field"><label for="session-commit">${commitLabel}</label><div class="field-help-inline"><select id="session-commit" ${sessionControlsDisabled}><option value="">${noOverrideLabel}</option><option value="*AUTO" ${sessionOptions.commit === '*AUTO' ? 'selected' : ''}>*AUTO</option><option value="*NONE" ${sessionOptions.commit === '*NONE' ? 'selected' : ''}>*NONE</option><option value="*CHG" ${sessionOptions.commit === '*CHG' ? 'selected' : ''}>*CHG</option><option value="*CS" ${sessionOptions.commit === '*CS' ? 'selected' : ''}>*CS</option><option value="*RR" ${sessionOptions.commit === '*RR' ? 'selected' : ''}>*RR</option></select><button type="button" class="help-hint" aria-label="${commitHelpTextEscaped}" data-help="${commitHelpTextEscaped}">?</button></div></div>
+                                    <div class="field"><label for="session-auto-commit">${autoCommitLabel}</label><div class="field-help-inline"><select id="session-auto-commit" ${sessionControlsDisabled}><option value="">${noOverrideLabel}</option><option value="*YES" ${sessionOptions.autoCommit === true ? 'selected' : ''}>*YES</option><option value="*NO" ${sessionOptions.autoCommit === false ? 'selected' : ''}>*NO</option></select><button type="button" class="help-hint" aria-label="${autoCommitHelpTextEscaped}" data-help="${autoCommitHelpTextEscaped}">?</button></div></div>
+                                    <div class="field"><label for="session-true-autocommit">${trueAutocommitLabel}</label><div class="field-help-inline"><select id="session-true-autocommit" ${sessionControlsDisabled} ${trueAutocommitDisabled}><option value="">${noOverrideLabel}</option><option value="*YES" ${trueAutocommitChecked}>*YES</option><option value="*NO" ${!trueAutocommitValue ? 'selected' : ''}>*NO</option></select><button type="button" class="help-hint" aria-label="${trueAutocommitHelpTextEscaped}" data-help="${trueAutocommitHelpTextEscaped}">?</button></div></div>
+                                    <div class="field"><label for="session-datfmt">${datfmtLabel}</label><div class="field-help-inline"><select id="session-datfmt" ${sessionControlsDisabled}><option value="">${noOverrideLabel}</option><option value="*ISO" ${sessionOptions.datfmt === '*ISO' ? 'selected' : ''}>*ISO</option><option value="*USA" ${sessionOptions.datfmt === '*USA' ? 'selected' : ''}>*USA</option><option value="*EUR" ${sessionOptions.datfmt === '*EUR' ? 'selected' : ''}>*EUR</option><option value="*JIS" ${sessionOptions.datfmt === '*JIS' ? 'selected' : ''}>*JIS</option><option value="*MDY" ${sessionOptions.datfmt === '*MDY' ? 'selected' : ''}>*MDY</option><option value="*DMY" ${sessionOptions.datfmt === '*DMY' ? 'selected' : ''}>*DMY</option><option value="*YMD" ${sessionOptions.datfmt === '*YMD' ? 'selected' : ''}>*YMD</option></select><button type="button" class="help-hint" aria-label="${datfmtHelpTextEscaped}" data-help="${datfmtHelpTextEscaped}">?</button></div></div>
+                                    <div class="field"><label for="session-timfmt">${timfmtLabel}</label><div class="field-help-inline"><select id="session-timfmt" ${sessionControlsDisabled}><option value="">${noOverrideLabel}</option><option value="*HMS" ${sessionOptions.timfmt === '*HMS' ? 'selected' : ''}>*HMS</option><option value="*ISO" ${sessionOptions.timfmt === '*ISO' ? 'selected' : ''}>*ISO</option><option value="*USA" ${sessionOptions.timfmt === '*USA' ? 'selected' : ''}>*USA</option><option value="*EUR" ${sessionOptions.timfmt === '*EUR' ? 'selected' : ''}>*EUR</option><option value="*JIS" ${sessionOptions.timfmt === '*JIS' ? 'selected' : ''}>*JIS</option></select><button type="button" class="help-hint" aria-label="${timfmtHelpTextEscaped}" data-help="${timfmtHelpTextEscaped}">?</button></div></div>
+                                    <div class="field"><label for="session-lob-threshold">${lobThresholdLabel}</label><div class="field-help-inline"><input id="session-lob-threshold" type="number" min="0" max="16777216" step="1" value="${lobThresholdEscaped}" ${sessionControlsDisabled}><button type="button" class="help-hint" aria-label="${lobThresholdFieldHelpTextEscaped}" data-help="${lobThresholdFieldHelpTextEscaped}">?</button></div></div>
+                                    <div class="small">${lobThresholdHelpText}</div>
+                                    <div class="row mapepire-checkbox-row"><label><input id="session-extended-metadata" type="checkbox" ${extendedMetadataChecked} ${sessionControlsDisabled}> <span>${extendedMetadataLabel}</span></label><button type="button" class="help-hint" aria-label="${extendedMetadataFieldHelpTextEscaped}" data-help="${extendedMetadataFieldHelpTextEscaped}">?</button></div>
                                     <div class="small">${extendedMetadataHelpText}</div>
                                 </fieldset>
                                 <fieldset class="startup-script-fieldset">
                                     <legend>${runAfterSqlJobInitLabel}</legend>
-                                    <div class="field"><label for="session-current-library">${currentLibraryLabel}</label><div class="field-inline"><input id="session-current-library" type="text" maxlength="10" value="${currentLibraryEscaped}" placeholder="${vscode.l10n.t('QGPL or *NONE')}" ${sessionControlsDisabled}></div></div>
-                                    <div class="field"><label for="session-library-list">${libraryListLabel}</label><textarea id="session-library-list" rows="2" cols="80" placeholder="${vscode.l10n.t('QGPL, QTEMP')}" ${sessionControlsDisabled}>${libraryListEscaped}</textarea></div>
-                                    <div class="row"><button id="session-load-current-user-settings" type="button" ${sessionControlsDisabled}>${getCurrentUserSettingsLabel}</button><span class="small">${getCurrentUserSettingsHint}</span></div>
-                                    <div class="row"><label><input id="session-run-startup-script" type="checkbox" ${runStartupScriptChecked} ${sessionControlsDisabled}> ${runStartupScriptLabel}</label></div>
-                                    <div class="small">${runStartupScriptHelpText}</div>
-                                    <div class="small">${runAfterSqlJobInitHelpText}</div>
-                                    <textarea id="session-run-after-sql-job-init" rows="4" cols="80" ${sessionControlsDisabled}>${runAfterSqlJobInitEscaped}</textarea>
-                                    <div class="row"><button id="view-startup-script-log" type="button">${viewStartupScriptLogLabel}</button></div>
+                                    <fieldset class="settings-fieldset script-details-fieldset">
+                                        <legend>${runAfterSqlJobInitSubheadLabel}</legend>
+                                        <div class="small startup-script-help">${runAfterSqlJobInitHelpText}</div>
+                                        <textarea id="session-run-after-sql-job-init" rows="4" cols="80" ${sessionControlsDisabled}>${runAfterSqlJobInitEscaped}</textarea>
+                                        <div class="row"><label><input id="session-run-startup-script" type="checkbox" ${runStartupScriptChecked} ${sessionControlsDisabled}> ${runStartupScriptLabel}</label></div>
+                                        <div class="small startup-script-help">${runStartupScriptHelpText}</div>
+                                    </fieldset>
+                                    <fieldset class="settings-fieldset library-vars-fieldset">
+                                        <legend>${libraryListVariablesLabel}</legend>
+                                        <div class="field"><label for="session-current-library">${currentLibraryLabel}</label><div class="field-inline"><input id="session-current-library" type="text" maxlength="10" value="${currentLibraryEscaped}" placeholder="${vscode.l10n.t('QGPL or *NONE')}" ${sessionControlsDisabled}></div></div>
+                                        <div class="field"><label for="session-library-list">${libraryListLabel}</label><textarea id="session-library-list" rows="2" cols="80" placeholder="${vscode.l10n.t('QGPL, QTEMP')}" ${sessionControlsDisabled}>${libraryListEscaped}</textarea></div>
+                                        <div class="row"><button id="session-load-current-user-settings" type="button" ${sessionControlsDisabled}>${getCurrentUserSettingsLabel}</button><span class="small">${getCurrentUserSettingsHint}</span></div>
+                                    </fieldset>
                                 </fieldset>
-                    <div class="row"><button id="reconnect-private-job" ${reconnectButtonDisabled}>${reconnectButtonLabel}</button></div>
+                    <div class="row"><button id="reconnect-private-job" ${reconnectButtonDisabled}>${reconnectButtonLabel}</button><button id="view-startup-script-log" type="button">${viewStartupScriptLogLabel}</button></div>
                     ${reconnectStatusBlock}
                                 <div class="small">${sqlJobIdLabel}</div>
         </div>
@@ -3514,6 +3624,7 @@ FETCH FIRST 1 ROW ONLY`;
                                     <button id="close-settings-panel" class="secondary">${exitLabel}</button>
                     </div>
         </div>
+        <script src="${internalCut}"></script>
         <script>
           const vscode = acquireVsCodeApi();
           const radios = document.querySelectorAll('input[name="sqlJobMode"]');
@@ -3551,9 +3662,15 @@ FETCH FIRST 1 ROW ONLY`;
           const viewStartupScriptLog = document.getElementById('view-startup-script-log');
           const datfmt = document.getElementById('session-datfmt');
           const timfmt = document.getElementById('session-timfmt');
+          const lobThreshold = document.getElementById('session-lob-threshold');
                     const initialSchema = document.getElementById('session-initial-schema');
                     const initialPath = document.getElementById('session-initial-path');
                     const autoColumnViewSingleRow = document.getElementById('auto-column-view-single-row');
+                    window.clPrompterInstallInternalCutHandler?.(runAfterSqlJobInit);
+                    window.clPrompterInstallInternalCutHandler?.(currentLibrary);
+                    window.clPrompterInstallInternalCutHandler?.(libraryList);
+                    window.clPrompterInstallInternalCutHandler?.(initialSchema);
+                    window.clPrompterInstallInternalCutHandler?.(initialPath);
                     loadCurrentUserSettingsButton?.addEventListener('click', () => {
                         vscode.postMessage({ type: 'getCurrentUserLibrarySettings' });
                     });
@@ -3618,6 +3735,7 @@ FETCH FIRST 1 ROW ONLY`;
                         runAfterSqlJobInit: runAfterSqlJobInit ? runAfterSqlJobInit.value : '',
                         datfmt: datfmt ? datfmt.value : '',
                         timfmt: timfmt ? timfmt.value : '',
+                        lobThreshold: lobThreshold ? lobThreshold.value : '',
                         initialSchema: initialSchema ? initialSchema.value : '',
                         initialPath: initialPath ? initialPath.value : '',
                         autoColumnViewForSingleRow: autoColumnViewSingleRow ? !!autoColumnViewSingleRow.checked : false
@@ -3625,6 +3743,14 @@ FETCH FIRST 1 ROW ONLY`;
                     const serializeValues = (values) => JSON.stringify(values);
                     const initialValuesSnapshot = serializeValues(collectValues());
                     const hasUnsavedChanges = () => serializeValues(collectValues()) !== initialValuesSnapshot;
+                    const notifyDirtyState = () => {
+                        vscode.postMessage({ type: 'settingsDirtyState', dirty: hasUnsavedChanges() });
+                    };
+                    const allInputs = Array.from(document.querySelectorAll('input, select, textarea'));
+                    for (const control of allInputs) {
+                        control.addEventListener('input', notifyDirtyState);
+                        control.addEventListener('change', notifyDirtyState);
+                    }
           const reconnect = document.getElementById('reconnect-private-job');
           reconnect?.addEventListener('click', () => {
                         if (reconnect.disabled) {
@@ -3653,7 +3779,7 @@ FETCH FIRST 1 ROW ONLY`;
 
                     const closePanel = document.getElementById('close-settings-panel');
                     closePanel?.addEventListener('click', () => {
-                        vscode.postMessage({ type: 'closeCmdEntrySettings', hasUnsavedChanges: hasUnsavedChanges() });
+                        vscode.postMessage({ type: 'requestCloseCmdEntrySettings', hasUnsavedChanges: hasUnsavedChanges() });
                     });
         </script>
         </div></body></html>`;
@@ -3866,6 +3992,7 @@ FETCH FIRST 1 ROW ONLY`;
 
     private html(webview: vscode.Webview): string {
         const nonce = Array.from({ length: 32 }, () => 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789'.charAt(Math.floor(Math.random() * 62))).join('');
+        const internalCut = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'media', 'internalCut.js'));
         const script = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'media', 'commandEntry.js'));
         const style = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'media', 'commandEntry.css'));
         const commandEntryL10n = {
@@ -3939,7 +4066,7 @@ FETCH FIRST 1 ROW ONLY`;
                             <button id="status-job-menu-copy" type="button" role="menuitem">${vscode.l10n.t('Copy job name')}</button>
                             <button id="status-job-menu-display-joblog" type="button" role="menuitem">${vscode.l10n.t('Display Joblog')}</button>
                             <button id="status-job-menu-connection-settings" type="button" role="menuitem">${vscode.l10n.t('Connection Settings')}</button>
-                            <button id="status-job-menu-reconnect-server-job" type="button" role="menuitem">${vscode.l10n.t('Reconnect server job')}</button>
+                            <button id="status-job-menu-reconnect-server-job" type="button" role="menuitem">${vscode.l10n.t('Reconnect Server Job')}</button>
                         </div>
                     </div>
                     <section id="results" aria-label="Command results"></section>
@@ -3947,6 +4074,7 @@ FETCH FIRST 1 ROW ONLY`;
             </body>`;
 
         const scripts = `
+            <script nonce="${nonce}" src="${internalCut}"></script>
             <script nonce="${nonce}">const vscode = acquireVsCodeApi(); window.__clPrompterCommandEntryL10n = ${JSON.stringify(commandEntryL10n)};</script>
             <script nonce="${nonce}" src="${script}"></script>`;
 
