@@ -46,6 +46,7 @@ const { classifyMessage, determineOutcome, mapCommandMessages } = requireFromOut
 const { detectCommandEntryPrefix } = requireFromOut('commandEntryPrefixes');
 const { buildCancelSqlJobCommand, CMD_RUN_SQL, normalizeSqlJobId } = requireFromOut('commandEntrySqlHelpers');
 const { CommandEntryJobManager, buildJoblogQueryForSqlJob, collectRunAfterSqlJobInit, resolveRunAfterSqlJobInitMode, resolveSqlNamingMode } = requireFromOut('commandEntryJobManager');
+const { buildMsgwInquiryRowSql, buildMsgwLatestRowSql, buildMsgwJobInfoSql, buildMsgwQueueInquiryByKeySql, buildMsgwQueueInquirySql, buildMsgwReplyCommand, buildMsgwReplyCommandForQueue, buildMsgwStatusSql, findMsgwInquiryMessage, findMsgwQueueInquiryByKey, findMsgwQueueInquiryMessage } = requireFromOut('commandEntryMsgw');
 const { buildImmediateSessionContextSql, buildRunAfterSqlJobInitDefaults, expandStartupScriptPlaceholders, normalizeSchemaSessionContextValue, normalizeSessionContextValue, splitRunAfterSqlJobInitStatements } = requireFromOut('commandEntrySqlSettings');
 const { buildChgCurlibCommandFromCurrentLibrary, buildChgLiblCommandFromLibraryList } = requireFromOut('commandEntryChgLibl');
 const { formatCLCommandText } = requireFromOut('formatCL');
@@ -70,6 +71,86 @@ assert.match(
 assert.match(
     buildJoblogQueryForSqlJob('123456/USR$ABC/QZDASOINIT'),
     /FROM TABLE\(QSYS2\.JOBLOG_INFO\('123456\/USR\$ABC\/QZDASOINIT'\)\)\s+ORDER BY ORDINAL_POSITION DESC/i
+);
+assert.match(
+    buildMsgwLatestRowSql('123456/MYUSER/QZDASOINIT'),
+    /SELECT\s+MESSAGE_ID,\s+MESSAGE_TYPE,\s+MESSAGE_TEXT,\s+MESSAGE_KEY/i
+);
+assert.match(
+    buildMsgwLatestRowSql('123456/MYUSER/QZDASOINIT'),
+    /FROM TABLE\(QSYS2\.JOBLOG_INFO\('123456\/MYUSER\/QZDASOINIT'\)\)\s+WHERE MESSAGE_TYPE IN \('INQUIRY', 'SENDER', '\*INQ'\)\s+ORDER BY ORDINAL_POSITION DESC\s+FETCH FIRST 1 ROW ONLY/i
+);
+assert.match(
+    buildMsgwInquiryRowSql('123456/MYUSER/QZDASOINIT', []),
+    /FROM TABLE\(QSYS2\.JOBLOG_INFO\('123456\/MYUSER\/QZDASOINIT'\)\)\s+ORDER BY ORDINAL_POSITION DESC\s+FETCH FIRST 1 ROW ONLY/i
+);
+assert.match(
+    buildMsgwStatusSql('123456/MYUSER/QZDASOINIT'),
+    /FROM TABLE\(QSYS2\.ACTIVE_JOB_INFO\(DETAILED_INFO => 'NONE', CURRENT_USER_LIST_FILTER => USER, JOB_NAME_FILTER => 'QZDASOINIT'\)\) X\s+WHERE JOB_NAME = '123456\/MYUSER\/QZDASOINIT'\s+FETCH FIRST 1 ROW ONLY/i
+);
+assert.match(
+    buildMsgwJobInfoSql('123456/MYUSER/QZDASOINIT', 'SQLTOOLS'),
+    /SELECT\s+JOB,\s+ACTIVE_JOB_STATUS,\s+JOB_STATUS,\s+MSGKEY_HEX,\s+MSGKEY,\s+MSGQ_NAME,\s+MSGQ_LIB,\s+MSGQ_LIB_ASP\s+FROM TABLE\(SQLTOOLS\.JOB_INFO\('123456\/MYUSER\/QZDASOINIT'\)\)\s+FETCH FIRST 1 ROW ONLY/i
+);
+assert.match(
+    buildMsgwJobInfoSql('123456/MYUSER/QZDASOINIT', 'SQLTOOLS'),
+    /FROM TABLE\(SQLTOOLS\.JOB_INFO\('123456\/MYUSER\/QZDASOINIT'\)\)\s+FETCH FIRST 1 ROW ONLY/i
+);
+assert.strictEqual(
+    findMsgwInquiryMessage([{ MSGTYPE: '*SENDER', MSGTEXT: 'Inquiry text', MSGID: 'CPA0702', MSGKEY: Buffer.from([0x12, 0x34]) }])?.messageType,
+    '*SENDER'
+);
+assert.strictEqual(
+    findMsgwInquiryMessage([{ MSGTYPE: '*SENDER', MSGTEXT: 'Inquiry text', MSGID: 'CPA0702', MSGKEY: Buffer.from([0xFE, 0xBF, 0xCE, 0xD0]) }])?.messageKeyHex,
+    'FEBFCED0'
+);
+assert.strictEqual(
+    buildMsgwReplyCommand('1234ABCD', 'C', 'QSYSOPR'),
+    "SNDRPY MSGQ(QSYSOPR) MSGKEY(X'1234abcd') RPY('C')"
+);
+assert.strictEqual(
+    buildMsgwReplyCommand('X\'1234ABCD\'', "O'K"),
+    "SNDRPY MSGQ(QSYSOPR) MSGKEY(X'1234abcd') RPY('O''K')"
+);
+assert.strictEqual(
+    buildMsgwReplyCommand('00008743', 'I', 'QSYSOPR'),
+    "SNDRPY MSGQ(QSYSOPR) MSGKEY(X'00008743') RPY('I')"
+);
+assert.strictEqual(
+    buildMsgwReplyCommandForQueue('1234ABCD', 'C', 'QSYSOPR', 'QSYS'),
+    "SNDRPY MSGQ(QSYS/QSYSOPR) MSGKEY(X'1234abcd') RPY('C')"
+);
+assert.strictEqual(
+    buildMsgwReplyCommandForQueue('1234ABCD', 'C', 'QSYSOPR', ''),
+    "SNDRPY MSGQ(QSYSOPR) MSGKEY(X'1234abcd') RPY('C')"
+);
+assert.strictEqual(
+    buildMsgwReplyCommandForQueue('1234ABCD', 'C', 'QSYSOPR'),
+    "SNDRPY MSGQ(QSYSOPR) MSGKEY(X'1234abcd') RPY('C')"
+);
+assert.match(
+    buildMsgwQueueInquirySql('CPA0702', '123456/MYUSER/QZDASOINIT'),
+    /FROM TABLE\(QSYS2\.MESSAGE_QUEUE_INFO\(QUEUE_NAME => 'QSYSOPR', MESSAGE_FILTER => 'INQUIRY'\)\)\s+WHERE MESSAGE_ID = 'CPA0702'\s+AND FROM_JOB = '123456\/MYUSER\/QZDASOINIT'\s+AND MESSAGE_TYPE = 'INQUIRY'\s+AND ASSOCIATED_MESSAGE_KEY IS NULL\s+ORDER BY MESSAGE_TIMESTAMP DESC\s+FETCH FIRST 20 ROWS ONLY/i
+);
+assert.match(
+    buildMsgwQueueInquiryByKeySql('00000cb0'),
+    /FROM TABLE\(QSYS2\.MESSAGE_QUEUE_INFO\('QSYS', 'QSYSOPR', 'INQUIRY', 0\)\)\s+WHERE HEX\(MESSAGE_KEY\) = '00000CB0'\s+ORDER BY MESSAGE_TIMESTAMP DESC\s+FETCH FIRST 5 ROWS ONLY/i
+);
+assert.match(
+    buildMsgwQueueInquiryByKeySql('00000cb0', 'QSYSOPR', 'QSYS'),
+    /FROM TABLE\(QSYS2\.MESSAGE_QUEUE_INFO\('QSYS', 'QSYSOPR', 'INQUIRY', 0\)\)\s+WHERE HEX\(MESSAGE_KEY\) = '00000CB0'\s+ORDER BY MESSAGE_TIMESTAMP DESC\s+FETCH FIRST 5 ROWS ONLY/i
+);
+assert.strictEqual(
+    findMsgwQueueInquiryMessage([
+        { MESSAGE_ID: 'CPA0702', MESSAGE_TYPE: 'INQUIRY', MESSAGE_KEY: Buffer.from([0x12, 0x34]), ASSOCIATED_MESSAGE_KEY: null, FROM_JOB: '123456/MYUSER/QZDASOINIT' }
+    ], 'CPA0702', '123456/MYUSER/QZDASOINIT')?.messageKeyHex,
+    '1234'
+);
+assert.strictEqual(
+    findMsgwQueueInquiryByKey([
+        { MESSAGE_ID: 'CPA1702', MESSAGE_TYPE: 'INQUIRY', MESSAGE_TEXT: 'Record lock condition detected', MESSAGE_KEY_HEX: '00000CB0' }
+    ], '00000cb0')?.messageText,
+    'Record lock condition detected'
 );
 const cancelCommand = buildCancelSqlJobCommand('123456/MYUSER/QZDASOINIT');
 assert.match(cancelCommand, /^CALL\s+QSYS2\.CANCEL_SQL\('123456\/MYUSER\/QZDASOINIT'\)$/i);
@@ -157,6 +238,71 @@ assert.strictEqual(formatCLCommandText('CHGLIBL LIBL(QGPL QTEMP) CURLIB(MYLIB)',
     assert.strictEqual(rows.length, 2);
     assert.strictEqual(rows[0].MSGID, 'CPF0000');
     console.log('Joblog helper object-result parsing works');
+
+    const poolManager = new CommandEntryJobManager();
+    const poolExecutedSql: string[] = [];
+    const poolConnection = {
+        currentHost: 'host.example.com',
+        currentUser: 'MYUSER',
+        currentPort: 22,
+        getSqlJobJDBCOptions: () => ({}),
+        getConfig: () => ({}),
+        getComponent: async () => ({
+            newJob: async () => ({
+                getJobId: () => '222222/MYUSER/QSQSRVR',
+                execute: async (sql: string) => {
+                    poolExecutedSql.push(sql);
+                    return [{ MSGID: 'CPF0000', MSGTEXT: 'ok' }];
+                }
+            })
+        })
+    } as any;
+
+    const poolRows = await poolManager.queryJoblog(poolConnection, '123456/MYUSER/QZDASOINIT');
+    assert.strictEqual(poolRows.length, 1);
+    assert.match(poolExecutedSql[0], /JOBLOG_INFO\('123456\/MYUSER\/QZDASOINIT'\)/i);
+    console.log('Display joblog uses SQL pool helper job');
+
+    const cancelManager = new CommandEntryJobManager();
+    const cancelSql: string[] = [];
+    const cancelConnection = {
+        currentHost: 'host.example.com',
+        currentUser: 'MYUSER',
+        currentPort: 22,
+        getSqlJobJDBCOptions: () => ({}),
+        getConfig: () => ({}),
+        getComponent: async () => ({
+            newJob: async () => ({
+                getJobId: () => '222222/MYUSER/QSQSRVR',
+                execute: async (sql: string) => {
+                    cancelSql.push(sql);
+                    return [];
+                }
+            })
+        })
+    } as any;
+
+    (cancelManager as any).isDedicatedEnabled = () => true;
+    (cancelManager as any).hasPendingDedicatedRequest = () => true;
+    (cancelManager as any).dedicatedJobId = '123456/MYUSER/QZDASOINIT';
+    (cancelManager as any).connectionKey = 'host.example.com|myuser|22';
+    await cancelManager.submitCancelRequest(cancelConnection, '123456/MYUSER/QZDASOINIT');
+    assert.match(cancelSql[0], /CANCEL_SQL\('123456\/MYUSER\/QZDASOINIT'\)/i);
+    console.log('Cancel request uses SQL pool helper job');
+
+    const configuredPrivateConnection = {
+        currentHost: 'host.example.com',
+        currentUser: 'MYUSER',
+        currentPort: 22,
+        getConfig: () => ({ cmdEntry: { sharedSQLJob: false } }),
+        sqlRunnerAvailable: () => true
+    } as any;
+
+    assert.strictEqual(manager.isDedicatedUsable(configuredPrivateConnection), true);
+    assert.strictEqual(manager.isDedicatedEnabled(configuredPrivateConnection), true);
+    assert.strictEqual(manager.getState(configuredPrivateConnection).enabled, true);
+    assert.strictEqual(manager.getDisplayJobId(configuredPrivateConnection), undefined);
+    console.log('Private mode stays private before dedicated job startup');
 })();
 
 console.log('Command Entry model tests passed');

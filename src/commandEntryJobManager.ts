@@ -483,77 +483,10 @@ export class CommandEntryJobManager {
         );
     }
 
-    private logContinuationJsonDump(label: string, result: unknown): void {
-        if (!isCommandEntryDebugLoggingEnabled()) {
-            return;
-        }
-
-        if (!result || typeof result !== 'object' || Array.isArray(result)) {
-            return;
-        }
-
-        const candidate = result as Record<string, unknown>;
-        const keys = Object.keys(candidate).filter((key) => /(?:^|_|-)(?:id|cont|done|fetch|type|more)/i.test(key) || /continuation|fetchMore|is_done|isDone/i.test(key));
-        if (keys.length === 0) {
-            return;
-        }
-
-        const nestedContinuation = candidate.continuation && typeof candidate.continuation === 'object' && !Array.isArray(candidate.continuation)
-            ? candidate.continuation as Record<string, unknown>
-            : undefined;
-        const topId = [candidate.id, candidate.ID, candidate.continuationId, candidate.continuation_id]
-            .find((value) => typeof value === 'string' && value.trim().length > 0) as string | undefined;
-        const topContId = [candidate.cont_id, candidate.contId, candidate.CONT_ID]
-            .find((value) => typeof value === 'string' && value.trim().length > 0) as string | undefined;
-        const topIsDone = [candidate.is_done, candidate.isDone, candidate.done, candidate.IS_DONE]
-            .map(toOptionalBoolean)
-            .find((value) => value !== undefined);
-        const nestedId = nestedContinuation
-            ? [nestedContinuation.id, nestedContinuation.ID, nestedContinuation.continuationId, nestedContinuation.continuation_id]
-                .find((value) => typeof value === 'string' && value.trim().length > 0) as string | undefined
-            : undefined;
-        const nestedContId = nestedContinuation
-            ? [nestedContinuation.cont_id, nestedContinuation.contId, nestedContinuation.CONT_ID]
-                .find((value) => typeof value === 'string' && value.trim().length > 0) as string | undefined
-            : undefined;
-        const nestedIsDone = nestedContinuation
-            ? [nestedContinuation.is_done, nestedContinuation.isDone, nestedContinuation.done, nestedContinuation.IS_DONE]
-                .map(toOptionalBoolean)
-                .find((value) => value !== undefined)
-            : undefined;
-        const topHasFetchMore = typeof candidate.fetchMore === 'function';
-        const nestedHasFetchMore = !!nestedContinuation && typeof nestedContinuation.fetchMore === 'function';
-
-        this.output?.appendLine(
-            `[Cmd Entry][ContinuationDump] ${label} summary top(id=${topId ?? '<none>'},cont_id=${topContId ?? '<none>'},is_done=${topIsDone ?? '<unknown>'},fetchMore=${topHasFetchMore}) nested(id=${nestedId ?? '<none>'},cont_id=${nestedContId ?? '<none>'},is_done=${nestedIsDone ?? '<unknown>'},fetchMore=${nestedHasFetchMore})`
-        );
-
-        try {
-            const json = JSON.stringify(candidate, (key, value) => {
-                if (typeof value === 'function') {
-                    return '[Function]';
-                }
-
-                // Keep protocol attributes visible while suppressing row payload noise.
-                if (Array.isArray(value) && /^(rows|data)$/i.test(String(key || ''))) {
-                    return `[${key || 'array'} omitted: ${value.length} row(s)]`;
-                }
-
-                return value;
-            }, 2);
-            const maxChars = 4000;
-            if (json.length <= maxChars) {
-                this.output?.appendLine(`[Cmd Entry][ContinuationDump] ${label} ${json}`);
-            } else {
-                const head = json.slice(0, 2200);
-                const tail = json.slice(-1400);
-                this.output?.appendLine(
-                    `[Cmd Entry][ContinuationDump] ${label} ${head}\n... [truncated ${json.length - (head.length + tail.length)} chars] ...\n${tail}`
-                );
-            }
-        } catch (error) {
-            this.output?.appendLine(`[Cmd Entry][ContinuationDump] ${label} keys=${keys.join(', ')} error=${error instanceof Error ? error.message : String(error)}`);
-        }
+    private logContinuationJsonDump(_label: string, _result: unknown): void {
+        // Routine continuation metadata is too verbose to be actionable in the CL Command Entry
+        // output channel. The presence/absence of fetchMore and completion state is already
+        // represented by the higher-level flow logic, so this dump is intentionally suppressed.
     }
 
     private readConnectionSharedJobOverride(connection?: IBMi): boolean | undefined {
@@ -739,7 +672,7 @@ export class CommandEntryJobManager {
 
     isDedicatedEnabled(connection?: IBMi): boolean {
         const config = vscode.workspace.getConfiguration('clPrompter');
-        const settings = this.context ? getConnectionSqlSettings(this.context, connection) : getDefaultConnectionSqlSettings();
+        const settings = getConnectionSqlSettings(this.context, connection);
         const useShared = settings.useSharedJob;
         if (typeof useShared === 'boolean') {
             return !useShared;
@@ -818,7 +751,7 @@ export class CommandEntryJobManager {
             base.currentSchema = schema;
         }
 
-        if (!base.jobId && connection) {
+        if (!base.jobId && connection && (!this.isDedicatedEnabled(connection) || !this.canUseDedicatedForConnection(connection))) {
             base.jobId = this.getObservedSharedJobId(connection) ?? sharedSqlJobIdForDisplay(connection);
         }
 
@@ -1270,8 +1203,13 @@ export class CommandEntryJobManager {
             return state.jobId;
         }
 
-        // Dedicated job can be active before a readable dedicated job ID is resolved.
-        // Fall back to shared SQL job ID so UI never regresses to "no connection".
+        // In explicit private mode, do not silently surface the shared SQL Job ID while the
+        // dedicated job is starting or is not yet readable. That state is a user-visible
+        // mode mismatch and is what leads to the trailing * marker and wrong-job behavior.
+        if (this.isDedicatedEnabled(connection) && this.canUseDedicatedForConnection(connection)) {
+            return undefined;
+        }
+
         return this.getObservedSharedJobId(connection) ?? sharedSqlJobIdForDisplay(connection);
     }
 
@@ -1399,45 +1337,9 @@ export class CommandEntryJobManager {
         ].map(toOptionalElapsedMs).find((entry) => entry !== undefined);
     }
 
-    private logContinuationCandidate(source: SqlContinuationTuple['source'], candidate: Record<string, unknown>): void {
-        if (!isCommandEntryDebugLoggingEnabled()) {
-            return;
-        }
-
-        const rawKeys = Object.keys(candidate);
-        const interestingKeys = rawKeys.filter((key) => /(?:^|_|-)(?:id|cont|done|fetch|type|more)/i.test(key) || /continuation|fetchMore|is_done|isDone/i.test(key));
-        const nestedCandidates = [
-            candidate.continuation,
-            candidate.resultset,
-            candidate.resultSet,
-            candidate.page,
-            candidate.metadata,
-            candidate.meta
-        ].filter((entry) => !!entry && typeof entry === 'object' && !Array.isArray(entry)) as Record<string, unknown>[];
-
-        const nestedSummary = nestedCandidates.map((entry, index) => {
-            const keys = Object.keys(entry);
-            return `n${index + 1}={${keys.slice(0, 15).join(', ')}}`;
-        }).join(' ');
-
-        this.debugLog(
-            `[Cmd Entry][ContinuationCandidate] source=${source} keys=${rawKeys.join(', ')} interestingKeys=${interestingKeys.join(', ')} nested=${nestedSummary || '<none>'}`
-        );
-
-        if (interestingKeys.length === 0) {
-            return;
-        }
-
-        try {
-            const filtered: Record<string, unknown> = {};
-            for (const key of interestingKeys) {
-                filtered[key] = candidate[key];
-            }
-            const json = JSON.stringify(filtered, (_key, value) => typeof value === 'function' ? '[Function]' : value, 2);
-            this.debugLog(`[Cmd Entry][ContinuationCandidate] source=${source} filtered=${json.substring(0, 4000)}`);
-        } catch (error) {
-            this.debugLog(`[Cmd Entry][ContinuationCandidate] source=${source} filtered=<json_error:${error instanceof Error ? error.message : String(error)}>`);
-        }
+    private logContinuationCandidate(_source: SqlContinuationTuple['source'], _candidate: Record<string, unknown>): void {
+        // Suppress routine continuation candidate metadata from the standard output channel.
+        // This keeps the command-entry log focused on actionable user and failure messages.
     }
 
     private extractContinuationTuple(result: unknown, source: SqlContinuationTuple['source']): SqlContinuationTuple | undefined {
@@ -1515,13 +1417,13 @@ export class CommandEntryJobManager {
 
         const send = (job as any).send?.bind(job) as ((request: unknown) => Promise<unknown>) | undefined;
         if (typeof send !== 'function') {
-            this.output?.appendLine('[Cmd Entry][SQLPolicy] sqlmore.request unavailable reason=missing-job-send');
+            this.debugLog('[Cmd Entry][SQLPolicy] sqlmore.request unavailable reason=missing-job-send');
             return undefined;
         }
 
         const normalizedSql = typeof sqlStatement === 'string' ? stripTrailingSemicolon(sqlStatement) : '';
         if (!normalizedSql) {
-            this.output?.appendLine(`[Cmd Entry][SQLPolicy] sqlmore.request skipped cont_id=${token} reason=missing-sql`);
+            this.debugLog(`[Cmd Entry][SQLPolicy] sqlmore.request skipped cont_id=${token} reason=missing-sql`);
             return undefined;
         }
 
@@ -1535,14 +1437,14 @@ export class CommandEntryJobManager {
             request.rows = rows;
         }
 
-        this.output?.appendLine(`[Cmd Entry][SQLPolicy] sqlmore.request source=dedicated cont_id=${token} rows=${request.rows ?? '<none>'} sqlLen=${normalizedSql.length}`);
+        this.debugLog(`[Cmd Entry][SQLPolicy] sqlmore.request source=dedicated cont_id=${token} rows=${request.rows ?? '<none>'} sqlLen=${normalizedSql.length}`);
 
         try {
             const result = await send(request);
             this.logContinuationJsonDump(`sqlmore.request cont_id=${token}`, result);
             return { result, tokenUsed: token };
         } catch (error) {
-            this.output?.appendLine(`[Cmd Entry][SQLPolicy] sqlmore.request failed cont_id=${token} error=${error instanceof Error ? error.message : String(error)}`);
+            this.debugLog(`[Cmd Entry][SQLPolicy] sqlmore.request failed cont_id=${token} error=${error instanceof Error ? error.message : String(error)}`);
             return undefined;
         }
     }
@@ -1657,7 +1559,7 @@ export class CommandEntryJobManager {
                 ?? continuation;
 
             if (continuation) {
-                this.output?.appendLine(
+                this.debugLog(
                     `[Cmd Entry][SQLPolicy] continueSQLFromResult.step=${iteration} tuple(type=${continuation.type ?? '<none>'},id=${continuation.id ?? '<none>'},cont_id=${continuation.contId ?? '<none>'},is_done=${continuation.isDone ?? '<unknown>'},hasFetchMore=${continuation.hasFetchMore}) fetchedRows=${nextRows.length}`
                 );
             }
@@ -1846,7 +1748,7 @@ export class CommandEntryJobManager {
     ): Promise<RunSQLWithDetailsResult> {
         this.logDedicatedRouteDecision('runSQLWithDetails.enter', connection);
         const statementPreview = Array.isArray(statements) ? statements.join(' ; ') : statements;
-        this.output?.appendLine(`[Cmd Entry][runSQLWithDetails] route=${this.canUseDedicatedForConnection(connection) ? 'dedicated-preferred' : 'shared-only'} rows=${options?.rows ?? '<none>'} sql=${statementPreview}`);
+        this.debugLog(`[Cmd Entry][runSQLWithDetails] route=${this.canUseDedicatedForConnection(connection) ? 'dedicated-preferred' : 'shared-only'} rows=${options?.rows ?? '<none>'} sql=${statementPreview}`);
         this.logRouteSnapshot('runSQL.enter', connection, `rows=${options?.rows ?? '<none>'}`);
 
         const runOnSharedJob = async (reason: string): Promise<RunSQLWithDetailsResult> => {
@@ -2247,6 +2149,66 @@ export class CommandEntryJobManager {
         } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
             this.output?.appendLine(`[Cmd Entry] Display Joblog helper failed: targetJob=${normalizedJob} helperJob=${helperJobId ?? '<unknown>'} error=${message}`);
+            throw error;
+        } finally {
+            this.releaseSqlPoolJob(helperJob);
+        }
+    }
+
+    async queryWithHelperJob(connection: IBMi, statement: string, label: string): Promise<Record<string, unknown>[]> {
+        const sql = String(statement || '').trim();
+        if (!sql) {
+            throw new Error('A valid SQL statement is required to query with a helper job.');
+        }
+
+        const helperJob = await this.acquireSqlPoolJob(connection);
+        const helperJobId = this.resolveSqlJobIdFromObject(helperJob);
+        this.output?.appendLine(`[Cmd Entry][Route] SQLPoolJob(${label}): helperJob=${helperJobId ?? '<unknown>'} sql=${sql}`);
+
+        try {
+            const rawResult = await helperJob.execute(sql);
+            const rows = this.rowsFromExecutionResult(rawResult);
+            const rawKeys = rawResult && typeof rawResult === 'object' && !Array.isArray(rawResult)
+                ? Object.keys(rawResult as Record<string, unknown>)
+                : [];
+            this.output?.appendLine(`[Cmd Entry] ${label} helper: helperJob=${helperJobId ?? '<unknown>'} rawResultType=${rawResult === null ? 'null' : Array.isArray(rawResult) ? 'array' : typeof rawResult} rawKeys=${rawKeys.length > 0 ? rawKeys.join(', ') : '<none>'} rowsReturned=${rows.length}`);
+            return rows;
+        } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            this.output?.appendLine(`[Cmd Entry] ${label} helper failed: helperJob=${helperJobId ?? '<unknown>'} error=${message}`);
+            throw error;
+        } finally {
+            this.releaseSqlPoolJob(helperJob);
+        }
+    }
+
+    async runCommandWithHelperJob(connection: IBMi, commandText: string, mode: string, label: string): Promise<Record<string, unknown>[]> {
+        const command = String(commandText || '').trim();
+        const normalizedMode = String(mode || '').trim();
+        if (!command) {
+            throw new Error('A valid command is required to run with a helper job.');
+        }
+        if (!normalizedMode) {
+            throw new Error('A valid command mode is required to run with a helper job.');
+        }
+
+        const helperJob = await this.acquireSqlPoolJob(connection);
+        const helperJobId = this.resolveSqlJobIdFromObject(helperJob);
+        const udtfLibrary = getUDTFLibrary(connection);
+        const sql = substituteBindings(buildCmdRunSql(udtfLibrary), [command, normalizedMode]);
+        this.output?.appendLine(`[Cmd Entry][Route] SQLPoolJob(${label}): helperJob=${helperJobId ?? '<unknown>'} command=${command} mode=${normalizedMode}`);
+
+        try {
+            const rawResult = await helperJob.execute(sql);
+            const rows = this.rowsFromExecutionResult(rawResult);
+            const rawKeys = rawResult && typeof rawResult === 'object' && !Array.isArray(rawResult)
+                ? Object.keys(rawResult as Record<string, unknown>)
+                : [];
+            this.output?.appendLine(`[Cmd Entry] ${label} helper: helperJob=${helperJobId ?? '<unknown>'} rawResultType=${rawResult === null ? 'null' : Array.isArray(rawResult) ? 'array' : typeof rawResult} rawKeys=${rawKeys.length > 0 ? rawKeys.join(', ') : '<none>'} rowsReturned=${rows.length}`);
+            return rows;
+        } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            this.output?.appendLine(`[Cmd Entry] ${label} helper failed: helperJob=${helperJobId ?? '<unknown>'} error=${message}`);
             throw error;
         } finally {
             this.releaseSqlPoolJob(helperJob);

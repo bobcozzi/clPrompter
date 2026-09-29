@@ -4,11 +4,11 @@ import { CommandExecution, CommandExecutionMode, SqlColumnMetadata, determineOut
 import { getUDTFLibrary } from './components/hostFunctions';
 import { CommandEntryJobManager, RunSQLWithDetailsResult, SqlContinuationTuple } from './commandEntryJobManager';
 import { detectCommandEntryPrefix } from './commandEntryPrefixes';
-import { buildCancelSqlJobCommand, CMD_RUN_SQL, normalizeSqlJobId } from './commandEntrySqlHelpers';
+import { buildCancelSqlJobCommand, normalizeSqlJobId } from './commandEntrySqlHelpers';
 import { getConnectionSqlSettings } from './commandEntrySqlSettings';
 import { checkSQLForExecution } from './sqlSyntaxChecker';
 
-export { buildCancelSqlJobCommand, CMD_RUN_SQL, normalizeSqlJobId };
+export { buildCancelSqlJobCommand, normalizeSqlJobId, CMD_RUN_SQL, CMD_RUN_SQL_TEMPLATE, CMD_RUN_LIBRARY_PLACEHOLDER, buildCmdRunSqlForLibrary } from './commandEntrySqlHelpers';
 
 const DEFAULT_SQL_RESULT_ROWS = 1000;
 const NOMAX_SENTINEL = Number.MAX_SAFE_INTEGER;
@@ -329,9 +329,9 @@ function extractColumnsNodeForLogging(raw: unknown): { source: string; node: unk
     return undefined;
 }
 
-function compactJsonForLog(value: unknown, maxChars: number): string {
+function prettyJsonForLog(value: unknown, maxChars: number): string {
     try {
-        const json = JSON.stringify(value);
+        const json = JSON.stringify(value, null, 2);
         if (!json) {
             return '<empty-json>';
         }
@@ -725,12 +725,13 @@ export class CommandEntryService {
     private logColumnsNodeMetadata(raw: unknown, context: string): void {
         const resolved = extractColumnsNodeForLogging(raw);
         if (!resolved) {
-            this.logSqlInfo(`${context}.columnsNode source=<missing>`);
+            this.logSqlDiag(`${context}.columnsNode source=<missing>`);
             return;
         }
 
         const count = Array.isArray(resolved.node) ? resolved.node.length : 0;
-        this.logSqlInfo(`${context}.columnsNode source=${resolved.source} count=${count} json=${compactJsonForLog(resolved.node, 2200)}`);
+        const prettyJson = prettyJsonForLog(resolved.node, 6000);
+        this.logSqlDiag(`${context}.columnsNode source=${resolved.source} count=${count}\n${prettyJson}`);
     }
 
     private buildConnectionKey(connection: IBMi): string {

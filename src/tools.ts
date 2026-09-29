@@ -35,7 +35,7 @@ const FIND_SQL_FUNCTION = `SELECT SPECIFIC_SCHEMA,
 export async function checkSqlFunctionExists(
     connection: IBMi,
     specificName: string,
-    specificSchema = 'SQLTOOLS'
+    specificSchema: string
 ): Promise<SqlFunctionExistsResult> {
     const schema = specificSchema.trim().toUpperCase();
     const name = specificName.trim().toUpperCase();

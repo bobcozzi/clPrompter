@@ -2,6 +2,21 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.0.50] - 2026-09-29
+
+### What's Improved
+- CL commands run from Command Entry that enter MSGW (inquiry message wait) can now be handled directly in the extension.
+- MSGW checks can be run on demand from the job ID context menu, or automatically while any command is running.
+- Added new automatic MSGW check settings:
+  - `clPrompter.cmdEntryAutoMsgwCheckEnabled` (default: true)
+  - `clPrompter.cmdEntryAutoMsgwCheckSeconds` (default: 30)
+  - When the interval is 0 or less, automatic checks are disabled.
+- Added a new helper SQL function, `JOB_INFO()`, implemented as an RPG IV SQL UDTF. It returns current job status plus the inquiry message key and message queue information used for MSGW handling.
+- MSGW prompt context is now richer by resolving the inquiry message from `MESSAGE_QUEUE_INFO`, so reply prompts include message ID and message text.
+- Command Entry output is cleaner during normal use by suppressing routine non-actionable diagnostics, while detailed traces remain available through `clPrompter.cmdEntryDebugLogging`.
+- CL Prompter handling was improved to reduce failures when a command does not exist or when the user lacks sufficient authority.
+- CL Command message log has some minor UI enhancements.
+
 ## [1.0.49] - 2026-09-28
 
 ### What's Improved

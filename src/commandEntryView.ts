@@ -3,9 +3,10 @@ import * as vscode from 'vscode';
 import { buildChgCurlibCommandFromCurrentLibrary, buildChgLiblCommandFromLibraryList } from './commandEntryChgLibl';
 import { CLPrompter } from './clPrompter';
 import { CommandEntryJobManager } from './commandEntryJobManager';
-import { CommandEntryHistory, CommandExecutionMode } from './commandEntryModel';
+import { CommandEntryHistory, CommandExecutionMode, SqlResultPayload, determineOutcome, mapCommandMessages } from './commandEntryModel';
 import { detectCommandEntryPrefix } from './commandEntryPrefixes';
 import { CommandEntryService } from './commandEntryService';
+import { buildMsgwReplyCommandForQueue, checkForMsgw } from './commandEntryMsgw';
 import { BUILT_IN_SQL_SNIPPETS, CommandEntrySqlSnippet } from './commandEntrySnippets';
 import { formatCLCommandText } from './formatCL';
 import { buildImmediateSessionContextSql, buildRunAfterSqlJobInitDefaults, getConnectionSqlSessionOptions, getConnectionSqlSettings, normalizeSchemaSessionContextValue, normalizeSessionContextValue, splitLibraryListTokens, splitRunAfterSqlJobInitStatements, updateConnectionSqlSettings } from './commandEntrySqlSettings';
@@ -37,6 +38,7 @@ type CommandEntryRequest =
     | { type: 'copyCommand'; command: string }
     | { type: 'copySqlJobId'; sqlJobId: string }
     | { type: 'requestDisplayJoblog'; sqlJobId: string }
+    | { type: 'requestCheckForMsgw'; sqlJobId: string }
     | { type: 'requestSqlJobId' }
     | { type: 'requestCancelSqlJob' }
     | { type: 'manageCodeSnippets' }
@@ -275,6 +277,10 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
     private cmdEntrySettingsPanel: vscode.WebviewPanel | undefined;
     private cmdEntrySettingsDirty = false;
     private startupScriptLogPanel: vscode.WebviewPanel | undefined;
+    private msgwAutoCheckTimer: ReturnType<typeof setInterval> | undefined;
+    private msgwAutoCheckExecutionId: string | undefined;
+    private msgwAutoCheckInFlight = false;
+    private msgwAutoCheckPromptActive = false;
     private readonly output: vscode.OutputChannel;
     private readonly jobManager: CommandEntryJobManager;
     private readonly service: CommandEntryService;
@@ -315,6 +321,8 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
             const appearanceChanged = event.affectsConfiguration('clPrompter.cmdEntryCommandTextColor')
                 || event.affectsConfiguration('clPrompter.commandEntryCommandTextColor')
                 || event.affectsConfiguration('clPrompter.cmdEntrySqlStmtColor');
+            const msgwAutoCheckChanged = event.affectsConfiguration('clPrompter.cmdEntryAutoMsgwCheckEnabled')
+                || event.affectsConfiguration('clPrompter.cmdEntryAutoMsgwCheckSeconds');
             if (!sqlFetchConfigChanged
                 && !event.affectsConfiguration('clPrompter.cmdEntrySQLUseSharedJob')
                 && !event.affectsConfiguration('clPrompter.cmdEntryUseSharedSQLJob')
@@ -325,6 +333,7 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
                 && !sqlLogPreferenceChanged
                 && !historyScopeChanged
                 && !appearanceChanged
+                && !msgwAutoCheckChanged
                 && !connectionSettingsChanged) {
                 return;
             }
@@ -352,6 +361,9 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
             }
             if (connectionSettingsChanged) {
                 void this.applyConnectionSqlJobModeFromSettings('connectionSettingsChanged');
+            }
+            if (msgwAutoCheckChanged) {
+                this.refreshMsgwAutoCheckMonitor();
             }
         }));
     }
@@ -470,6 +482,7 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
     }
 
     async dispose(): Promise<void> {
+        this.stopMsgwAutoCheckMonitor();
         this.cmdEntrySettingsPanel?.dispose();
         this.cmdEntrySettingsPanel = undefined;
         setSqlResultPanelRequestHandler(undefined);
@@ -582,7 +595,7 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
                     commandTextColor: this.commandEntryCommandTextColor(),
                     sqlStatementColor: this.commandEntrySqlStatementColor(),
                     clearInputOnStartup,
-                    clearHistoryOnStartup: false
+                    clearHistoryOnStartup: firstReadyHistoryClearEligible && this.clearHistoryOnStartupEnabled()
                 });
                 this.postRunModeNotice(this.currentRunMode);
                 this.clearInputOnFirstReady = false;
@@ -602,6 +615,7 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
                 // This keeps single-mode forced-shared while allowing server-mode
                 // dedicated sessions to start their own job as soon as Command Entry
                 // is live.
+                void this.applyConnectionSqlJobModeFromSettings('ready');
                 void this.initializeDedicatedJobIfNeeded();
 
                 // Run non-critical startup work after first paint.
@@ -654,6 +668,9 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
                 break;
             case 'requestDisplayJoblog':
                 await this.displayJoblogForSqlJob(message.sqlJobId);
+                break;
+            case 'requestCheckForMsgw':
+                await this.checkForMsgw(message.sqlJobId);
                 break;
             case 'requestSqlJobId':
                 this.refreshSqlJobId();
@@ -856,47 +873,178 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
             return;
         }
 
-        if (this.running) {
-            this.post({ type: 'notice', message: vscode.l10n.t('A command is currently running. Try Display Joblog again in a moment.') });
-            return;
-        }
-
         const fullJoblogSnippet = BUILT_IN_SQL_SNIPPETS.find((snippet) => snippet.id === 'builtin.full-joblog');
         if (!fullJoblogSnippet) {
             this.post({ type: 'notice', message: vscode.l10n.t('Built-in full joblog snippet is unavailable.') });
             return;
         }
 
-        const snippetContext: SnippetTemplateContext = {
-            ...this.buildSnippetContext(connection),
-            sqlJobId: qualifiedJob
-        };
-        const resolution = this.resolveSqlTemplate(fullJoblogSnippet.stmt, snippetContext);
-        if (resolution.missing.length > 0) {
-            this.post({
-                type: 'notice',
-                message: vscode.l10n.t('Unable to resolve full joblog SQL template values: {values}', {
-                    values: resolution.missing.map((name) => `\${${name}}`).join(', ')
-                })
+        const hasActiveDedicatedJob = this.jobManager.hasActiveDedicatedJob(connection);
+        const shouldUseSharedJoblogPath = this.isUsingSharedSqlJob(connection) && !hasActiveDedicatedJob;
+
+        if (shouldUseSharedJoblogPath) {
+            if (this.running) {
+                this.post({ type: 'notice', message: vscode.l10n.t('A command is currently running. Try Display Joblog again in a moment.') });
+                return;
+            }
+
+            const snippetContext: SnippetTemplateContext = {
+                ...this.buildSnippetContext(connection),
+                sqlJobId: qualifiedJob
+            };
+            const resolution = this.resolveSqlTemplate(fullJoblogSnippet.stmt, snippetContext);
+            if (resolution.missing.length > 0) {
+                this.post({
+                    type: 'notice',
+                    message: vscode.l10n.t('Unable to resolve full joblog SQL template values: {values}', {
+                        values: resolution.missing.map((name) => `\${${name}}`).join(', ')
+                    })
+                });
+                return;
+            }
+
+            const command = `SQL: ${resolution.resolved}`;
+            const execution = await this.service.execute(connection, command, '*RUN', undefined, {
+                resultTitle: fullJoblogSnippet.label,
+                autoColumnViewForSingleRowOverride: false
             });
+            if (execution.failure) {
+                this.safeOutputAppendLine(`[Cmd Entry] Display Joblog failed for ${qualifiedJob}: ${execution.failure}`);
+                this.post({ type: 'notice', message: vscode.l10n.t('Display Joblog failed: {failure}', { failure: execution.failure }) });
+                return;
+            }
+
+            if (execution.sqlResult) {
+                showSqlResultPanel(execution.sqlResult);
+            }
+            this.post({ type: 'notice', message: vscode.l10n.t('Displayed joblog for {job}.', { job: qualifiedJob }) });
             return;
         }
 
-        const command = `SQL: ${resolution.resolved}`;
-        const execution = await this.service.execute(connection, command, '*RUN', undefined, {
-            resultTitle: fullJoblogSnippet.label,
-            autoColumnViewForSingleRowOverride: false
-        });
-        if (execution.failure) {
-            this.safeOutputAppendLine(`[Cmd Entry] Display Joblog failed for ${qualifiedJob}: ${execution.failure}`);
-            this.post({ type: 'notice', message: vscode.l10n.t('Display Joblog failed: {failure}', { failure: execution.failure }) });
+        try {
+            const rows = await this.jobManager.queryJoblog(connection, qualifiedJob);
+            const columns = Array.from(new Set(rows.flatMap((row) => Object.keys(row))));
+            const sqlResult: SqlResultPayload = {
+                statement: fullJoblogSnippet.stmt,
+                resultTitle: fullJoblogSnippet.label,
+                columns,
+                rows,
+                rowCount: rows.length,
+                displayedRowCount: rows.length,
+                truncated: false,
+                autoColumnViewForSingleRow: false
+            };
+            showSqlResultPanel(sqlResult);
+            this.post({ type: 'notice', message: vscode.l10n.t('Displayed joblog for {job}.', { job: qualifiedJob }) });
+        } catch (error) {
+            const failure = error instanceof Error ? error.message : String(error);
+            this.safeOutputAppendLine(`[Cmd Entry] Display Joblog failed for ${qualifiedJob}: ${failure}`);
+            this.post({ type: 'notice', message: vscode.l10n.t('Display Joblog failed: {failure}', { failure }) });
+        }
+    }
+
+    private async checkForMsgw(sqlJobId: string, options: { background?: boolean } = {}): Promise<void> {
+        const isBackground = options.background === true;
+        const connection = this.getConnection();
+        if (!connection || !connection.sqlRunnerAvailable()) {
+            if (!isBackground) {
+                this.post({ type: 'notice', message: vscode.l10n.t('Not connected to IBM i, or the SQL runner is unavailable.') });
+            }
             return;
         }
 
-        if (execution.sqlResult) {
-            showSqlResultPanel(execution.sqlResult);
+        try {
+            const inquiryMessage = await checkForMsgw({
+                connection,
+                jobManager: this.jobManager,
+                sqlJobId,
+                silentProbeNotices: isBackground,
+                log: (message) => this.jobManager.logDiagnostic(message),
+                showNotice: (message, severity = 'info') => this.post({ type: 'notice', message, severity })
+            });
+
+            if (!inquiryMessage) {
+                return;
+            }
+
+            const messageKey = inquiryMessage.messageKeyHex?.trim();
+            if (!messageKey) {
+                this.post({ type: 'notice', message: vscode.l10n.t('MSGW inquiry was found, but no reply key was available for job {job}.', { job: sqlJobId }), severity: 'error' });
+                return;
+            }
+
+            const inquiryIdForPrompt = inquiryMessage.messageId?.trim() || messageKey;
+            const inquiryTextForPrompt = inquiryMessage.messageText?.trim();
+            const promptMessageContext = inquiryTextForPrompt
+                ? `${inquiryIdForPrompt} - ${inquiryTextForPrompt}`
+                : inquiryIdForPrompt;
+
+            if (isBackground) {
+                if (this.msgwAutoCheckPromptActive) {
+                    this.jobManager.logDiagnostic(`[Cmd Entry][MSGW] Auto-check skipped prompt for ${sqlJobId} because another MSGW reply prompt is already active.`);
+                    return;
+                }
+                this.msgwAutoCheckPromptActive = true;
+            }
+
+            const replyText = await vscode.window.showInputBox({
+                title: vscode.l10n.t('Reply to MSGW'),
+                prompt: vscode.l10n.t('Enter the reply text for message {messageContext} on job {job}.', {
+                    messageContext: promptMessageContext,
+                    job: sqlJobId
+                }),
+                value: '',
+                ignoreFocusOut: true
+            });
+
+            if (replyText === undefined) {
+                this.post({ type: 'notice', message: vscode.l10n.t('MSGW reply was cancelled.') });
+                return;
+            }
+
+            const normalizedReplyText = replyText.trim();
+            if (!normalizedReplyText) {
+                this.post({ type: 'notice', message: vscode.l10n.t('A reply text is required to send an MSGW response.'), severity: 'error' });
+                return;
+            }
+
+            const queueName = inquiryMessage.messageQueueName || 'QSYSOPR';
+            const queueLibrary = inquiryMessage.messageQueueLibrary;
+            const replyCommand = buildMsgwReplyCommandForQueue(messageKey, normalizedReplyText, queueName, queueLibrary);
+            this.jobManager.logDiagnostic(`[Cmd Entry][MSGW] Sending reply for ${sqlJobId} via SQL pool job using queue ${queueLibrary ? `${queueLibrary}/${queueName}` : queueName} and key ${messageKey}.`);
+            this.jobManager.logDiagnostic(`[Cmd Entry][MSGW] Reply CL command: ${replyCommand}`);
+            const replyRows = await this.jobManager.runCommandWithHelperJob(connection, replyCommand, '*RUN', 'MSGW reply');
+            const replyMessages = mapCommandMessages(replyRows);
+            const replyOutcome = determineOutcome(replyMessages);
+            if (replyMessages.length > 0) {
+                for (const message of replyMessages) {
+                    this.jobManager.logDiagnostic(`[Cmd Entry][MSGW] Reply result message: id=${message.messageId || '<none>'} type=${message.type || '<none>'} sev=${message.severity} kind=${message.kind} text=${message.text || '<none>'}`);
+                }
+            }
+
+            if (replyOutcome === 'error') {
+                const firstError = replyMessages.find((message) => message.kind === 'error') ?? replyMessages[0];
+                const failure = firstError
+                    ? `${firstError.messageId || 'MSGW reply failed'}${firstError.text ? `: ${firstError.text}` : ''}`
+                    : 'MSGW reply failed.';
+                this.jobManager.logDiagnostic(`[Cmd Entry][MSGW] Reply failed for ${sqlJobId}: ${failure}`);
+                this.post({ type: 'notice', message: vscode.l10n.t('MSGW reply failed for job {job}: {failure}', { job: sqlJobId, failure }), severity: 'error' });
+                return;
+            }
+
+            this.jobManager.logDiagnostic(`[Cmd Entry][MSGW] Reply submitted for ${sqlJobId} via SQL pool job ${replyRows.length > 0 ? `rows=${replyRows.length}` : 'rows=<none>'}.`);
+            this.post({ type: 'notice', message: vscode.l10n.t('MSGW reply sent for job {job}.', { job: sqlJobId }), severity: 'info' });
+        } catch (error) {
+            const failure = error instanceof Error ? error.message : String(error);
+            this.jobManager.logDiagnostic(`[Cmd Entry] Check for MSGW failed for ${sqlJobId}: ${failure}`);
+            if (!isBackground) {
+                this.post({ type: 'notice', message: vscode.l10n.t('Check for MSGW failed: {failure}', { failure }), severity: 'error' });
+            }
+        } finally {
+            if (isBackground) {
+                this.msgwAutoCheckPromptActive = false;
+            }
         }
-        this.post({ type: 'notice', message: vscode.l10n.t('Displayed joblog for {job}.', { job: qualifiedJob }) });
     }
 
     private async showHistoryPicker(): Promise<void> {
@@ -1048,7 +1196,12 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
             return;
         }
         try {
-            const result = await CLPrompter(this.context.extensionUri, commandForPrompter);
+            const connection = this.getConnection();
+            const result = await CLPrompter(this.context.extensionUri, commandForPrompter, {
+                cmdXmlOptions: connection ? {
+                    runSql: async (sql: string) => this.jobManager.runSQL(connection, sql, { skipSyntaxCheck: true })
+                } : undefined
+            });
             const promptedCommand = result.command && result.command.trim().length > 0 ? result.command : commandForPrompter;
             const config = vscode.workspace.getConfiguration('clPrompter');
             const convertCmdAndParmNameCase = config.get<'*UPPER' | '*LOWER' | '*NONE'>('convertCmdAndParmNameCase', '*UPPER');
@@ -1292,6 +1445,7 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
 
         this.running = true;
         this.activeExecutionId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+        this.refreshMsgwAutoCheckMonitor();
         const sqlJobId = this.currentSqlJobId(connection);
         const dedicatedState = this.jobManager.getState(connection);
         const showDedicatedStartupMessage = this.jobManager.isDedicatedUsable(connection)
@@ -1386,6 +1540,7 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
         } finally {
             this.running = false;
             this.activeExecutionId = undefined;
+            this.stopMsgwAutoCheckMonitor();
             const latestSqlJobId = this.currentSqlJobId(connection);
             this.lastPostedSqlJobId = latestSqlJobId;
             this.post({ type: 'running', running: false, sqlJobId: latestSqlJobId, statusIdentity: this.currentStatusIdentity(connection) });
@@ -2215,6 +2370,90 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
         return this.jobManager.getDisplayJobId(connection);
     }
 
+    private msgwAutoCheckEnabled(): boolean {
+        const config = vscode.workspace.getConfiguration('clPrompter');
+        return config.get<boolean>('cmdEntryAutoMsgwCheckEnabled', false);
+    }
+
+    private msgwAutoCheckSeconds(): number {
+        if (!this.msgwAutoCheckEnabled()) {
+            return 0;
+        }
+
+        const config = vscode.workspace.getConfiguration('clPrompter');
+        const configured = Number(config.get<number>('cmdEntryAutoMsgwCheckSeconds', 0));
+        if (!Number.isFinite(configured)) {
+            return 0;
+        }
+        const rounded = Math.trunc(configured);
+        return rounded > 0 ? rounded : 0;
+    }
+
+    private refreshMsgwAutoCheckMonitor(): void {
+        if (!this.running || !this.activeExecutionId) {
+            this.stopMsgwAutoCheckMonitor();
+            return;
+        }
+
+        const seconds = this.msgwAutoCheckSeconds();
+        if (seconds <= 0) {
+            this.stopMsgwAutoCheckMonitor();
+            return;
+        }
+
+        const intervalMs = seconds * 1000;
+        const executionId = this.activeExecutionId;
+
+        if (this.msgwAutoCheckTimer && this.msgwAutoCheckExecutionId === executionId) {
+            return;
+        }
+
+        this.stopMsgwAutoCheckMonitor();
+        this.msgwAutoCheckExecutionId = executionId;
+        this.msgwAutoCheckTimer = setInterval(() => {
+            void this.runMsgwAutoCheckTick(executionId);
+        }, intervalMs);
+
+        this.jobManager.logDiagnostic(`[Cmd Entry][MSGW] Auto-check enabled every ${seconds}s for execution ${executionId}.`);
+    }
+
+    private stopMsgwAutoCheckMonitor(): void {
+        if (this.msgwAutoCheckTimer) {
+            clearInterval(this.msgwAutoCheckTimer);
+            this.msgwAutoCheckTimer = undefined;
+        }
+        this.msgwAutoCheckExecutionId = undefined;
+        this.msgwAutoCheckInFlight = false;
+        this.msgwAutoCheckPromptActive = false;
+    }
+
+    private async runMsgwAutoCheckTick(executionId: string): Promise<void> {
+        if (!this.running || !this.activeExecutionId || this.activeExecutionId !== executionId) {
+            return;
+        }
+
+        if (this.msgwAutoCheckInFlight || this.msgwAutoCheckPromptActive) {
+            return;
+        }
+
+        const connection = this.getConnection();
+        if (!connection || !connection.sqlRunnerAvailable()) {
+            return;
+        }
+
+        const sqlJobId = this.currentSqlJobId(connection);
+        if (!sqlJobId) {
+            return;
+        }
+
+        this.msgwAutoCheckInFlight = true;
+        try {
+            await this.checkForMsgw(sqlJobId, { background: true });
+        } finally {
+            this.msgwAutoCheckInFlight = false;
+        }
+    }
+
     private messageDetailsMode(): MessageDetailsMode {
         const config = vscode.workspace.getConfiguration('clPrompter');
         const raw = String(
@@ -2298,7 +2537,7 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
             return true;
         }
 
-        return !this.jobManager.hasActiveDedicatedJob(connection);
+        return !this.jobManager.isDedicatedEnabled(connection);
     }
 
     private postJobCapabilities(): void {
@@ -2428,6 +2667,7 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
     ): Promise<void> {
         const { autoInitializeDedicatedJob = true } = options;
         this.refreshSqlJobId(connection);
+        await this.applyConnectionSqlJobModeFromSettings('connectionAvailable');
         this.postJobCapabilities();
         this.post({ type: 'connectionScope', connectionScopeKey: this.buildHistoryConnectionKey(connection) });
         this.post({ type: 'historyUpdated', history: this.history(connection) });
@@ -4065,6 +4305,7 @@ FETCH FIRST 1 ROW ONLY`;
                         <div id="status-job-menu" class="toolbar-menu-list" role="menu" aria-hidden="true">
                             <button id="status-job-menu-copy" type="button" role="menuitem">${vscode.l10n.t('Copy job name')}</button>
                             <button id="status-job-menu-display-joblog" type="button" role="menuitem">${vscode.l10n.t('Display Joblog')}</button>
+                            <button id="status-job-menu-check-msgw" type="button" role="menuitem">${vscode.l10n.t('Check for MSGW')}</button>
                             <button id="status-job-menu-connection-settings" type="button" role="menuitem">${vscode.l10n.t('Connection Settings')}</button>
                             <button id="status-job-menu-reconnect-server-job" type="button" role="menuitem">${vscode.l10n.t('Reconnect Server Job')}</button>
                         </div>

@@ -66,6 +66,10 @@ function _inspectSqlJobOnce(sqlJob: any): void {
 // each spinning up their own cold Mapepire/JVM service job.
 const _inflight = new Map<string, Promise<string>>();
 
+export interface GetCmdXmlOptions {
+    runSql?: (sql: string) => Promise<Record<string, unknown>[]>;
+}
+
 /** Clear the XML cache (call when the user explicitly wants a fresh fetch). */
 export function clearCMDXMLCache(cmdKey?: string): void {
     if (cmdKey) {
@@ -163,7 +167,7 @@ export async function warmXmlCache(cmd: string): Promise<void> {
 }
 
 // Utility: Fetch or return XML for a command
-export async function getCMDXML(cmdString: string): Promise<string> {
+export async function getCMDXML(cmdString: string, options?: GetCmdXmlOptions): Promise<string> {
     if (!code4i) {
         vscode.window.showErrorMessage(vscode.l10n.t('Code for IBM i (CodeForIBMi) extension is not found and is required.'));
         return '';
@@ -223,7 +227,7 @@ export async function getCMDXML(cmdString: string): Promise<string> {
 
     // Build and register the fetch promise SYNCHRONOUSLY (before the first await)
     // so any concurrent call arriving after this point will find it in _inflight.
-    const sqlAvail = connection.sqlRunnerAvailable();
+    const sqlAvail = typeof options?.runSql === 'function' || connection.sqlRunnerAvailable();
     console.log(`[clPrompter] getCMDXML: fetching ${cmdXMLName} from IBM i (sqlRunnerAvailable=${sqlAvail}, primary=${sqlAvail ? 'CMD_XML UDTF' : 'QCDRCMDD fallback'})`);
 
     const fetchPromise: Promise<string> = Promise.resolve(vscode.window.withProgress({
@@ -253,7 +257,9 @@ export async function getCMDXML(cmdString: string): Promise<string> {
                 progress.report({ message: `Waiting for IBM i SQL job... ${_pendingGet.sql.substring(0, 120)}` });
             }
             try {
-                const results = await connection.runSQL(sql);
+                const results = options?.runSql
+                    ? await options.runSql(sql)
+                    : await connection.runSQL(sql);
                 console.log(`[clPrompter] CMD_XML UDTF took ${Date.now() - t0}ms`);
                 if (results.length > 0 && results[0].CMD_XML) {
                     xml = String(results[0].CMD_XML);

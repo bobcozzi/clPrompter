@@ -30,7 +30,7 @@ import * as os from 'os';
 import { CodeForIBMi } from "@halcyontech/vscode-ibmi-types";
 export let code4i: CodeForIBMi;
 import { Extension, extensions } from "vscode";
-import { CmdHelpChecker, CmdRunChecker, CmdXmlChecker, FieldListChecker } from './components/hostFunctions';
+import { CmdHelpChecker, CmdRunChecker, CmdXmlChecker, FieldListChecker, JobInfoChecker } from './components/hostFunctions';
 
 import { initializePrompter, CLPrompter, CLPrompterCallback } from './clPrompter';
 import { CommandEntryViewProvider } from './commandEntryView';
@@ -111,6 +111,17 @@ function isCommandEntryDebugLoggingEnabled(): boolean {
         return previous;
     }
     return config.get<boolean>('commandEntryVerboseLogging', false);
+}
+
+function getKeepAliveSettings(): { enabled: boolean; intervalMs: number } {
+    const config = vscode.workspace.getConfiguration('clPrompter');
+    const enabled = config.get<boolean>('cmdEntryKeepAliveEnabled', true);
+    const intervalSeconds = config.get<number>('cmdEntryKeepAliveIntervalSeconds', 60);
+    const normalizedSeconds = Number.isFinite(intervalSeconds) ? intervalSeconds : 60;
+    return {
+        enabled,
+        intervalMs: Math.max(10, normalizedSeconds) * 1000
+    };
 }
 
 function getExtensionObjectId(value: unknown): number | undefined {
@@ -699,6 +710,8 @@ export async function activate(context: vscode.ExtensionContext) {
         safeRegisterCode4iComponent('CmdRunChecker', cmdRunChecker);
         const fieldListChecker = new FieldListChecker();
         safeRegisterCode4iComponent('FieldListChecker', fieldListChecker);
+        const jobInfoChecker = new JobInfoChecker();
+        safeRegisterCode4iComponent('JobInfoChecker', jobInfoChecker);
 
         // If the extension activates while a connection is already live (e.g. lazy
         // activation), the ComponentManager won't have called our component for the
@@ -776,18 +789,43 @@ export async function activate(context: vscode.ExtensionContext) {
             }
         };
 
+        let jobInfoCheckRunning = false;
+        const runJobInfoCheck = async () => {
+            if (jobInfoCheckRunning) { return; }
+            jobInfoCheckRunning = true;
+            try {
+                const conn = code4i?.instance?.getConnection();
+                if (!conn) { return; }
+                const state = await jobInfoChecker.getRemoteState(conn, '');
+                if (state.status !== 'Installed') {
+                    await jobInfoChecker.update(conn, '');
+                }
+            } catch (e) {
+                console.error(`[clPrompter] JobInfoChecker manual check failed: ${e}`);
+            } finally {
+                jobInfoCheckRunning = false;
+            }
+        };
+
         // Subscribe to IBM i connection events.
         // On disconnect: clear the XML cache so stale definitions from the previous
         // IBM i system are never reused after reconnecting to a different system.
 
         // Keep-alive: send a lightweight SQL ping to the Mapepire SQL job on a regular
         // interval so IBM i doesn't recycle the service job during idle periods.
+        // Users can disable or retime it via clPrompter.cmdEntryKeepAliveEnabled / cmdEntryKeepAliveIntervalSeconds.
         // Without this, opening a second source member after a short pause causes a
         // ~17-20s cold-start while the JVM/JDBC connection is re-established.
         let keepAliveInterval: ReturnType<typeof setInterval> | undefined;
 
         const startKeepAlive = () => {
             if (keepAliveInterval) { clearInterval(keepAliveInterval); }
+            const keepAliveSettings = getKeepAliveSettings();
+            if (!keepAliveSettings.enabled) {
+                commandEntryDebugLog('[Cmd Entry][KeepAlive] disabled by clPrompter.cmdEntryKeepAliveEnabled=false');
+                return;
+            }
+
             keepAliveInterval = setInterval(async () => {
                 const conn = code4i?.instance?.getConnection();
                 if (!conn || !conn.sqlRunnerAvailable()) { return; }
@@ -796,13 +834,17 @@ export async function activate(context: vscode.ExtensionContext) {
                 const beforeJobIdRaw = String((conn as any).getSqlJobId?.() ?? '<none>');
                 const beforeStatus = (conn as any).sqlJob?.getStatus?.() ?? '<unknown>';
                 const beforeSqlJobObject = getExtensionObjectId((conn as any).sqlJob) ?? '<none>';
-                commandEntryDebugLog(`[Cmd Entry][KeepAlive] tick before sharedSqlJobObj=${beforeSqlJobObject} status=${beforeStatus} sharedJobId=${beforeJobId} sharedJobIdRaw=${beforeJobIdRaw}`);
+                if (isCommandEntryDebugLoggingEnabled()) {
+                    console.debug(`[clPrompter][KeepAlive] tick before sharedSqlJobObj=${beforeSqlJobObject} status=${beforeStatus} sharedJobId=${beforeJobId} sharedJobIdRaw=${beforeJobIdRaw}`);
+                }
 
                 // Skip the ping if the SQLJob is already busy — another query is in-flight,
                 // which itself proves the connection is alive.  No need to queue behind it.
                 const jobStatus: string | undefined = (conn as any).sqlJob?.getStatus?.();
                 if (jobStatus === 'busy') {
-                    commandEntryDebugLog('[Cmd Entry][KeepAlive] skip ping because shared SQL job status is busy.');
+                    if (isCommandEntryDebugLoggingEnabled()) {
+                        console.debug('[clPrompter][KeepAlive] skip ping because shared SQL job status is busy.');
+                    }
                     return;
                 }
                 try {
@@ -815,7 +857,9 @@ export async function activate(context: vscode.ExtensionContext) {
                     const afterJobIdRaw = String((conn as any).getSqlJobId?.() ?? '<none>');
                     const afterStatus = (conn as any).sqlJob?.getStatus?.() ?? '<unknown>';
                     const afterSqlJobObject = getExtensionObjectId((conn as any).sqlJob) ?? '<none>';
-                    commandEntryDebugLog(`[Cmd Entry][KeepAlive] ping OK after sharedSqlJobObj=${afterSqlJobObject} status=${afterStatus} sharedJobId=${afterJobId} sharedJobIdRaw=${afterJobIdRaw}`);
+                    if (isCommandEntryDebugLoggingEnabled()) {
+                        console.debug(`[clPrompter][KeepAlive] ping OK after sharedSqlJobObj=${afterSqlJobObject} status=${afterStatus} sharedJobId=${afterJobId} sharedJobIdRaw=${afterJobIdRaw}`);
+                    }
                     commandEntry.refreshSqlJobId(conn as any);
                 } catch (err: any) {
                     // The keep-alive failed.  The most common cause is that the Mapepire
@@ -849,7 +893,7 @@ export async function activate(context: vscode.ExtensionContext) {
                     console.warn('[clPrompter] keep-alive: SQLJob appears dead; manual restart is disabled.');
                     commandEntryOutput.appendLine('[Cmd Entry][KeepAlive] shared SQL job appears dead; manual restart is disabled (owned by Code for IBM i).');
                 }
-            }, 60_000);
+            }, keepAliveSettings.intervalMs);
         };
 
         const stopKeepAlive = () => {
@@ -858,6 +902,13 @@ export async function activate(context: vscode.ExtensionContext) {
                 keepAliveInterval = undefined;
             }
         };
+
+        context.subscriptions.push(vscode.workspace.onDidChangeConfiguration(event => {
+            if (event.affectsConfiguration('clPrompter.cmdEntryKeepAliveEnabled')
+                || event.affectsConfiguration('clPrompter.cmdEntryKeepAliveIntervalSeconds')) {
+                startKeepAlive();
+            }
+        }));
 
         /**
          * Pre-loads the command XML definition (CMD_XML UDTF → _xmlCache) for every
@@ -945,7 +996,7 @@ export async function activate(context: vscode.ExtensionContext) {
             startKeepAlive();
             // Run UDTF checks in parallel, then prefetch — serialized relative
             // to prefetch so upload/compile steps don't race for SSH channels.
-            Promise.allSettled([runCmdHelpCheck(), runCmdXmlCheck(), runCmdRunCheck(), runFieldListCheck()]).finally(() => prefetch());
+            Promise.allSettled([runCmdHelpCheck(), runCmdXmlCheck(), runCmdRunCheck(), runFieldListCheck(), runJobInfoCheck()]).finally(() => prefetch());
         } else {
             scheduleStartupConnectionHydration();
         }

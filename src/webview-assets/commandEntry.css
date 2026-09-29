@@ -449,6 +449,11 @@ header {
     -webkit-user-select: none;
     user-select: none;
     position: relative;
+    text-decoration: none;
+    border-radius: 3px;
+    padding: 0 2px;
+    margin: 0 -2px;
+    transition: background-color .12s ease;
 }
 
 .execution-command.execution-command-sql {
@@ -476,7 +481,8 @@ header {
 
 .execution-command:hover,
 .execution-command:focus-visible {
-    text-decoration: underline;
+    text-decoration: none;
+    background: var(--vscode-list-hoverBackground, color-mix(in srgb, var(--vscode-textLink-foreground, #569CD6) 16%, transparent));
     outline: none;
 }
 

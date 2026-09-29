@@ -11,6 +11,8 @@ import { getCmdXmlCPPSrc } from './cmdXml/cmdXmlCppSource';
 import { getCmdXmlSQLSrc } from './cmdXml/cmdXmlSqlSource';
 import { getFieldListCPPSrc } from './fieldList/fieldListCppSource';
 import { getFieldListSQLSrc } from './fieldList/fieldListSqlSource';
+import { getJobInfoRPGLESrc } from './jobInfo/jobInfoRpgleSource';
+import { getJobInfoSQLSrc } from './jobInfo/jobInfoSqlSource';
 import { appendClPrompterOutputLine } from '../clPrompterOutput';
 
 // ---------------------------------------------------------------------------
@@ -61,10 +63,10 @@ WHERE ROUTINE_SCHEMA = '${schema.toUpperCase()}' \
     const [result] = await connection.runSQL(sql);
     if (result?.LONG_COMMENT) {
         const comment = String(result.LONG_COMMENT);
-        const dash = comment.indexOf('-');
-        if (dash > -1) {
-            const v = Number(comment.substring(0, dash).trim());
-            if (!isNaN(v)) { return v; }
+        const leadingVersion = /^\s*(\d+)/.exec(comment);
+        if (leadingVersion?.[1]) {
+            const parsed = Number(leadingVersion[1]);
+            if (!isNaN(parsed)) { return parsed; }
         }
     }
     return -1;
@@ -285,7 +287,7 @@ export class CmdXmlChecker extends UDTFChecker {
     readonly id = CmdXmlChecker.ID;
     readonly PGM_NAME = 'CMDXML';
     readonly UDTF_SPECIFIC = 'cmd_xml';
-    readonly currentVersion = 1;
+    readonly currentVersion = 2;
 
     getCPPSrc(): string { return getCmdXmlCPPSrc(); }
     getSQLSrc(library: string, version: number): string { return getCmdXmlSQLSrc(library, version); }
@@ -317,4 +319,189 @@ export class FieldListChecker extends UDTFChecker {
 
     getCPPSrc(): string { return getFieldListCPPSrc(); }
     getSQLSrc(library: string, version: number): string { return getFieldListSQLSrc(library, version); }
+}
+
+/**
+ * Manages the JOB_INFO UDTF — returns status and queue details for a target
+ * job by wrapping the QUSRJOBI API in an RPGLE external program.
+ */
+export class JobInfoChecker implements IBMiComponent {
+    static readonly ID = 'clPrompter.JobInfoChecker';
+    readonly id = JobInfoChecker.ID;
+    readonly PGM_NAME = 'JOB_INFO';
+    readonly UDTF_SPECIFIC = 'job_info';
+    readonly currentVersion = 1;
+
+    getRPGLESrc(): string { return getJobInfoRPGLESrc(); }
+    getSQLSrc(library: string, version: number): string { return getJobInfoSQLSrc(library, version); }
+
+    private getSignatureForLibrary(library: string): string {
+        return createHash('sha256')
+            .update(this.getRPGLESrc())
+            .update(this.getSQLSrc(library, this.currentVersion))
+            .digest('hex');
+    }
+
+    getIdentification(): ComponentIdentification {
+        const signatureLibrary = getSignatureLibraryForIdentification();
+        const signature = this.getSignatureForLibrary(signatureLibrary);
+        return { name: this.id, version: this.currentVersion, signature };
+    }
+
+    async getRemoteState(connection: IBMi, _installDirectory: string): Promise<SecureComponentState> {
+        const library = getUDTFLibrary(connection);
+        const localSignature = this.getIdentification().signature;
+        console.log(`[clPrompter] ${this.id}.getRemoteState() — library=${library}`);
+        try {
+            const version = await getUDTFVersion(connection, library, this.UDTF_SPECIFIC);
+            const status: ComponentState = version >= this.currentVersion ? 'Installed' : 'NeedsUpdate';
+            console.log(`[clPrompter] ${this.id}.getRemoteState() — version=${version}, status=${status}`);
+            return {
+                status,
+                remoteSignature: localSignature
+            };
+        } catch (e) {
+            console.log(`[clPrompter] ${this.id}.getRemoteState() — query threw: ${e}, returning NeedsUpdate`);
+            return {
+                status: 'NeedsUpdate',
+                remoteSignature: localSignature
+            };
+        }
+    }
+
+    async update(connection: IBMi, _installDirectory: string): Promise<SecureComponentState> {
+        console.log(`[clPrompter] ${this.id}.update() — starting install`);
+        return connection.withTempDirectory(async (tempDir: string) => {
+            const content = connection.getContent();
+            const encoder = new TextEncoder();
+            const library = getUDTFLibrary(connection);
+            const runtimeSignature = this.getIdentification().signature;
+            console.log(`[clPrompter] ${this.id}.update() — tempDir=${tempDir}, library=${library}`);
+
+            // Step 1: upload RPGLE source.
+            const rpglePath = `${tempDir}_${this.PGM_NAME}.rpgle`;
+            const rpgleBytes = encoder.encode(this.getRPGLESrc());
+            console.log(`[clPrompter] ${this.id}.update() — uploading RPGLE to ${rpglePath} (${rpgleBytes.length} bytes)`);
+            let rpgleUploadErr: string | void;
+            try {
+                rpgleUploadErr = await content.writeStreamfileRaw(rpglePath, rpgleBytes);
+            } catch (e) {
+                console.error(`[clPrompter] writeStreamfileRaw(rpgle) threw: ${e}`);
+                return {
+                    status: 'Error',
+                    remoteSignature: runtimeSignature
+                };
+            }
+            if (rpgleUploadErr) {
+                console.error(`[clPrompter] writeStreamfileRaw(rpgle) failed: ${rpgleUploadErr}`);
+                return {
+                    status: 'Error',
+                    remoteSignature: runtimeSignature
+                };
+            }
+
+            // Step 1b: ensure target library exists.
+            const crtlibResult = await connection.runCommand({ command: `CRTLIB LIB(${library})`, noLibList: true });
+            console.log(`[clPrompter] ${this.id}.update() — CRTLIB(${library}) code=${crtlibResult.code}: ${crtlibResult.stderr}`);
+
+            // Step 2: try direct compile first; fall back to CCSID-converted copies for mixed IBM i PTF levels.
+            const compileFromStream = async (sourcePath: string, useTargetCcsid: boolean): Promise<{ code: number; stderr: string; stdout: string }> => {
+                const tgtCcsidParm = useTargetCcsid ? ' TGTCCSID(*JOB)' : '';
+                const cmd = `CRTBNDRPG PGM(${library}/${this.PGM_NAME}) SRCSTMF('${sourcePath}')${tgtCcsidParm} OPTION(*SRCSTMT) DBGVIEW(*NONE)`;
+                appendClPrompterOutputLine(`[clPrompter] ${this.id}.update() — compile external program command: ${cmd}`);
+                const result = await connection.runCommand({ command: cmd });
+                return {
+                    code: result.code,
+                    stderr: result.stderr,
+                    stdout: result.stdout
+                };
+            };
+
+            let compileResult = await compileFromStream(rpglePath, true);
+
+            if (compileResult.code !== 0) {
+                appendClPrompterOutputLine(`[clPrompter] ${this.id}.update() — direct compile with TGTCCSID(*JOB) failed; retrying with TOCCSID(*JOBCCSID) conversion.`);
+
+                const rpgleJobCcsidPath = `${tempDir}_${this.PGM_NAME}_ccsid_job.rpgle`;
+                const cpyToJobCcsidCmd = `CPY OBJ('${rpglePath}') TOOBJ('${rpgleJobCcsidPath}') TOCCSID(*JOBCCSID) REPLACE(*YES)`;
+                appendClPrompterOutputLine(`[clPrompter] ${this.id}.update() — convert source CCSID command: ${cpyToJobCcsidCmd}`);
+                const cpyToJobCcsidResult = await connection.runCommand({ command: cpyToJobCcsidCmd });
+
+                if (cpyToJobCcsidResult.code === 0) {
+                    compileResult = await compileFromStream(rpgleJobCcsidPath, false);
+                } else {
+                    appendClPrompterOutputLine(`[clPrompter] ${this.id}.update() — TOCCSID(*JOBCCSID) conversion failed; retrying with TOCCSID(37) for compatibility.`);
+
+                    const rpgle37Path = `${tempDir}_${this.PGM_NAME}_ccsid37.rpgle`;
+                    const cpyTo37Cmd = `CPY OBJ('${rpglePath}') TOOBJ('${rpgle37Path}') TOCCSID(37) REPLACE(*YES)`;
+                    appendClPrompterOutputLine(`[clPrompter] ${this.id}.update() — convert source CCSID command: ${cpyTo37Cmd}`);
+                    const cpyTo37Result = await connection.runCommand({ command: cpyTo37Cmd });
+
+                    if (cpyTo37Result.code === 0) {
+                        compileResult = await compileFromStream(rpgle37Path, false);
+                    } else {
+                        console.error(`[clPrompter] CPY conversion failed for ${this.PGM_NAME}. *JOBCCSID stderr: ${cpyToJobCcsidResult.stderr} | CCSID(37) stderr: ${cpyTo37Result.stderr}`);
+                        return {
+                            status: 'Error',
+                            remoteSignature: runtimeSignature
+                        };
+                    }
+                }
+            }
+
+            if (compileResult.code !== 0) {
+                console.error(`[clPrompter] CRTBNDRPG failed for ${this.PGM_NAME}: ${compileResult.stderr}`);
+                return {
+                    status: 'Error',
+                    remoteSignature: runtimeSignature
+                };
+            }
+
+            // Step 4: upload SQL DDL.
+            const sqlPath = `${tempDir}_${this.UDTF_SPECIFIC}.sql`;
+            const sqlUploadErr = await content.writeStreamfileRaw(
+                sqlPath,
+                encoder.encode(this.getSQLSrc(library, this.currentVersion))
+            );
+            if (sqlUploadErr) {
+                console.error(`[clPrompter] writeStreamfileRaw(sql) failed: ${sqlUploadErr}`);
+                return {
+                    status: 'Error',
+                    remoteSignature: runtimeSignature
+                };
+            }
+
+            // Step 5: drop existing specific function (ignore if missing).
+            try {
+                await connection.runSQL(`DROP SPECIFIC FUNCTION ${library}.${this.UDTF_SPECIFIC}`);
+            } catch {
+                // UDTF may not exist yet — that's fine
+            }
+
+            // Step 6: RUNSQLSTM to create/replace the UDTF.
+            const runsqlstmCmd = `RUNSQLSTM SRCSTMF('${sqlPath}') COMMIT(*NONE) NAMING(*SYS)`;
+            appendClPrompterOutputLine(`[clPrompter] ${this.id}.update() — create/replace function command: ${runsqlstmCmd}`);
+            const sqlResult = await connection.runCommand({
+                command: runsqlstmCmd,
+                noLibList: true
+            });
+            if (sqlResult.code !== 0) {
+                console.error(`[clPrompter] RUNSQLSTM failed for ${this.UDTF_SPECIFIC}: ${sqlResult.stderr}`);
+                return {
+                    status: 'Error',
+                    remoteSignature: runtimeSignature
+                };
+            }
+
+            console.log(`[clPrompter] ${this.UDTF_SPECIFIC} UDTF installed in ${library} (version ${this.currentVersion})`);
+            return {
+                status: 'Installed',
+                remoteSignature: runtimeSignature
+            };
+        });
+    }
+
+    reset(): void {
+        // No per-connection state to clear — library is re-read from settings each time
+    }
 }

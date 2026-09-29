@@ -9,7 +9,7 @@
   const defaultCommandRows = 3;
   const command = document.getElementById('command'), mode = document.getElementById('mode'), severityFilter = document.getElementById('message-severity-filter');
   window.clPrompterInstallInternalCutHandler?.(command);
-  const run = document.getElementById('run'), prompt = document.getElementById('prompt'), cmdEntryHelp = document.getElementById('cmdentry-help'), cmdEntrySettings = document.getElementById('cmdentry-settings'), toolbarMenu = document.getElementById('toolbar-menu'), toolbarMenuList = document.getElementById('toolbar-menu-list'), menuViewLog = document.getElementById('menu-view-log'), menuClearLog = document.getElementById('menu-clear-log'), menuClearSqlLog = document.getElementById('menu-clear-sql-log'), menuClearSqlHistory = document.getElementById('menu-clear-sql-history'), menuToggleSqlLog = document.getElementById('menu-toggle-sql-log'), menuToggleMessageDetails = document.getElementById('menu-toggle-message-details'), menuConnectionSettings = document.getElementById('menu-connection-settings'), menuUseSharedSqlJob = document.getElementById('menu-use-shared-sql-job'), menuUsePrivateSqlJob = document.getElementById('menu-use-private-sql-job'), menuStartNewJob = document.getElementById('menu-start-new-job'), menuClearHistory = document.getElementById('menu-clear-history'), menuRunMode = document.getElementById('menu-run-mode'), menuRunModeList = document.getElementById('menu-run-mode-list'), menuRunModeWrap = menuRunMode ? menuRunMode.closest('.toolbar-submenu-wrap') : null, menuRunModeRun = document.getElementById('menu-run-mode-run'), menuRunModeLimit = document.getElementById('menu-run-mode-limit'), menuRunModeCheck = document.getElementById('menu-run-mode-check'), historyPrev = document.getElementById('history-prev'), historyNext = document.getElementById('history-next'), statusJobMenu = document.getElementById('status-job-menu'), statusJobMenuCopy = document.getElementById('status-job-menu-copy'), statusJobMenuDisplayJoblog = document.getElementById('status-job-menu-display-joblog'), statusJobMenuToggleSqlJob = document.getElementById('status-job-menu-toggle-sql-job'), statusJobMenuConnectionSettings = document.getElementById('status-job-menu-connection-settings'), statusJobMenuReconnectServerJob = document.getElementById('status-job-menu-reconnect-server-job');
+  const run = document.getElementById('run'), prompt = document.getElementById('prompt'), cmdEntryHelp = document.getElementById('cmdentry-help'), cmdEntrySettings = document.getElementById('cmdentry-settings'), toolbarMenu = document.getElementById('toolbar-menu'), toolbarMenuList = document.getElementById('toolbar-menu-list'), menuViewLog = document.getElementById('menu-view-log'), menuClearLog = document.getElementById('menu-clear-log'), menuClearSqlLog = document.getElementById('menu-clear-sql-log'), menuClearSqlHistory = document.getElementById('menu-clear-sql-history'), menuToggleSqlLog = document.getElementById('menu-toggle-sql-log'), menuToggleMessageDetails = document.getElementById('menu-toggle-message-details'), menuConnectionSettings = document.getElementById('menu-connection-settings'), menuUseSharedSqlJob = document.getElementById('menu-use-shared-sql-job'), menuUsePrivateSqlJob = document.getElementById('menu-use-private-sql-job'), menuStartNewJob = document.getElementById('menu-start-new-job'), menuClearHistory = document.getElementById('menu-clear-history'), menuRunMode = document.getElementById('menu-run-mode'), menuRunModeList = document.getElementById('menu-run-mode-list'), menuRunModeWrap = menuRunMode ? menuRunMode.closest('.toolbar-submenu-wrap') : null, menuRunModeRun = document.getElementById('menu-run-mode-run'), menuRunModeLimit = document.getElementById('menu-run-mode-limit'), menuRunModeCheck = document.getElementById('menu-run-mode-check'), historyPrev = document.getElementById('history-prev'), historyNext = document.getElementById('history-next'), statusJobMenu = document.getElementById('status-job-menu'), statusJobMenuCopy = document.getElementById('status-job-menu-copy'), statusJobMenuDisplayJoblog = document.getElementById('status-job-menu-display-joblog'), statusJobMenuCheckMsgw = document.getElementById('status-job-menu-check-msgw'), statusJobMenuToggleSqlJob = document.getElementById('status-job-menu-toggle-sql-job'), statusJobMenuConnectionSettings = document.getElementById('status-job-menu-connection-settings'), statusJobMenuReconnectServerJob = document.getElementById('status-job-menu-reconnect-server-job');
   const statusText = document.getElementById('status-text'), statusIdentity = document.getElementById('status-identity'), statusJobId = document.getElementById('status-jobid'), results = document.getElementById('results');
   let historyIndex = -1, runningStartedAt, runningTimerId, runningStatusPrefix = l10n.runningStatusPrefix || 'Running…', historyDraft = '', sqlJobPollingId;
   let transientStatusUntil = 0;
@@ -277,6 +277,11 @@
     const sqlJobId = getStatusJobIdRaw();
     if (!sqlJobId || sqlJobId.toLowerCase() === noConnectionText) { return; }
     vscode.postMessage({ type: 'requestDisplayJoblog', sqlJobId });
+  };
+  const checkForMsgw = () => {
+    const sqlJobId = getStatusJobIdRaw();
+    if (!sqlJobId || sqlJobId.toLowerCase() === noConnectionText) { return; }
+    vscode.postMessage({ type: 'requestCheckForMsgw', sqlJobId });
   };
   const selectEntireStatusJobId = () => {
     const sqlJobId = getStatusJobIdRaw();
@@ -1504,6 +1509,12 @@
     closeStatusJobMenu();
     vscode.postMessage({ type: 'requestDisplayJoblog', sqlJobId });
   });
+  statusJobMenuCheckMsgw?.addEventListener('click', () => {
+    const sqlJobId = statusJobMenu?.getAttribute('data-jobid') || '';
+    if (!sqlJobId) { return; }
+    closeStatusJobMenu();
+    vscode.postMessage({ type: 'requestCheckForMsgw', sqlJobId });
+  });
   statusJobMenuToggleSqlJob?.addEventListener('click', () => {
     closeStatusJobMenu();
     vscode.postMessage({ type: useSharedSqlJob ? 'usePrivateSqlJob' : 'useSharedSqlJob' });
@@ -1541,7 +1552,7 @@
       return;
     }
 
-    const items = [statusJobMenuCopy, statusJobMenuDisplayJoblog, statusJobMenuToggleSqlJob, statusJobMenuConnectionSettings, statusJobMenuReconnectServerJob].filter(item => item && !item.disabled);
+    const items = [statusJobMenuCopy, statusJobMenuDisplayJoblog, statusJobMenuCheckMsgw, statusJobMenuToggleSqlJob, statusJobMenuConnectionSettings, statusJobMenuReconnectServerJob].filter(item => item && !item.disabled);
     if (!items.length) { return; }
     event.preventDefault();
     const currentIndex = items.indexOf(document.activeElement);

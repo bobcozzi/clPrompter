@@ -31,11 +31,15 @@
 
 import * as vscode from 'vscode';
 import { DOMParser } from '@xmldom/xmldom';
-import { getCMDXML } from './getcmdxml';
+import { getCMDXML, GetCmdXmlOptions } from './getcmdxml';
 
 export interface CLPrompterResult {
     command: string;
     action: 'submit' | 'cancel' | 'error';
+}
+
+export interface CLPrompterOptions {
+    cmdXmlOptions?: GetCmdXmlOptions;
 }
 
 const API_DEBUG_LOGS = false;
@@ -111,61 +115,15 @@ function extractCmdLabel(cmdString: string): string {
     return '';
 }
 
-/**
- * Prompt a CL command and return the updated command string
- *
- * This function can be called by external extensions to invoke the CL prompter
- * on any CL command string. It returns a Promise that resolves with:
- * - The updated command string if the user submits the prompt
- * - The original command string if the user cancels the prompt
- * - null if an error occurs
- *
- * @param extensionUri - The URI of the extension (for loading webview resources)
- * @param commandString - The CL command string to prompt
- * @returns Promise that resolves with the updated command string or original on cancel
- *
- * @example
- * ```typescript
- * const result = await CLPrompter(context.extensionUri, 'CRTPF FILE(MYLIB/MYFILE)');
- * if (result) {
- *     console.log('Updated command:', result);
- * }
- * ```
- */
-export async function CLPrompter(
-    extensionUri: vscode.Uri,
-    commandString: string
-): Promise<CLPrompterResult>;
-
-/**
- * Prompt a CL command and return the updated command string (simplified version)
- *
- * This overload automatically finds the clPrompter extension URI, so you only
- * need to pass the command string.
- *
- * @param commandString - The CL command string to prompt
- * @returns Promise that resolves with the updated command string or original on cancel
- *
- * @example
- * ```typescript
- * const result = await CLPrompter('CRTPF FILE(MYLIB/MYFILE)');
- * if (result) {
- *     console.log('Updated command:', result);
- * }
- * ```
- */
-export async function CLPrompter(
-    commandString: string
-): Promise<CLPrompterResult>;
-
-// Implementation
 export async function CLPrompter(
     extensionUriOrCommand: vscode.Uri | string,
-    commandString?: string
+    commandStringOrOptions?: string | CLPrompterOptions,
+    options?: CLPrompterOptions
 ): Promise<CLPrompterResult> {
     // Determine which overload was called
     let extensionUri: vscode.Uri;
     let command: string;
+    let promptOptions = options;
 
     if (typeof extensionUriOrCommand === 'string') {
         // Simple overload: CLPrompter(commandString)
@@ -178,7 +136,11 @@ export async function CLPrompter(
     } else {
         // Full overload: CLPrompter(extensionUri, commandString)
         extensionUri = extensionUriOrCommand;
-        command = commandString!;
+        command = typeof commandStringOrOptions === 'string' ? commandStringOrOptions : '';
+    }
+
+    if (typeof extensionUriOrCommand === 'string' && commandStringOrOptions && typeof commandStringOrOptions === 'object' && !Array.isArray(commandStringOrOptions)) {
+        promptOptions = commandStringOrOptions as CLPrompterOptions;
     }
 
     if (!ClPromptPanelClass) {
@@ -203,7 +165,7 @@ export async function CLPrompter(
             // Get the command XML definition from IBM i
             let xml: string;
             try {
-                xml = await getCMDXML(cmdName);
+                xml = await getCMDXML(cmdName, promptOptions?.cmdXmlOptions);
             } catch (error) {
                 console.error('[CLPrompter] Failed to get command XML:', error);
                 vscode.window.showErrorMessage(vscode.l10n.t('Failed to get command definition for {cmdName}', { cmdName }));
