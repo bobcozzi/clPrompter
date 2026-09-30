@@ -2,7 +2,7 @@
 
 All notable changes to this project are documented in this file.
 
-## [1.0.51] - 2026-09-29
+## [1.0.52] - 2026-09-30
 
 ### What's Improved
 - CL commands run from Command Entry that enter MSGW (inquiry message wait) can now be handled directly in the extension.

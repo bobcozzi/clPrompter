@@ -182,7 +182,7 @@ abstract class UDTFChecker implements IBMiComponent {
             const crtcppiBaseCmd = `CRTSQLCPPI OBJ(${library}/${this.PGM_NAME}) SRCSTMF('${cppPath}')`;
             const crtcppiStaticParms = `CVTCCSID(*JOB) OUTPUT(*PRINT)`;
             const crtcppiCompileOptParm = `COMPILEOPT('${crtcppiCompileOpts}')`;
-            const crtcppiCmd = `${crtcppiBaseCmd} ${crtcppiStaticParms} ${crtcppiCompileOptParm}`;
+            const crtcppiCmd = `${crtcppiBaseCmd} ${crtcppiStaticParms} ${crtcppiCompileOptParm} TGTRLS(*CURRENT)`;
             appendClPrompterOutputLine(`[clPrompter] ${this.id}.update() — compile external program command: ${crtcppiCmd}`);
             console.log(`[clPrompter] ${this.id}.update() — running: ${crtcppiCmd}`);
             const moduleResult = await connection.runCommand({ command: crtcppiCmd, noLibList: true });
@@ -198,7 +198,7 @@ abstract class UDTFChecker implements IBMiComponent {
 
             // ── Step 3: CRTPGM ────────────────────────────────────────────
             const pgmResult = await connection.runCommand({
-                command: `CRTPGM PGM(${library}/${this.PGM_NAME}) MODULE(${library}/${this.PGM_NAME}) ACTGRP(*CALLER)`,
+                command: `CRTPGM PGM(${library}/${this.PGM_NAME}) MODULE(${library}/${this.PGM_NAME}) ACTGRP(*CALLER) TGTRLS(*CURRENT)`,
                 noLibList: true
             });
             if (pgmResult.code !== 0) {
@@ -231,7 +231,7 @@ abstract class UDTFChecker implements IBMiComponent {
             }
 
             // ── Step 6: RUNSQLSTM to create/replace the UDTF ──────────────
-            const runsqlstmCmd = `RUNSQLSTM SRCSTMF('${sqlPath}') COMMIT(*NONE) NAMING(*SYS)`;
+            const runsqlstmCmd = `RUNSQLSTM SRCSTMF('${sqlPath}') COMMIT(*NONE) NAMING(*SYS) TGTRLS(*CURRENT)`;
             appendClPrompterOutputLine(`[clPrompter] ${this.id}.update() — create/replace function command: ${runsqlstmCmd}`);
             appendClPrompterOutputLine(`[clPrompter] ${this.id}.update() — running: ${runsqlstmCmd}`);
             const sqlResult = await connection.runCommand({
@@ -407,7 +407,7 @@ export class JobInfoChecker implements IBMiComponent {
             // Step 2: try direct compile first; fall back to CCSID-converted copies for mixed IBM i PTF levels.
             const compileFromStream = async (sourcePath: string, useTargetCcsid: boolean): Promise<{ code: number; stderr: string; stdout: string }> => {
                 const tgtCcsidParm = useTargetCcsid ? ' TGTCCSID(*JOB)' : '';
-                const cmd = `CRTBNDRPG PGM(${library}/${this.PGM_NAME}) SRCSTMF('${sourcePath}')${tgtCcsidParm} OPTION(*SRCSTMT) DBGVIEW(*NONE)`;
+                const cmd = `CRTBNDRPG PGM(${library}/${this.PGM_NAME}) SRCSTMF('${sourcePath}')${tgtCcsidParm} OPTION(*SRCSTMT) DBGVIEW(*NONE) TGTRLS(*CURRENT)`;
                 appendClPrompterOutputLine(`[clPrompter] ${this.id}.update() — compile external program command: ${cmd}`);
                 const result = await connection.runCommand({ command: cmd });
                 return {
@@ -479,7 +479,7 @@ export class JobInfoChecker implements IBMiComponent {
             }
 
             // Step 6: RUNSQLSTM to create/replace the UDTF.
-            const runsqlstmCmd = `RUNSQLSTM SRCSTMF('${sqlPath}') COMMIT(*NONE) NAMING(*SYS)`;
+            const runsqlstmCmd = `RUNSQLSTM SRCSTMF('${sqlPath}') COMMIT(*NONE) NAMING(*SYS) TGTRLS(*CURRENT)`;
             appendClPrompterOutputLine(`[clPrompter] ${this.id}.update() — create/replace function command: ${runsqlstmCmd}`);
             const sqlResult = await connection.runCommand({
                 command: runsqlstmCmd,
