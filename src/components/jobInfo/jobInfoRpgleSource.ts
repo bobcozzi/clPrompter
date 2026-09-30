@@ -5,7 +5,7 @@
  * RPGLE is intentionally stored as plain text (not base64-encoded).
  */
 export function getJobInfoRPGLESrc(): string {
-    return `**free
+     return `**free
 
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 by R. Cozzi, Jr.
@@ -240,9 +240,19 @@ dcl-proc main ;
           reset ec;
           QUSRJOBI( buffer200 : %size(buffer200) : 'JOBI0200' :
                          scratchPad.jobID : intJOBID : ec);
+          if (ec.bytes_returned > 0);
+               snd-msg 'JOB_INFO returned ' + ec.msgid;
+               outSQLSTATE = '38701';
+               return;
+          endif;
           reset ec;
           QUSRJOBI( buffer300 : %size(buffer300) : 'JOBI0300' :
                          scratchPad.jobID : intJOBID : ec);
+          if (ec.bytes_returned > 0);
+               snd-msg 'JOB_INFO returned ' + ec.msgid;
+               outSQLSTATE = '38701';
+               return;
+          endif;
 
           job = %upper(inJOBID);
           Job_Name = buffer200.Job_Name;

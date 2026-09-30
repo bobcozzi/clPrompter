@@ -330,7 +330,7 @@ export class JobInfoChecker implements IBMiComponent {
     readonly id = JobInfoChecker.ID;
     readonly PGM_NAME = 'JOB_INFO';
     readonly UDTF_SPECIFIC = 'job_info';
-    readonly currentVersion = 1;
+    readonly currentVersion = 2;
 
     getRPGLESrc(): string { return getJobInfoRPGLESrc(); }
     getSQLSrc(library: string, version: number): string { return getJobInfoSQLSrc(library, version); }
