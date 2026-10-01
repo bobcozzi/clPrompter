@@ -1751,21 +1751,9 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
     }
 
     private currentExtensionVersion(): string | undefined {
-        const byId = vscode.extensions.getExtension('CozziResearch.clprompter')
-            ?? vscode.extensions.getExtension('cozziresearch.clprompter');
-        const version = byId?.packageJSON?.version;
+        const version = this.context.extension.packageJSON?.version;
         if (typeof version === 'string' && version.trim().length > 0) {
             return version.trim();
-        }
-
-        for (const ext of vscode.extensions.all) {
-            const name = String(ext.packageJSON?.name || '').toLowerCase();
-            if (name === 'clprompter') {
-                const candidate = ext.packageJSON?.version;
-                if (typeof candidate === 'string' && candidate.trim().length > 0) {
-                    return candidate.trim();
-                }
-            }
         }
 
         return undefined;

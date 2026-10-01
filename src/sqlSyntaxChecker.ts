@@ -1,4 +1,5 @@
 import IBMi from '@halcyontech/vscode-ibmi-types/api/IBMi';
+import * as vscode from 'vscode';
 
 export interface SqlSyntaxCheckRunner {
     runSQL(connection: IBMi, statements: string | string[], options?: { bindings?: unknown[]; rows?: number }): Promise<Record<string, unknown>[]>;
@@ -103,10 +104,94 @@ function hasBalancedTopLevelParentheses(sql: string): boolean {
     return depth === 0;
 }
 
+function hasMultipleTopLevelStatements(sql: string): boolean {
+    let inSingleQuote = false;
+    let inDoubleQuote = false;
+    let inLineComment = false;
+    let inBlockComment = false;
+
+    for (let i = 0; i < sql.length; i += 1) {
+        const ch = sql[i];
+        const next = sql[i + 1];
+
+        if (inLineComment) {
+            if (ch === '\n' || ch === '\r') {
+                inLineComment = false;
+            }
+            continue;
+        }
+
+        if (inBlockComment) {
+            if (ch === '*' && next === '/') {
+                inBlockComment = false;
+                i += 1;
+            }
+            continue;
+        }
+
+        if (inSingleQuote) {
+            if (ch === "'" && next === "'") {
+                i += 1;
+                continue;
+            }
+            if (ch === "'") {
+                inSingleQuote = false;
+            }
+            continue;
+        }
+
+        if (inDoubleQuote) {
+            if (ch === '"' && next === '"') {
+                i += 1;
+                continue;
+            }
+            if (ch === '"') {
+                inDoubleQuote = false;
+            }
+            continue;
+        }
+
+        if (ch === '-' && next === '-') {
+            inLineComment = true;
+            i += 1;
+            continue;
+        }
+
+        if (ch === '/' && next === '*') {
+            inBlockComment = true;
+            i += 1;
+            continue;
+        }
+
+        if (ch === "'") {
+            inSingleQuote = true;
+            continue;
+        }
+
+        if (ch === '"') {
+            inDoubleQuote = true;
+            continue;
+        }
+
+        if (ch === ';') {
+            const remainder = sql.slice(i + 1).trim();
+            if (remainder.length > 0) {
+                return true;
+            }
+        }
+    }
+
+    return false;
+}
+
 export function checkSQLBeforePaging(sql: string): void {
     const normalized = stripTrailingSemicolon(sql).trim();
     if (!normalized) {
         throw new Error('No SQL statement was provided.');
+    }
+
+    if (hasMultipleTopLevelStatements(normalized)) {
+        throw new Error(vscode.l10n.t('Single-statement mode, but multiple SQL statements detected. Specify only one SQL statement and try again.'));
     }
 
     if (!hasBalancedTopLevelParentheses(normalized)) {

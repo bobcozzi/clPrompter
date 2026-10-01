@@ -53,10 +53,11 @@ function debugLog(...args: unknown[]): void {
 // These will be needed when the ClPromptPanel is imported
 let ClPromptPanelClass: any;
 let extensionUriCache: vscode.Uri | undefined;
+let registeredPromptHandler: ((command: string, options?: CLPrompterOptions) => Promise<CLPrompterResult> | CLPrompterResult) | undefined;
 
 /**
- * Initialize the prompter with the ClPromptPanel class and extension URI
- * This is called from extension.ts after the class is defined
+ * Initialize the prompter with the ClPromptPanel class and extension URI.
+ * This is called from extension.ts after the class is defined.
  */
 export function initializePrompter(ClPromptPanel: any, extensionUri?: vscode.Uri) {
     ClPromptPanelClass = ClPromptPanel;
@@ -66,20 +67,57 @@ export function initializePrompter(ClPromptPanel: any, extensionUri?: vscode.Uri
 }
 
 /**
- * Get the clPrompter extension URI
- * This is used internally to find the extension's resources
+ * Register a custom prompter implementation without hard-coding the extension ID.
+ * This is intentionally additive: existing callers can keep using CLPrompter(), while
+ * integrations that need a generic fallback can supply their own callback.
+ */
+export function registerCLPrompterHandler(
+    handler: ((command: string, options?: CLPrompterOptions) => Promise<CLPrompterResult> | CLPrompterResult) | undefined,
+    extensionUri?: vscode.Uri
+): void {
+    registeredPromptHandler = handler;
+    if (extensionUri) {
+        extensionUriCache = extensionUri;
+    }
+}
+
+export function unregisterCLPrompterHandler(): void {
+    registeredPromptHandler = undefined;
+}
+
+export function getRegisteredCLPrompterHandler(): ((command: string, options?: CLPrompterOptions) => Promise<CLPrompterResult> | CLPrompterResult) | undefined {
+    return registeredPromptHandler;
+}
+
+/**
+ * Get the clPrompter extension URI.
+ * Prefer the explicitly supplied URI; do not resolve by hard-coded extension ID.
  */
 function getExtensionUri(): vscode.Uri | undefined {
-    if (extensionUriCache) {
-        return extensionUriCache;
+    return extensionUriCache;
+}
+
+export async function promptWithRegisteredCLPrompter(
+    command: string,
+    options?: CLPrompterOptions
+): Promise<CLPrompterResult> {
+    const handler = registeredPromptHandler;
+    if (handler) {
+        return await handler(command, options);
     }
-    // Try to find the extension
-    const extension = vscode.extensions.getExtension('CozziResearch.clprompter');
-    if (extension) {
-        extensionUriCache = extension.extensionUri;
-        return extensionUriCache;
+
+    const fallback = await vscode.window.showInputBox({
+        prompt: 'Enter a CL command to prompt',
+        value: command,
+        ignoreFocusOut: true,
+        placeHolder: 'CMD(...)'
+    });
+
+    if (fallback === undefined) {
+        return { command, action: 'cancel' };
     }
-    return undefined;
+
+    return { command: fallback.trim() || command, action: 'submit' };
 }
 
 /**

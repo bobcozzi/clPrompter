@@ -1,13 +1,10 @@
 /**
- * Generates the SQL DDL used to create (or replace) the CMD_RUN UDTF in the
- * target library on IBM i.
+ * Generates SQL DDL for the UDTF from embedded source SQL.
  *
- * The version number is embedded in the LONG_COMMENT of the specific routine so
- * CmdRunChecker.getRemoteState() can detect stale installs and trigger update().
+ * Source origin: /Users/cozzi/Downloads/projects/open-UDTF/src/CMD_RUN/CMD_RUN.SQL
  */
-export function getCmdRunSQLSrc(library: string, version: number): string {
-  return `
--- CL Command Processor for IBM i
+const SQL_TEMPLATE = String.raw`
+  -- CL Command Processor for IBM i
   -- This function runs a CL command.
   -- Note the options for the MODE parameter are:
   -- *RUN (run CL command) or *LIMIT (limited user mode).
@@ -15,7 +12,7 @@ export function getCmdRunSQLSrc(library: string, version: number): string {
   -- or, for Limited Users, as if it were on that limited user command line.
   -- For syntax checking, use the CMD_CHECK function instead.
 
-CREATE or REPLACE FUNCTION ${library}.CMD_RUN(
+CREATE or REPLACE FUNCTION sqltools.CMD_RUN(
                                     CMD   VARCHAR(32700),
                                     MODE  VARCHAR(14) DEFAULT '*RUN'
                                           )
@@ -47,23 +44,23 @@ CREATE or REPLACE FUNCTION ${library}.CMD_RUN(
      DISALLOW PARALLEL
      CARDINALITY 5
      SCRATCHPAD 2000
-     SPECIFIC ${library}.cmd_run
-     EXTERNAL NAME '${library}/CMDRUN'
+     SPECIFIC sqlTools.CMD_RUN
+     EXTERNAL NAME 'SQLTOOLS/CMD_RUN'
      PARAMETER STYLE DB2SQL;
 
 
-LABEL on specific routine ${library}.cmd_run IS
-'${version} - Run or Check CL commands via QCAPCMD';
+LABEL on specific routine sqlTools.CMD_RUN IS
+'\${version} - Run or Check CL commands via QCAPCMD';
 
-comment on specific FUNCTION ${library}.cmd_run is
-'${version} - CL Command Processor to Run and Syntax Checker CL commands<br />
+comment on specific FUNCTION sqlTools.CMD_RUN is
+'\${version} - CL Command Processor to Run and Syntax Checker CL commands<br />
 The resultSet returns the MSGID, MSGSEV, MSGTYPE, 1st Level Message Text,
 and 2nd Level Message text (sometimes called "Message Help"). <br />
 When running a CL command, if no messages are generated the resultSet
 is empty. When checking CL command sytnax, if no syntax errors are detected,
 the resultSet is empty.';
 
-comment on parameter specific function ${library}.cmd_run
+comment on parameter specific function sqlTools.CMD_RUN
 (
 CMD is 'CL command to be processed. A command length under 32k bytes is
 supported by this function. Command Prompting is not supported.',
@@ -78,6 +75,14 @@ the CL command and then immediately run the command.
 <li>*CHECKLIMIT - Syntax Check a CL command for a "limited User"</li>
 </ul>
 The leading asterisk and upper/lower case is ignored.
-The default is: <i>*RUN - Run CL Command</i>'
-);`;
+The default is: <i>*RUN - Run a CL Command</i>'
+);
+`;
+
+export function getCmdRunSQLSrc(library: string, version: number): string {
+  return SQL_TEMPLATE
+    .replace(/\\\$\{version\}/gi, String(version))
+    .replace(/\$\{version\}/gi, String(version))
+    .replace(/sqltools\./gi, `${library}.`)
+    .replace(/SQLTOOLS\//g, `${library}/`);
 }

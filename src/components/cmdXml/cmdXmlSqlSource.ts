@@ -1,16 +1,13 @@
 /**
- * Generates the SQL DDL used to create (or replace) the CMD_XML UDTF in the
- * target library on IBM i.
+ * Generates SQL DDL for the UDTF from embedded source SQL.
  *
- * The version number is embedded in the LONG_COMMENT of the specific routine so
- * CmdXmlChecker.getRemoteState() can detect stale installs and trigger update().
+ * Source origin: /Users/cozzi/Downloads/projects/open-UDTF/src/CMD_XML/CMD_XML.SQL
  */
-export function getCmdXmlSQLSrc(library: string, version: number): string {
-    return `
-CREATE or REPLACE FUNCTION ${library}.CMD_XML(
-                              LIBRARY_NAME varchar(10) DEFAULT '*LIBL',
+const SQL_TEMPLATE = String.raw`
+CREATE or REPLACE FUNCTION SQLTOOLS.cmd_xml(
+                              LIBRARY_NAME varchar(10) default '*LIBL',
                               CMD_NAME     varchar(10)
-                                             )
+                                     )
     RETURNS table (
             CMD_XML CLOB(16M) CCSID 1208
           )
@@ -23,17 +20,20 @@ CREATE or REPLACE FUNCTION ${library}.CMD_XML(
     NOT FENCED
     CARDINALITY 1
     SCRATCHPAD 256
-    SPECIFIC ${library}.cmd_xml
-    EXTERNAL NAME '${library}/CMDXML'
+    SPECIFIC sqlTools.cmd_XML
+    EXTERNAL NAME 'SQLTOOLS/CMD_XML'
     PARAMETER STYLE DB2SQL;
 
-LABEL on specific routine ${library}.cmd_xml IS
-'Retrieve Command Statement Definition as XML';
 
-comment on SPECIFIC FUNCTION ${library}.cmd_xml is
-'${version} - Retrieve Command Definition statements (CMD, PARM, QUAL, ELEM, DEP, PMTCTL) as XML via QCDRCMDD API';
+LABEL on specific routine sqltools.cmd_XML IS
+'\${version} Retrieve Command Statement Defintion as XML';
 
-comment on parameter specific function ${library}.cmd_xml
+comment on SPECIFIC FUNCTION sqltools.cmd_XML  is
+ '\${version} Retrieve Command Definition statements (CMD, PARM, QUAL, ELEM, DEP, PMTCTL)
+ as XML. Returns the results from a call to the QCDRCMDD API
+ as a CLOB, ready for processing via XMLTABLE or other functions.';
+
+comment on parameter specific function sqltools.cmd_XML
 (LIBRARY_NAME IS 'The name of the library where the *CMD object specified
 on the CMD_NAME parameter is located. The special values *LIBL and *CURLIB
 are supported. The default is *LIBL',
@@ -41,5 +41,13 @@ are supported. The default is *LIBL',
 CMD_NAME IS 'The name of the CL command whose source code XML is
 to be retrieved. Upper/lower case is ignored.'
 );
+
 `;
+
+export function getCmdXmlSQLSrc(library: string, version: number): string {
+    return SQL_TEMPLATE
+        .replace(/\\\$\{version\}/gi, String(version))
+        .replace(/\$\{version\}/gi, String(version))
+        .replace(/sqltools\./gi, `${library}.`)
+        .replace(/SQLTOOLS\//g, `${library}/`);
 }

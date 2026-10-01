@@ -764,6 +764,7 @@ function buildClientPayload(result: SqlResultPayload, l10n: SqlResultPanelL10n) 
     });
 
     return {
+        statement: result.statement,
         columns,
         rowCells,
         resultTitle: result.resultTitle ?? '',

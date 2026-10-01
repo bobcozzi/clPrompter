@@ -3,6 +3,7 @@ import { CommandEntryJobManager } from './commandEntryJobManager';
 import { getUDTFLibrary } from './components/hostFunctions';
 
 const MSGW_REPLY_QUEUE = 'QSYSOPR';
+const CUSTOM_JOB_STATUS_FUNCTION = 'JOB_ATTR';
 
 export interface MsgwInquiryRow {
     ordinalPosition?: number;
@@ -225,7 +226,7 @@ export function buildMsgwJobInfoSql(sqlJobId: string, udtfLibrary: string): stri
 
     return [
         'SELECT JOB, ACTIVE_JOB_STATUS, JOB_STATUS, MSGKEY_HEX, MSGKEY, MSGQ_NAME, MSGQ_LIB, MSGQ_LIB_ASP',
-        `FROM TABLE(${normalizedLibrary}.JOB_INFO('${escapeSqlLiteral(normalizedJobId)}'))`,
+        `FROM TABLE(${normalizedLibrary}.${CUSTOM_JOB_STATUS_FUNCTION}('${escapeSqlLiteral(normalizedJobId)}'))`,
         'FETCH FIRST 1 ROW ONLY'
     ].join(' ');
 }
@@ -546,13 +547,13 @@ export async function checkForMsgw(deps: MsgwCheckDependencies): Promise<MsgwInq
     }
 
     const udtfLibrary = getUDTFLibrary(deps.connection);
-    deps.log?.(`[Cmd Entry][MSGW] Checking job ${sqlJobId} using ${udtfLibrary}.JOB_INFO.`);
+    deps.log?.(`[Cmd Entry][MSGW] Checking job ${sqlJobId} using ${udtfLibrary}.${CUSTOM_JOB_STATUS_FUNCTION}.`);
     if (!silentProbeNotices) {
         deps.showNotice(`Checking for MSGW on job ${sqlJobId}...`, 'info');
     }
 
     const jobInfoSql = buildMsgwJobInfoSql(sqlJobId, udtfLibrary);
-    deps.log?.(`[Cmd Entry][MSGW] JOB_INFO SQL for ${sqlJobId}: ${jobInfoSql}`);
+    deps.log?.(`[Cmd Entry][MSGW] ${CUSTOM_JOB_STATUS_FUNCTION} SQL for ${sqlJobId}: ${jobInfoSql}`);
 
     const rows = await deps.jobManager.queryWithHelperJob(
         deps.connection,
@@ -561,12 +562,12 @@ export async function checkForMsgw(deps: MsgwCheckDependencies): Promise<MsgwInq
     );
     const row = rows.length > 0 ? rows[0] as Record<string, unknown> : undefined;
     if (!row) {
-        deps.log?.(`[Cmd Entry][MSGW] ${udtfLibrary}.JOB_INFO returned no row for ${sqlJobId}.`);
-        deps.showNotice(`Unable to determine MSGW status for job ${sqlJobId}; ${udtfLibrary}.JOB_INFO returned no row.`, 'warning');
+        deps.log?.(`[Cmd Entry][MSGW] ${udtfLibrary}.${CUSTOM_JOB_STATUS_FUNCTION} returned no row for ${sqlJobId}.`);
+        deps.showNotice(`Unable to determine MSGW status for job ${sqlJobId}; ${udtfLibrary}.${CUSTOM_JOB_STATUS_FUNCTION} returned no row.`, 'warning');
         return undefined;
     }
 
-    deps.log?.(`[Cmd Entry][MSGW] JOB_INFO row for ${sqlJobId}: ${formatMsgwDebugRow(row)}`);
+    deps.log?.(`[Cmd Entry][MSGW] ${CUSTOM_JOB_STATUS_FUNCTION} row for ${sqlJobId}: ${formatMsgwDebugRow(row)}`);
 
     const activeJobStatus = String(row.ACTIVE_JOB_STATUS ?? row.active_job_status ?? '').trim().toUpperCase();
     const fallbackJobStatus = String(row.JOB_STATUS ?? row.job_status ?? '').trim().toUpperCase();
@@ -589,14 +590,14 @@ export async function checkForMsgw(deps: MsgwCheckDependencies): Promise<MsgwInq
     const messageQueueLibrary = String(row.MSGQ_LIB ?? row.msgq_lib ?? '').trim().toUpperCase();
 
     if (!messageKeyHex) {
-        deps.log?.(`[Cmd Entry][MSGW] Job ${sqlJobId} is MSGW, but JOB_INFO returned no usable MSGKEY.`);
-        deps.showNotice(`Job ${sqlJobId} is in MSGW, but no usable message key was returned by ${udtfLibrary}.JOB_INFO.`, 'warning');
+        deps.log?.(`[Cmd Entry][MSGW] Job ${sqlJobId} is MSGW, but ${CUSTOM_JOB_STATUS_FUNCTION} returned no usable MSGKEY.`);
+        deps.showNotice(`Job ${sqlJobId} is in MSGW, but no usable message key was returned by ${udtfLibrary}.${CUSTOM_JOB_STATUS_FUNCTION}.`, 'warning');
         return undefined;
     }
 
     if (!messageQueueName) {
-        deps.log?.(`[Cmd Entry][MSGW] Job ${sqlJobId} is MSGW, but JOB_INFO returned no usable message queue name.`);
-        deps.showNotice(`Job ${sqlJobId} is in MSGW, but no message queue name was returned by ${udtfLibrary}.JOB_INFO.`, 'warning');
+        deps.log?.(`[Cmd Entry][MSGW] Job ${sqlJobId} is MSGW, but ${CUSTOM_JOB_STATUS_FUNCTION} returned no usable message queue name.`);
+        deps.showNotice(`Job ${sqlJobId} is in MSGW, but no message queue name was returned by ${udtfLibrary}.${CUSTOM_JOB_STATUS_FUNCTION}.`, 'warning');
         return undefined;
     }
 

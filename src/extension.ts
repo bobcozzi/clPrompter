@@ -30,9 +30,28 @@ import * as os from 'os';
 import { CodeForIBMi } from "@halcyontech/vscode-ibmi-types";
 export let code4i: CodeForIBMi;
 import { Extension, extensions } from "vscode";
-import { CmdHelpChecker, CmdRunChecker, CmdXmlChecker, FieldListChecker, JobInfoChecker } from './components/hostFunctions';
+import {
+    ChkAuthChecker,
+    CmdCheckChecker,
+    CmdHelpChecker,
+    CmdRunChecker,
+    CmdXmlChecker,
+    DltObjChecker,
+    FieldListChecker,
+    JobAttrChecker,
+    LastSplfChecker
+} from './components/hostFunctions';
 
-import { initializePrompter, CLPrompter, CLPrompterCallback } from './clPrompter';
+import {
+    initializePrompter,
+    CLPrompter,
+    CLPrompterCallback,
+    CLPrompterOptions,
+    CLPrompterResult,
+    registerCLPrompterHandler,
+    promptWithRegisteredCLPrompter,
+    unregisterCLPrompterHandler
+} from './clPrompter';
 import { CommandEntryViewProvider } from './commandEntryView';
 import { registerCodeSnippetManagerView } from './commandEntrySnippetView';
 import { CommandEntryJobManager } from './commandEntryJobManager';
@@ -710,8 +729,16 @@ export async function activate(context: vscode.ExtensionContext) {
         safeRegisterCode4iComponent('CmdRunChecker', cmdRunChecker);
         const fieldListChecker = new FieldListChecker();
         safeRegisterCode4iComponent('FieldListChecker', fieldListChecker);
-        const jobInfoChecker = new JobInfoChecker();
-        safeRegisterCode4iComponent('JobInfoChecker', jobInfoChecker);
+        const jobAttrChecker = new JobAttrChecker();
+        safeRegisterCode4iComponent('JobAttrChecker', jobAttrChecker);
+        const chkAuthChecker = new ChkAuthChecker();
+        safeRegisterCode4iComponent('ChkAuthChecker', chkAuthChecker);
+        const cmdCheckChecker = new CmdCheckChecker();
+        safeRegisterCode4iComponent('CmdCheckChecker', cmdCheckChecker);
+        const dltObjChecker = new DltObjChecker();
+        safeRegisterCode4iComponent('DltObjChecker', dltObjChecker);
+        const lastSplfChecker = new LastSplfChecker();
+        safeRegisterCode4iComponent('LastSplfChecker', lastSplfChecker);
 
         // If the extension activates while a connection is already live (e.g. lazy
         // activation), the ComponentManager won't have called our component for the
@@ -789,21 +816,93 @@ export async function activate(context: vscode.ExtensionContext) {
             }
         };
 
-        let jobInfoCheckRunning = false;
-        const runJobInfoCheck = async () => {
-            if (jobInfoCheckRunning) { return; }
-            jobInfoCheckRunning = true;
+        let jobAttrCheckRunning = false;
+        const runJobAttrCheck = async () => {
+            if (jobAttrCheckRunning) { return; }
+            jobAttrCheckRunning = true;
             try {
                 const conn = code4i?.instance?.getConnection();
                 if (!conn) { return; }
-                const state = await jobInfoChecker.getRemoteState(conn, '');
+                const state = await jobAttrChecker.getRemoteState(conn, '');
                 if (state.status !== 'Installed') {
-                    await jobInfoChecker.update(conn, '');
+                    await jobAttrChecker.update(conn, '');
                 }
             } catch (e) {
-                console.error(`[clPrompter] JobInfoChecker manual check failed: ${e}`);
+                console.error(`[clPrompter] JobAttrChecker manual check failed: ${e}`);
             } finally {
-                jobInfoCheckRunning = false;
+                jobAttrCheckRunning = false;
+            }
+        };
+
+        let chkAuthCheckRunning = false;
+        const runChkAuthCheck = async () => {
+            if (chkAuthCheckRunning) { return; }
+            chkAuthCheckRunning = true;
+            try {
+                const conn = code4i?.instance?.getConnection();
+                if (!conn) { return; }
+                const state = await chkAuthChecker.getRemoteState(conn, '');
+                if (state.status !== 'Installed') {
+                    await chkAuthChecker.update(conn, '');
+                }
+            } catch (e) {
+                console.error(`[clPrompter] ChkAuthChecker manual check failed: ${e}`);
+            } finally {
+                chkAuthCheckRunning = false;
+            }
+        };
+
+        let cmdCheckCheckRunning = false;
+        const runCmdCheckCheck = async () => {
+            if (cmdCheckCheckRunning) { return; }
+            cmdCheckCheckRunning = true;
+            try {
+                const conn = code4i?.instance?.getConnection();
+                if (!conn) { return; }
+                const state = await cmdCheckChecker.getRemoteState(conn, '');
+                if (state.status !== 'Installed') {
+                    await cmdCheckChecker.update(conn, '');
+                }
+            } catch (e) {
+                console.error(`[clPrompter] CmdCheckChecker manual check failed: ${e}`);
+            } finally {
+                cmdCheckCheckRunning = false;
+            }
+        };
+
+        let dltObjCheckRunning = false;
+        const runDltObjCheck = async () => {
+            if (dltObjCheckRunning) { return; }
+            dltObjCheckRunning = true;
+            try {
+                const conn = code4i?.instance?.getConnection();
+                if (!conn) { return; }
+                const state = await dltObjChecker.getRemoteState(conn, '');
+                if (state.status !== 'Installed') {
+                    await dltObjChecker.update(conn, '');
+                }
+            } catch (e) {
+                console.error(`[clPrompter] DltObjChecker manual check failed: ${e}`);
+            } finally {
+                dltObjCheckRunning = false;
+            }
+        };
+
+        let lastSplfCheckRunning = false;
+        const runLastSplfCheck = async () => {
+            if (lastSplfCheckRunning) { return; }
+            lastSplfCheckRunning = true;
+            try {
+                const conn = code4i?.instance?.getConnection();
+                if (!conn) { return; }
+                const state = await lastSplfChecker.getRemoteState(conn, '');
+                if (state.status !== 'Installed') {
+                    await lastSplfChecker.update(conn, '');
+                }
+            } catch (e) {
+                console.error(`[clPrompter] LastSplfChecker manual check failed: ${e}`);
+            } finally {
+                lastSplfCheckRunning = false;
             }
         };
 
@@ -830,21 +929,10 @@ export async function activate(context: vscode.ExtensionContext) {
                 const conn = code4i?.instance?.getConnection();
                 if (!conn || !conn.sqlRunnerAvailable()) { return; }
 
-                const beforeJobId = conn.getSqlJobId?.() ?? '<none>';
-                const beforeJobIdRaw = String((conn as any).getSqlJobId?.() ?? '<none>');
-                const beforeStatus = (conn as any).sqlJob?.getStatus?.() ?? '<unknown>';
-                const beforeSqlJobObject = getExtensionObjectId((conn as any).sqlJob) ?? '<none>';
-                if (isCommandEntryDebugLoggingEnabled()) {
-                    console.debug(`[clPrompter][KeepAlive] tick before sharedSqlJobObj=${beforeSqlJobObject} status=${beforeStatus} sharedJobId=${beforeJobId} sharedJobIdRaw=${beforeJobIdRaw}`);
-                }
-
                 // Skip the ping if the SQLJob is already busy — another query is in-flight,
                 // which itself proves the connection is alive.  No need to queue behind it.
                 const jobStatus: string | undefined = (conn as any).sqlJob?.getStatus?.();
                 if (jobStatus === 'busy') {
-                    if (isCommandEntryDebugLoggingEnabled()) {
-                        console.debug('[clPrompter][KeepAlive] skip ping because shared SQL job status is busy.');
-                    }
                     return;
                 }
                 try {
@@ -853,13 +941,6 @@ export async function activate(context: vscode.ExtensionContext) {
                     // separate warming.  We only need to keep the SQLJob itself alive so
                     // IBM i doesn't recycle the service job during idle periods.
                     await conn.runSQL(`VALUES 1`);
-                    const afterJobId = conn.getSqlJobId?.() ?? '<none>';
-                    const afterJobIdRaw = String((conn as any).getSqlJobId?.() ?? '<none>');
-                    const afterStatus = (conn as any).sqlJob?.getStatus?.() ?? '<unknown>';
-                    const afterSqlJobObject = getExtensionObjectId((conn as any).sqlJob) ?? '<none>';
-                    if (isCommandEntryDebugLoggingEnabled()) {
-                        console.debug(`[clPrompter][KeepAlive] ping OK after sharedSqlJobObj=${afterSqlJobObject} status=${afterStatus} sharedJobId=${afterJobId} sharedJobIdRaw=${afterJobIdRaw}`);
-                    }
                     commandEntry.refreshSqlJobId(conn as any);
                 } catch (err: any) {
                     // The keep-alive failed.  The most common cause is that the Mapepire
@@ -996,7 +1077,17 @@ export async function activate(context: vscode.ExtensionContext) {
             startKeepAlive();
             // Run UDTF checks in parallel, then prefetch — serialized relative
             // to prefetch so upload/compile steps don't race for SSH channels.
-            Promise.allSettled([runCmdHelpCheck(), runCmdXmlCheck(), runCmdRunCheck(), runFieldListCheck(), runJobInfoCheck()]).finally(() => prefetch());
+            Promise.allSettled([
+                runCmdHelpCheck(),
+                runCmdXmlCheck(),
+                runCmdRunCheck(),
+                runFieldListCheck(),
+                runJobAttrCheck(),
+                runChkAuthCheck(),
+                runCmdCheckCheck(),
+                runDltObjCheck(),
+                runLastSplfCheck()
+            ]).finally(() => prefetch());
         } else {
             scheduleStartupConnectionHydration();
         }
@@ -1150,13 +1241,36 @@ export async function activate(context: vscode.ExtensionContext) {
     }
 
     // Initialize the standalone CLPrompter API for external extensions
-    // This must be done after ClPromptPanel is defined
+    // This must be done after ClPromptPanel is defined.
+    // Keep the registration additive and non-breaking: a consumer may supply its own
+    // handler or let the built-in UI act as the default fallback.
     initializePrompter(ClPromptPanel, context.extensionUri);
+    registerCLPrompterHandler(async (command: string, options?: CLPrompterOptions) => {
+        return await CLPrompter(context.extensionUri, command, options);
+    }, context.extensionUri);
+
+    context.subscriptions.push(
+        vscode.commands.registerCommand('clPrompter.registerPromptHandler', (handler?: ((command: string, options?: CLPrompterOptions) => Promise<CLPrompterResult> | CLPrompterResult) | undefined) => {
+            registerCLPrompterHandler(handler, context.extensionUri);
+            return true;
+        }),
+        vscode.commands.registerCommand('clPrompter.unregisterPromptHandler', () => {
+            unregisterCLPrompterHandler();
+            return true;
+        }),
+        vscode.commands.registerCommand('clPrompter.promptWithRegisteredHandler', async (command: string, options?: CLPrompterOptions) => {
+            return await promptWithRegisteredCLPrompter(command, options);
+        })
+    );
+
     // Return API for external extensions
     return {
         CLPrompter,
         CLPrompterCallback,
-        multiSqlJob
+        multiSqlJob,
+        registerCLPrompterHandler,
+        unregisterCLPrompterHandler,
+        promptWithRegisteredCLPrompter
     };
 }
 

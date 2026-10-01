@@ -2,6 +2,16 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.0.53] - 2026-10-01
+
+### What's New
+- Added a generic, extensible registration hook for the CL Prompter so other integrations can supply a custom command-prompt handler without hard-coding extension IDs. The built-in CL Prompter continues to work normally, and the extension retains a safe fallback when no custom handler is registered.
+- Added new consistent interface to invoke the CL Prompter from anywhere via the codefori extension's API layer.
+
+- All SQL UDTF names used by this extension have been renamed consistently. We now incorporate an embedded underscore (`_`) character in the name to help make the names more consistent and unique.
+- All SQL UDTFs have had a version bump to insure they are re-uploaed and created on your host IBM i server.
+- Command Entry now allows users to use Shift+Enter to go to a new line. Linefeeds are translated to blanks when the statement is assembled.
+
 ## [1.0.52] - 2026-09-30
 
 ### What's Improved
@@ -11,7 +21,7 @@ All notable changes to this project are documented in this file.
   - `clPrompter.cmdEntryAutoMsgwCheckEnabled` (default: true)
   - `clPrompter.cmdEntryAutoMsgwCheckSeconds` (default: 30)
   - When the interval is 0 or less, automatic checks are disabled.
-- Added a new helper SQL function, `JOB_INFO()`, implemented as an RPG IV SQL UDTF. It returns current job status plus the inquiry message key and message queue information used for MSGW handling.
+- Added a new helper SQL function, `JOB_ATTR()`, implemented as an RPG IV SQL UDTF. It returns current job status plus the inquiry message key and message queue information used for MSGW handling.
 - MSGW prompt context is now richer by resolving the inquiry message from `MESSAGE_QUEUE_INFO`, so reply prompts include message ID and message text.
 - Command Entry output is cleaner during normal use by suppressing routine non-actionable diagnostics, while detailed traces remain available through `clPrompter.cmdEntryDebugLogging`.
 - CL Prompter handling was improved to reduce failures when a command does not exist or when the user lacks sufficient authority.

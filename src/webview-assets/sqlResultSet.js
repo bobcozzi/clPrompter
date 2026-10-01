@@ -2170,6 +2170,9 @@
         var wasRerun = rerunInFlight;
         rerunInFlight = false;
         var payload = message.payload;
+        if (sqlStatement && typeof payload.statement === 'string') {
+            sqlStatement.textContent = payload.statement;
+        }
         rows = (payload.rowCells && Array.isArray(payload.rowCells)) ? payload.rowCells.slice() : [];
         setCurrentColumns(payload.columns, payload.columnMetadata);
         resultTitle = String(payload.resultTitle || '').trim();

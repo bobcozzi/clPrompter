@@ -42,6 +42,13 @@ ORDER BY ORDINAL_POSITION`;
 }
 
 function extractSqlStatement(command: string): string | undefined {
+    const normalizeStatementWhitespace = (value: string): string => value
+        // Preserve token boundaries when users paste multiline SQL into Command Entry.
+        .replace(/[\r\n]+/g, ' ')
+        // Normalize all remaining whitespace (including NBSP) to plain spaces.
+        .replace(/[^\S\r\n]+/g, ' ')
+        .trim();
+
     const text = String(command ?? '');
 
     const explicitPrefix = detectCommandEntryPrefix(text);
@@ -54,17 +61,49 @@ function extractSqlStatement(command: string): string | undefined {
     // Explicit SQL mode remains the primary path.
     const match = text.match(/^\s*sql\s*:\s*([\s\S]*)$/i);
     if (match) {
-        const statement = (match[1] || '').trim();
+        const statement = normalizeStatementWhitespace(match[1] || '');
         return statement || undefined;
     }
 
     // Smart fallback: if SQL prefix is omitted, treat SELECT/VALUES/WITH/SET as SQL.
-    const trimmed = text.trim();
+    const trimmed = normalizeStatementWhitespace(text);
     if (/^(SELECT|VALUES|WITH|SET)\b/i.test(trimmed)) {
         return trimmed;
     }
 
     return undefined;
+}
+
+function sqlPreview(sql: string, maxLength = 220): string {
+    const normalized = String(sql ?? '')
+        .replace(/[\r\n]+/g, ' ')
+        .replace(/[^\S\r\n]+/g, ' ')
+        .trim();
+    if (normalized.length <= maxLength) {
+        return normalized;
+    }
+    return `${normalized.slice(0, maxLength)}...`;
+}
+
+function sqlFingerprint(sql: string): string {
+    // Lightweight stable hash for correlating statements across logs.
+    let hash = 5381;
+    for (let i = 0; i < sql.length; i += 1) {
+        hash = ((hash << 5) + hash) ^ sql.charCodeAt(i);
+    }
+    return (hash >>> 0).toString(16).padStart(8, '0');
+}
+
+function sqlTokenContext(sql: string, needle: string): string | undefined {
+    const upperSql = sql.toUpperCase();
+    const upperNeedle = needle.toUpperCase();
+    const index = upperSql.indexOf(upperNeedle);
+    if (index < 0) {
+        return undefined;
+    }
+    const start = Math.max(0, index - 30);
+    const end = Math.min(sql.length, index + upperNeedle.length + 30);
+    return sql.slice(start, end);
 }
 
 function toIsoTimestamp(date: Date): string {
@@ -82,6 +121,28 @@ function deriveSqlColumns(rows: Record<string, unknown>[]): string[] {
                 columns.push(key);
             }
         }
+    }
+    return columns;
+}
+
+function deriveColumnsFromMetadata(metadata: SqlColumnMetadata[] | undefined): string[] {
+    if (!metadata || metadata.length === 0) {
+        return [];
+    }
+
+    const columns: string[] = [];
+    const seen = new Set<string>();
+    for (const entry of metadata) {
+        const name = String(entry?.name ?? '').trim();
+        if (!name) {
+            continue;
+        }
+        const key = name.toUpperCase();
+        if (seen.has(key)) {
+            continue;
+        }
+        seen.add(key);
+        columns.push(name);
     }
     return columns;
 }
@@ -630,6 +691,10 @@ function hasTopLevelUserRowLimiter(sql: string): boolean {
     return false;
 }
 
+function isTopLevelWithStatement(sql: string): boolean {
+    return /^\s*WITH\b/i.test(stripTrailingSemicolon(sql));
+}
+
 function resolveConfiguredSqlFetchLimit(connection?: IBMi, context?: vscode.ExtensionContext): number {
     const config = vscode.workspace.getConfiguration('clPrompter');
     const connectionSettings = connection && context ? getConnectionSqlSettings(context, connection) : undefined;
@@ -679,6 +744,7 @@ function resolveConfiguredSqlPrefetchRows(connection?: IBMi, context?: vscode.Ex
 /** Executes CMD_RUN on Code for IBM i's existing shared SQL job. */
 export class CommandEntryService {
     private activeSqlSession: SqlPagingSession | undefined;
+    private lastSqlFingerprint: string | undefined;
 
     constructor(
         private readonly jobManager?: CommandEntryJobManager,
@@ -924,10 +990,15 @@ export class CommandEntryService {
         const autoColumnViewForSingleRow = typeof options?.autoColumnViewForSingleRowOverride === 'boolean'
             ? options.autoColumnViewForSingleRowOverride
             : getConnectionSqlSettings(this.context, connection).autoColumnViewForSingleRow;
-        const columns = deriveSqlColumns(rows);
+
         const runtimeMetadata = hasUsefulColumnMetadata(options?.columnMetadata)
             ? options?.columnMetadata
             : undefined;
+
+        const inferredColumns = deriveSqlColumns(rows);
+        const metadataColumns = deriveColumnsFromMetadata(runtimeMetadata);
+        const columns = inferredColumns.length > 0 ? inferredColumns : metadataColumns;
+
         const finalMetadata = enrichMetadataWithInferredTypes(columns, runtimeMetadata, rows);
         return {
             statement,
@@ -1084,6 +1155,7 @@ export class CommandEntryService {
         const startedAt = startedDate.toISOString();
         try {
             const sqlStatement = extractSqlStatement(command);
+            this.logSqlInfo(`query.trace.command isSql=${!!sqlStatement} commandLen=${String(command ?? '').length} commandPreview="${sqlPreview(command)}"`);
             if (sqlStatement) {
                 await this.closeSqlSession();
 
@@ -1091,9 +1163,26 @@ export class CommandEntryService {
                 const prefetchRows = resolveConfiguredSqlPrefetchRows(connection, this.context);
                 const unlimited = maxRows === NOMAX_SENTINEL;
                 const normalizedSql = stripTrailingSemicolon(sqlStatement);
+                const fingerprint = sqlFingerprint(normalizedSql);
+                const containsCreated = /\bCREATED\b/i.test(normalizedSql);
+                const mergedMissingImplOrder = /MISSING_IMPLORDER/i.test(normalizedSql);
+                const spacedMissingImplOrder = /MISSING_IMPL\s+ORDER/i.test(normalizedSql);
+                const createdContext = sqlTokenContext(normalizedSql, 'CREATED');
+                const missingContext = sqlTokenContext(normalizedSql, 'MISSING_IMPL');
+                const sameAsPrevious = this.lastSqlFingerprint === fingerprint;
+                this.lastSqlFingerprint = fingerprint;
                 const userManagedRowLimiter = hasTopLevelUserRowLimiter(normalizedSql);
+                const shouldBypassHostRowLimitPaging = isTopLevelWithStatement(normalizedSql);
+                const effectiveUserManagedRowLimiter = userManagedRowLimiter || shouldBypassHostRowLimitPaging;
                 this.logSqlInfo(`query.start continuationOnly=true dedicatedUsable=${this.jobManager?.isDedicatedUsable(connection) ?? false}`);
-                this.logSqlDiag(`query.start dedicatedUsable=${this.jobManager?.isDedicatedUsable(connection) ?? false} maxRows=${maxRows === NOMAX_SENTINEL ? '*NOMAX' : maxRows} prefetchRows=${prefetchRows} unlimited=${unlimited} userManagedLimiter=${userManagedRowLimiter}`);
+                this.logSqlInfo(`query.trace.sql fingerprint=${fingerprint} sameAsPrevious=${sameAsPrevious} sqlLen=${normalizedSql.length} containsCreated=${containsCreated} mergedMissingImplOrder=${mergedMissingImplOrder} spacedMissingImplOrder=${spacedMissingImplOrder} sqlPreview="${sqlPreview(normalizedSql)}"`);
+                if (createdContext) {
+                    this.logSqlInfo(`query.trace.sql tokenContext[CREATED]="${createdContext}"`);
+                }
+                if (missingContext) {
+                    this.logSqlInfo(`query.trace.sql tokenContext[MISSING_IMPL]="${missingContext}"`);
+                }
+                this.logSqlDiag(`query.start dedicatedUsable=${this.jobManager?.isDedicatedUsable(connection) ?? false} maxRows=${maxRows === NOMAX_SENTINEL ? '*NOMAX' : maxRows} prefetchRows=${prefetchRows} unlimited=${unlimited} userManagedLimiter=${userManagedRowLimiter} bypassHostRowPagingForWith=${shouldBypassHostRowLimitPaging}`);
                 let rows: Record<string, unknown>[];
                 let hasMoreRows = false;
                 let sessionId: string | undefined;
@@ -1101,7 +1190,7 @@ export class CommandEntryService {
 
                 let columnMetadata: SqlColumnMetadata[] | undefined;
 
-                if (userManagedRowLimiter) {
+                if (effectiveUserManagedRowLimiter) {
                     const result = await this.runSqlRowsWithDetails(connection, normalizedSql, undefined);
                     rows = result.rows;
                     columnMetadata = result.metadata;
@@ -1167,7 +1256,7 @@ export class CommandEntryService {
                 const rowLabel = rowCount === 1 ? 'row' : 'rows';
                 const effectiveRowsPerFetch = hasMoreRows ? Math.min(maxRows, prefetchRows) : maxRows;
                 const executionElapsedMs = queryElapsedMs ?? (Date.now() - started);
-                const sqlSummaryText = userManagedRowLimiter
+                const sqlSummaryText = effectiveUserManagedRowLimiter
                     ? `${rowCount} ${rowLabel} returned (user-managed row limiter)`
                     : unlimited
                         ? `${rowCount} ${rowLabel} returned (*NOMAX)`
@@ -1175,7 +1264,7 @@ export class CommandEntryService {
                             ? `${rowCount} ${rowLabel} returned (prefetched ${rowCount}; rows per fetch ${effectiveRowsPerFetch})`
                             : `${rowCount} ${rowLabel} returned (rows per fetch ${effectiveRowsPerFetch})`;
                 this.logSqlInfo(`query.end rows=${rowCount} hasMore=${hasMoreRows} sessionId=${sessionId ?? '<none>'}`);
-                this.logSqlDiag(`query.end rows=${rowCount} hasMore=${hasMoreRows} sessionId=${sessionId ?? '<none>'} fetchSize=${(unlimited || userManagedRowLimiter) ? '<none>' : effectiveRowsPerFetch}`);
+                this.logSqlDiag(`query.end rows=${rowCount} hasMore=${hasMoreRows} sessionId=${sessionId ?? '<none>'} fetchSize=${(unlimited || effectiveUserManagedRowLimiter) ? '<none>' : effectiveRowsPerFetch}`);
                 this.logSqlDiag(`query.messageCreated text="${sqlSummaryText}" elapsedMs=${queryElapsedMs ?? '<undefined>'} rowCount=${rowCount} hasMoreRows=${hasMoreRows} sessionId=${sessionId ?? '<none>'}`);
                 return {
                     id: id ?? `${started}-${Math.random().toString(36).slice(2, 8)}`,
@@ -1205,8 +1294,8 @@ export class CommandEntryService {
                     sqlResult: await this.buildSqlResultPayload(connection, normalizedSql, rows, {
                         sessionId,
                         hasMoreRows,
-                        fetchSize: (unlimited || userManagedRowLimiter) ? undefined : effectiveRowsPerFetch,
-                        prefetchSize: (unlimited || userManagedRowLimiter) ? undefined : Math.min(maxRows, prefetchRows),
+                        fetchSize: (unlimited || effectiveUserManagedRowLimiter) ? undefined : effectiveRowsPerFetch,
+                        prefetchSize: (unlimited || effectiveUserManagedRowLimiter) ? undefined : Math.min(maxRows, prefetchRows),
                         columnMetadata,
                         resultTitle: options?.resultTitle,
                         elapsedMs: queryElapsedMs,

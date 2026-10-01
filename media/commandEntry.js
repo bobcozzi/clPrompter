@@ -12,6 +12,7 @@
   const run = document.getElementById('run'), prompt = document.getElementById('prompt'), cmdEntryHelp = document.getElementById('cmdentry-help'), cmdEntrySettings = document.getElementById('cmdentry-settings'), toolbarMenu = document.getElementById('toolbar-menu'), toolbarMenuList = document.getElementById('toolbar-menu-list'), menuViewLog = document.getElementById('menu-view-log'), menuClearLog = document.getElementById('menu-clear-log'), menuClearSqlLog = document.getElementById('menu-clear-sql-log'), menuClearSqlHistory = document.getElementById('menu-clear-sql-history'), menuToggleSqlLog = document.getElementById('menu-toggle-sql-log'), menuToggleMessageDetails = document.getElementById('menu-toggle-message-details'), menuConnectionSettings = document.getElementById('menu-connection-settings'), menuUseSharedSqlJob = document.getElementById('menu-use-shared-sql-job'), menuUsePrivateSqlJob = document.getElementById('menu-use-private-sql-job'), menuStartNewJob = document.getElementById('menu-start-new-job'), menuClearHistory = document.getElementById('menu-clear-history'), menuRunMode = document.getElementById('menu-run-mode'), menuRunModeList = document.getElementById('menu-run-mode-list'), menuRunModeWrap = menuRunMode ? menuRunMode.closest('.toolbar-submenu-wrap') : null, menuRunModeRun = document.getElementById('menu-run-mode-run'), menuRunModeLimit = document.getElementById('menu-run-mode-limit'), menuRunModeCheck = document.getElementById('menu-run-mode-check'), historyPrev = document.getElementById('history-prev'), historyNext = document.getElementById('history-next'), statusJobMenu = document.getElementById('status-job-menu'), statusJobMenuCopy = document.getElementById('status-job-menu-copy'), statusJobMenuDisplayJoblog = document.getElementById('status-job-menu-display-joblog'), statusJobMenuCheckMsgw = document.getElementById('status-job-menu-check-msgw'), statusJobMenuToggleSqlJob = document.getElementById('status-job-menu-toggle-sql-job'), statusJobMenuConnectionSettings = document.getElementById('status-job-menu-connection-settings'), statusJobMenuReconnectServerJob = document.getElementById('status-job-menu-reconnect-server-job');
   const statusText = document.getElementById('status-text'), statusIdentity = document.getElementById('status-identity'), statusJobId = document.getElementById('status-jobid'), results = document.getElementById('results');
   let historyIndex = -1, runningStartedAt, runningTimerId, runningStatusPrefix = l10n.runningStatusPrefix || 'Running…', historyDraft = '', sqlJobPollingId;
+  let lastSubmittedRawCommand = '';
   let transientStatusUntil = 0;
   let transientStatusClearTimer;
   let statusJobSingleClickTimer;
@@ -776,7 +777,12 @@
     }
     updateMessageDetailsMenuLabel();
   };
-  const normalizeCommand = value => String(value || '').replace(/[\r\n]+/g, '');
+  const normalizeCommand = value => String(value || '')
+    // Preserve token boundaries when flattening multiline SQL/CL input.
+    .replace(/[\r\n]+/g, ' ')
+    // Normalize all other whitespace (including NBSP) to plain spaces.
+    .replace(/[^\S\r\n]+/g, ' ')
+    .trim();
   const lineCount = value => Math.max(minTextareaRows, String(value || '').split(/\r\n|\n|\r/).length);
   const rememberCommandHeight = heightPx => {
     const rounded = Math.max(baseMinHeightPx, Math.round(Number(heightPx || 0)));
@@ -1106,11 +1112,9 @@
     }
   }
   function requestRun() {
-    const normalized = normalizeCommand(command.value);
-    if (normalized !== command.value) {
-      command.value = normalized;
-      resizeCommandInput();
-    }
+    const rawCommand = String(command.value || '');
+    const normalized = normalizeCommand(rawCommand);
+    lastSubmittedRawCommand = rawCommand;
     save();
     vscode.postMessage({ type: 'run', command: normalized, mode: mode.value });
   }
@@ -1158,7 +1162,15 @@
       command.setSelectionRange(target, target);
       return;
     }
-    if (event.key === 'Enter') { event.preventDefault(); requestRun(); return; }
+    if (event.key === 'Enter') {
+      if (event.shiftKey) {
+        // Let the textarea insert a newline for multiline command editing.
+        return;
+      }
+      event.preventDefault();
+      requestRun();
+      return;
+    }
     if (event.key === 'F4' || event.key === 'f4' || event.code === 'F4') {
       event.preventDefault();
       requestPrompt();
@@ -1668,9 +1680,11 @@
         if (message.addToHistory !== false) {
           const executionIsSql = !!message.execution.sqlResult
             || (message.execution.messages || []).some(entry => String(entry.messageId || '').trim().toUpperCase() === 'SQL0000');
-          const recalledCommand = applySqlPrefixForRecall(message.execution.command, executionIsSql);
+          const historySourceCommand = lastSubmittedRawCommand || message.execution.command;
+          const recalledCommand = applySqlPrefixForRecall(historySourceCommand, executionIsSql);
           state.history = [{ command: recalledCommand, mode: message.execution.mode, isSql: executionIsSql }, ...state.history.filter(item => item.command !== recalledCommand || item.mode !== message.execution.mode)].slice(0, 100);
         }
+        lastSubmittedRawCommand = '';
         command.value = '';
         historyDraft = '';
         historyIndex = -1;
