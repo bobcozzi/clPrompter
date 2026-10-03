@@ -160,6 +160,8 @@ class SqlResultPanel {
     private stopLoadAllRequested = false;
     private readonly l10n = getSqlResultPanelL10n();
 
+    constructor(private readonly onDisposed?: () => void) { }
+
     private sanitizeExportBaseName(value?: string): string {
         const base = String(value ?? '').trim().toLowerCase().replace(/[^a-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '');
         return base || 'sql-results';
@@ -370,7 +372,7 @@ class SqlResultPanel {
         }
 
         const content = this.serializeResultSet(selection, columns, rows);
-        await vscode.workspace.fs.writeFile(uri, Buffer.from(content, 'utf8'));
+        await vscode.workspace.fs.writeFile(uri, new TextEncoder().encode(content));
         void vscode.window.showInformationMessage(vscode.l10n.t('Saved result set to {path}.', { path: uri.fsPath }));
     }
 
@@ -409,6 +411,7 @@ class SqlResultPanel {
                 this.panel = undefined;
                 this.activeSessionId = undefined;
                 this.activeResultTitle = undefined;
+                this.onDisposed?.();
             });
         } else {
             this.panel.reveal(vscode.ViewColumn.Beside, true);
@@ -638,26 +641,129 @@ class SqlResultPanel {
 }
 
 const singletonPanel = new SqlResultPanel();
+const snippetPanelsByKey = new Map<string, SqlResultPanel>();
+const snippetIdByPanelKey = new Map<string, string>();
+const preferredPanelKeyBySnippetId = new Map<string, string>();
+let sharedRequestHandler: SqlResultPanelRequestHandler | undefined;
 let sqlResultPanelExtensionUri: vscode.Uri | undefined;
+
+function normalizeSnippetId(value: unknown): string | undefined {
+    const text = String(value ?? '').trim();
+    return text.length > 0 ? text : undefined;
+}
+
+function normalizeSnippetRunInstanceId(value: unknown): string | undefined {
+    const text = String(value ?? '').trim();
+    return text.length > 0 ? text.replace(/[^a-zA-Z0-9_.-]+/g, '_') : undefined;
+}
+
+function buildSnippetReusePanelKey(snippetId: string): string {
+    return `snippet:${snippetId}`;
+}
+
+function buildSnippetForcedPanelKey(snippetId: string, runInstanceId: string): string {
+    return `snippet:${snippetId}:run:${runInstanceId}`;
+}
+
+function pickFallbackPreferredPanelKey(snippetId: string): string | undefined {
+    let fallback: string | undefined;
+    for (const [panelKey, ownedSnippetId] of snippetIdByPanelKey.entries()) {
+        if (ownedSnippetId === snippetId && snippetPanelsByKey.has(panelKey)) {
+            fallback = panelKey;
+        }
+    }
+    return fallback;
+}
+
+function createSnippetPanel(panelKey: string, snippetId: string): SqlResultPanel {
+    const panel = new SqlResultPanel(() => {
+        snippetPanelsByKey.delete(panelKey);
+        snippetIdByPanelKey.delete(panelKey);
+        const preferred = preferredPanelKeyBySnippetId.get(snippetId);
+        if (preferred === panelKey) {
+            const fallback = pickFallbackPreferredPanelKey(snippetId);
+            if (fallback) {
+                preferredPanelKeyBySnippetId.set(snippetId, fallback);
+            } else {
+                preferredPanelKeyBySnippetId.delete(snippetId);
+            }
+        }
+    });
+    panel.setRequestHandler(sharedRequestHandler);
+    snippetPanelsByKey.set(panelKey, panel);
+    snippetIdByPanelKey.set(panelKey, snippetId);
+    return panel;
+}
+
+function getOrCreateSnippetPanel(panelKey: string, snippetId: string): SqlResultPanel {
+    const existing = snippetPanelsByKey.get(panelKey);
+    if (existing) {
+        return existing;
+    }
+    return createSnippetPanel(panelKey, snippetId);
+}
+
+function resolvePanelForResult(result: SqlResultPayload): SqlResultPanel {
+    const snippetId = normalizeSnippetId(result.snippetId);
+    const snippetViewMode = result.snippetViewMode ?? 'singleton';
+
+    if (!snippetId || snippetViewMode === 'singleton') {
+        return singletonPanel;
+    }
+
+    if (snippetViewMode === 'forceNew') {
+        const runInstanceId = normalizeSnippetRunInstanceId(result.snippetRunInstanceId)
+            ?? `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+        const panelKey = buildSnippetForcedPanelKey(snippetId, runInstanceId);
+        preferredPanelKeyBySnippetId.set(snippetId, panelKey);
+        return getOrCreateSnippetPanel(panelKey, snippetId);
+    }
+
+    const preferredPanelKey = preferredPanelKeyBySnippetId.get(snippetId);
+    if (preferredPanelKey) {
+        const preferredPanel = snippetPanelsByKey.get(preferredPanelKey);
+        if (preferredPanel) {
+            return preferredPanel;
+        }
+    }
+
+    const reusePanelKey = buildSnippetReusePanelKey(snippetId);
+    preferredPanelKeyBySnippetId.set(snippetId, reusePanelKey);
+    return getOrCreateSnippetPanel(reusePanelKey, snippetId);
+}
 
 export function configureSqlResultPanelAssets(extensionUri: vscode.Uri): void {
     sqlResultPanelExtensionUri = extensionUri;
 }
 
 export function showSqlResultPanel(result: SqlResultPayload): void {
-    singletonPanel.show(result);
+    const panel = resolvePanelForResult(result);
+    panel.show(result);
 }
 
 export function setSqlResultPanelRequestHandler(handler: SqlResultPanelRequestHandler | undefined): void {
+    sharedRequestHandler = handler;
     singletonPanel.setRequestHandler(handler);
+    for (const panel of snippetPanelsByKey.values()) {
+        panel.setRequestHandler(handler);
+    }
 }
 
 export function notifySqlResultSessionClosed(message?: string): void {
     singletonPanel.markSessionClosed(message);
+    for (const panel of snippetPanelsByKey.values()) {
+        panel.markSessionClosed(message);
+    }
 }
 
 export function closeSqlResultPanel(): void {
     singletonPanel.dispose();
+    for (const panel of snippetPanelsByKey.values()) {
+        panel.dispose();
+    }
+    snippetPanelsByKey.clear();
+    snippetIdByPanelKey.clear();
+    preferredPanelKeyBySnippetId.clear();
 }
 
 function renderSqlResultHtml(result: SqlResultPayload, cspSource: string, scriptUri: string, codiconStylesheetUri: string, l10n: SqlResultPanelL10n): string {

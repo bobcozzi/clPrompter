@@ -3,6 +3,8 @@
  *
  * Source origin: /Users/cozzi/Downloads/projects/open-UDTF/src/CMD_RUN/CMD_RUN.SQL
  */
+import { applySqlSourceTokens } from '../sqlSourceTokens';
+
 const SQL_TEMPLATE = String.raw`
   -- CL Command Processor for IBM i
   -- This function runs a CL command.
@@ -80,9 +82,5 @@ The default is: <i>*RUN - Run a CL Command</i>'
 `;
 
 export function getCmdRunSQLSrc(library: string, version: number): string {
-  return SQL_TEMPLATE
-    .replace(/\\\$\{version\}/gi, String(version))
-    .replace(/\$\{version\}/gi, String(version))
-    .replace(/sqltools\./gi, `${library}.`)
-    .replace(/SQLTOOLS\//g, `${library}/`);
+  return applySqlSourceTokens(SQL_TEMPLATE, library, version);
 }

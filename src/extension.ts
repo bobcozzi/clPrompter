@@ -39,6 +39,7 @@ import {
     DltObjChecker,
     FieldListChecker,
     JobAttrChecker,
+    JobLiblChecker,
     LastSplfChecker
 } from './components/hostFunctions';
 
@@ -611,6 +612,7 @@ export async function activate(context: vscode.ExtensionContext) {
         vscode.commands.registerCommand('clprompter.commandEntry.menu.clearHistoryAndMessages', () => commandEntry.requestClearHistoryAndMessages()),
         vscode.commands.registerCommand('clprompter.commandEntry.menu.clearSqlHistoryAndMessages', () => commandEntry.requestClearSqlHistoryAndMessages()),
         vscode.commands.registerCommand('clprompter.commandEntry.menu.clearSqlLogMessages', () => commandEntry.requestClearSqlLogMessages()),
+        vscode.commands.registerCommand('clprompter.commandEntry.menu.displayActiveJoblog', () => commandEntry.requestDisplayJoblogForActiveSqlJob()),
         vscode.commands.registerCommand('clprompter.commandEntry.menu.openConnectionSettings', () => commandEntry.requestOpenConnectionSettings()),
         vscode.commands.registerCommand('clprompter.commandEntry.menu.setRunModeRun', () => {
             void syncRunModeMenuContexts('*RUN');
@@ -731,6 +733,8 @@ export async function activate(context: vscode.ExtensionContext) {
         safeRegisterCode4iComponent('FieldListChecker', fieldListChecker);
         const jobAttrChecker = new JobAttrChecker();
         safeRegisterCode4iComponent('JobAttrChecker', jobAttrChecker);
+        const jobLiblChecker = new JobLiblChecker();
+        safeRegisterCode4iComponent('JobLiblChecker', jobLiblChecker);
         const chkAuthChecker = new ChkAuthChecker();
         safeRegisterCode4iComponent('ChkAuthChecker', chkAuthChecker);
         const cmdCheckChecker = new CmdCheckChecker();
@@ -835,6 +839,24 @@ export async function activate(context: vscode.ExtensionContext) {
         };
 
         let chkAuthCheckRunning = false;
+        let jobLiblCheckRunning = false;
+        const runJobLiblCheck = async () => {
+            if (jobLiblCheckRunning) { return; }
+            jobLiblCheckRunning = true;
+            try {
+                const conn = code4i?.instance?.getConnection();
+                if (!conn) { return; }
+                const state = await jobLiblChecker.getRemoteState(conn, '');
+                if (state.status !== 'Installed') {
+                    await jobLiblChecker.update(conn, '');
+                }
+            } catch (e) {
+                console.error(`[clPrompter] JobLiblChecker manual check failed: ${e}`);
+            } finally {
+                jobLiblCheckRunning = false;
+            }
+        };
+
         const runChkAuthCheck = async () => {
             if (chkAuthCheckRunning) { return; }
             chkAuthCheckRunning = true;
@@ -1083,6 +1105,7 @@ export async function activate(context: vscode.ExtensionContext) {
                 runCmdRunCheck(),
                 runFieldListCheck(),
                 runJobAttrCheck(),
+                runJobLiblCheck(),
                 runChkAuthCheck(),
                 runCmdCheckCheck(),
                 runDltObjCheck(),

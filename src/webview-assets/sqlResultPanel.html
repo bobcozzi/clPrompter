@@ -386,9 +386,36 @@
             max-width: 240px;
         }
 
+        .table-wrap.is-few-columns thead th.sortable-col:last-child,
+        .table-wrap.is-few-columns tbody td:last-child {
+            min-width: min(100ch, calc(100vw - 280px));
+            max-width: min(180ch, calc(100vw - 120px));
+        }
+
         tbody td.sql-wide-cell {
             min-width: 320px;
             max-width: 640px;
+        }
+
+        .table-wrap.is-few-columns tbody td.sql-wide-cell:last-child {
+            min-width: min(130ch, calc(100vw - 260px));
+            max-width: min(240ch, calc(100vw - 100px));
+        }
+
+        thead th.sql-last-col-content-fit,
+        tbody td.sql-last-col-content-fit {
+            width: max-content;
+            max-width: max(480ch, calc(100vw - 120px));
+        }
+
+        tbody td.sql-last-col-content-fit {
+            white-space: pre;
+            word-break: normal;
+            overflow-wrap: normal;
+        }
+
+        tbody td.sql-wide-cell.sql-last-col-content-fit {
+            min-width: 0;
         }
 
         tbody td.sql-null-cell {

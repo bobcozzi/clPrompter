@@ -1,16 +1,18 @@
 import IBMi from '@halcyontech/vscode-ibmi-types/api/IBMi';
 import * as vscode from 'vscode';
 import { buildChgCurlibCommandFromCurrentLibrary, buildChgLiblCommandFromLibraryList } from './commandEntryChgLibl';
+import { getUDTFLibrary } from './components/hostFunctions';
 import { CLPrompter } from './clPrompter';
 import { CommandEntryJobManager } from './commandEntryJobManager';
 import { CommandEntryHistory, CommandExecutionMode, SqlResultPayload, determineOutcome, mapCommandMessages } from './commandEntryModel';
 import { detectCommandEntryPrefix } from './commandEntryPrefixes';
 import { CommandEntryService } from './commandEntryService';
 import { buildMsgwReplyCommandForQueue, checkForMsgw } from './commandEntryMsgw';
-import { BUILT_IN_SQL_SNIPPETS, CommandEntrySqlSnippet } from './commandEntrySnippets';
+import { BUILT_IN_SQL_SNIPPETS, CommandEntrySnippetEnvironment, CommandEntrySqlSnippet } from './commandEntrySnippets';
 import { formatCLCommandText } from './formatCL';
 import { buildImmediateSessionContextSql, buildRunAfterSqlJobInitDefaults, getConnectionSqlSessionOptions, getConnectionSqlSettings, normalizeSchemaSessionContextValue, normalizeSessionContextValue, splitLibraryListTokens, splitRunAfterSqlJobInitStatements, updateConnectionSqlSettings } from './commandEntrySqlSettings';
 import { closeSqlResultPanel, configureSqlResultPanelAssets, notifySqlResultSessionClosed, setSqlResultPanelRequestHandler, showSqlResultPanel } from './sqlResultPanel';
+import { SnippetTemplateContext, resolveSnippetTemplateValue } from './commandEntrySnippetResolution';
 
 const HISTORY_KEY = 'commandEntry.history';
 const MAX_HISTORY = 100;
@@ -37,6 +39,7 @@ type CommandEntryRequest =
     | { type: 'requestHistoryPicker' }
     | { type: 'copyCommand'; command: string }
     | { type: 'copySqlJobId'; sqlJobId: string }
+    | { type: 'requestDisplayActiveJoblog' }
     | { type: 'requestDisplayJoblog'; sqlJobId: string }
     | { type: 'requestCheckForMsgw'; sqlJobId: string }
     | { type: 'requestSqlJobId' }
@@ -72,6 +75,7 @@ export interface CodeSnippetRecord {
     label: string;
     codeTemplate: string;
     group: string;
+    environment?: CommandEntrySnippetEnvironment;
     singleRowResultView?: 'row' | 'column';
     order?: number;
     source: 'built-in' | 'user';
@@ -104,13 +108,8 @@ function normalizeSnippetOrder(value: unknown): number | undefined {
     return whole >= 0 ? whole : undefined;
 }
 
-interface SnippetTemplateContext {
-    sqlJobId?: string;
-    sqlJobName?: string;
-    sqlJobNumber?: string;
-    currentUser?: string;
-    currentLibrary?: string;
-    userSBSList?: string;
+interface ExecuteSnippetOptions {
+    forceNewView?: boolean;
 }
 function isSqlCommandText(command: string): boolean {
     const text = String(command ?? '');
@@ -286,6 +285,8 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
     private readonly service: CommandEntryService;
     private readonly onDidChangeCodeSnippetsEmitter = new vscode.EventEmitter<void>();
     public readonly onDidChangeCodeSnippets = this.onDidChangeCodeSnippetsEmitter.event;
+    private snippetRefreshDebounceTimer: ReturnType<typeof setTimeout> | undefined;
+    private lastSnippetDisplayContextKey: string | undefined;
 
     constructor(
         private readonly context: vscode.ExtensionContext,
@@ -421,6 +422,15 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
     requestClearSqlLogMessages(): void { void this.clearSqlLogMessagesWithConfirmation(); }
     requestClearSqlHistoryAndMessages(): void { void this.clearSqlHistoryAndMessagesWithConfirmation(); }
     requestClearHistoryAndMessages(): void { void this.clearHistoryAndMessagesWithConfirmation(); }
+    requestDisplayJoblogForActiveSqlJob(): void {
+        const sqlJobId = this.currentSqlJobId();
+        if (!sqlJobId) {
+            this.post({ type: 'notice', message: vscode.l10n.t('No SQL job ID is available.') });
+            return;
+        }
+
+        void this.displayJoblogForSqlJob(sqlJobId);
+    }
     requestOpenConnectionSettings(): void { void this.openCmdEntrySettingsPanel(); }
     requestOpenHelp(): void { void this.openCmdEntryHelpPanel(); }
     requestOpenSettings(): void { void vscode.commands.executeCommand('workbench.action.openSettings', 'clPrompter.cmdEntry'); }
@@ -430,19 +440,26 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
         this.postRunModeNotice(mode);
         this.post({ type: 'focusInput' });
     }
-    async executeCodeSnippetById(id: string): Promise<void> { await this.executeSnippet(id); }
+    async executeCodeSnippetById(id: string, options?: ExecuteSnippetOptions): Promise<void> { await this.executeSnippet(id, options); }
     resolveSnippetTemplateText(template: string): { resolved: string; missing: string[] } {
         const connection = this.getConnection();
         const context = this.buildSnippetContext(connection);
         const resolution = this.resolveSqlTemplate(template, context);
         return resolution;
     }
+    private resolveSnippetDisplayLabel(snippet: CommandEntrySqlSnippet): string {
+        const connection = this.getConnection();
+        const context = this.buildSnippetContext(connection, snippet);
+        return resolveSnippetTemplateValue(snippet.label, context).resolved;
+    }
+
     listCodeSnippets(): CodeSnippetRecord[] {
         return this.getMergedSqlSnippets().map((snippet) => ({
             id: snippet.id,
-            label: snippet.label,
+            label: this.resolveSnippetDisplayLabel(snippet),
             codeTemplate: snippet.stmt,
             group: snippet.group,
+            environment: snippet.environment,
             singleRowResultView: snippet.singleRowResultView,
             order: snippet.order,
             source: snippet.source
@@ -666,6 +683,9 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
             case 'copySqlJobId':
                 await this.copySqlJobIdToClipboard(message.sqlJobId);
                 break;
+            case 'requestDisplayActiveJoblog':
+                this.requestDisplayJoblogForActiveSqlJob();
+                break;
             case 'requestDisplayJoblog':
                 await this.displayJoblogForSqlJob(message.sqlJobId);
                 break;
@@ -879,6 +899,29 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
             return;
         }
 
+        const snippetContext: SnippetTemplateContext = {
+            ...this.buildSnippetContext(connection, fullJoblogSnippet),
+            ...this.parseSqlJobParts(qualifiedJob),
+            sqlJobId: qualifiedJob,
+            resultSqlJobId: qualifiedJob
+        };
+        const statementResolution = this.resolveSqlTemplate(fullJoblogSnippet.stmt, snippetContext);
+        if (statementResolution.missing.length > 0) {
+            this.post({
+                type: 'notice',
+                message: vscode.l10n.t('Unable to resolve full joblog SQL template values: {values}', {
+                    values: statementResolution.missing.map((name) => `\${${name}}`).join(', ')
+                })
+            });
+            return;
+        }
+
+        const titleTemplate = fullJoblogSnippet.title ?? fullJoblogSnippet.label;
+        const titleResolution = this.resolveSqlTemplate(titleTemplate, snippetContext);
+        const resultTitle = titleResolution.missing.length > 0
+            ? fullJoblogSnippet.label
+            : titleResolution.resolved;
+
         const hasActiveDedicatedJob = this.jobManager.hasActiveDedicatedJob(connection);
         const shouldUseSharedJoblogPath = this.isUsingSharedSqlJob(connection) && !hasActiveDedicatedJob;
 
@@ -888,24 +931,9 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
                 return;
             }
 
-            const snippetContext: SnippetTemplateContext = {
-                ...this.buildSnippetContext(connection),
-                sqlJobId: qualifiedJob
-            };
-            const resolution = this.resolveSqlTemplate(fullJoblogSnippet.stmt, snippetContext);
-            if (resolution.missing.length > 0) {
-                this.post({
-                    type: 'notice',
-                    message: vscode.l10n.t('Unable to resolve full joblog SQL template values: {values}', {
-                        values: resolution.missing.map((name) => `\${${name}}`).join(', ')
-                    })
-                });
-                return;
-            }
-
-            const command = `SQL: ${resolution.resolved}`;
+            const command = `SQL: ${statementResolution.resolved}`;
             const execution = await this.service.execute(connection, command, '*RUN', undefined, {
-                resultTitle: fullJoblogSnippet.label,
+                resultTitle,
                 autoColumnViewForSingleRowOverride: false
             });
             if (execution.failure) {
@@ -922,11 +950,11 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
         }
 
         try {
-            const rows = await this.jobManager.queryJoblog(connection, qualifiedJob);
+            const rows = await this.jobManager.queryWithHelperJob(connection, statementResolution.resolved, 'DisplayJoblog');
             const columns = Array.from(new Set(rows.flatMap((row) => Object.keys(row))));
             const sqlResult: SqlResultPayload = {
-                statement: fullJoblogSnippet.stmt,
-                resultTitle: fullJoblogSnippet.label,
+                statement: statementResolution.resolved,
+                resultTitle,
                 columns,
                 rows,
                 rowCount: rows.length,
@@ -1376,6 +1404,12 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
             logToCommandEntryLog?: boolean;
             resultTitle?: string;
             singleRowResultView?: 'row' | 'column';
+            forceSharedSqlJob?: boolean;
+            forcePoolSqlJob?: boolean;
+            snippetId?: string;
+            snippetLabel?: string;
+            snippetViewMode?: 'singleton' | 'reuse' | 'forceNew';
+            snippetRunInstanceId?: string;
         } = {}
     ): Promise<void> {
         const promptPrefixResolution = resolvePromptPrefixedCommand(command);
@@ -1445,6 +1479,9 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
 
         this.running = true;
         this.activeExecutionId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+        const runLane = this.getRunLane(connection, options);
+        const runLaneId = this.activeExecutionId;
+        this.postRunLane('start', runLane, runLaneId, Date.now());
         this.refreshMsgwAutoCheckMonitor();
         const sqlJobId = this.currentSqlJobId(connection);
         const dedicatedState = this.jobManager.getState(connection);
@@ -1469,11 +1506,17 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
         try {
             const execution = await this.service.execute(connection, command, mode, this.activeExecutionId, {
                 resultTitle: options.resultTitle,
+                snippetId: options.snippetId,
+                snippetLabel: options.snippetLabel,
+                snippetViewMode: options.snippetViewMode,
+                snippetRunInstanceId: options.snippetRunInstanceId,
                 autoColumnViewForSingleRowOverride: options.singleRowResultView === 'row'
                     ? false
                     : options.singleRowResultView === 'column'
                         ? true
-                        : undefined
+                        : undefined,
+                forceSharedSqlJob: options.forceSharedSqlJob,
+                forcePoolSqlJob: options.forcePoolSqlJob
             });
             let executionForPost = isSql
                 ? { ...execution, command: ensureSqlPrefixForRecall(execution.command, true) }
@@ -1538,6 +1581,7 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
                 completionNotice = sqlNotLoggedMessage;
             }
         } finally {
+            this.postRunLane('end', runLane, runLaneId);
             this.running = false;
             this.activeExecutionId = undefined;
             this.stopMsgwAutoCheckMonitor();
@@ -2126,57 +2170,161 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
         };
     }
 
-    private buildSnippetContext(connection: IBMi | undefined): SnippetTemplateContext {
-        const sqlJobId = this.currentSqlJobId(connection) || connection?.getSqlJobId?.();
-        const parts = this.parseSqlJobParts(sqlJobId);
+    private buildSnippetContext(connection: IBMi | undefined, snippet?: CommandEntrySqlSnippet): SnippetTemplateContext {
+        const commandEntrySqlJobId = this.currentSqlJobId(connection) || connection?.getSqlJobId?.();
+        const sharedSqlJobId = connection?.getSqlJobId?.();
+        const c4iJobId = sharedSqlJobId || commandEntrySqlJobId;
+        const resultSqlJobId = snippet?.environment === 'c4iShared'
+            ? c4iJobId
+            : commandEntrySqlJobId;
+        const parts = this.parseSqlJobParts(commandEntrySqlJobId);
         const config = connection?.getConfig?.();
         const extensionConfig = vscode.workspace.getConfiguration('clPrompter');
         const userSBSList = normalizeSnippetSubsystemList(extensionConfig.get<string>('cmdEntrySnippetsACTSBS', ''));
+        const funcLib = connection ? getUDTFLibrary(connection) : undefined;
         return {
             sqlJobId: parts.sqlJobId,
             sqlJobName: parts.sqlJobName,
             sqlJobNumber: parts.sqlJobNumber,
+            sharedSqlJobId: sharedSqlJobId?.trim() || undefined,
+            resultSqlJobId: resultSqlJobId?.trim() || undefined,
+            c4iJobId: c4iJobId?.trim() || undefined,
             currentUser: connection?.currentUser,
             currentLibrary: typeof config?.currentLibrary === 'string' ? config.currentLibrary : undefined,
-            userSBSList
+            userSBSList,
+            funcLib: funcLib?.trim() || undefined
         };
+    }
+
+    private buildSnippetDisplayContextKey(connection: IBMi | undefined): string {
+        const context = this.buildSnippetContext(connection);
+        return JSON.stringify({
+            sqlJobId: context.sqlJobId ?? '',
+            sqlJobName: context.sqlJobName ?? '',
+            sqlJobNumber: context.sqlJobNumber ?? '',
+            sharedSqlJobId: context.sharedSqlJobId ?? '',
+            resultSqlJobId: context.resultSqlJobId ?? '',
+            c4iJobId: context.c4iJobId ?? '',
+            currentUser: context.currentUser ?? '',
+            currentLibrary: context.currentLibrary ?? '',
+            userSBSList: context.userSBSList ?? '',
+            funcLib: context.funcLib ?? ''
+        });
     }
 
     private resolveSqlTemplate(template: string, context: SnippetTemplateContext): { resolved: string; missing: string[] } {
-        const tokenValues: Record<string, string | undefined> = {
-            sqlJobId: context.sqlJobId,
-            sqlJobName: context.sqlJobName,
-            sqlJobNumber: context.sqlJobNumber,
-            currentUser: context.currentUser,
-            currentLibrary: context.currentLibrary,
-            userSBSList: context.userSBSList
-        };
-
-        const missing = new Set<string>();
-        const resolved = template.replace(/\$\{([A-Za-z0-9_]+)\}/g, (_all, tokenName: string) => {
-            const key = String(tokenName || '').trim();
-            if (!(key in tokenValues)) {
-                return `\${${key}}`;
-            }
-            const value = tokenValues[key];
-            if (key === 'userSBSList') {
-                return String(value ?? '').replace(/'/g, "''");
-            }
-            if (!value || !String(value).trim()) {
-                missing.add(key);
-                return `\${${key}}`;
-            }
-            return String(value).replace(/'/g, "''");
-        });
-
-        return { resolved, missing: [...missing] };
+        return resolveSnippetTemplateValue(template, context);
     }
 
-    private async executeSnippet(snippetId: string): Promise<void> {
+    private getSnpEnv(snippet?: CommandEntrySqlSnippet): CommandEntrySnippetEnvironment {
+        const env = snippet?.environment;
+        return env === 'c4iShared' || env === 'cmdEntryPool' || env === 'cmdEntry'
+            ? env
+            : 'cmdEntry';
+    }
+
+    private getSnpRouteOpts(snippet?: CommandEntrySqlSnippet): { forceSharedSqlJob?: boolean; forcePoolSqlJob?: boolean } {
+        const env = this.getSnpEnv(snippet);
+        if (env === 'c4iShared') {
+            return { forceSharedSqlJob: true };
+        }
+        if (env === 'cmdEntryPool') {
+            return { forcePoolSqlJob: true };
+        }
+        return {};
+    }
+
+    private getRunLane(
+        connection: IBMi | undefined,
+        options?: { forceSharedSqlJob?: boolean; forcePoolSqlJob?: boolean }
+    ): 'C4i' | 'Pool' | 'Cmd' {
+        if (options?.forcePoolSqlJob) {
+            return 'Pool';
+        }
+        if (options?.forceSharedSqlJob || this.isUsingSharedSqlJob(connection)) {
+            return 'C4i';
+        }
+        return 'Cmd';
+    }
+
+    private postRunLane(
+        action: 'start' | 'end',
+        lane: 'C4i' | 'Pool' | 'Cmd',
+        id: string,
+        startedAt?: number
+    ): void {
+        this.post({ type: 'runLane', action, lane, id, startedAt });
+    }
+
+    private async runSnpPoolNow(
+        connection: IBMi,
+        snippet: CommandEntrySqlSnippet,
+        statement: string,
+        resultTitle: string,
+        snippetViewMode: 'singleton' | 'reuse' | 'forceNew',
+        snippetRunInstanceId?: string
+    ): Promise<void> {
+        const sqlLike = isSqlCommandText(statement);
+        const addToHistory = this.shouldAddToHistory('snippet', sqlLike);
+        const executionId = `${Date.now()}-pool-${Math.random().toString(36).slice(2, 8)}`;
+        const startedAt = Date.now();
+        this.postRunLane('start', 'Pool', executionId, startedAt);
+
+        try {
+            const execution = await this.service.execute(connection, statement, '*RUN', executionId, {
+                resultTitle,
+                snippetId: snippet.id,
+                snippetLabel: snippet.label,
+                snippetViewMode,
+                snippetRunInstanceId,
+                autoColumnViewForSingleRowOverride: snippet.singleRowResultView === 'row'
+                    ? false
+                    : snippet.singleRowResultView === 'column'
+                        ? true
+                        : undefined,
+                forcePoolSqlJob: true
+            });
+
+            let executionForPost = sqlLike
+                ? { ...execution, command: ensureSqlPrefixForRecall(execution.command, true) }
+                : execution;
+
+            if (addToHistory) {
+                this.remember({ command: ensureSqlPrefixForRecall(statement, sqlLike), mode: '*RUN', isSql: sqlLike });
+            }
+
+            if (execution.failure) {
+                this.safeOutputAppendLine(`[Cmd Entry] Snippet pool execution failed: ${execution.failure}`);
+            }
+
+            if (executionForPost.sqlResult) {
+                showSqlResultPanel(executionForPost.sqlResult);
+            }
+
+            const addToCommandEntryLog = !!(execution.failure || execution.outcome === 'error');
+            this.post({
+                type: 'execution',
+                execution: executionForPost,
+                addToHistory,
+                addToCommandEntryLog
+            });
+        } finally {
+            this.postRunLane('end', 'Pool', executionId);
+        }
+    }
+
+    private async executeSnippet(snippetId: string, options: ExecuteSnippetOptions = {}): Promise<void> {
         try {
             const snippet = this.getMergedSqlSnippets().find((item) => item.id === snippetId);
             if (!snippet) {
                 this.post({ type: 'notice', message: vscode.l10n.t('The selected snippet is no longer available.') });
+                return;
+            }
+
+            const snpEnv = this.getSnpEnv(snippet);
+
+            if (this.running && snpEnv !== 'cmdEntryPool') {
+                this.post({ type: 'notice', message: vscode.l10n.t("Snippet '{label}' is already running. Please wait for completion.", { label: snippet.label }) });
                 return;
             }
 
@@ -2186,26 +2334,60 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
                 return;
             }
 
-            const resolution = this.resolveSnippetTemplateText(snippet.stmt);
-            if (resolution.missing.length > 0) {
+            const snippetContext = this.buildSnippetContext(connection, snippet);
+            const statementResolution = this.resolveSqlTemplate(snippet.stmt, snippetContext);
+            if (statementResolution.missing.length > 0) {
                 this.post({
                     type: 'notice',
                     message: vscode.l10n.t("Snippet '{label}' requires unavailable value(s): {missing}", {
                         label: snippet.label,
-                        missing: resolution.missing.map((name) => `\${${name}}`).join(', ')
+                        missing: statementResolution.missing.map((name) => `\${${name}}`).join(', ')
                     })
                 });
                 return;
             }
 
-            const sqlLike = isSqlCommandText(resolution.resolved);
+            const titleTemplate = snippet.title ?? snippet.label;
+            const titleResolution = this.resolveSqlTemplate(titleTemplate, snippetContext);
+            const resultTitle = titleResolution.missing.length > 0
+                ? snippet.label
+                : titleResolution.resolved;
+            const sqlLike = isSqlCommandText(statementResolution.resolved);
+            const openInNewViewEnabled = this.openSnippetsInNewViewEnabled();
+            const snippetViewMode: 'singleton' | 'reuse' | 'forceNew' = options.forceNewView
+                ? 'forceNew'
+                : openInNewViewEnabled
+                    ? 'reuse'
+                    : 'singleton';
+            const snippetRunInstanceId = snippetViewMode === 'forceNew'
+                ? `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+                : undefined;
+            const snpRoute = this.getSnpRouteOpts(snippet);
 
-            await this.run(resolution.resolved, '*RUN', {
+            if (snpRoute.forcePoolSqlJob) {
+                await this.runSnpPoolNow(
+                    connection,
+                    snippet,
+                    statementResolution.resolved,
+                    resultTitle,
+                    snippetViewMode,
+                    snippetRunInstanceId
+                );
+                return;
+            }
+
+            await this.run(statementResolution.resolved, '*RUN', {
                 sourceType: 'snippet',
                 logToHistory: this.shouldAddToHistory('snippet', sqlLike),
                 logToCommandEntryLog: this.shouldAddToCommandEntryLog('snippet', sqlLike),
-                resultTitle: snippet.label,
-                singleRowResultView: snippet.singleRowResultView
+                resultTitle,
+                snippetId: snippet.id,
+                snippetLabel: snippet.label,
+                snippetViewMode,
+                snippetRunInstanceId,
+                singleRowResultView: snippet.singleRowResultView,
+                forceSharedSqlJob: snpRoute.forceSharedSqlJob,
+                forcePoolSqlJob: snpRoute.forcePoolSqlJob
             });
         } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
@@ -2347,7 +2529,14 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
     }
 
     private notifyCodeSnippetsChanged(): void {
-        this.onDidChangeCodeSnippetsEmitter.fire();
+        if (this.snippetRefreshDebounceTimer) {
+            clearTimeout(this.snippetRefreshDebounceTimer);
+        }
+
+        this.snippetRefreshDebounceTimer = setTimeout(() => {
+            this.snippetRefreshDebounceTimer = undefined;
+            this.onDidChangeCodeSnippetsEmitter.fire();
+        }, 250);
     }
 
     private failed(command: string, mode: CommandExecutionMode, failure: string) {
@@ -2566,6 +2755,11 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
         return String(value || '#3794FF').trim() || '#3794FF';
     }
 
+    private openSnippetsInNewViewEnabled(): boolean {
+        const config = vscode.workspace.getConfiguration('clPrompter');
+        return config.get<boolean>('cmdEntryOpenSnippetsInNewView', true);
+    }
+
     private resolveWildcardLookupRowLimit(connection?: IBMi): number {
         const settings = getConnectionSqlSettings(this.context, connection);
         const configured = Number.isInteger(settings.fetchRowLimit) && settings.fetchRowLimit > 0
@@ -2669,6 +2863,7 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
         const sqlJobId = this.currentSqlJobId(connection);
         const statusIdentity = this.currentStatusIdentity(connection);
         this.lastPostedSqlJobId = sqlJobId;
+        const snippetDisplayContextKey = this.buildSnippetDisplayContextKey(connection);
 
         const debugEnabled = vscode.workspace.getConfiguration('clPrompter').get<boolean>('cmdEntryDebugLogging', false);
         if (debugEnabled) {
@@ -2681,6 +2876,10 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
             });
         }
         this.post({ type: 'sqlJobId', sqlJobId, statusIdentity });
+        if (snippetDisplayContextKey !== this.lastSnippetDisplayContextKey) {
+            this.lastSnippetDisplayContextKey = snippetDisplayContextKey;
+            this.notifyCodeSnippetsChanged();
+        }
     }
 
     private currentStatusIdentity(connection = this.getConnection()): string | undefined {
@@ -3560,7 +3759,7 @@ FETCH FIRST 1 ROW ONLY`;
             : vscode.l10n.t('Mapepire single-user mode detected.');
         const sessionReadOnlyNotice = useSharedJob
             ? `<div class="small">${vscode.l10n.t('Shared SQL jobs use the active C4i IBM i job settings and cannot be changed here.')}</div>`
-            : `<div class="small">${vscode.l10n.t('Easily change the active Cmd Entry SQL Job PATH and SCHEMA by modifying these settings and press Apply now.')}</div>`;
+            : `<div class="small">${vscode.l10n.t('Easily change the active Cmd Entry SQL Job PATH and SCHEMA by modifying these settings and press Apply Now.')}</div>`;
         let liveSessionContext: { currentSchema?: string; currentPath?: string } = {};
         try {
             liveSessionContext = await this.resolveCurrentSchemaAndPath(connection);
@@ -3607,13 +3806,7 @@ FETCH FIRST 1 ROW ONLY`;
         const initialSchemaEscaped = this.escapeHtmlAttribute(initialSchema);
         const initialPathEscaped = this.escapeHtmlAttribute(initialPath);
         const lobThresholdEscaped = this.escapeHtmlAttribute(String(lobThreshold));
-        const reconnectingLabel = vscode.l10n.t('Reconnecting...');
-        const reconnectSuccessLabel = vscode.l10n.t('Reconnect successful');
-        const reconnectButtonLabel = reconnectStatus === 'reconnecting'
-            ? reconnectingLabel
-            : reconnectStatus === 'success'
-                ? vscode.l10n.t('Reconnect successful. Job {jobId}', { jobId: effectiveJobId })
-                : vscode.l10n.t('Reconnect server job');
+        const reconnectButtonLabel = vscode.l10n.t('Reconnect Cmd Entry Server Job');
         const reconnectButtonDisabled = reconnectStatus === 'reconnecting' || !isDedicatedUsable ? 'disabled' : '';
         const reconnectStatusBlock = reconnectStatus === 'success'
             ? `<div class="small success-message">${vscode.l10n.t('Reconnect successful. Job {jobId} is active.', { jobId: effectiveJobId })}</div>`
@@ -3658,7 +3851,7 @@ FETCH FIRST 1 ROW ONLY`;
         const lobThresholdHelpText = vscode.l10n.t('LOBs larger than this size are fetched in pieces by the SQL job.');
         const schemaLabel = vscode.l10n.t('SCHEMA');
         const pathLabel = vscode.l10n.t('PATH');
-        const applyNowLabel = vscode.l10n.t('Apply now');
+        const applyNowLabel = vscode.l10n.t('Apply Now');
         const applyNowHelpText = vscode.l10n.t('Applies both values shown above to the active SQL job.');
         const autoColumnViewLabel = vscode.l10n.t('Use Column View when result set size is 1 row');
         const autoColumnViewHelpText = vscode.l10n.t('When enabled, an SQL run from Command Entry that returns exactly one row automatically switches to the custom Column View presentation.');
@@ -3985,7 +4178,6 @@ FETCH FIRST 1 ROW ONLY`;
                             return;
                         }
                         reconnect.disabled = true;
-                        reconnect.textContent = '${reconnectingLabel}';
                         vscode.postMessage({ type: 'reconnectPrivateSqlJob', ...collectValues() });
           });
 
@@ -4285,6 +4477,9 @@ FETCH FIRST 1 ROW ONLY`;
                             <option value="*LIMIT" title="${vscode.l10n.t('Run as Limited USRPRF')}">${vscode.l10n.t('Limit')}</option>
                             <option value="*CHECK" title="${vscode.l10n.t('Syntax Check Only')}">${vscode.l10n.t('Check')}</option>
                         </select>
+                    </div>
+                    <div id="run-lane" role="status" aria-live="polite" aria-label="${vscode.l10n.t('Active run lanes')}">
+                        <span id="run-lane-text"></span>
                     </div>
                     <div id="status" role="status" aria-live="polite">
                         <span id="status-text"></span>

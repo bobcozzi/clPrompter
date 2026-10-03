@@ -1,8 +1,12 @@
+export type CommandEntrySnippetEnvironment = 'cmdEntry' | 'c4iShared' | 'cmdEntryPool';
+
 export interface CommandEntrySqlSnippet {
     id: string;
     label: string;
+    title?: string;
     stmt: string;
     group: string;
+    environment?: CommandEntrySnippetEnvironment;
     singleRowResultView?: 'row' | 'column';
     order?: number;
     source: 'built-in' | 'user';
@@ -15,7 +19,8 @@ export interface CommandEntrySqlSnippet {
 export const BUILT_IN_SQL_SNIPPETS: ReadonlyArray<CommandEntrySqlSnippet> = [
     {
         id: 'builtin.lastest-joblog',
-        label: 'Joblog (last 200 msgs)',
+        label: 'Joblog (last 200 msgs) ${sqlJobId}',
+        title: 'Joblog (Last 200 msgs) (${sqlJobId})',
         stmt: [
             'SELECT ORDINAL_POSITION as SEQNBR,',
             '       MESSAGE_ID as MSGID, SEVERITY as SEV, ',
@@ -34,13 +39,15 @@ export const BUILT_IN_SQL_SNIPPETS: ReadonlyArray<CommandEntrySqlSnippet> = [
             'ORDER BY ORDINAL_POSITION DESC FETCH FIRST 200 ROWS ONLY'
         ].join(' '),
         group: 'Job Info',
+        environment: 'cmdEntryPool',
         singleRowResultView: 'row',
         order: 10,
         source: 'built-in'
     },
     {
         id: 'builtin.full-joblog',
-        label: 'Joblog (full)',
+        label: 'Joblog (full) ${sqlJobId}',
+        title: 'Full Joblog (${sqlJobId})',
         stmt: [
             'SELECT ORDINAL_POSITION as SEQNBR,',
             '       MESSAGE_ID as MSGID, SEVERITY as SEV, ',
@@ -59,13 +66,14 @@ export const BUILT_IN_SQL_SNIPPETS: ReadonlyArray<CommandEntrySqlSnippet> = [
             'ORDER BY ORDINAL_POSITION DESC'
         ].join(' '),
         group: 'Job Info',
+        environment: 'cmdEntryPool',
         singleRowResultView: 'row',
         order: 20,
         source: 'built-in'
     },
     {
         id: 'builtin.job-attributes',
-        label: 'Job Attributes',
+        label: 'Job Attributes ${sqlJobId}',
         stmt: ["SELECT JOB_NAME as JOB,SUBSYSTEM,AUTHORIZATION_NAME as USER_NAME,JOB_NAME_SHORT as JOB_NAME,",
             "trim(JOB_TYPE) concat '/' concat trim(JOB_TYPE_ENHANCED) as JOB_TYPE,",
             "OPEN_FILES,",
@@ -88,33 +96,55 @@ export const BUILT_IN_SQL_SNIPPETS: ReadonlyArray<CommandEntrySqlSnippet> = [
             "FROM TABLE(qsys2.active_job_info(job_name_filter => '*', DETAILED_INFO => 'ALL'))"
         ].join(' '),
         group: 'Job Info',
+        environment: 'cmdEntry',
         order: 30,
         source: 'built-in'
 
     },
     {
         id: 'builtin.library-list',
-        label: 'Library List',
+        label: 'Library List ${sqlJobId}',
+        title: 'Library List (${sqlJobId})',
         stmt: [
-            'SELECT ORDINAL_POSITION AS "Sequence",',
-            'SYSTEM_SCHEMA_NAME as "Library Name",',
-            '"TYPE" AS "LIBL Type",',
-            "'*' CONCAT ld.library_type AS ", '"Library Type",',
-            'ld.object_count,ll.TEXT_DESCRIPTION AS "Text",',
-            'll.IASP_NUMBER AS "IASP Number",',
-            'ld.IASP_NAME AS "iASP Name",',
-            'SCHEMA_NAME AS "Library Long Name"',
-            'FROM QSYS2.LIBRARY_LIST_INFO LL ',
-            ', LATERAL (SELECT * FROM TABLE (LIBRARY_INFO(LL.SYSTEM_SCHEMA_NAME,',
-            "DETAILED_INFO => 'NO')) LibInfo ) LD"
+            'SELECT ORDINAL_POSITION AS "Position",',
+            'LIBRARY_NAME as "Library Name",',
+            '"TYPE" AS "LIBL Portion",',
+            'Library_Type as "Library Type",',
+            'OBJECT_COUNT as "Object Count",',
+            'IASP_NUMBER AS "iASP Nbr",',
+            'IASP_NAME AS "iASP Name",',
+            'JOB',
+            "FROM TABLE(${funcLib}.JOB_LIBL('${sqlJobId}')) LL"
         ].join(' '),
         group: 'Job Info',
+        environment: 'cmdEntryPool',
         order: 40,
         source: 'built-in'
     },
     {
+        id: 'builtin.library-list-c4i',
+        label: 'Library List (c4i) ${c4iJobId}',
+        title: 'Library List (c4i) (${c4iJobId})',
+        stmt: [
+            'SELECT ORDINAL_POSITION AS "Position",',
+            'LIBRARY_NAME as "Library Name",',
+            '"TYPE" AS "LIBL Portion",',
+            'Library_Type as "Library Type",',
+            'OBJECT_COUNT as "Object Count",',
+            'IASP_NUMBER AS "iASP Nbr",',
+            'IASP_NAME AS "iASP Name",',
+            'JOB',
+            "FROM TABLE(${funcLib}.JOB_LIBL('${c4iJobId}')) LL"
+        ].join(' '),
+        group: 'Job Info',
+        environment: 'cmdEntryPool',
+        order: 45,
+        source: 'built-in'
+    },
+    {
         id: 'builtin.job-splf-list',
-        label: 'SPOOLED Files List (Job)',
+        label: 'SPOOLED Files List ${sqlJobId}',
+        title: 'SPOOLED Files from Job(${sqlJobId})',
         stmt: [
             'SELECT SPOOLED_FILE_NAME AS SPLFNAME,',
             'SPOOLED_FILE_NUMBER AS SPLNBR,',
@@ -129,19 +159,22 @@ export const BUILT_IN_SQL_SNIPPETS: ReadonlyArray<CommandEntrySqlSnippet> = [
             'ASP_NUMBER,SYSTEM AS "System Where Created",',
             "'Select ordinal_position as Rec, SPOOLED_DATA from table(systools.SPOOLED_FILE_DATA('''",
             " CONCAT QUALIFIED_JOB_NAME CONCAT",
-            "''',''' CONCAT TRIM(spooled_file_name) CONCAT ''',' CONCAT spooled_file_number CONCAT ')) DSPSPLF'",
+            "''',''' CONCAT TRIM(spooled_file_name) CONCAT ''',' CONCAT spooled_file_number CONCAT ')) DSPSPLF",
+            "ORDER BY ORDINAL_POSITION'",
             'AS DSPSPLF_via_SQL',
             "FROM TABLE(QSYS2.SPOOLED_FILE_INFO(JOB_NAME => '${sqlJobId}' ))",
             "WHERE (SPOOLED_FILE_NAME <> 'QPRINT' AND JOB_NAME <> 'MAPEPIRE')",
             'ORDER BY CREATION_TIMESTAMP'
         ].join(' '),
         group: 'Job Info',
+        environment: 'cmdEntryPool',
         order: 90,
         source: 'built-in'
     },
     {
         id: 'builtin.last-job-spooled-file',
-        label: 'View Last SPOOLED File (Job)',
+        label: 'View Last SPOOLED File ${sqlJobId}',
+        title: 'Last SPOOLED File for Job(${sqlJobId})',
         stmt: [
             'WITH sf AS (',
             'SELECT * FROM TABLE (qsys2.spooled_file_info(',
@@ -159,12 +192,13 @@ export const BUILT_IN_SQL_SNIPPETS: ReadonlyArray<CommandEntrySqlSnippet> = [
             ') sd'
         ].join(' '),
         group: 'Job Info',
+        environment: 'cmdEntryPool',
         order: 100,
         source: 'built-in'
     },
     {
-        id: 'builtin.active-jobs-settings',
-        label: 'Active Jobs (User/Fast)',
+        id: 'builtin.active-jobs-custom',
+        label: 'Active Jobs sbs(${userSBSList})',
         stmt: [
             'SELECT aj.JOB_NAME as JOB, aj.SUBSYSTEM, aj.JOB_NAME_SHORT as JOB_NAME,',
             'aj.AUTHORIZATION_NAME as USER_NAME, ',
@@ -175,12 +209,13 @@ export const BUILT_IN_SQL_SNIPPETS: ReadonlyArray<CommandEntrySqlSnippet> = [
             'ORDER BY ORDINAL_POSITION'
         ].join(' '),
         group: 'Admin',
+        environment: 'cmdEntryPool',
         order: 10,
         source: 'built-in'
     },
     {
-        id: 'builtin.active-jobs-settings-detailed',
-        label: 'Active Jobs (User/Detailed)',
+        id: 'builtin.active-jobs-custom-detailed',
+        label: 'Active Jobs Detailed sbs(${userSBSList})',
         stmt: [
             'SELECT aj.JOB_NAME as JOB, aj.SUBSYSTEM, aj.JOB_NAME_SHORT as JOB_NAME,',
             'aj.AUTHORIZATION_NAME as USER_NAME, ',
@@ -192,6 +227,7 @@ export const BUILT_IN_SQL_SNIPPETS: ReadonlyArray<CommandEntrySqlSnippet> = [
             'ORDER BY ORDINAL_POSITION'
         ].join(' '),
         group: 'Admin',
+        environment: 'cmdEntryPool',
         order: 20,
         source: 'built-in'
     },
@@ -208,6 +244,7 @@ export const BUILT_IN_SQL_SNIPPETS: ReadonlyArray<CommandEntrySqlSnippet> = [
             'ORDER BY ORDINAL_POSITION'
         ].join(' '),
         group: 'Admin',
+        environment: 'cmdEntryPool',
         singleRowResultView: 'row',
         order: 30,
         source: 'built-in'
@@ -225,6 +262,7 @@ export const BUILT_IN_SQL_SNIPPETS: ReadonlyArray<CommandEntrySqlSnippet> = [
             'ORDER BY ORDINAL_POSITION'
         ].join(' '),
         group: 'Admin',
+        environment: 'cmdEntryPool',
         singleRowResultView: 'row',
         order: 40,
         source: 'built-in'
@@ -242,6 +280,7 @@ export const BUILT_IN_SQL_SNIPPETS: ReadonlyArray<CommandEntrySqlSnippet> = [
             'ORDER BY ORDINAL_POSITION'
         ].join(' '),
         group: 'Admin',
+        environment: 'cmdEntryPool',
         singleRowResultView: 'row',
         order: 40,
         source: 'built-in'
@@ -259,13 +298,15 @@ export const BUILT_IN_SQL_SNIPPETS: ReadonlyArray<CommandEntrySqlSnippet> = [
             'ORDER BY ORDINAL_POSITION'
         ].join(' '),
         group: 'Admin',
+        environment: 'cmdEntryPool',
         singleRowResultView: 'row',
         order: 50,
         source: 'built-in'
     },
     {
         id: 'builtin.spooled-files-user',
-        label: 'SPOOLED Files List (User)',
+        label: 'SPOOLED Files List (${currentUser})',
+        title: 'SPOOLED Files User(${currentUser})',
         stmt: [
             'SELECT SPOOLED_FILE_NAME AS SPLFNAME,',
             'SPOOLED_FILE_NUMBER AS SPLNBR,',
@@ -278,22 +319,25 @@ export const BUILT_IN_SQL_SNIPPETS: ReadonlyArray<CommandEntrySqlSnippet> = [
             'CREATION_TIMESTAMP AS CREATED,',
             'FILE_AVAILABLE AS FILE_AVAIL,',
             'ASP_NUMBER,SYSTEM AS "System Where Created",',
-            "'Select ordinal_position as Rec, SPOOLED_DATA from table(systools.SPOOLED_FILE_DATA('''",
+            "'Select ordinal_position as SPLRECNBR, SPOOLED_DATA from table(systools.SPOOLED_FILE_DATA('''",
             " CONCAT QUALIFIED_JOB_NAME CONCAT",
-            "''',''' CONCAT TRIM(spooled_file_name) CONCAT ''',' CONCAT spooled_file_number CONCAT ')) DSPSPLF'",
+            "''',''' CONCAT TRIM(spooled_file_name) CONCAT ''',' CONCAT spooled_file_number CONCAT ')) DSPSPLF",
+            "ORDER BY ORDINAL_POSITION'",
             'AS DSPSPLF_via_SQL',
             "FROM TABLE(QSYS2.SPOOLED_FILE_INFO(USER_NAME => '${currentUser}'))",
             " WHERE SPOOLED_FILE_NAME <> 'QPRINT' AND JOB_NAME <> 'MAPEPIRE'",
             " ORDER BY CREATION_TIMESTAMP"
         ].join(' '),
         group: 'SPOOLED Files',
+        environment: 'cmdEntryPool',
         singleRowResultView: 'row',
         order: 10,
         source: 'built-in'
     },
     {
         id: 'builtin.last-user-spooled-file',
-        label: 'View Last SPOOLED File (User)',
+        label: 'View Last SPOOLED File (${currentUser})',
+        title: 'Last SPOOLED File for User(${currentUser})',
         stmt: [
             'WITH sf AS (',
             'SELECT * FROM TABLE (qsys2.spooled_file_info(',
@@ -310,6 +354,7 @@ export const BUILT_IN_SQL_SNIPPETS: ReadonlyArray<CommandEntrySqlSnippet> = [
             '           SPOOLED_FILE_NUMBER => SF.SPOOLED_FILE_NUMBER)) spd) sd'
         ].join(' '),
         group: 'SPOOLED Files',
+        environment: 'cmdEntryPool',
         singleRowResultView: 'row',
         order: 20,
         source: 'built-in'

@@ -466,6 +466,7 @@ class CodeSnippetEditorPanel {
                             <button type="button" data-token="\${sqlJobId}">+ \${sqlJobId}</button>
                             <button type="button" data-token="\${sqlJobName}">+ \${sqlJobName}</button>
                             <button type="button" data-token="\${sqlJobNumber}">+ \${sqlJobNumber}</button>
+                            <button type="button" data-token="\${c4iJobId}">+ \${c4iJobId}</button>
                             <button type="button" data-token="\${currentUser}">+ \${currentUser}</button>
                             <button type="button" data-token="\${currentLibrary}">+ \${currentLibrary}</button>
                         </div>
@@ -724,6 +725,12 @@ export function registerCodeSnippetManagerView(
             const snippet = resolveSnippet(item);
             if (snippet) {
                 await commandEntry.executeCodeSnippetById(snippet.id);
+            }
+        }),
+        vscode.commands.registerCommand('clprompter.codeSnippet.runInNewView', async (item?: CodeSnippetTreeItem | CodeSnippetPreviewTreeItem | CodeSnippetRecord) => {
+            const snippet = resolveSnippet(item);
+            if (snippet) {
+                await commandEntry.executeCodeSnippetById(snippet.id, { forceNewView: true });
             }
         }),
         vscode.commands.registerCommand('clprompter.codeSnippet.viewFullStatement', async (item?: CodeSnippetTreeItem | CodeSnippetPreviewTreeItem | CodeSnippetRecord) => {

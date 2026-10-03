@@ -267,6 +267,26 @@ button[data-tooltip]:focus-visible::after {
     min-width: 68px;
 }
 
+#run-lane {
+    min-height: 1.2em;
+    margin: 3px 0 2px;
+    display: flex;
+    align-items: center;
+}
+
+#run-lane-text {
+    min-width: 0;
+    color: var(--vscode-descriptionForeground);
+    font-size: .88em;
+    font-family: var(--vscode-editor-font-family);
+    white-space: pre-wrap;
+}
+
+#run-lane-text.is-active {
+    color: var(--vscode-textLink-foreground, #0e639c);
+    font-weight: 700;
+}
+
 #status {
     min-height: 1.3em;
     margin: 5px 0;
@@ -285,6 +305,19 @@ button[data-tooltip]:focus-visible::after {
 #status-text.notice-warning,
 #status-text.notice-error {
     font-weight: 600;
+}
+
+#status-text.notice-running {
+    color: var(--vscode-textLink-foreground, #0e639c);
+    font-weight: 700;
+    background: color-mix(in srgb, var(--vscode-textLink-foreground, #0e639c) 16%, transparent);
+    border: 1px solid color-mix(in srgb, var(--vscode-textLink-foreground, #0e639c) 44%, transparent);
+    border-radius: 4px;
+    padding: 1px 6px;
+}
+
+.vscode-light #status-text.notice-running {
+    background: color-mix(in srgb, var(--vscode-textLink-foreground, #0e639c) 12%, transparent);
 }
 
 #status-text.notice-warning {

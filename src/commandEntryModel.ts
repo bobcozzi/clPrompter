@@ -49,6 +49,10 @@ export interface SqlColumnMetadata {
 export interface SqlResultPayload {
     statement: string;
     resultTitle?: string;
+    snippetId?: string;
+    snippetLabel?: string;
+    snippetViewMode?: 'singleton' | 'reuse' | 'forceNew';
+    snippetRunInstanceId?: string;
     elapsedMs?: number;
     columns: string[];
     columnMetadata?: SqlColumnMetadata[];

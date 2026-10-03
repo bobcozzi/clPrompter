@@ -2,7 +2,7 @@
   "name": "clprompter",
   "displayName": "%displayName%",
   "description": "%description%",
-  "version": "1.0.53",
+  "version": "1.0.54",
   "author": {
     "name": "Bob Cozzi",
     "url": "https://github.com/bobcozzi"
@@ -134,6 +134,12 @@
         "icon": "$(debug-start)"
       },
       {
+        "command": "clprompter.codeSnippet.runInNewView",
+        "category": "%contributes.commands.30.category%",
+        "title": "%contributes.commands.30.title%",
+        "icon": "$(add)"
+      },
+      {
         "command": "clprompter.codeSnippet.viewFullStatement",
         "category": "%contributes.commands.22.category%",
         "title": "%contributes.commands.22.title%"
@@ -201,6 +207,10 @@
       {
         "command": "clprompter.commandEntry.menu.clearSqlLogMessages",
         "title": "Clear SQL Log Entries"
+      },
+      {
+        "command": "clprompter.commandEntry.menu.displayActiveJoblog",
+        "title": "Display Joblog"
       },
       {
         "command": "clprompter.commandEntry.menu.openConnectionSettings",
@@ -448,6 +458,12 @@
             "%contributes.configuration.properties.clPrompter.cmdEntryCodeSnippetTreeClickAction.enumDescriptions.2%"
           ],
           "description": "%contributes.configuration.properties.clPrompter.cmdEntryCodeSnippetTreeClickAction.description%"
+        },
+        "clPrompter.cmdEntryOpenSnippetsInNewView": {
+          "order": 113.1,
+          "type": "boolean",
+          "default": true,
+          "description": "%contributes.configuration.properties.clPrompter.cmdEntryOpenSnippetsInNewView.description%"
         },
         "clPrompter.kwdColor": {
           "type": "string",
@@ -758,8 +774,12 @@
           "group": "9_options@1"
         },
         {
-          "command": "clprompter.commandEntry.menu.openConnectionSettings",
+          "command": "clprompter.commandEntry.menu.displayActiveJoblog",
           "group": "9_options@2"
+        },
+        {
+          "command": "clprompter.commandEntry.menu.openConnectionSettings",
+          "group": "9_options@3"
         },
         {
           "command": "clprompter.startNewCommandEntryJob",
@@ -817,6 +837,11 @@
           "command": "clprompter.codeSnippet.run",
           "when": "view == clprompter.codeSnippetManagerView && (viewItem == codeSnippetUser || viewItem == codeSnippetBuiltIn || viewItem == codeSnippetPreviewUser || viewItem == codeSnippetPreviewBuiltIn)",
           "group": "navigation@3"
+        },
+        {
+          "command": "clprompter.codeSnippet.runInNewView",
+          "when": "view == clprompter.codeSnippetManagerView && (viewItem == codeSnippetUser || viewItem == codeSnippetBuiltIn || viewItem == codeSnippetPreviewUser || viewItem == codeSnippetPreviewBuiltIn)",
+          "group": "navigation@3.5"
         },
         {
           "command": "clprompter.codeSnippet.viewFullStatement",

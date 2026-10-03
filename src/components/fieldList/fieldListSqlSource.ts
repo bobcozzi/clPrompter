@@ -3,6 +3,8 @@
  *
  * Source origin: /Users/cozzi/Downloads/projects/open-UDTF/src/FIELD_LIST/FIELD_LIST.SQL
  */
+import { applySqlSourceTokens } from '../sqlSourceTokens';
+
 const SQL_TEMPLATE = String.raw`
 
 -- SPDX-License-Identifier: Apache-2.0
@@ -153,9 +155,5 @@ valid choices are:<ul>
 `;
 
 export function getFieldListSQLSrc(library: string, version: number): string {
-    return SQL_TEMPLATE
-        .replace(/\\\$\{version\}/gi, String(version))
-        .replace(/\$\{version\}/gi, String(version))
-        .replace(/sqltools\./gi, `${library}.`)
-        .replace(/SQLTOOLS\//g, `${library}/`);
+    return applySqlSourceTokens(SQL_TEMPLATE, library, version);
 }

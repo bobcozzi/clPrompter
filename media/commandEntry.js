@@ -10,11 +10,12 @@
   const command = document.getElementById('command'), mode = document.getElementById('mode'), severityFilter = document.getElementById('message-severity-filter');
   window.clPrompterInstallInternalCutHandler?.(command);
   const run = document.getElementById('run'), prompt = document.getElementById('prompt'), cmdEntryHelp = document.getElementById('cmdentry-help'), cmdEntrySettings = document.getElementById('cmdentry-settings'), toolbarMenu = document.getElementById('toolbar-menu'), toolbarMenuList = document.getElementById('toolbar-menu-list'), menuViewLog = document.getElementById('menu-view-log'), menuClearLog = document.getElementById('menu-clear-log'), menuClearSqlLog = document.getElementById('menu-clear-sql-log'), menuClearSqlHistory = document.getElementById('menu-clear-sql-history'), menuToggleSqlLog = document.getElementById('menu-toggle-sql-log'), menuToggleMessageDetails = document.getElementById('menu-toggle-message-details'), menuConnectionSettings = document.getElementById('menu-connection-settings'), menuUseSharedSqlJob = document.getElementById('menu-use-shared-sql-job'), menuUsePrivateSqlJob = document.getElementById('menu-use-private-sql-job'), menuStartNewJob = document.getElementById('menu-start-new-job'), menuClearHistory = document.getElementById('menu-clear-history'), menuRunMode = document.getElementById('menu-run-mode'), menuRunModeList = document.getElementById('menu-run-mode-list'), menuRunModeWrap = menuRunMode ? menuRunMode.closest('.toolbar-submenu-wrap') : null, menuRunModeRun = document.getElementById('menu-run-mode-run'), menuRunModeLimit = document.getElementById('menu-run-mode-limit'), menuRunModeCheck = document.getElementById('menu-run-mode-check'), historyPrev = document.getElementById('history-prev'), historyNext = document.getElementById('history-next'), statusJobMenu = document.getElementById('status-job-menu'), statusJobMenuCopy = document.getElementById('status-job-menu-copy'), statusJobMenuDisplayJoblog = document.getElementById('status-job-menu-display-joblog'), statusJobMenuCheckMsgw = document.getElementById('status-job-menu-check-msgw'), statusJobMenuToggleSqlJob = document.getElementById('status-job-menu-toggle-sql-job'), statusJobMenuConnectionSettings = document.getElementById('status-job-menu-connection-settings'), statusJobMenuReconnectServerJob = document.getElementById('status-job-menu-reconnect-server-job');
-  const statusText = document.getElementById('status-text'), statusIdentity = document.getElementById('status-identity'), statusJobId = document.getElementById('status-jobid'), results = document.getElementById('results');
+  const statusText = document.getElementById('status-text'), statusIdentity = document.getElementById('status-identity'), statusJobId = document.getElementById('status-jobid'), runLaneText = document.getElementById('run-lane-text'), results = document.getElementById('results');
   let historyIndex = -1, runningStartedAt, runningTimerId, runningStatusPrefix = l10n.runningStatusPrefix || 'Running…', historyDraft = '', sqlJobPollingId;
   let lastSubmittedRawCommand = '';
   let transientStatusUntil = 0;
   let transientStatusClearTimer;
+  let runLaneTimerId;
   let statusJobSingleClickTimer;
   let historyHoverTooltipEl;
   let dedicatedJobEnabled = false;
@@ -26,6 +27,7 @@
   const latestExecutionPinnedByConnection = Object.create(null);
   let baseMinHeightPx = 0, autoResizing = false;
   let runModeSubmenuCloseTimer;
+  const activeRunLanes = new Map();
   const parseConnectionScopeKey = value => {
     const raw = String(value || '').trim().toLowerCase();
     if (!raw || raw === defaultConnectionScopeKey) {
@@ -160,9 +162,66 @@
     return `${trimmed.slice(0, Math.max(0, maxChars - 1)).trimEnd()}…`;
   };
   const formatElapsed = ms => ms < 1000 ? `${ms} ms` : `${(ms / 1000).toFixed(1)} s`;
+  const normalizeRunLane = lane => {
+    const value = String(lane || '').trim();
+    if (value === 'C4i' || value === 'Pool' || value === 'Cmd') {
+      return value;
+    }
+    return 'Cmd';
+  };
+  const formatRunLaneToken = entry => {
+    const startedAt = Number(entry?.startedAt || Date.now());
+    const elapsedSeconds = Math.max(0, Math.floor((Date.now() - startedAt) / 1000));
+    return `${entry.lane}(${elapsedSeconds} s)`;
+  };
+  const renderRunLaneStatus = () => {
+    if (!runLaneText) {
+      return;
+    }
+    const tokens = Array.from(activeRunLanes.values())
+      .sort((left, right) => Number(left.startedAt || 0) - Number(right.startedAt || 0))
+      .map(formatRunLaneToken);
+    runLaneText.textContent = tokens.join('  ');
+    runLaneText.classList.toggle('is-active', tokens.length > 0);
+  };
+  const ensureRunLaneTimer = () => {
+    if (activeRunLanes.size > 0) {
+      if (!runLaneTimerId) {
+        runLaneTimerId = setInterval(() => {
+          renderRunLaneStatus();
+        }, 250);
+      }
+      return;
+    }
+
+    if (runLaneTimerId) {
+      clearInterval(runLaneTimerId);
+      runLaneTimerId = undefined;
+    }
+  };
+  const applyRunLaneMessage = message => {
+    const id = String(message.id || '').trim();
+    if (!id) {
+      return;
+    }
+
+    const action = String(message.action || '').trim().toLowerCase();
+    if (action === 'start') {
+      activeRunLanes.set(id, {
+        lane: normalizeRunLane(message.lane),
+        startedAt: Number(message.startedAt || Date.now())
+      });
+    }
+    else if (action === 'end') {
+      activeRunLanes.delete(id);
+    }
+
+    renderRunLaneStatus();
+    ensureRunLaneTimer();
+  };
   const normalizeNoticeSeverity = severity => {
     const normalized = String(severity || '').trim().toLowerCase();
-    if (normalized === 'error' || normalized === 'warning' || normalized === 'info') {
+    if (normalized === 'error' || normalized === 'warning' || normalized === 'info' || normalized === 'running') {
       return normalized;
     }
     return 'info';
@@ -184,6 +243,7 @@
     const text = String(message ?? '');
     const normalizedSeverity = normalizeNoticeSeverity(severity);
     statusText.textContent = text;
+    statusText.classList.toggle('notice-running', normalizedSeverity === 'running' && text.length > 0);
     statusText.classList.toggle('notice-warning', normalizedSeverity === 'warning' && text.length > 0);
     statusText.classList.toggle('notice-error', normalizedSeverity === 'error' && text.length > 0);
     statusText.classList.toggle('muted', !text);
@@ -277,7 +337,7 @@
   const displayStatusJoblog = () => {
     const sqlJobId = getStatusJobIdRaw();
     if (!sqlJobId || sqlJobId.toLowerCase() === noConnectionText) { return; }
-    vscode.postMessage({ type: 'requestDisplayJoblog', sqlJobId });
+    vscode.postMessage({ type: 'requestDisplayActiveJoblog' });
   };
   const checkForMsgw = () => {
     const sqlJobId = getStatusJobIdRaw();
@@ -1086,7 +1146,7 @@
     }
     if (value) {
       runningStatusPrefix = String(statusMessage || '').trim() || 'Running…';
-      setStatusMessage(runningStatusPrefix, 'info');
+      setStatusMessage(runningStatusPrefix, 'running');
       runningTimerId = setInterval(() => {
         if (!runningStartedAt) {
           if (runningTimerId) {
@@ -1098,7 +1158,7 @@
         if (Date.now() < transientStatusUntil) {
           return;
         }
-        setStatusMessage(`${runningStatusPrefix} ${formatElapsed(Date.now() - runningStartedAt)}`, 'info');
+        setStatusMessage(`${runningStatusPrefix} ${formatElapsed(Date.now() - runningStartedAt)}`, 'running');
       }, 250);
     }
     else {
@@ -1519,7 +1579,7 @@
     const sqlJobId = statusJobMenu?.getAttribute('data-jobid') || '';
     if (!sqlJobId) { return; }
     closeStatusJobMenu();
-    vscode.postMessage({ type: 'requestDisplayJoblog', sqlJobId });
+    vscode.postMessage({ type: 'requestDisplayActiveJoblog' });
   });
   statusJobMenuCheckMsgw?.addEventListener('click', () => {
     const sqlJobId = statusJobMenu?.getAttribute('data-jobid') || '';
@@ -1762,6 +1822,9 @@
           }
         }
         break;
+      case 'runLane':
+        applyRunLaneMessage(message);
+        break;
     }
   });
   results.addEventListener('scroll', hideHistoryHoverTooltip, { passive: true });
@@ -1775,6 +1838,10 @@
     if (transientStatusClearTimer) {
       clearTimeout(transientStatusClearTimer);
       transientStatusClearTimer = undefined;
+    }
+    if (runLaneTimerId) {
+      clearInterval(runLaneTimerId);
+      runLaneTimerId = undefined;
     }
     stopSqlJobPolling();
   });

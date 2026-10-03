@@ -19,6 +19,8 @@ import { getFieldListCPPSrc } from './fieldList/fieldListCppSource';
 import { getFieldListSQLSrc } from './fieldList/fieldListSqlSource';
 import { getJobAttrRPGLESrc } from './jobAttr/jobAttrRpgleSource';
 import { getJobAttrSQLSrc } from './jobAttr/jobAttrSqlSource';
+import { getJobLiblRPGLESrc } from './joblibl/jobLiblRpgleSource';
+import { getJobLiblSQLSrc } from './joblibl/jobLiblSqlSource';
 import { getLastSplfCPPSrc } from './lastSplf/lastSplfCppSource';
 import { getLastSplfSQLSrc } from './lastSplf/lastSplfSqlSource';
 import { appendClPrompterOutputLine } from '../clPrompterOutput';
@@ -68,6 +70,7 @@ const MANAGED_SPECIFIC_NAMES = [
     'DELETE_OBJECT',
     'FIELD_LIST',
     'JOB_ATTR',
+    'JOB_LIBL',
     'LAST_SPLF'
 ];
 
@@ -510,6 +513,22 @@ export class JobAttrChecker extends UDTFChecker {
 
     getSourceSrc(): string { return getJobAttrRPGLESrc(); }
     getSQLSrc(library: string, version: number): string { return getJobAttrSQLSrc(library, version); }
+}
+
+/**
+ * Manages the JOB_LIBL UDTF — returns library list entries for a target job
+ * by wrapping QUSRJOBI format JOBI0750 in an RPGLE external program.
+ */
+export class JobLiblChecker extends UDTFChecker {
+    static readonly ID = 'clPrompter.JobLiblChecker';
+    readonly id = JobLiblChecker.ID;
+    readonly PGM_NAME = 'JOB_LIBL';
+    readonly UDTF_SPECIFIC = 'job_libl';
+    readonly currentVersion = 1;
+    readonly SOURCE_TYPE: HostSourceType = 'RPGLE';
+
+    getSourceSrc(): string { return getJobLiblRPGLESrc(); }
+    getSQLSrc(library: string, version: number): string { return getJobLiblSQLSrc(library, version); }
 }
 
 /**

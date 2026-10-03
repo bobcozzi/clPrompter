@@ -20,6 +20,10 @@ interface SqlPagingSession {
     connectionKey: string;
     statement: string;
     resultTitle?: string;
+    snippetId?: string;
+    snippetLabel?: string;
+    snippetViewMode?: 'singleton' | 'reuse' | 'forceNew';
+    snippetRunInstanceId?: string;
     rows: Record<string, unknown>[];
     columnMetadata?: SqlColumnMetadata[];
     columns: string[];
@@ -820,7 +824,7 @@ export class CommandEntryService {
         connection: IBMi,
         statement: string,
         rows?: number,
-        options?: { skipSyntaxCheck?: boolean }
+        options?: { skipSyntaxCheck?: boolean; forceSharedSqlJob?: boolean; forcePoolSqlJob?: boolean }
     ): Promise<{ rows: Record<string, unknown>[]; metadata?: SqlColumnMetadata[]; elapsedMs?: number }> {
         await this.refreshManagedSessionState(connection);
 
@@ -828,10 +832,25 @@ export class CommandEntryService {
             await checkSQLForExecution(connection, statement, this.jobManager);
         }
 
-        const rawResult = this.jobManager
+        const forceSharedSqlJob = options?.forceSharedSqlJob === true;
+        const forcePoolSqlJob = options?.forcePoolSqlJob === true;
+
+        if (forcePoolSqlJob && this.jobManager) {
+            const poolRows = await this.jobManager.queryWithHelperJob(connection, statement, 'SnippetPoolSQL');
+            const normalizedPoolRows = Array.isArray(poolRows) ? poolRows : [];
+            const limitedPoolRows = isPositiveInteger(rows)
+                ? normalizedPoolRows.slice(0, rows)
+                : normalizedPoolRows;
+            return {
+                rows: limitedPoolRows,
+                metadata: extractSqlColumnMetadata(limitedPoolRows, deriveSqlColumns(limitedPoolRows))
+            };
+        }
+
+        const rawResult = this.jobManager && !forceSharedSqlJob
             ? await this.jobManager.runSQLWithDetails(connection, statement, { rows })
             : await tryRunSharedMapepireQuery(connection, statement, rows)
-            ?? await runCmdEntrySql(connection, this.jobManager, statement, { rows, skipSyntaxCheck: true });
+            ?? await runCmdEntrySql(connection, undefined, statement, { rows, skipSyntaxCheck: true });
 
         const detailedRawResult = rawResult
             && typeof rawResult === 'object'
@@ -876,7 +895,7 @@ export class CommandEntryService {
         connection: IBMi,
         statement: string,
         rows?: number,
-        options?: { skipSyntaxCheck?: boolean }
+        options?: { skipSyntaxCheck?: boolean; forceSharedSqlJob?: boolean; forcePoolSqlJob?: boolean }
     ): Promise<(RunSQLWithDetailsResult & { metadata?: SqlColumnMetadata[] })> {
         await this.refreshManagedSessionState(connection);
 
@@ -884,14 +903,21 @@ export class CommandEntryService {
             await checkSQLForExecution(connection, statement, this.jobManager);
         }
 
-        if (this.jobManager) {
+        const forceSharedSqlJob = options?.forceSharedSqlJob === true;
+        const forcePoolSqlJob = options?.forcePoolSqlJob === true;
+
+        if (this.jobManager && !forceSharedSqlJob && !forcePoolSqlJob) {
             const detailed = await this.jobManager.runSQLWithDetails(connection, statement, { rows });
             this.logColumnsNodeMetadata(detailed.rawResult ?? detailed.rows, 'runSqlRowsWithDetails');
             const metadata = extractSqlColumnMetadata(detailed.rawResult ?? detailed.rows, deriveSqlColumns(detailed.rows));
             return { ...detailed, metadata };
         }
 
-        const basic = await this.runSqlRows(connection, statement, rows, { skipSyntaxCheck: true });
+        const basic = await this.runSqlRows(connection, statement, rows, {
+            skipSyntaxCheck: true,
+            forceSharedSqlJob,
+            forcePoolSqlJob
+        });
         return {
             rows: basic.rows,
             metadata: basic.metadata
@@ -983,6 +1009,10 @@ export class CommandEntryService {
             prefetchSize?: number;
             columnMetadata?: SqlColumnMetadata[];
             resultTitle?: string;
+            snippetId?: string;
+            snippetLabel?: string;
+            snippetViewMode?: 'singleton' | 'reuse' | 'forceNew';
+            snippetRunInstanceId?: string;
             elapsedMs?: number;
             autoColumnViewForSingleRowOverride?: boolean;
         }
@@ -1003,6 +1033,10 @@ export class CommandEntryService {
         return {
             statement,
             resultTitle: options?.resultTitle,
+            snippetId: options?.snippetId,
+            snippetLabel: options?.snippetLabel,
+            snippetViewMode: options?.snippetViewMode,
+            snippetRunInstanceId: options?.snippetRunInstanceId,
             columns,
             columnMetadata: finalMetadata,
             rows,
@@ -1108,6 +1142,10 @@ export class CommandEntryService {
                     prefetchSize: session.prefetchSize,
                     columnMetadata: session.columnMetadata,
                     resultTitle: session.resultTitle,
+                    snippetId: session.snippetId,
+                    snippetLabel: session.snippetLabel,
+                    snippetViewMode: session.snippetViewMode,
+                    snippetRunInstanceId: session.snippetRunInstanceId,
                     elapsedMs: undefined,
                     autoColumnViewForSingleRowOverride: session.autoColumnViewForSingleRowOverride
                 });
@@ -1132,6 +1170,10 @@ export class CommandEntryService {
             prefetchSize: session.prefetchSize,
             columnMetadata: session.columnMetadata,
             resultTitle: session.resultTitle,
+            snippetId: session.snippetId,
+            snippetLabel: session.snippetLabel,
+            snippetViewMode: session.snippetViewMode,
+            snippetRunInstanceId: session.snippetRunInstanceId,
             elapsedMs: undefined,
             autoColumnViewForSingleRowOverride: session.autoColumnViewForSingleRowOverride
         });
@@ -1148,7 +1190,16 @@ export class CommandEntryService {
         command: string,
         mode: CommandExecutionMode,
         id?: string,
-        options?: { resultTitle?: string; autoColumnViewForSingleRowOverride?: boolean }
+        options?: {
+            resultTitle?: string;
+            autoColumnViewForSingleRowOverride?: boolean;
+            forceSharedSqlJob?: boolean;
+            forcePoolSqlJob?: boolean;
+            snippetId?: string;
+            snippetLabel?: string;
+            snippetViewMode?: 'singleton' | 'reuse' | 'forceNew';
+            snippetRunInstanceId?: string;
+        }
     ): Promise<CommandExecution> {
         const started = Date.now();
         const startedDate = new Date(started);
@@ -1159,6 +1210,8 @@ export class CommandEntryService {
             if (sqlStatement) {
                 await this.closeSqlSession();
 
+                const forceSharedSqlJob = options?.forceSharedSqlJob === true;
+                const forcePoolSqlJob = options?.forcePoolSqlJob === true;
                 const maxRows = resolveConfiguredSqlFetchLimit(connection, this.context);
                 const prefetchRows = resolveConfiguredSqlPrefetchRows(connection, this.context);
                 const unlimited = maxRows === NOMAX_SENTINEL;
@@ -1174,7 +1227,7 @@ export class CommandEntryService {
                 const userManagedRowLimiter = hasTopLevelUserRowLimiter(normalizedSql);
                 const shouldBypassHostRowLimitPaging = isTopLevelWithStatement(normalizedSql);
                 const effectiveUserManagedRowLimiter = userManagedRowLimiter || shouldBypassHostRowLimitPaging;
-                this.logSqlInfo(`query.start continuationOnly=true dedicatedUsable=${this.jobManager?.isDedicatedUsable(connection) ?? false}`);
+                this.logSqlInfo(`query.start continuationOnly=true dedicatedUsable=${!forceSharedSqlJob && !forcePoolSqlJob && (this.jobManager?.isDedicatedUsable(connection) ?? false)} forceSharedSqlJob=${forceSharedSqlJob} forcePoolSqlJob=${forcePoolSqlJob}`);
                 this.logSqlInfo(`query.trace.sql fingerprint=${fingerprint} sameAsPrevious=${sameAsPrevious} sqlLen=${normalizedSql.length} containsCreated=${containsCreated} mergedMissingImplOrder=${mergedMissingImplOrder} spacedMissingImplOrder=${spacedMissingImplOrder} sqlPreview="${sqlPreview(normalizedSql)}"`);
                 if (createdContext) {
                     this.logSqlInfo(`query.trace.sql tokenContext[CREATED]="${createdContext}"`);
@@ -1191,21 +1244,30 @@ export class CommandEntryService {
                 let columnMetadata: SqlColumnMetadata[] | undefined;
 
                 if (effectiveUserManagedRowLimiter) {
-                    const result = await this.runSqlRowsWithDetails(connection, normalizedSql, undefined);
+                    const result = await this.runSqlRowsWithDetails(connection, normalizedSql, undefined, {
+                        forceSharedSqlJob,
+                        forcePoolSqlJob
+                    });
                     rows = result.rows;
                     columnMetadata = result.metadata;
                     queryElapsedMs = result.elapsedMs;
-                } else if (!isPagedQueryCandidate(normalizedSql) || unlimited) {
-                    const result = this.jobManager
+                } else if (!isPagedQueryCandidate(normalizedSql) || unlimited || forcePoolSqlJob) {
+                    const result = this.jobManager && !forceSharedSqlJob && !forcePoolSqlJob
                         ? await this.runDedicatedSqlWithPaging(connection, normalizedSql, maxRows)
-                        : await this.runSqlRows(connection, normalizedSql, unlimited ? undefined : maxRows);
+                        : await this.runSqlRows(connection, normalizedSql, unlimited ? undefined : maxRows, {
+                            forceSharedSqlJob,
+                            forcePoolSqlJob
+                        });
                     rows = result.rows;
                     columnMetadata = result.metadata;
                     queryElapsedMs = result.elapsedMs;
                 } else {
                     const prefetchSize = Math.min(maxRows, prefetchRows);
-                    if (this.jobManager) {
-                        const initialChunk = await this.runSqlRowsWithDetails(connection, normalizedSql, prefetchSize);
+                    if (this.jobManager && !forceSharedSqlJob) {
+                        const initialChunk = await this.runSqlRowsWithDetails(connection, normalizedSql, prefetchSize, {
+                            forceSharedSqlJob,
+                            forcePoolSqlJob
+                        });
                         rows = initialChunk.rows;
                         columnMetadata = initialChunk.metadata;
                         queryElapsedMs = initialChunk.elapsedMs;
@@ -1222,6 +1284,10 @@ export class CommandEntryService {
                                 connectionKey: this.buildConnectionKey(connection),
                                 statement: normalizedSql,
                                 resultTitle: options?.resultTitle,
+                                snippetId: options?.snippetId,
+                                snippetLabel: options?.snippetLabel,
+                                snippetViewMode: options?.snippetViewMode,
+                                snippetRunInstanceId: options?.snippetRunInstanceId,
                                 rows: [...rows],
                                 columnMetadata,
                                 columns: deriveSqlColumns(rows),
@@ -1243,7 +1309,10 @@ export class CommandEntryService {
                             this.logSqlInfo('query.branch continuationUnavailable action=singlePageOnly');
                         }
                     } else {
-                        const initialChunk = await this.runSqlRows(connection, normalizedSql, prefetchSize);
+                        const initialChunk = await this.runSqlRows(connection, normalizedSql, prefetchSize, {
+                            forceSharedSqlJob,
+                            forcePoolSqlJob
+                        });
                         rows = initialChunk.rows;
                         columnMetadata = initialChunk.metadata;
                         queryElapsedMs = initialChunk.elapsedMs;
@@ -1298,6 +1367,10 @@ export class CommandEntryService {
                         prefetchSize: (unlimited || effectiveUserManagedRowLimiter) ? undefined : Math.min(maxRows, prefetchRows),
                         columnMetadata,
                         resultTitle: options?.resultTitle,
+                        snippetId: options?.snippetId,
+                        snippetLabel: options?.snippetLabel,
+                        snippetViewMode: options?.snippetViewMode,
+                        snippetRunInstanceId: options?.snippetRunInstanceId,
                         elapsedMs: queryElapsedMs,
                         autoColumnViewForSingleRowOverride: options?.autoColumnViewForSingleRowOverride
                     })
@@ -1307,7 +1380,14 @@ export class CommandEntryService {
             // `bindings` is Code for IBM i 3.x's public Mapepire parameter API.
             // It keeps CL command text out of the SQL source and prevents SQL injection.
             const udtfLibrary = getUDTFLibrary(connection);
-            const rows = await runCmdEntrySql(connection, this.jobManager, buildCmdRunSql(udtfLibrary), { bindings: [command, mode], skipSyntaxCheck: true });
+            const rows = options?.forcePoolSqlJob && this.jobManager
+                ? await this.jobManager.runCommandWithHelperJob(connection, command, mode, 'SnippetPoolCMD')
+                : await runCmdEntrySql(
+                    connection,
+                    options?.forceSharedSqlJob ? undefined : this.jobManager,
+                    buildCmdRunSql(udtfLibrary),
+                    { bindings: [command, mode], skipSyntaxCheck: true }
+                );
             const messages = mapCommandMessages(rows as Record<string, unknown>[]);
             return {
                 id: id ?? `${started}-${Math.random().toString(36).slice(2, 8)}`,

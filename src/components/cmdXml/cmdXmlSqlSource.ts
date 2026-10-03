@@ -3,6 +3,8 @@
  *
  * Source origin: /Users/cozzi/Downloads/projects/open-UDTF/src/CMD_XML/CMD_XML.SQL
  */
+import { applySqlSourceTokens } from '../sqlSourceTokens';
+
 const SQL_TEMPLATE = String.raw`
 CREATE or REPLACE FUNCTION SQLTOOLS.cmd_xml(
                               LIBRARY_NAME varchar(10) default '*LIBL',
@@ -45,9 +47,5 @@ to be retrieved. Upper/lower case is ignored.'
 `;
 
 export function getCmdXmlSQLSrc(library: string, version: number): string {
-    return SQL_TEMPLATE
-        .replace(/\\\$\{version\}/gi, String(version))
-        .replace(/\$\{version\}/gi, String(version))
-        .replace(/sqltools\./gi, `${library}.`)
-        .replace(/SQLTOOLS\//g, `${library}/`);
+    return applySqlSourceTokens(SQL_TEMPLATE, library, version);
 }

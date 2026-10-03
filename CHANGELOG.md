@@ -2,6 +2,14 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.0.54] - 2026-10-03
+
+### What's New
+- Added a new JOB_LIBL SQL function (referred to as a "component" in Code for IBM i terminology). This library-list UDTF returns the library list similar to the system-supplied `LIBRARY_LIST_INFO` view, but it accepts a 3-part qualified job identifier so CL Prompter and Command Entry can retrieve the correct library list for the target job.
+- For the small number of IBM i shops that do not install the C and C++ compilers, future components may be written in RPG IV instead of C/C++ when practical. Installing the C/C++ compilers is still recommended because they are included at no extra cost, unless company security policy prohibits them.
+- Centralized the component update process before pushing new components to the host server.
+- Aligned the implementation with the Code for IBM i component architecture.
+
 ## [1.0.53] - 2026-10-01
 
 ### What's New

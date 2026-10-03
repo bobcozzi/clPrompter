@@ -249,6 +249,9 @@
                 var rebuildHeaderText = resolveColumnHeaderText(rebuildName, rebuildMeta || undefined);
                 var rebuildTooltip = buildColumnHeaderTooltip(rebuildName, rebuildMeta || undefined);
                 var classNames = ['sortable-col'];
+                if (rebuildIndex === columnNames.length - 1) {
+                    classNames.push('sql-last-col-content-fit');
+                }
                 var rebuildType = rebuildMeta ? String(rebuildMeta.typeName || rebuildMeta.type || '') : '';
                 if (isLikelyNumericType(rebuildType)) {
                     classNames.push('align-right');
@@ -279,6 +282,7 @@
             headerCell.title = tooltip;
             headerCell.setAttribute('data-tooltip', tooltip);
             headerCell.setAttribute('aria-label', tooltip);
+            headerCell.classList.toggle('sql-last-col-content-fit', i === (columnNames.length - 1));
         }
     }
 
@@ -305,6 +309,7 @@
     var singleRowDataHeader = document.getElementById('single-row-data-header');
     var toggleSingleRowLayoutBtn = document.getElementById('toggle-single-row-layout');
     var currentElapsedMs = Number(initialPayload.elapsedMs || 0);
+    var currentReturnedAt = new Date();
 
     if (!tbody) {
         return;
@@ -312,6 +317,18 @@
 
     function setStatus() {
         // Status thread intentionally omitted; keep only batch/paging summaries.
+    }
+
+    function formatReturnedAt(value) {
+        var when = value instanceof Date ? value : new Date(value);
+        if (!when || !isFinite(when.getTime())) {
+            return '';
+        }
+        var hh = String(when.getHours()).padStart(2, '0');
+        var mm = String(when.getMinutes()).padStart(2, '0');
+        var ss = String(when.getSeconds()).padStart(2, '0');
+        var mmm = String(when.getMilliseconds()).padStart(3, '0');
+        return 'Returned: ' + hh + ':' + mm + ':' + ss + '.' + mmm;
     }
 
     function setRerunBusy(isBusy) {
@@ -784,12 +801,22 @@
         columnWidths = (tableSignature && widthBySignature[tableSignature] && typeof widthBySignature[tableSignature] === 'object')
             ? widthBySignature[tableSignature]
             : {};
+        updateAdaptiveColumnLayoutClass();
         applyWidths();
         updateColumnHeaders(currentColumns, currentColumnMetadata);
         if (sortColumnIndex >= currentColumns.length) {
             sortColumnIndex = -1;
             sortDirection = 'asc';
         }
+    }
+
+    function updateAdaptiveColumnLayoutClass() {
+        if (!tableWrap || !tableWrap.classList) {
+            return;
+        }
+
+        var hasFewColumns = currentColumns.length > 0 && currentColumns.length <= 3;
+        tableWrap.classList.toggle('is-few-columns', hasFewColumns);
     }
 
     function applyWidths() {
@@ -903,9 +930,14 @@
             if (rowTop >= viewportBottom) {
                 break;
             }
-            // Count rows whose top edge is inside the current row viewport.
-            // This is more stable than overlap-based counting for page stepping.
-            if (rowTop >= viewportTop) {
+            var rowHeight = getMeasuredRowHeight(i);
+            var rowBottom = rowTop + rowHeight;
+            var overlapTop = Math.max(rowTop, viewportTop);
+            var overlapBottom = Math.min(rowBottom, viewportBottom);
+            var visibleHeight = Math.max(0, overlapBottom - overlapTop);
+            var visibleRatio = rowHeight > 0 ? (visibleHeight / rowHeight) : 0;
+            // Treat a row as visible when at least 95% of it is in view.
+            if (visibleRatio >= 0.95) {
                 visibleCount += 1;
             }
         }
@@ -1284,24 +1316,13 @@
             }
 
             rebuildRowOffsets();
-            var anchors = getAutoPageAnchors();
-            var currentAnchorIndex = getAutoPageIndexFromScrollAnchors(anchors);
-            var targetAnchorIndex = currentAnchorIndex + deltaPages;
-            if (targetAnchorIndex < 0) {
-                targetAnchorIndex = 0;
+            var baseTopRow = getCurrentTopRowIndex();
+            var visibleCount = getVisibleRowCountFromStartRow(baseTopRow);
+            var targetTopRow = baseTopRow + (deltaPages * visibleCount);
+            if (targetTopRow <= baseTopRow && deltaPages > 0 && baseTopRow < rowOffsets.length - 1) {
+                targetTopRow = baseTopRow + 1;
             }
-            if (targetAnchorIndex > anchors.length - 1) {
-                targetAnchorIndex = anchors.length - 1;
-            }
-
-            var targetTopRow = anchors[targetAnchorIndex] || 0;
-
-            tableWrap.scrollTop = Math.max(0, rowOffsets[targetTopRow] || 0);
-            syncPageIndexFromScroll();
-            updatePageButtons();
-            if (pageSummary) {
-                pageSummary.textContent = buildPageSummaryText();
-            }
+            scrollToRowIndex(targetTopRow);
             logPagingDiag('jumpByPages:auto');
             return;
         }
@@ -1518,6 +1539,9 @@
                     if (shouldUseWideCellClass(String(currentColumns[c] || ''), currentColumnMetadata, c)) {
                         classNames.push(wideColumnClassName);
                     }
+                    if (c === (currentColumns.length - 1)) {
+                        classNames.push('sql-last-col-content-fit');
+                    }
                     classNames.push('sql-result-cell');
                     var alignClass = classNames.length > 0 ? ' class="' + classNames.join(' ') + '"' : '';
                     var cellHtml = (typeof cell.html === 'string') ? cell.html : '';
@@ -1546,9 +1570,11 @@
 
         if (resultMeta) {
             var elapsedText = formatElapsedMs(currentElapsedMs);
+            var returnedAtText = formatReturnedAt(currentReturnedAt);
+            var timingText = [elapsedText, returnedAtText].filter(function (part) { return String(part || '').length > 0; }).join('  ');
             resultMeta.textContent = hasMoreRows
-                ? formatTemplate(t('moreRowsAvailableTemplate', '{count} rows loaded. More available.'), { count: rows.length }) + (elapsedText ? ' ' + elapsedText : '')
-                : formatTemplate(t('rowsReturnedTemplate', '{count} rows returned.'), { count: rows.length }) + (elapsedText ? ' ' + elapsedText : '');
+                ? formatTemplate(t('moreRowsAvailableTemplate', '{count} rows loaded. More available.'), { count: rows.length }) + (timingText ? ' ' + timingText : '')
+                : formatTemplate(t('rowsReturnedTemplate', '{count} rows returned.'), { count: rows.length }) + (timingText ? ' ' + timingText : '');
         }
         if (pageSummary) {
             pageSummary.textContent = buildPageSummaryText();
@@ -2181,6 +2207,7 @@
         fetchSize = Number(payload.fetchSize || 0);
         autoColumnViewForSingleRow = !!payload.autoColumnViewForSingleRow;
         currentElapsedMs = Number(payload.elapsedMs || 0);
+        currentReturnedAt = new Date();
         l10n = (payload.l10n && typeof payload.l10n === 'object') ? payload.l10n : l10n;
         singleRowVerticalMode = autoColumnViewForSingleRow && rows.length === 1;
         updatePagingButtonTitles();
@@ -2211,6 +2238,7 @@
         updatePageSizeFromSelection();
         setRerunBusy(false);
         updatePagingButtonTitles();
+        updateAdaptiveColumnLayoutClass();
         updateColumnHeaders(currentColumns, currentColumnMetadata);
         attachSortHandlers();
         attachResizeHandlers();

@@ -46,11 +46,13 @@ const { classifyMessage, determineOutcome, mapCommandMessages } = requireFromOut
 const { detectCommandEntryPrefix } = requireFromOut('commandEntryPrefixes');
 const { buildCancelSqlJobCommand, CMD_RUN_SQL, normalizeSqlJobId } = requireFromOut('commandEntrySqlHelpers');
 const { CommandEntryJobManager, buildJoblogQueryForSqlJob, collectRunAfterSqlJobInit, resolveRunAfterSqlJobInitMode, resolveSqlNamingMode } = requireFromOut('commandEntryJobManager');
+const { resolveSnippetTemplateValue } = requireFromOut('commandEntrySnippetResolution');
 const { buildMsgwInquiryRowSql, buildMsgwLatestRowSql, buildMsgwJobInfoSql, buildMsgwQueueInquiryByKeySql, buildMsgwQueueInquirySql, buildMsgwReplyCommand, buildMsgwReplyCommandForQueue, buildMsgwStatusSql, findMsgwInquiryMessage, findMsgwQueueInquiryByKey, findMsgwQueueInquiryMessage } = requireFromOut('commandEntryMsgw');
 const { buildImmediateSessionContextSql, buildRunAfterSqlJobInitDefaults, expandStartupScriptPlaceholders, normalizeSchemaSessionContextValue, normalizeSessionContextValue, splitRunAfterSqlJobInitStatements } = requireFromOut('commandEntrySqlSettings');
 const { buildChgCurlibCommandFromCurrentLibrary, buildChgLiblCommandFromLibraryList } = requireFromOut('commandEntryChgLibl');
 const { formatCLCommandText } = requireFromOut('formatCL');
 const { checkSQLForExecution } = requireFromOut('sqlSyntaxChecker');
+const { BUILT_IN_SQL_SNIPPETS } = requireFromOut('commandEntrySnippets');
 
 const messages = mapCommandMessages([
     { ORDINAL_POSITION: 2, MSGID: 'CPF0001', MSGSEV: 40, MSGTYPE: 'ESCAPE', MSGTEXT: 'Failed', SECLVLMSG: 'Details' },
@@ -64,6 +66,12 @@ assert.strictEqual(determineOutcome(messages), 'error');
 assert.match(CMD_RUN_SQL, /CMD_RUN\(\?, \?\)/);
 assert.strictEqual(normalizeSqlJobId('123456/myuser/qzdasoinit'), '123456/MYUSER/QZDASOINIT');
 assert.strictEqual(normalizeSqlJobId('123456/USER/NOT VALID'), undefined);
+assert.deepStrictEqual(resolveSnippetTemplateValue('Active Jobs sbs(${userSBSList})', { userSBSList: 'QGPL' }).resolved, 'Active Jobs sbs(QGPL)');
+assert.deepStrictEqual(resolveSnippetTemplateValue('Job (${sqlJobId})', { sqlJobId: '123456/MYUSER/QZDASOINIT' }).resolved, 'Job (123456/MYUSER/QZDASOINIT)');
+assert.deepStrictEqual(resolveSnippetTemplateValue('Job (${sqlJobId})', {}).missing, ['sqlJobId']);
+const c4iJobSnippet = BUILT_IN_SQL_SNIPPETS.find((snippet: any) => snippet.id === 'builtin.library-list-c4i');
+assert.ok(c4iJobSnippet, 'expected c4i snippet to exist');
+assert.ok(c4iJobSnippet.stmt.includes('${c4iJobId}'), 'expected c4i snippet to use c4iJobId token');
 assert.match(
     buildJoblogQueryForSqlJob('123456/MYUSER/QZDASOINIT'),
     /FROM TABLE\(QSYS2\.JOBLOG_INFO\('123456\/MYUSER\/QZDASOINIT'\)\)\s+ORDER BY ORDINAL_POSITION DESC/i

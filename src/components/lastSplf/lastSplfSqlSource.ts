@@ -3,6 +3,8 @@
  *
  * Source origin: /Users/cozzi/Downloads/projects/open-UDTF/src/LAST_SPLF/LAST_SPLF.SQL
  */
+import { applySqlSourceTokens } from '../sqlSourceTokens';
+
 const SQL_TEMPLATE = String.raw`
 
 CREATE or REPLACE FUNCTION sqltools.LAST_SPLF(
@@ -57,9 +59,5 @@ The valid choices are:
 `;
 
 export function getLastSplfSQLSrc(library: string, version: number): string {
-  return SQL_TEMPLATE
-    .replace(/\\\$\{version\}/gi, String(version))
-    .replace(/\$\{version\}/gi, String(version))
-    .replace(/sqltools\./gi, `${library}.`)
-    .replace(/SQLTOOLS\//g, `${library}/`);
+  return applySqlSourceTokens(SQL_TEMPLATE, library, version);
 }
