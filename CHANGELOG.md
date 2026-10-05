@@ -2,7 +2,7 @@
 
 All notable changes to this project are documented in this file.
 
-## [1.0.54] - 2026-10-05
+## [1.0.55] - 2026-10-05
 - Command Entry UI improvements.
 - Command Entry Code Snippets UI improvements.
 - New SQL Job timers appear when running to indicate the job and length of time that it has been runing.
