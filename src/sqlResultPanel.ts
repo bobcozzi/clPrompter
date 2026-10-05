@@ -1204,9 +1204,55 @@ function buildColumnProfiles(
     return out;
 }
 
-function isExactNumericType(typeName: string | undefined): boolean {
+function normalizedSqlTypeBase(typeName: string | undefined): string {
     const normalized = (typeName ?? '').trim().toUpperCase();
-    return normalized === 'DECIMAL' || normalized === 'NUMERIC' || normalized === 'DEC';
+    const withoutArgs = normalized.replace(/\(.*\)$/, '').trim();
+    return withoutArgs.replace(/\s+/g, ' ');
+}
+
+function parseJdbcTypeCode(typeName: string | undefined): number | undefined {
+    const numeric = Number((typeName ?? '').trim());
+    return Number.isFinite(numeric) ? numeric : undefined;
+}
+
+function isNumericMetadataType(typeName: string | undefined): boolean {
+    const base = normalizedSqlTypeBase(typeName);
+    if (base === 'SMALLINT'
+        || base === 'INTEGER'
+        || base === 'INT'
+        || base === 'BIGINT'
+        || base === 'DEC'
+        || base === 'DECIMAL'
+        || base === 'NUM'
+        || base === 'NUMERIC'
+        || base === 'DECFLOAT'
+        || base === 'REAL'
+        || base === 'DOUBLE'
+        || base === 'DOUBLE PRECISION'
+        || base === 'FLOAT') {
+        return true;
+    }
+
+    const jdbcTypeCode = parseJdbcTypeCode(typeName);
+    return jdbcTypeCode === -6
+        || jdbcTypeCode === -5
+        || jdbcTypeCode === 5
+        || jdbcTypeCode === 4
+        || jdbcTypeCode === 2
+        || jdbcTypeCode === 3
+        || jdbcTypeCode === 6
+        || jdbcTypeCode === 7
+        || jdbcTypeCode === 8;
+}
+
+function isExactNumericType(typeName: string | undefined): boolean {
+    const base = normalizedSqlTypeBase(typeName);
+    if (base === 'DECIMAL' || base === 'NUMERIC' || base === 'DEC' || base === 'NUM') {
+        return true;
+    }
+
+    const jdbcTypeCode = parseJdbcTypeCode(typeName);
+    return jdbcTypeCode === 2 || jdbcTypeCode === 3;
 }
 
 function profileColumn(
@@ -1218,6 +1264,10 @@ function profileColumn(
     let fractionDigits = 0;
     let sawFractionalNumber = false;
     let exactNumericScale: number | undefined;
+
+    if (metadata && isNumericMetadataType(metadata.typeName)) {
+        kind = 'number';
+    }
 
     if (metadata && isExactNumericType(metadata.typeName) && typeof metadata.scale === 'number' && metadata.scale >= 0) {
         kind = 'number';

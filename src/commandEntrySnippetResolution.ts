@@ -9,10 +9,11 @@ export interface SnippetTemplateContext {
     currentLibrary?: string;
     userSBSList?: string;
     funcLib?: string;
+    customVariables?: Record<string, string>;
 }
 
 export function resolveSnippetTemplateValue(template: string, context: SnippetTemplateContext): { resolved: string; missing: string[] } {
-    const tokenValues: Record<string, string | undefined> = {
+    const builtInTokenValues: Record<string, string | undefined> = {
         sqlJobId: context.sqlJobId,
         sqlJobName: context.sqlJobName,
         sqlJobNumber: context.sqlJobNumber,
@@ -24,15 +25,21 @@ export function resolveSnippetTemplateValue(template: string, context: SnippetTe
         userSBSList: context.userSBSList,
         funcLib: context.funcLib
     };
+    const customTokenValues = context.customVariables ?? {};
 
     const missing = new Set<string>();
     const resolved = String(template ?? '').replace(/\$\{([A-Za-z0-9_]+)\}/g, (_all, tokenName: string) => {
         const key = String(tokenName || '').trim();
-        if (!(key in tokenValues)) {
+        const isBuiltIn = key in builtInTokenValues;
+        const hasCustom = key in customTokenValues;
+        if (!isBuiltIn && !hasCustom) {
             return `\${${key}}`;
         }
-        const value = tokenValues[key];
-        if (key === 'userSBSList') {
+
+        const value = isBuiltIn
+            ? builtInTokenValues[key]
+            : customTokenValues[key];
+        if (key === 'userSBSList' && isBuiltIn) {
             return String(value ?? '').replace(/'/g, "''");
         }
         if (!value || !String(value).trim()) {

@@ -73,6 +73,9 @@ interface CmdEntryNoticePayload {
 export interface CodeSnippetRecord {
     id: string;
     label: string;
+    descriptionTemplate?: string;
+    treeLabel?: string;
+    treeDescription?: string;
     codeTemplate: string;
     group: string;
     environment?: CommandEntrySnippetEnvironment;
@@ -84,6 +87,8 @@ export interface CodeSnippetRecord {
 interface CommandEntrySqlSnippetUser {
     id: string;
     label: string;
+    description?: string;
+    variables?: Array<{ var: string; value: string }>;
     stmt: string;
     group: string;
     singleRowResultView?: 'row' | 'column';
@@ -93,6 +98,39 @@ interface CommandEntrySqlSnippetUser {
 }
 
 type CodeSnippetImportMode = 'merge' | 'replace-all' | 'add-new-only';
+
+function normalizeSnippetVariables(raw: unknown): Array<{ var: string; value: string }> | undefined {
+    if (!Array.isArray(raw)) {
+        return undefined;
+    }
+
+    const normalized = raw
+        .filter((item): item is { var?: unknown; value?: unknown } => !!item && typeof item === 'object')
+        .map((item) => ({
+            var: String(item.var ?? '').trim(),
+            value: String(item.value ?? '').trim()
+        }))
+        .filter((item) => item.var.length > 0);
+
+    return normalized.length > 0 ? normalized : undefined;
+}
+
+function snippetVariablesToMap(variables: Array<{ var: string; value: string }> | undefined): Record<string, string> | undefined {
+    if (!variables || variables.length === 0) {
+        return undefined;
+    }
+
+    const map: Record<string, string> = {};
+    for (const entry of variables) {
+        const key = String(entry.var ?? '').trim();
+        if (!key) {
+            continue;
+        }
+        map[key] = String(entry.value ?? '');
+    }
+
+    return Object.keys(map).length > 0 ? map : undefined;
+}
 
 function normalizeSnippetOrder(value: unknown): number | undefined {
     if (value === undefined || value === null || value === '') {
@@ -255,6 +293,15 @@ function normalizeSnippetSubsystemList(rawValue: unknown): string {
     }
 
     return tokens.join(',');
+}
+
+function collapseSnippetLabelWhitespace(label: string): string {
+    return String(label ?? '')
+        .replace(/\(\s*\)/g, '')
+        .replace(/\s{2,}/g, ' ')
+        .replace(/\s+\)/g, ')')
+        .replace(/\(\s+/g, '(')
+        .trim();
 }
 
 /** Persistent panel webview. It deliberately does not own an IBM i connection. */
@@ -453,10 +500,68 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
         return resolveSnippetTemplateValue(snippet.label, context).resolved;
     }
 
+    private resolveSnippetTreePresentation(snippet: CommandEntrySqlSnippet): { treeLabel?: string; treeDescription?: string } {
+        const labelTemplate = String(snippet.label || '');
+        const connection = this.getConnection();
+        const context = this.buildSnippetContext(connection, snippet);
+
+        const explicitDescriptionTemplate = String(snippet.description ?? '').trim();
+        if (explicitDescriptionTemplate) {
+            const resolvedLabel = resolveSnippetTemplateValue(labelTemplate, context).resolved;
+            const resolvedDescription = resolveSnippetTemplateValue(explicitDescriptionTemplate, context).resolved;
+            return {
+                treeLabel: collapseSnippetLabelWhitespace(resolvedLabel) || undefined,
+                treeDescription: collapseSnippetLabelWhitespace(resolvedDescription) || undefined
+            };
+        }
+
+        if (!labelTemplate.includes('${')) {
+            return {};
+        }
+
+        const tokenPattern = /\$\{([A-Za-z0-9_]+)\}/g;
+        const tokenNames = [...labelTemplate.matchAll(tokenPattern)]
+            .map((match) => String(match[1] || '').trim())
+            .filter(Boolean);
+        if (tokenNames.length === 0) {
+            return {};
+        }
+
+        const seen = new Set<string>();
+        const tokenValues = tokenNames
+            .filter((tokenName) => {
+                if (seen.has(tokenName)) {
+                    return false;
+                }
+                seen.add(tokenName);
+                return true;
+            })
+            .map((tokenName) => String((context as Record<string, unknown>)[tokenName] ?? '').trim())
+            .filter((value) => value.length > 0);
+        if (tokenValues.length === 0) {
+            return {};
+        }
+
+        const baseTemplate = labelTemplate.replace(tokenPattern, '');
+        const baseResolved = resolveSnippetTemplateValue(baseTemplate, context).resolved;
+        const treeLabel = collapseSnippetLabelWhitespace(baseResolved);
+        const wrapsSingleToken = tokenNames.length === 1 && /\(\s*\$\{[A-Za-z0-9_]+\}\s*\)/.test(labelTemplate);
+        const treeDescription = wrapsSingleToken
+            ? `(${tokenValues[0]})`
+            : tokenValues.join(', ');
+
+        return {
+            treeLabel: treeLabel || undefined,
+            treeDescription: collapseSnippetLabelWhitespace(treeDescription)
+        };
+    }
+
     listCodeSnippets(): CodeSnippetRecord[] {
         return this.getMergedSqlSnippets().map((snippet) => ({
+            ...this.resolveSnippetTreePresentation(snippet),
             id: snippet.id,
             label: this.resolveSnippetDisplayLabel(snippet),
+            descriptionTemplate: snippet.description,
             codeTemplate: snippet.stmt,
             group: snippet.group,
             environment: snippet.environment,
@@ -465,11 +570,11 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
             source: snippet.source
         }));
     }
-    async createCodeSnippet(label: string, codeTemplate: string, group = 'Admin', order?: number, singleRowResultView?: 'row' | 'column'): Promise<void> {
-        await this.addUserSqlSnippet(label, codeTemplate, group, order, singleRowResultView);
+    async createCodeSnippet(label: string, codeTemplate: string, group = 'Admin', order?: number, singleRowResultView?: 'row' | 'column', descriptionTemplate?: string): Promise<void> {
+        await this.addUserSqlSnippet(label, codeTemplate, group, order, singleRowResultView, descriptionTemplate);
     }
-    async updateCodeSnippet(id: string, label: string, codeTemplate: string, group?: string, order?: number, singleRowResultView?: 'row' | 'column'): Promise<void> {
-        await this.updateUserSqlSnippet(id, label, codeTemplate, group, order, singleRowResultView);
+    async updateCodeSnippet(id: string, label: string, codeTemplate: string, group?: string, order?: number, singleRowResultView?: 'row' | 'column', descriptionTemplate?: string): Promise<void> {
+        await this.updateUserSqlSnippet(id, label, codeTemplate, group, order, singleRowResultView, descriptionTemplate);
     }
     async deleteCodeSnippet(id: string): Promise<void> {
         await this.deleteSqlSnippet(id);
@@ -769,7 +874,7 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
     private postRunModeNotice(mode: CommandExecutionMode): void {
         this.post({
             type: 'notice',
-            message: vscode.l10n.t('Mode set to {description}.', {
+            message: vscode.l10n.t('Cmd Entry mode set to {description}.', {
                 description: this.runModeDescription(mode)
             })
         });
@@ -798,7 +903,7 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
             this.post({
                 type: 'notice',
                 message: useSharedJob
-                    ? vscode.l10n.t('Command Entry is already using the shared SQL job.')
+                    ? vscode.l10n.t('Command Entry is already using the shared C4i SQL job.')
                     : vscode.l10n.t('Command Entry is already using a private SQL job.')
             });
             this.postJobCapabilities();
@@ -825,7 +930,7 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
             this.post({
                 type: 'notice',
                 message: useSharedJob
-                    ? vscode.l10n.t(source === 'command' ? 'Switched to shared SQL job mode for this connection.' : 'Switched to shared SQL job mode.')
+                    ? vscode.l10n.t(source === 'command' ? 'Switched to shared C4i SQL job mode for this connection.' : 'Switched to shared C4i SQL job mode.')
                     : vscode.l10n.t(source === 'command' ? 'Switched to private SQL job mode for this connection.' : 'Switched to private SQL job mode.')
             });
         } catch (error) {
@@ -1746,6 +1851,8 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
             const record = item as Partial<CommandEntrySqlSnippetUser> & { sqlTemplate?: string };
             const id = String(record.id || '').trim();
             const label = String(record.label || '').trim();
+            const description = String(record.description ?? '').trim();
+            const variables = normalizeSnippetVariables((record as { variables?: unknown }).variables);
             const stmt = String(record.stmt ?? record.sqlTemplate ?? '').trim();
             const group = String(record.group || 'Admin').trim();
             const order = normalizeSnippetOrder((record as { order?: unknown; sequence?: unknown }).order ?? (record as { sequence?: unknown }).sequence);
@@ -1755,6 +1862,8 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
             snippets.push({
                 id,
                 label,
+                description: description || undefined,
+                variables,
                 stmt,
                 group,
                 singleRowResultView: record.singleRowResultView,
@@ -1864,6 +1973,8 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
         const userSnippets = this.getUserSqlSnippets().map<CommandEntrySqlSnippet>((snippet) => ({
             id: snippet.id,
             label: snippet.label,
+            description: snippet.description,
+            variables: snippet.variables,
             stmt: snippet.stmt,
             group: snippet.group,
             singleRowResultView: snippet.singleRowResultView,
@@ -1947,12 +2058,12 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
         return label.trim().length > 0;
     }
 
-    private normalizeImportedSnippets(raw: unknown): Array<{ label: string; stmt: string; group: string; singleRowResultView?: 'row' | 'column'; order?: number }> {
+    private normalizeImportedSnippets(raw: unknown): Array<{ label: string; description?: string; variables?: Array<{ var: string; value: string }>; stmt: string; group: string; singleRowResultView?: 'row' | 'column'; order?: number }> {
         const sourceArray = Array.isArray(raw)
             ? raw
             : (raw && typeof raw === 'object' && Array.isArray((raw as any).snippets) ? (raw as any).snippets : []);
 
-        const normalized: Array<{ label: string; stmt: string; group: string; singleRowResultView?: 'row' | 'column'; order?: number }> = [];
+        const normalized: Array<{ label: string; description?: string; variables?: Array<{ var: string; value: string }>; stmt: string; group: string; singleRowResultView?: 'row' | 'column'; order?: number }> = [];
         const seenLabels = new Set<string>();
         for (const item of sourceArray) {
             if (!item || typeof item !== 'object') {
@@ -1961,6 +2072,8 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
 
             const record = item as Record<string, unknown> & { sqlTemplate?: string; stmt?: string };
             const label = String(record.label ?? record.name ?? '').trim();
+            const description = String(record.description ?? record.treeDescription ?? '').trim();
+            const variables = normalizeSnippetVariables(record.variables);
             const stmt = String(record.stmt ?? record.sqlTemplate ?? record.codeTemplate ?? record.snippetText ?? record.text ?? record.command ?? '').trim();
             const group = String(record.group ?? record.category ?? 'Admin').trim() || 'Admin';
             const singleRowRaw = String(record.singleRowResultView ?? record.singleRowView ?? '').trim().toLowerCase();
@@ -1977,7 +2090,7 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
                 continue;
             }
             seenLabels.add(key);
-            normalized.push({ label, stmt, group, singleRowResultView, order });
+            normalized.push({ label, description: description || undefined, variables, stmt, group, singleRowResultView, order });
         }
 
         return normalized.slice(0, SQL_SNIPPETS_MAX);
@@ -2008,6 +2121,8 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
                 exportedAt: new Date().toISOString(),
                 snippets: userSnippets.map((snippet) => ({
                     label: snippet.label,
+                    description: snippet.description,
+                    variables: snippet.variables,
                     codeTemplate: snippet.stmt,
                     group: snippet.group,
                     singleRowResultView: snippet.singleRowResultView,
@@ -2086,6 +2201,8 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
                 const replaced: CommandEntrySqlSnippetUser[] = imported.map((item) => ({
                     id: this.createUserSnippetId(),
                     label: item.label,
+                    description: item.description,
+                    variables: item.variables,
                     stmt: item.stmt,
                     group: item.group,
                     singleRowResultView: item.singleRowResultView,
@@ -2108,6 +2225,8 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
                         const createdSnippet: CommandEntrySqlSnippetUser = {
                             id: this.createUserSnippetId(),
                             label: item.label,
+                            description: item.description,
+                            variables: item.variables,
                             stmt: item.stmt,
                             group: item.group,
                             singleRowResultView: item.singleRowResultView,
@@ -2123,6 +2242,8 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
 
                     if (mode === 'merge') {
                         existingMatch.label = item.label;
+                        existingMatch.description = item.description;
+                        existingMatch.variables = item.variables;
                         existingMatch.stmt = item.stmt;
                         existingMatch.group = item.group;
                         existingMatch.singleRowResultView = item.singleRowResultView;
@@ -2182,6 +2303,7 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
         const extensionConfig = vscode.workspace.getConfiguration('clPrompter');
         const userSBSList = normalizeSnippetSubsystemList(extensionConfig.get<string>('cmdEntrySnippetsACTSBS', ''));
         const funcLib = connection ? getUDTFLibrary(connection) : undefined;
+        const customVariables = snippetVariablesToMap(snippet?.variables);
         return {
             sqlJobId: parts.sqlJobId,
             sqlJobName: parts.sqlJobName,
@@ -2192,7 +2314,8 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
             currentUser: connection?.currentUser,
             currentLibrary: typeof config?.currentLibrary === 'string' ? config.currentLibrary : undefined,
             userSBSList,
-            funcLib: funcLib?.trim() || undefined
+            funcLib: funcLib?.trim() || undefined,
+            customVariables
         };
     }
 
@@ -2396,8 +2519,9 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
         }
     }
 
-    private async addUserSqlSnippet(label: string, stmt: string, group = 'Admin', order?: number, singleRowResultView?: 'row' | 'column'): Promise<void> {
+    private async addUserSqlSnippet(label: string, stmt: string, group = 'Admin', order?: number, singleRowResultView?: 'row' | 'column', descriptionTemplate?: string): Promise<void> {
         const trimmedLabel = label.trim();
+        const trimmedDescription = String(descriptionTemplate ?? '').trim();
         const trimmedStmt = stmt.trim();
         const trimmedGroup = group.trim() || 'Admin';
         const normalizedOrder = normalizeSnippetOrder(order);
@@ -2416,6 +2540,7 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
         userSnippets.push({
             id,
             label: trimmedLabel,
+            description: trimmedDescription || undefined,
             stmt: trimmedStmt,
             group: trimmedGroup,
             singleRowResultView,
@@ -2431,8 +2556,9 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
         this.notifyCodeSnippetsChanged();
     }
 
-    private async updateUserSqlSnippet(id: string, label: string, stmt: string, group?: string, order?: number, singleRowResultView?: 'row' | 'column'): Promise<void> {
+    private async updateUserSqlSnippet(id: string, label: string, stmt: string, group?: string, order?: number, singleRowResultView?: 'row' | 'column', descriptionTemplate?: string): Promise<void> {
         const trimmedLabel = label.trim();
+        const trimmedDescription = String(descriptionTemplate ?? '').trim();
         const trimmedStmt = stmt.trim();
         const trimmedGroup = group?.trim();
         const normalizedOrder = normalizeSnippetOrder(order);
@@ -2457,6 +2583,8 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
             userSnippets.push({
                 id,
                 label: trimmedLabel,
+                description: trimmedDescription || builtIn.description,
+                variables: builtIn.variables,
                 stmt: trimmedStmt,
                 group: trimmedGroup || builtIn.group || 'Admin',
                 singleRowResultView,
@@ -2472,6 +2600,7 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
         userSnippets[index] = {
             ...userSnippets[index],
             label: trimmedLabel,
+            description: trimmedDescription || undefined,
             stmt: trimmedStmt,
             group: trimmedGroup || userSnippets[index].group || 'Admin',
             singleRowResultView,
@@ -4477,9 +4606,9 @@ FETCH FIRST 1 ROW ONLY`;
                             <option value="*LIMIT" title="${vscode.l10n.t('Run as Limited USRPRF')}">${vscode.l10n.t('Limit')}</option>
                             <option value="*CHECK" title="${vscode.l10n.t('Syntax Check Only')}">${vscode.l10n.t('Check')}</option>
                         </select>
-                    </div>
-                    <div id="run-lane" role="status" aria-live="polite" aria-label="${vscode.l10n.t('Active run lanes')}">
-                        <span id="run-lane-text"></span>
+                        <div id="run-lane" role="status" aria-live="polite" aria-label="${vscode.l10n.t('Active run lanes')}">
+                            <span id="run-lane-text"></span>
+                        </div>
                     </div>
                     <div id="status" role="status" aria-live="polite">
                         <span id="status-text"></span>

@@ -94,9 +94,9 @@ class CodeSnippetPreviewTreeItem extends vscode.TreeItem {
 
 class CodeSnippetTreeItem extends vscode.TreeItem {
     constructor(public readonly snippet: CodeSnippetRecord, clickAction: TreeClickAction) {
-        super(snippet.label, vscode.TreeItemCollapsibleState.Collapsed);
+        super(snippet.treeLabel || snippet.label, vscode.TreeItemCollapsibleState.Collapsed);
         this.id = snippet.id;
-        this.description = snippet.source === 'user' ? 'User' : undefined;
+        this.description = snippet.treeDescription || (snippet.source === 'user' ? 'User' : undefined);
         this.tooltip = new vscode.MarkdownString([
             `**${snippet.label}**`,
             '',
@@ -267,7 +267,15 @@ class CodeSnippetDragAndDropController implements vscode.TreeDragAndDropControll
         }
 
         if (sourceSnippet.group !== targetGroup) {
-            await this.commandEntry.updateCodeSnippet(sourceSnippet.id, sourceSnippet.label, sourceSnippet.codeTemplate, targetGroup);
+            await this.commandEntry.updateCodeSnippet(
+                sourceSnippet.id,
+                sourceSnippet.label,
+                sourceSnippet.codeTemplate,
+                targetGroup,
+                sourceSnippet.order,
+                sourceSnippet.singleRowResultView,
+                sourceSnippet.descriptionTemplate
+            );
         }
 
         const refreshed = this.commandEntry.listCodeSnippets();
@@ -343,6 +351,7 @@ class CodeSnippetEditorPanel {
                         break;
                     case 'save': {
                         const label = String(message.label || '').trim();
+                        const descriptionTemplate = String(message.descriptionTemplate ?? '').trim();
                         const codeTemplate = String(message.codeTemplate || '').trim();
                         const group = String(message.group || '').trim() || 'Admin';
                         const singleRowResultView = message.singleRowResultView === 'row' || message.singleRowResultView === 'column'
@@ -357,15 +366,16 @@ class CodeSnippetEditorPanel {
                             : undefined;
 
                         if (snippet && snippet.source === 'user') {
-                            await commandEntry.updateCodeSnippet(snippet.id, label, codeTemplate, group, parsedOrder, singleRowResultView);
+                            await commandEntry.updateCodeSnippet(snippet.id, label, codeTemplate, group, parsedOrder, singleRowResultView, descriptionTemplate);
                         } else {
-                            await commandEntry.createCodeSnippet(label, codeTemplate, group, parsedOrder, singleRowResultView);
+                            await commandEntry.createCodeSnippet(label, codeTemplate, group, parsedOrder, singleRowResultView, descriptionTemplate);
                         }
                         panel.dispose();
                         break;
                     }
                     case 'saveRun': {
                         const label = String(message.label || '').trim();
+                        const descriptionTemplate = String(message.descriptionTemplate ?? '').trim();
                         const codeTemplate = String(message.codeTemplate || '').trim();
                         const group = String(message.group || '').trim() || 'Admin';
                         const singleRowResultView = message.singleRowResultView === 'row' || message.singleRowResultView === 'column'
@@ -380,10 +390,10 @@ class CodeSnippetEditorPanel {
                             : undefined;
 
                         if (snippet && snippet.source === 'user') {
-                            await commandEntry.updateCodeSnippet(snippet.id, label, codeTemplate, group, parsedOrder, singleRowResultView);
+                            await commandEntry.updateCodeSnippet(snippet.id, label, codeTemplate, group, parsedOrder, singleRowResultView, descriptionTemplate);
                             await commandEntry.executeCodeSnippetById(snippet.id);
                         } else {
-                            await commandEntry.createCodeSnippet(label, codeTemplate, group, parsedOrder, singleRowResultView);
+                            await commandEntry.createCodeSnippet(label, codeTemplate, group, parsedOrder, singleRowResultView, descriptionTemplate);
                             const created = commandEntry.listCodeSnippets().find((entry) => entry.label.toUpperCase() === label.toUpperCase() && entry.source === 'user');
                             if (created) {
                                 await commandEntry.executeCodeSnippetById(created.id);
@@ -435,6 +445,13 @@ class CodeSnippetEditorPanel {
                     <div class="control-wrap narrow">
                         <input id="snippet-group" type="text" list="group-options" />
                         <datalist id="group-options"></datalist>
+                    </div>
+                </div>
+
+                <div class="field-label"><label for="snippet-description">Tree Description (optional)</label></div>
+                <div class="field-control">
+                    <div class="control-wrap narrow">
+                        <input id="snippet-description" type="text" maxlength="180" placeholder="Supports tokens like \${currentUser}" />
                     </div>
                 </div>
 
@@ -492,6 +509,7 @@ class CodeSnippetEditorPanel {
   <script nonce="${nonce}">
     const vscode = acquireVsCodeApi();
     const label = document.getElementById('snippet-label');
+    const description = document.getElementById('snippet-description');
     const group = document.getElementById('snippet-group');
     const order = document.getElementById('snippet-order');
     const singleRowView = document.getElementById('snippet-single-row-view');
@@ -537,6 +555,7 @@ class CodeSnippetEditorPanel {
                         vscode.postMessage({
                             type: 'save',
                             label: label.value,
+                            descriptionTemplate: description.value,
                             group: group.value,
                             order: order.value,
                             singleRowResultView: singleRowView.value,
@@ -551,6 +570,7 @@ class CodeSnippetEditorPanel {
       if (message.type === 'load') {
         currentSnippet = message.snippet || null;
         label.value = currentSnippet?.label || '';
+        description.value = currentSnippet?.descriptionTemplate || '';
         code.value = currentSnippet?.codeTemplate || '';
         group.value = currentSnippet?.group || 'Admin';
         order.value = Number.isFinite(Number(currentSnippet?.order)) ? String(Math.trunc(Number(currentSnippet.order))) : '';

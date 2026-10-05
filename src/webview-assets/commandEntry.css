@@ -14,6 +14,7 @@ body {
     align-items: flex-start;
     gap: 6px;
     flex-wrap: wrap;
+    position: relative;
 }
 
 .severity-wrap {
@@ -268,10 +269,19 @@ button[data-tooltip]:focus-visible::after {
 }
 
 #run-lane {
-    min-height: 1.2em;
-    margin: 3px 0 2px;
-    display: flex;
+    position: absolute;
+    right: 0;
+    bottom: 2px;
+    display: none;
     align-items: center;
+    max-width: 42%;
+    min-width: 120px;
+    justify-content: flex-end;
+    pointer-events: none;
+}
+
+#run-lane.is-active {
+    display: flex;
 }
 
 #run-lane-text {
@@ -280,6 +290,7 @@ button[data-tooltip]:focus-visible::after {
     font-size: .88em;
     font-family: var(--vscode-editor-font-family);
     white-space: pre-wrap;
+    text-align: right;
 }
 
 #run-lane-text.is-active {

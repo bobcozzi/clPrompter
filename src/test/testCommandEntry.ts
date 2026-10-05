@@ -69,6 +69,18 @@ assert.strictEqual(normalizeSqlJobId('123456/USER/NOT VALID'), undefined);
 assert.deepStrictEqual(resolveSnippetTemplateValue('Active Jobs sbs(${userSBSList})', { userSBSList: 'QGPL' }).resolved, 'Active Jobs sbs(QGPL)');
 assert.deepStrictEqual(resolveSnippetTemplateValue('Job (${sqlJobId})', { sqlJobId: '123456/MYUSER/QZDASOINIT' }).resolved, 'Job (123456/MYUSER/QZDASOINIT)');
 assert.deepStrictEqual(resolveSnippetTemplateValue('Job (${sqlJobId})', {}).missing, ['sqlJobId']);
+assert.deepStrictEqual(
+    resolveSnippetTemplateValue('Active Jobs sbs(${sbsId}) order ${Order}', {
+        customVariables: { sbsId: 'QINTER', Order: 'desc' }
+    }).resolved,
+    'Active Jobs sbs(QINTER) order desc'
+);
+assert.deepStrictEqual(
+    resolveSnippetTemplateValue('Missing ${customValue}', {
+        customVariables: { customValue: '' }
+    }).missing,
+    ['customValue']
+);
 const c4iJobSnippet = BUILT_IN_SQL_SNIPPETS.find((snippet: any) => snippet.id === 'builtin.library-list-c4i');
 assert.ok(c4iJobSnippet, 'expected c4i snippet to exist');
 assert.ok(c4iJobSnippet.stmt.includes('${c4iJobId}'), 'expected c4i snippet to use c4iJobId token');

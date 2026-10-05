@@ -10,7 +10,7 @@
   const command = document.getElementById('command'), mode = document.getElementById('mode'), severityFilter = document.getElementById('message-severity-filter');
   window.clPrompterInstallInternalCutHandler?.(command);
   const run = document.getElementById('run'), prompt = document.getElementById('prompt'), cmdEntryHelp = document.getElementById('cmdentry-help'), cmdEntrySettings = document.getElementById('cmdentry-settings'), toolbarMenu = document.getElementById('toolbar-menu'), toolbarMenuList = document.getElementById('toolbar-menu-list'), menuViewLog = document.getElementById('menu-view-log'), menuClearLog = document.getElementById('menu-clear-log'), menuClearSqlLog = document.getElementById('menu-clear-sql-log'), menuClearSqlHistory = document.getElementById('menu-clear-sql-history'), menuToggleSqlLog = document.getElementById('menu-toggle-sql-log'), menuToggleMessageDetails = document.getElementById('menu-toggle-message-details'), menuConnectionSettings = document.getElementById('menu-connection-settings'), menuUseSharedSqlJob = document.getElementById('menu-use-shared-sql-job'), menuUsePrivateSqlJob = document.getElementById('menu-use-private-sql-job'), menuStartNewJob = document.getElementById('menu-start-new-job'), menuClearHistory = document.getElementById('menu-clear-history'), menuRunMode = document.getElementById('menu-run-mode'), menuRunModeList = document.getElementById('menu-run-mode-list'), menuRunModeWrap = menuRunMode ? menuRunMode.closest('.toolbar-submenu-wrap') : null, menuRunModeRun = document.getElementById('menu-run-mode-run'), menuRunModeLimit = document.getElementById('menu-run-mode-limit'), menuRunModeCheck = document.getElementById('menu-run-mode-check'), historyPrev = document.getElementById('history-prev'), historyNext = document.getElementById('history-next'), statusJobMenu = document.getElementById('status-job-menu'), statusJobMenuCopy = document.getElementById('status-job-menu-copy'), statusJobMenuDisplayJoblog = document.getElementById('status-job-menu-display-joblog'), statusJobMenuCheckMsgw = document.getElementById('status-job-menu-check-msgw'), statusJobMenuToggleSqlJob = document.getElementById('status-job-menu-toggle-sql-job'), statusJobMenuConnectionSettings = document.getElementById('status-job-menu-connection-settings'), statusJobMenuReconnectServerJob = document.getElementById('status-job-menu-reconnect-server-job');
-  const statusText = document.getElementById('status-text'), statusIdentity = document.getElementById('status-identity'), statusJobId = document.getElementById('status-jobid'), runLaneText = document.getElementById('run-lane-text'), results = document.getElementById('results');
+  const statusText = document.getElementById('status-text'), statusIdentity = document.getElementById('status-identity'), statusJobId = document.getElementById('status-jobid'), runLane = document.getElementById('run-lane'), runLaneText = document.getElementById('run-lane-text'), results = document.getElementById('results');
   let historyIndex = -1, runningStartedAt, runningTimerId, runningStatusPrefix = l10n.runningStatusPrefix || 'Running…', historyDraft = '', sqlJobPollingId;
   let lastSubmittedRawCommand = '';
   let transientStatusUntil = 0;
@@ -175,14 +175,16 @@
     return `${entry.lane}(${elapsedSeconds} s)`;
   };
   const renderRunLaneStatus = () => {
-    if (!runLaneText) {
+    if (!runLane || !runLaneText) {
       return;
     }
     const tokens = Array.from(activeRunLanes.values())
       .sort((left, right) => Number(left.startedAt || 0) - Number(right.startedAt || 0))
       .map(formatRunLaneToken);
     runLaneText.textContent = tokens.join('  ');
-    runLaneText.classList.toggle('is-active', tokens.length > 0);
+    const isActive = tokens.length > 0;
+    runLane.classList.toggle('is-active', isActive);
+    runLaneText.classList.toggle('is-active', isActive);
   };
   const ensureRunLaneTimer = () => {
     if (activeRunLanes.size > 0) {

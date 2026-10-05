@@ -63,8 +63,93 @@
         return String(value || '').trim().toUpperCase();
     }
 
-    function isLikelyNumericType(typeName) {
-        return /^(SMALLINT|INTEGER|INT|BIGINT|DEC|DECIMAL|NUMERIC|DECFLOAT|REAL|DOUBLE|FLOAT)$/i.test(String(typeName || ''));
+    function normalizedSqlTypeBase(typeName) {
+        var normalized = String(typeName || '').trim().toUpperCase();
+        var withoutArgs = normalized.replace(/\(.*\)$/, '').trim();
+        return withoutArgs.replace(/\s+/g, ' ');
+    }
+
+    function parseJdbcTypeCode(typeName) {
+        var numeric = Number(String(typeName || '').trim());
+        return isFinite(numeric) ? numeric : undefined;
+    }
+
+    function isLikelyRightAlignedType(typeName) {
+        var base = normalizedSqlTypeBase(typeName);
+        if (base === 'DATE'
+            || base === 'TIME'
+            || base === 'TIMESTAMP'
+            || base === 'TIMESTMP'
+            || base === 'TIMESTAMP WITH TIME ZONE'
+            || base === 'TIMESTAMP WITHOUT TIME ZONE') {
+            return true;
+        }
+
+        var jdbcTypeCode = parseJdbcTypeCode(typeName);
+        if (jdbcTypeCode === 91
+            || jdbcTypeCode === 92
+            || jdbcTypeCode === 93
+            || jdbcTypeCode === 2013
+            || jdbcTypeCode === 2014) {
+            return true;
+        }
+
+        if (base === 'SMALLINT'
+            || base === 'INTEGER'
+            || base === 'INT'
+            || base === 'BIGINT'
+            || base === 'DEC'
+            || base === 'DECIMAL'
+            || base === 'NUM'
+            || base === 'NUMERIC'
+            || base === 'DECFLOAT'
+            || base === 'REAL'
+            || base === 'DOUBLE'
+            || base === 'DOUBLE PRECISION'
+            || base === 'FLOAT') {
+            return true;
+        }
+
+        return jdbcTypeCode === -6
+            || jdbcTypeCode === -5
+            || jdbcTypeCode === 5
+            || jdbcTypeCode === 4
+            || jdbcTypeCode === 2
+            || jdbcTypeCode === 3
+            || jdbcTypeCode === 6
+            || jdbcTypeCode === 7
+            || jdbcTypeCode === 8;
+    }
+
+    function isRightAlignedSortKind(sortKind) {
+        var kind = String(sortKind || '').toLowerCase();
+        return kind === 'number'
+            || kind === 'date'
+            || kind === 'time'
+            || kind === 'timestamp';
+    }
+
+    function isRowCellRightAligned(columnIndex) {
+        for (var rowIndex = 0; rowIndex < rows.length; rowIndex++) {
+            var row = rows[rowIndex];
+            if (!Array.isArray(row)) {
+                continue;
+            }
+            var cell = row[columnIndex];
+            if (!cell || typeof cell !== 'object') {
+                continue;
+            }
+            var alignClass = String(cell.alignClass || '');
+            if (alignClass.indexOf('align-right') >= 0) {
+                return true;
+            }
+
+            if (isRightAlignedSortKind(cell.sortKind)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     function findMetadataForColumn(columnName, metadata, index) {
@@ -253,7 +338,9 @@
                     classNames.push('sql-last-col-content-fit');
                 }
                 var rebuildType = rebuildMeta ? String(rebuildMeta.typeName || rebuildMeta.type || '') : '';
-                if (isLikelyNumericType(rebuildType)) {
+                var rebuildKeepRightAligned = isLikelyRightAlignedType(rebuildType)
+                    || isRowCellRightAligned(rebuildIndex);
+                if (rebuildKeepRightAligned) {
                     classNames.push('align-right');
                 }
                 rebuilt += '<th class="' + classNames.join(' ') + '" data-col-index="' + rebuildIndex + '" title="' + escapeHtml(rebuildTooltip) + '" data-tooltip="' + escapeHtml(rebuildTooltip) + '" aria-label="' + escapeHtml(rebuildTooltip) + '" aria-sort="none">' + renderColumnHeaderHtml(rebuildHeaderText) + '</th>';
@@ -271,6 +358,7 @@
             var columnMetadata = findMetadataForColumn(columnName, metadata, i);
             var headerText = resolveColumnHeaderText(columnName, columnMetadata || undefined);
             var tooltip = buildColumnHeaderTooltip(columnName, columnMetadata || undefined);
+            var metadataType = columnMetadata ? String(columnMetadata.typeName || columnMetadata.type || '') : '';
             var stackedHeader = headerCell.querySelector('.stacked-header');
             if (stackedHeader) {
                 stackedHeader.innerHTML = renderColumnHeaderHtml(headerText).replace(/^<div class="stacked-header">|<\/div>$/g, '');
@@ -283,6 +371,31 @@
             headerCell.setAttribute('data-tooltip', tooltip);
             headerCell.setAttribute('aria-label', tooltip);
             headerCell.classList.toggle('sql-last-col-content-fit', i === (columnNames.length - 1));
+            var keepRightAligned = isLikelyRightAlignedType(metadataType)
+                || isRowCellRightAligned(i);
+            headerCell.classList.toggle('align-right', keepRightAligned);
+        }
+    }
+
+    function syncHeaderAlignmentFromCells(columnNames, metadata) {
+        var headerRow = document.querySelector('#table-wrap thead tr');
+        if (!headerRow) {
+            return;
+        }
+
+        var headerCells = headerRow.querySelectorAll('th.sortable-col[data-col-index]');
+        if (!headerCells || headerCells.length === 0) {
+            return;
+        }
+
+        for (var i = 0; i < headerCells.length; i++) {
+            var headerCell = headerCells[i];
+            var columnName = String((columnNames && columnNames[i]) || '');
+            var columnMetadata = findMetadataForColumn(columnName, metadata, i);
+            var metadataType = columnMetadata ? String(columnMetadata.typeName || columnMetadata.type || '') : '';
+            var keepRightAligned = isRowCellRightAligned(i)
+                || isLikelyRightAlignedType(metadataType);
+            headerCell.classList.toggle('align-right', keepRightAligned);
         }
     }
 
@@ -923,6 +1036,7 @@
         var viewportHeight = getRowViewportHeight();
         var viewportTop = rowOffsets[start] || 0;
         var viewportBottom = viewportTop + viewportHeight;
+        var clipTolerancePx = 0.5;
         var visibleCount = 0;
 
         for (var i = start; i < rowOffsets.length; i++) {
@@ -932,14 +1046,13 @@
             }
             var rowHeight = getMeasuredRowHeight(i);
             var rowBottom = rowTop + rowHeight;
-            var overlapTop = Math.max(rowTop, viewportTop);
-            var overlapBottom = Math.min(rowBottom, viewportBottom);
-            var visibleHeight = Math.max(0, overlapBottom - overlapTop);
-            var visibleRatio = rowHeight > 0 ? (visibleHeight / rowHeight) : 0;
-            // Treat a row as visible when at least 95% of it is in view.
-            if (visibleRatio >= 0.95) {
+            // Count only rows that are fully visible in the viewport.
+            if (rowBottom <= (viewportBottom + clipTolerancePx)) {
                 visibleCount += 1;
+                continue;
             }
+
+            break;
         }
 
         return Math.max(1, visibleCount);
@@ -969,6 +1082,82 @@
         return 24;
     }
 
+    function getLastTopRowForViewport() {
+        if (!tableWrap || rowOffsets.length === 0) {
+            return 0;
+        }
+
+        var maxScrollable = Math.max(0, tableWrap.scrollHeight - tableWrap.clientHeight);
+        return findRowIndexForScrollTop(maxScrollable);
+    }
+
+    function computeAutoPageDownTopRow(currentTopRowIndex) {
+        if (!tableWrap || rowOffsets.length === 0) {
+            return 0;
+        }
+
+        var lastTopRow = getLastTopRowForViewport();
+        var topIndex = Math.max(0, Math.min(lastTopRow, currentTopRowIndex));
+        if (topIndex >= lastTopRow) {
+            return lastTopRow;
+        }
+
+        var viewportTop = rowOffsets[topIndex] || 0;
+        var viewportBottom = viewportTop + getRowViewportHeight();
+        var clipTolerancePx = 0.5;
+        var nextTop = topIndex;
+
+        for (var i = topIndex; i < rowOffsets.length; i++) {
+            var rowTop = rowOffsets[i] || 0;
+            var rowBottom = rowTop + getMeasuredRowHeight(i);
+            if (rowBottom <= (viewportBottom + clipTolerancePx)) {
+                nextTop = i + 1;
+                continue;
+            }
+
+            nextTop = i;
+            break;
+        }
+
+        if (nextTop <= topIndex) {
+            nextTop = topIndex + 1;
+        }
+
+        return Math.max(0, Math.min(lastTopRow, nextTop));
+    }
+
+    function computeAutoPageUpTopRow(currentTopRowIndex) {
+        if (!tableWrap || rowOffsets.length === 0) {
+            return 0;
+        }
+
+        var topIndex = Math.max(0, Math.min(rowOffsets.length - 1, currentTopRowIndex));
+        if (topIndex <= 0) {
+            return 0;
+        }
+
+        var remainingHeight = getRowViewportHeight();
+        var clipTolerancePx = 0.5;
+        var candidate = topIndex - 1;
+
+        while (candidate >= 0) {
+            var rowHeight = getMeasuredRowHeight(candidate);
+            if ((remainingHeight - rowHeight) >= -clipTolerancePx) {
+                remainingHeight -= rowHeight;
+                candidate -= 1;
+                continue;
+            }
+            break;
+        }
+
+        var target = candidate + 1;
+        if (target >= topIndex) {
+            target = topIndex - 1;
+        }
+
+        return Math.max(0, target);
+    }
+
     function getAutoLastStartRow() {
         var anchors = getAutoPageAnchors();
         return anchors.length > 0 ? anchors[anchors.length - 1] : 0;
@@ -979,10 +1168,29 @@
             return [0];
         }
 
-        var autoRowsPerPage = Math.max(1, estimateVisibleRows());
         var anchors = [0];
-        for (var startRow = autoRowsPerPage; startRow < rowOffsets.length; startRow += autoRowsPerPage) {
-            anchors.push(startRow);
+        var currentStart = 0;
+        var maxScrollable = Math.max(0, tableWrap.scrollHeight - tableWrap.clientHeight);
+        var lastStartRow = findRowIndexForScrollTop(maxScrollable);
+
+        // Build page anchors from measured viewport fit at each start row.
+        // The final anchor must be the max-scroll top row (not the last data row),
+        // otherwise tail pages can collapse to one-row views and break reverse paging.
+        while (currentStart < lastStartRow) {
+            var visibleCount = Math.max(1, getVisibleRowCountFromStartRow(currentStart));
+            var nextStart = Math.min(lastStartRow, currentStart + visibleCount);
+            if (nextStart <= currentStart) {
+                nextStart = Math.min(lastStartRow, currentStart + 1);
+            }
+            if (nextStart <= currentStart) {
+                break;
+            }
+            anchors.push(nextStart);
+            currentStart = nextStart;
+        }
+
+        if (anchors[anchors.length - 1] !== lastStartRow) {
+            anchors.push(lastStartRow);
         }
 
         return anchors;
@@ -1316,12 +1524,17 @@
             }
 
             rebuildRowOffsets();
-            var baseTopRow = getCurrentTopRowIndex();
-            var visibleCount = getVisibleRowCountFromStartRow(baseTopRow);
-            var targetTopRow = baseTopRow + (deltaPages * visibleCount);
-            if (targetTopRow <= baseTopRow && deltaPages > 0 && baseTopRow < rowOffsets.length - 1) {
-                targetTopRow = baseTopRow + 1;
+            var targetTopRow = getCurrentTopRowIndex();
+            if (deltaPages > 0) {
+                for (var forward = 0; forward < deltaPages; forward++) {
+                    targetTopRow = computeAutoPageDownTopRow(targetTopRow);
+                }
+            } else if (deltaPages < 0) {
+                for (var backward = 0; backward < Math.abs(deltaPages); backward++) {
+                    targetTopRow = computeAutoPageUpTopRow(targetTopRow);
+                }
             }
+
             scrollToRowIndex(targetTopRow);
             logPagingDiag('jumpByPages:auto');
             return;
@@ -1567,6 +1780,7 @@
         }
 
         syncPageIndexFromScroll();
+        syncHeaderAlignmentFromCells(currentColumns, currentColumnMetadata);
 
         if (resultMeta) {
             var elapsedText = formatElapsedMs(currentElapsedMs);
@@ -1985,6 +2199,7 @@
                 return;
             }
             if (pageSizeAuto && tableWrap) {
+                rebuildRowOffsets();
                 var anchors = getAutoPageAnchors();
                 var lastPage = Math.max(0, anchors.length - 1);
                 pageIndex = lastPage;

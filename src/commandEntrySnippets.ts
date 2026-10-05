@@ -1,8 +1,15 @@
 export type CommandEntrySnippetEnvironment = 'cmdEntry' | 'c4iShared' | 'cmdEntryPool';
 
+export interface CommandEntrySnippetVariable {
+    var: string;
+    value: string;
+}
+
 export interface CommandEntrySqlSnippet {
     id: string;
     label: string;
+    description?: string;
+    variables?: CommandEntrySnippetVariable[];
     title?: string;
     stmt: string;
     group: string;
@@ -19,7 +26,8 @@ export interface CommandEntrySqlSnippet {
 export const BUILT_IN_SQL_SNIPPETS: ReadonlyArray<CommandEntrySqlSnippet> = [
     {
         id: 'builtin.lastest-joblog',
-        label: 'Joblog (last 200 msgs) ${sqlJobId}',
+        label: 'Joblog (last 200 msgs)',
+        description: '${sqlJobId}',
         title: 'Joblog (Last 200 msgs) (${sqlJobId})',
         stmt: [
             'SELECT ORDINAL_POSITION as SEQNBR,',
@@ -46,7 +54,8 @@ export const BUILT_IN_SQL_SNIPPETS: ReadonlyArray<CommandEntrySqlSnippet> = [
     },
     {
         id: 'builtin.full-joblog',
-        label: 'Joblog (full) ${sqlJobId}',
+        label: 'Joblog (full)',
+        description: '${sqlJobId}',
         title: 'Full Joblog (${sqlJobId})',
         stmt: [
             'SELECT ORDINAL_POSITION as SEQNBR,',
@@ -73,7 +82,9 @@ export const BUILT_IN_SQL_SNIPPETS: ReadonlyArray<CommandEntrySqlSnippet> = [
     },
     {
         id: 'builtin.job-attributes',
-        label: 'Job Attributes ${sqlJobId}',
+        label: 'Job Attributes',
+        description: '${sqlJobId}',
+        title: 'Job Attributes for ${sqlJobId}',
         stmt: ["SELECT JOB_NAME as JOB,SUBSYSTEM,AUTHORIZATION_NAME as USER_NAME,JOB_NAME_SHORT as JOB_NAME,",
             "trim(JOB_TYPE) concat '/' concat trim(JOB_TYPE_ENHANCED) as JOB_TYPE,",
             "OPEN_FILES,",
@@ -103,7 +114,8 @@ export const BUILT_IN_SQL_SNIPPETS: ReadonlyArray<CommandEntrySqlSnippet> = [
     },
     {
         id: 'builtin.library-list',
-        label: 'Library List ${sqlJobId}',
+        label: 'Library List',
+        description: '${sqlJobId}',
         title: 'Library List (${sqlJobId})',
         stmt: [
             'SELECT ORDINAL_POSITION AS "Position",',
@@ -123,7 +135,8 @@ export const BUILT_IN_SQL_SNIPPETS: ReadonlyArray<CommandEntrySqlSnippet> = [
     },
     {
         id: 'builtin.library-list-c4i',
-        label: 'Library List (c4i) ${c4iJobId}',
+        label: 'Library List (c4i)',
+        description: '${c4iJobId}',
         title: 'Library List (c4i) (${c4iJobId})',
         stmt: [
             'SELECT ORDINAL_POSITION AS "Position",',
@@ -143,7 +156,8 @@ export const BUILT_IN_SQL_SNIPPETS: ReadonlyArray<CommandEntrySqlSnippet> = [
     },
     {
         id: 'builtin.job-splf-list',
-        label: 'SPOOLED Files List ${sqlJobId}',
+        label: 'SPOOLED Files List',
+        description: '${sqlJobId}',
         title: 'SPOOLED Files from Job(${sqlJobId})',
         stmt: [
             'SELECT SPOOLED_FILE_NAME AS SPLFNAME,',
@@ -173,7 +187,8 @@ export const BUILT_IN_SQL_SNIPPETS: ReadonlyArray<CommandEntrySqlSnippet> = [
     },
     {
         id: 'builtin.last-job-spooled-file',
-        label: 'View Last SPOOLED File ${sqlJobId}',
+        label: 'View Last SPOOLED File',
+        description: 'Job(${sqlJobId})',
         title: 'Last SPOOLED File for Job(${sqlJobId})',
         stmt: [
             'WITH sf AS (',
@@ -198,12 +213,23 @@ export const BUILT_IN_SQL_SNIPPETS: ReadonlyArray<CommandEntrySqlSnippet> = [
     },
     {
         id: 'builtin.active-jobs-custom',
-        label: 'Active Jobs sbs(${userSBSList})',
+        label: 'Active Jobs',
+        description: 'sbs(${userSBSList})',
         stmt: [
             'SELECT aj.JOB_NAME as JOB, aj.SUBSYSTEM, aj.JOB_NAME_SHORT as JOB_NAME,',
             'aj.AUTHORIZATION_NAME as USER_NAME, ',
+            'JOB_TYPE,JOB_STATUS,',
             " trim(aj.FUNCTION_TYPE) concat '-' concat aj.FUNCTION as FUNCTION_INFO,",
-            ' JOB_STATUS, ',
+            'aj.JOB_ACTIVE_TIME as "Job Start Time",',
+            'aj.CLIENT_IP_ADDRESS,',
+            "trim(aj.JOB_DESCRIPTION_LIBRARY) concat '/'",
+            'concat trim(aj.JOB_DESCRIPTION) as "JOBD",',
+            "trim(aj.OUTPUT_QUEUE_LIBRARY) concat '/'",
+            'concat trim(aj.OUTPUT_QUEUE) as "OUTQ", ',
+            'aj.OPEN_FILES,',
+            'aj."CCSID",',
+            'aj.DEFAULT_CCSID as "Default CCSID",',
+            'aj.JOB_TYPE_ENHANCED,',
             ' MEMORY_POOL, TEMPORARY_STORAGE, CPU_TIME, TOTAL_DISK_IO_COUNT as "Total Disk I/O"',
             "FROM TABLE(QSYS2.ACTIVE_JOB_INFO(SUBSYSTEM_LIST_FILTER => '${userSBSList}')) aj",
             'ORDER BY ORDINAL_POSITION'
@@ -215,14 +241,13 @@ export const BUILT_IN_SQL_SNIPPETS: ReadonlyArray<CommandEntrySqlSnippet> = [
     },
     {
         id: 'builtin.active-jobs-custom-detailed',
-        label: 'Active Jobs Detailed sbs(${userSBSList})',
+        label: 'Active Jobs Detailed',
+        description: 'sbs(${userSBSList})',
         stmt: [
             'SELECT aj.JOB_NAME as JOB, aj.SUBSYSTEM, aj.JOB_NAME_SHORT as JOB_NAME,',
             'aj.AUTHORIZATION_NAME as USER_NAME, ',
-            " trim(aj.FUNCTION_TYPE) concat '-' concat aj.FUNCTION as FUNCTION_INFO,",
-            ' JOB_STATUS, JOB_ACTIVE_TIME as "Job Start Time",',
+            'JOB_TYPE,JOB_STATUS,',
             ' MEMORY_POOL, TEMPORARY_STORAGE as "Temp Stg", CPU_TIME, TOTAL_DISK_IO_COUNT as "Total Disk I/O"',
-            ' , OUTPUT_QUEUE, JOB_USER_IDENTITY, PAGE_FAULTS, DATABASE_LOCK_WAITS, OPEN_FILES',
             "FROM TABLE(QSYS2.ACTIVE_JOB_INFO(DETAILED_INFO => 'ALL', SUBSYSTEM_LIST_FILTER => '${userSBSList}')) aj",
             'ORDER BY ORDINAL_POSITION'
         ].join(' '),
@@ -233,14 +258,28 @@ export const BUILT_IN_SQL_SNIPPETS: ReadonlyArray<CommandEntrySqlSnippet> = [
     },
     {
         id: 'builtin.active-jobs-qinter',
-        label: 'Active Jobs sbs(QINTER)',
+        label: 'Active Jobs',
+        description: 'sbs(${sbsId})',
+        variables: [
+            { var: 'sbsId', value: 'QINTER' }
+        ],
         stmt: [
             'SELECT aj.JOB_NAME as JOB, aj.SUBSYSTEM, aj.JOB_NAME_SHORT as JOB_NAME,',
             'aj.AUTHORIZATION_NAME as USER_NAME, ',
+            'JOB_TYPE,JOB_STATUS,',
             " trim(aj.FUNCTION_TYPE) concat '-' concat aj.FUNCTION as FUNCTION_INFO,",
-            ' JOB_STATUS, JOB_ACTIVE_TIME as "Job Start Time",',
+            'aj.JOB_ACTIVE_TIME as "Job Start Time",',
+            'aj.CLIENT_IP_ADDRESS,',
+            "trim(aj.JOB_DESCRIPTION_LIBRARY) concat '/'",
+            'concat trim(aj.JOB_DESCRIPTION) as "JOBD",',
+            "trim(aj.OUTPUT_QUEUE_LIBRARY) concat '/'",
+            'concat trim(aj.OUTPUT_QUEUE) as "OUTQ", ',
+            'aj.OPEN_FILES,',
+            'aj."CCSID",',
+            'aj.DEFAULT_CCSID as "Default CCSID",',
+            'aj.JOB_TYPE_ENHANCED,',
             ' MEMORY_POOL, TEMPORARY_STORAGE as "Temp Stg", CPU_TIME, TOTAL_DISK_IO_COUNT as "Total Disk I/O"',
-            "FROM TABLE(QSYS2.ACTIVE_JOB_INFO(DETAILED_INFO => 'ALL', SUBSYSTEM_LIST_FILTER => 'QINTER')) aj",
+            "FROM TABLE(QSYS2.ACTIVE_JOB_INFO(DETAILED_INFO => 'ALL', SUBSYSTEM_LIST_FILTER => '${sbsId}')) aj",
             'ORDER BY ORDINAL_POSITION'
         ].join(' '),
         group: 'Admin',
@@ -251,14 +290,28 @@ export const BUILT_IN_SQL_SNIPPETS: ReadonlyArray<CommandEntrySqlSnippet> = [
     },
     {
         id: 'builtin.active-jobs-qbatch',
-        label: 'Active Jobs sbs(QBATCH)',
+        label: 'Active Jobs',
+        description: 'sbs(${sbsId})',
+        variables: [
+            { var: 'sbsId', value: 'QBATCH' }
+        ],
         stmt: [
             'SELECT aj.JOB_NAME as JOB, aj.SUBSYSTEM, aj.JOB_NAME_SHORT as JOB_NAME,',
             'aj.AUTHORIZATION_NAME as USER_NAME, ',
+            'JOB_TYPE,JOB_STATUS,',
             " trim(aj.FUNCTION_TYPE) concat '-' concat aj.FUNCTION as FUNCTION_INFO,",
-            ' JOB_STATUS, JOB_ACTIVE_TIME as "Job Start Time",',
+            'aj.JOB_ACTIVE_TIME as "Job Start Time",',
+            'aj.CLIENT_IP_ADDRESS,',
+            "trim(aj.JOB_DESCRIPTION_LIBRARY) concat '/'",
+            'concat trim(aj.JOB_DESCRIPTION) as "JOBD",',
+            "trim(aj.OUTPUT_QUEUE_LIBRARY) concat '/'",
+            'concat trim(aj.OUTPUT_QUEUE) as "OUTQ", ',
+            'aj.OPEN_FILES,',
+            'aj."CCSID",',
+            'aj.DEFAULT_CCSID as "Default CCSID",',
+            'aj.JOB_TYPE_ENHANCED,',
             ' MEMORY_POOL, TEMPORARY_STORAGE as "Temp Stg", CPU_TIME, TOTAL_DISK_IO_COUNT as "Total Disk I/O"',
-            "FROM TABLE(QSYS2.ACTIVE_JOB_INFO(DETAILED_INFO => 'ALL', SUBSYSTEM_LIST_FILTER => 'QBATCH')) aj",
+            "FROM TABLE(QSYS2.ACTIVE_JOB_INFO(DETAILED_INFO => 'ALL', SUBSYSTEM_LIST_FILTER => '${sbsId}')) aj",
             'ORDER BY ORDINAL_POSITION'
         ].join(' '),
         group: 'Admin',
@@ -269,14 +322,28 @@ export const BUILT_IN_SQL_SNIPPETS: ReadonlyArray<CommandEntrySqlSnippet> = [
     },
     {
         id: 'builtin.active-jobs-qusrwrk',
-        label: 'Active Jobs sbs(QUSRWRK)',
+        label: 'Active Jobs',
+        description: 'sbs(${sbsId})',
+        variables: [
+            { var: 'sbsId', value: 'QUSRWRK' }
+        ],
         stmt: [
             'SELECT aj.JOB_NAME as JOB, aj.SUBSYSTEM, aj.JOB_NAME_SHORT as JOB_NAME,',
             'aj.AUTHORIZATION_NAME as USER_NAME, ',
+            'JOB_TYPE,JOB_STATUS,',
             " trim(aj.FUNCTION_TYPE) concat '-' concat aj.FUNCTION as FUNCTION_INFO,",
-            ' JOB_STATUS, JOB_ACTIVE_TIME as "Job Start Time",',
+            'aj.JOB_ACTIVE_TIME as "Job Start Time",',
+            'aj.CLIENT_IP_ADDRESS,',
+            "trim(aj.JOB_DESCRIPTION_LIBRARY) concat '/'",
+            'concat trim(aj.JOB_DESCRIPTION) as "JOBD",',
+            "trim(aj.OUTPUT_QUEUE_LIBRARY) concat '/'",
+            'concat trim(aj.OUTPUT_QUEUE) as "OUTQ", ',
+            'aj.OPEN_FILES,',
+            'aj."CCSID",',
+            'aj.DEFAULT_CCSID as "Default CCSID",',
+            'aj.JOB_TYPE_ENHANCED,',
             ' MEMORY_POOL, TEMPORARY_STORAGE as "Temp Stg", CPU_TIME, TOTAL_DISK_IO_COUNT as "Total Disk I/O"',
-            "FROM TABLE(QSYS2.ACTIVE_JOB_INFO(DETAILED_INFO => 'ALL', SUBSYSTEM_LIST_FILTER => 'QUSRWRK')) aj",
+            "FROM TABLE(QSYS2.ACTIVE_JOB_INFO(DETAILED_INFO => 'ALL', SUBSYSTEM_LIST_FILTER => '${sbsId}')) aj",
             'ORDER BY ORDINAL_POSITION'
         ].join(' '),
         group: 'Admin',
@@ -287,14 +354,28 @@ export const BUILT_IN_SQL_SNIPPETS: ReadonlyArray<CommandEntrySqlSnippet> = [
     },
     {
         id: 'builtin.active-jobs-qhttpsvr',
-        label: 'Active Jobs sbs(QHTTPSVR)',
+        label: 'Active Jobs',
+        description: 'sbs(${sbsId})',
+        variables: [
+            { var: 'sbsId', value: 'QHTTPSVR' }
+        ],
         stmt: [
             'SELECT aj.JOB_NAME as JOB, aj.SUBSYSTEM, aj.JOB_NAME_SHORT as JOB_NAME,',
             'aj.AUTHORIZATION_NAME as USER_NAME, ',
+            'JOB_TYPE,JOB_STATUS,',
             " trim(aj.FUNCTION_TYPE) concat '-' concat aj.FUNCTION as FUNCTION_INFO,",
-            ' JOB_STATUS, JOB_ACTIVE_TIME as "Job Start Time",',
+            'aj.JOB_ACTIVE_TIME as "Job Start Time",',
+            'aj.CLIENT_IP_ADDRESS,',
+            "trim(aj.JOB_DESCRIPTION_LIBRARY) concat '/'",
+            'concat trim(aj.JOB_DESCRIPTION) as "JOBD",',
+            "trim(aj.OUTPUT_QUEUE_LIBRARY) concat '/'",
+            'concat trim(aj.OUTPUT_QUEUE) as "OUTQ", ',
+            'aj.OPEN_FILES,',
+            'aj."CCSID",',
+            'aj.DEFAULT_CCSID as "Default CCSID",',
+            'aj.JOB_TYPE_ENHANCED,',
             ' MEMORY_POOL, TEMPORARY_STORAGE as "Temp Stg", CPU_TIME, TOTAL_DISK_IO_COUNT as "Total Disk I/O"',
-            "FROM TABLE(QSYS2.ACTIVE_JOB_INFO(DETAILED_INFO => 'ALL', SUBSYSTEM_LIST_FILTER => 'QHTTPSVR')) aj",
+            "FROM TABLE(QSYS2.ACTIVE_JOB_INFO(DETAILED_INFO => 'ALL', SUBSYSTEM_LIST_FILTER => '${sbsId}')) aj",
             'ORDER BY ORDINAL_POSITION'
         ].join(' '),
         group: 'Admin',
@@ -304,13 +385,52 @@ export const BUILT_IN_SQL_SNIPPETS: ReadonlyArray<CommandEntrySqlSnippet> = [
         source: 'built-in'
     },
     {
+        id: 'builtin.QSYSOPR',
+        label: 'QSYSOPR messages',
+        description: '(descend)',
+        stmt: [
+            'SELECT message_ID,',
+            "CASE UPPER(TRIM(MESSAGE_TYPE))",
+            "WHEN 'COMMAND' THEN '*CMD'",
+            "WHEN 'COMPLETION' THEN '*COMP'",
+            "WHEN 'DIAGNOSTIC' THEN '*DIAG'",
+            "WHEN 'ESCAPE' THEN '*ESCAPE'",
+            "WHEN 'INFORMATIONAL' THEN '*INFO'",
+            "WHEN 'INQUIRY' THEN '*INQ'",
+            "WHEN 'NOTIFY' THEN '*NOTIFY'",
+            "WHEN 'REPLY' THEN '*RPY'",
+            "WHEN 'REQUEST' THEN '*RQS'",
+            "WHEN 'SCOPE' THEN '*SCOPE'",
+            "WHEN 'SENDER' THEN '*SENDER'",
+            "ELSE MESSAGE_TYPE",
+            "END AS MSGTYPE,",
+            "Message_text AS MSGTEXT,",
+            "SEVERITY AS SEV,",
+            "MESSAGE_TIMESTAMP,",
+            "FROM_USER,FROM_JOB,FROM_PROGRAM,",
+            "COALESCE(TRIM(MESSAGE_FILE_LIBRARY) CONCAT '/', '') CONCAT",
+            "message_file_name AS MSGFILE,",
+            "MESSAGE_SECOND_LEVEL_TEXT AS MSG_2ND_LEVEL",
+            "FROM TABLE (qsys2.message_queue_info(QUEUE_NAME=>'QSYSOPR'))",
+            'order by MESSAGE_TIMESTAMP desc'
+        ].join(' '),
+        group: 'Admin',
+        environment: 'cmdEntryPool',
+        singleRowResultView: 'row',
+        order: 60,
+        source: 'built-in'
+    },
+
+
+    {
         id: 'builtin.spooled-files-user',
-        label: 'SPOOLED Files List (${currentUser})',
+        label: 'SPOOLED Files List',
+        description: '${currentUser}',
         title: 'SPOOLED Files User(${currentUser})',
         stmt: [
             'SELECT SPOOLED_FILE_NAME AS SPLFNAME,',
             'SPOOLED_FILE_NUMBER AS SPLNBR,',
-            'QUALIFIED_JOB_NAME AS JOB,',
+            'QUALIFIED_JOB_NAME as "Created in Job",',
             'STATUS,TOTAL_PAGES AS PAGES,USER_DATA,FORM_TYPE,',
             'JOB_USER AS USER_NAME,',
             "TRIM(OUTPUT_QUEUE_LIBRARY) CONCAT '/' CONCAT OUTPUT_QUEUE AS OUTPUT_QUEUE,",
@@ -336,7 +456,8 @@ export const BUILT_IN_SQL_SNIPPETS: ReadonlyArray<CommandEntrySqlSnippet> = [
     },
     {
         id: 'builtin.last-user-spooled-file',
-        label: 'View Last SPOOLED File (${currentUser})',
+        label: 'View Last SPOOLED File',
+        description: '${currentUser}',
         title: 'Last SPOOLED File for User(${currentUser})',
         stmt: [
             'WITH sf AS (',
@@ -346,7 +467,8 @@ export const BUILT_IN_SQL_SNIPPETS: ReadonlyArray<CommandEntrySqlSnippet> = [
             '  LIMIT 1',
             ') ',
             'SELECT SF.CREATION_TIMESTAMP AS CREATED,',
-            ' SF.QUALIFIED_JOB_NAME as JOB, sf.SPOOLED_FILE_NAME as SPLFNAME,',
+            ' SF.QUALIFIED_JOB_NAME as "Created in Job",',
+            ' sf.SPOOLED_FILE_NAME as SPLFNAME, ',
             ' sd.SPOOLED_DATA FROM sf',
             ',LATERAL (SELECT * FROM TABLE(systools.spooled_file_data(',
             '           JOB_NAME => SF.QUALIFIED_JOB_NAME,',
