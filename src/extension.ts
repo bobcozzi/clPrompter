@@ -40,7 +40,8 @@ import {
     FieldListChecker,
     JobAttrChecker,
     JobLiblChecker,
-    LastSplfChecker
+    LastSplfChecker,
+    ObjAttrChecker
 } from './components/hostFunctions';
 
 import {
@@ -743,6 +744,8 @@ export async function activate(context: vscode.ExtensionContext) {
         safeRegisterCode4iComponent('DltObjChecker', dltObjChecker);
         const lastSplfChecker = new LastSplfChecker();
         safeRegisterCode4iComponent('LastSplfChecker', lastSplfChecker);
+        const objAttrChecker = new ObjAttrChecker();
+        safeRegisterCode4iComponent('ObjAttrChecker', objAttrChecker);
 
         // If the extension activates while a connection is already live (e.g. lazy
         // activation), the ComponentManager won't have called our component for the
@@ -928,6 +931,24 @@ export async function activate(context: vscode.ExtensionContext) {
             }
         };
 
+        let objAttrCheckRunning = false;
+        const runObjAttrCheck = async () => {
+            if (objAttrCheckRunning) { return; }
+            objAttrCheckRunning = true;
+            try {
+                const conn = code4i?.instance?.getConnection();
+                if (!conn) { return; }
+                const state = await objAttrChecker.getRemoteState(conn, '');
+                if (state.status !== 'Installed') {
+                    await objAttrChecker.update(conn, '');
+                }
+            } catch (e) {
+                console.error(`[clPrompter] ObjAttrChecker manual check failed: ${e}`);
+            } finally {
+                objAttrCheckRunning = false;
+            }
+        };
+
         // Subscribe to IBM i connection events.
         // On disconnect: clear the XML cache so stale definitions from the previous
         // IBM i system are never reused after reconnecting to a different system.
@@ -1109,7 +1130,8 @@ export async function activate(context: vscode.ExtensionContext) {
                 runChkAuthCheck(),
                 runCmdCheckCheck(),
                 runDltObjCheck(),
-                runLastSplfCheck()
+                runLastSplfCheck(),
+                runObjAttrCheck()
             ]).finally(() => prefetch());
         } else {
             scheduleStartupConnectionHydration();

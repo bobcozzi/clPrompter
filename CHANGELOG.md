@@ -2,13 +2,21 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.0.56] - 2026-10-09
+### What's Fixed
+- When resizing a resultSet column for SQL run via Command Entry, when the mouse leaves the VS CODE Editor window, the mouse movements are still tracked so it can be released "off screen" even when outside that window.
+- Added new OBJ_ATTR UDTF to obtain object or file->member attributes. Note this is for code for IBM i extension and only included here for completeness.
+- The CL Prompter now supports using the Arrow keys in the parameter input fields to move between pre-defined parmaeter option.
+
 ## [1.0.55] - 2026-10-05
+
+### What's New
+
 - Command Entry UI improvements.
 - Command Entry Code Snippets UI improvements.
 - New SQL Job timers appear when running to indicate the job and length of time that it has been runing.
 - They auto-vanish when finished so you might see a quick flash for fast commands.
 
-### What's New
 
 ## [1.0.54] - 2026-10-03
 

@@ -38,6 +38,20 @@ export interface CBInputOptions {
   placeholder?: string;
 }
 
+export function cbinputResolveHighlightIndex(options: string[], value: string): number {
+  return options.indexOf(value);
+}
+
+export function cbinputMoveIndex(options: string[], highlightedIndex: number, direction: 'next' | 'previous'): number {
+  if (options.length === 0) return -1;
+
+  if (direction === 'next') {
+    return highlightedIndex + 1 >= options.length ? 0 : highlightedIndex + 1;
+  }
+
+  return highlightedIndex - 1 < 0 ? options.length - 1 : highlightedIndex - 1;
+}
+
 export class CBInput {
   private container: HTMLDivElement;
   private input: HTMLInputElement;
@@ -45,6 +59,15 @@ export class CBInput {
   private dropdown: HTMLDivElement;
   private options: string[];
   private isOpen: boolean = false;
+  private highlightedIndex: number = -1; // Current option highlighted in the dropdown
+  private justFocused: boolean = false; // First arrow key after focus overrides browser selection collapse
+
+  private syncHighlightedIndexToCurrentValue(): void {
+    this.highlightedIndex = cbinputResolveHighlightIndex(this.options, this.input.value);
+    if (this.isOpen) {
+      this.refreshDropdownHighlight();
+    }
+  }
 
   constructor(opts: CBInputOptions) {
     this.options = opts.options || [];
@@ -136,28 +159,45 @@ export class CBInput {
   private renderOptions(): void {
     this.dropdown.innerHTML = '';
 
-    this.options.forEach(optionValue => {
+    this.options.forEach((optionValue, index) => {
       const optionEl = document.createElement('div');
       optionEl.className = 'cbinput-option';
       optionEl.textContent = optionValue;
       optionEl.setAttribute('data-value', optionValue);
+      optionEl.setAttribute('data-index', String(index));
       optionEl.style.padding = '4px 8px';
       optionEl.style.cursor = 'pointer';
       optionEl.style.color = '#006400';
       optionEl.style.fontFamily = 'var(--vscode-font-family, monospace)';
       optionEl.style.fontSize = '13px';
+      optionEl.style.transition = 'background 0.1s ease';
+
+      // Highlight current selection if this index matches
+      if (index === this.highlightedIndex) {
+        optionEl.style.background = '#0e639c'; // VS Code selection blue
+        optionEl.style.color = '#ffffff';
+      }
 
       // Hover effect
       optionEl.addEventListener('mouseenter', () => {
         optionEl.style.background = '#e0e0e0';
+        optionEl.style.color = '#000000';
       });
       optionEl.addEventListener('mouseleave', () => {
-        optionEl.style.background = '';
+        // Restore highlighting if this was the current selection
+        if (index === this.highlightedIndex) {
+          optionEl.style.background = '#0e639c';
+          optionEl.style.color = '#ffffff';
+        } else {
+          optionEl.style.background = '';
+          optionEl.style.color = '#006400';
+        }
       });
 
       // Click to select
       optionEl.addEventListener('mousedown', (e) => {
         e.preventDefault(); // Prevent input blur
+        this.highlightedIndex = index;
         this.selectOption(optionValue);
       });
 
@@ -179,13 +219,108 @@ export class CBInput {
       }
     });
 
-    // Input focus behavior
+    // Keep select-all on focus so users can type over the current value.
+    // The first arrow key after focus is handled specially to override the browser's
+    // native selection-collapse behavior.
     this.input.addEventListener('focus', () => {
       this.input.style.borderColor = 'var(--vscode-focusBorder, #007acc)';
+      this.justFocused = true;
+      this.syncHighlightedIndexToCurrentValue();
+      this.input.select();
     });
 
     this.input.addEventListener('blur', () => {
       this.input.style.borderColor = 'var(--vscode-input-border, #3c3c3c)';
+      this.justFocused = false;
+    });
+
+    // Keyboard navigation for the dropdown list.
+    this.input.addEventListener('keydown', (e) => {
+      if (this.options.length === 0) return;
+
+      switch (e.key) {
+        case 'ArrowDown':
+          e.preventDefault();
+          if (this.justFocused) {
+            this.justFocused = false;
+            const endPos = this.input.value.length;
+            this.input.setSelectionRange(endPos, endPos);
+            this.highlightNext();
+            this.refreshDropdownHighlight();
+            return;
+          }
+          this.highlightNext();
+          this.refreshDropdownHighlight();
+          break;
+
+        case 'ArrowUp':
+          e.preventDefault();
+          if (this.justFocused) {
+            this.justFocused = false;
+            const endPos = this.input.value.length;
+            this.input.setSelectionRange(endPos, endPos);
+            this.highlightPrevious();
+            this.refreshDropdownHighlight();
+            return;
+          }
+          this.highlightPrevious();
+          this.refreshDropdownHighlight();
+          break;
+
+        case 'Enter':
+          if (this.highlightedIndex >= 0 && this.highlightedIndex < this.options.length) {
+            e.preventDefault();
+            this.selectOption(this.options[this.highlightedIndex]);
+          }
+          break;
+
+        case 'Escape':
+          if (this.isOpen) {
+            e.preventDefault();
+            this.closeDropdown();
+          }
+          break;
+
+        default:
+          this.justFocused = false;
+          this.highlightedIndex = -1;
+          break;
+      }
+    });
+  }
+
+  private highlightNext(): void {
+    this.highlightedIndex = cbinputMoveIndex(this.options, this.highlightedIndex, 'next');
+
+    this.updateInputToHighlighted();
+  }
+
+  private highlightPrevious(): void {
+    this.highlightedIndex = cbinputMoveIndex(this.options, this.highlightedIndex, 'previous');
+
+    this.updateInputToHighlighted();
+  }
+
+  private updateInputToHighlighted(): void {
+    if (this.highlightedIndex >= 0 && this.highlightedIndex < this.options.length) {
+      this.input.value = this.options[this.highlightedIndex];
+    }
+  }
+
+  private refreshDropdownHighlight(): void {
+    // Update visual highlight in dropdown if it's open
+    if (!this.isOpen) return;
+
+    const options = this.dropdown.querySelectorAll('.cbinput-option');
+    options.forEach((option, index) => {
+      const optionEl = option as HTMLElement;
+      if (index === this.highlightedIndex) {
+        optionEl.style.background = '#0e639c'; // VS Code selection blue
+        optionEl.style.color = '#ffffff';
+      } else {
+        optionEl.style.background = '';
+        optionEl.style.color = '#006400';
+      }
     });
   }
 
@@ -201,12 +336,19 @@ export class CBInput {
     this.dropdown.style.display = 'block';
     this.isOpen = true;
     this.button.textContent = '▲';
+    // Initialize highlighting to first option if none is selected
+    if (this.highlightedIndex < 0 && this.options.length > 0) {
+      this.highlightedIndex = 0;
+      this.updateInputToHighlighted();
+    }
+    this.refreshDropdownHighlight();
   }
 
   private closeDropdown(): void {
     this.dropdown.style.display = 'none';
     this.isOpen = false;
     this.button.textContent = '▼';
+    this.highlightedIndex = -1; // Reset navigation index
   }
 
   private selectOption(value: string): void {
@@ -229,10 +371,12 @@ export class CBInput {
 
   public setValue(value: string): void {
     this.input.value = value;
+    this.syncHighlightedIndexToCurrentValue();
   }
 
   public setOptions(options: string[]): void {
     this.options = options;
+    this.syncHighlightedIndexToCurrentValue();
     this.renderOptions();
   }
 

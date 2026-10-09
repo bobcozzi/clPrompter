@@ -2022,14 +2022,19 @@
                 handle.title = t('dragToResizeColumn', 'Drag to resize column');
                 header.appendChild(handle);
 
-                handle.addEventListener('mousedown', function (event) {
-                    event.preventDefault();
-                    event.stopPropagation();
+                handle.addEventListener('pointerdown', function (event) {
+                    if (event && typeof event.preventDefault === 'function') {
+                        event.preventDefault();
+                    }
+                    if (event && typeof event.stopPropagation === 'function') {
+                        event.stopPropagation();
+                    }
 
                     var startX = event.clientX;
                     var rect = header.getBoundingClientRect();
                     var baseWidth = Number(columnWidths[colIndex]) || rect.width;
                     var didMove = false;
+                    var activePointerId = typeof event.pointerId === 'number' ? event.pointerId : undefined;
                     if (!isFinite(baseWidth) || baseWidth < minColumnWidthPx) {
                         baseWidth = minColumnWidthPx;
                     }
@@ -2049,9 +2054,22 @@
                         applyWidths();
                     };
 
-                    var onUp = function () {
-                        window.removeEventListener('mousemove', onMove);
-                        window.removeEventListener('mouseup', onUp);
+                    var finishResize = function () {
+                        if (typeof handle.releasePointerCapture === 'function' && typeof activePointerId === 'number') {
+                            try {
+                                handle.releasePointerCapture(activePointerId);
+                            } catch (_releaseError) {
+                                // Ignore capture release errors.
+                            }
+                        }
+
+                        handle.removeEventListener('pointermove', onMove);
+                        handle.removeEventListener('pointerup', finishResize);
+                        handle.removeEventListener('pointercancel', finishResize);
+                        document.removeEventListener('pointermove', onMove);
+                        document.removeEventListener('pointerup', finishResize);
+                        document.removeEventListener('pointercancel', finishResize);
+                        window.removeEventListener('blur', finishResize);
                         document.body.classList.remove('is-col-resizing');
                         if (didMove) {
                             suppressSortUntil = Date.now() + 250;
@@ -2065,8 +2083,21 @@
                         }));
                     };
 
-                    window.addEventListener('mousemove', onMove);
-                    window.addEventListener('mouseup', onUp);
+                    if (typeof handle.setPointerCapture === 'function' && typeof activePointerId === 'number') {
+                        try {
+                            handle.setPointerCapture(activePointerId);
+                        } catch (_captureError) {
+                            // Pointer capture can fail in some browsers; document listeners remain as fallback.
+                        }
+                    }
+
+                    handle.addEventListener('pointermove', onMove);
+                    handle.addEventListener('pointerup', finishResize);
+                    handle.addEventListener('pointercancel', finishResize);
+                    document.addEventListener('pointermove', onMove);
+                    document.addEventListener('pointerup', finishResize);
+                    document.addEventListener('pointercancel', finishResize);
+                    window.addEventListener('blur', finishResize);
                 });
 
                 // Block click bubbling from the handle itself.

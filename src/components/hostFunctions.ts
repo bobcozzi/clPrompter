@@ -19,6 +19,7 @@ import { getFieldListCPPSrc } from './fieldList/fieldListCppSource';
 import { getFieldListSQLSrc } from './fieldList/fieldListSqlSource';
 import { getJobAttrRPGLESrc } from './jobAttr/jobAttrRpgleSource';
 import { getJobAttrSQLSrc } from './jobAttr/jobAttrSqlSource';
+import { getSource_objattr, OBJ_ATTR_RPGLE_SOURCE } from './objAttr/source';
 import { getJobLiblRPGLESrc } from './joblibl/jobLiblRpgleSource';
 import { getJobLiblSQLSrc } from './joblibl/jobLiblSqlSource';
 import { getLastSplfCPPSrc } from './lastSplf/lastSplfCppSource';
@@ -71,7 +72,8 @@ const MANAGED_SPECIFIC_NAMES = [
     'FIELD_LIST',
     'JOB_ATTR',
     'JOB_LIBL',
-    'LAST_SPLF'
+    'LAST_SPLF',
+    'OBJ_ATTR'
 ];
 
 const VERSION_CACHE_TTL_MS = 10000;
@@ -404,7 +406,7 @@ abstract class UDTFChecker implements IBMiComponent {
             }
 
             // ── Step 6: RUNSQLSTM to create/replace the UDTF ──────────────
-            const runsqlstmCmd = `RUNSQLSTM SRCSTMF('${sqlPath}') COMMIT(*NONE) NAMING(*SYS) TGTRLS(*CURRENT)`;
+            const runsqlstmCmd = `RUNSQLSTM SRCSTMF('${sqlPath}') COMMIT(*NONE) NAMING(*SYS) TGTRLS(*CURRENT) OPTION(*LIST)`;
             appendClPrompterOutputLine(`[clPrompter] ${this.id}.update() — create/replace function command: ${runsqlstmCmd}`);
             appendClPrompterOutputLine(`[clPrompter] ${this.id}.update() — running: ${runsqlstmCmd}`);
             const sqlResult = await connection.runCommand({
@@ -513,6 +515,21 @@ export class JobAttrChecker extends UDTFChecker {
 
     getSourceSrc(): string { return getJobAttrRPGLESrc(); }
     getSQLSrc(library: string, version: number): string { return getJobAttrSQLSrc(library, version); }
+}
+
+/**
+ * Manages the OBJ_ATTR UDTF — returns object/member attributes using Qp0lGetAttr.
+ */
+export class ObjAttrChecker extends UDTFChecker {
+    static readonly ID = 'clPrompter.ObjAttrChecker';
+    readonly id = ObjAttrChecker.ID;
+    readonly PGM_NAME = 'OBJ_ATTR';
+    readonly UDTF_SPECIFIC = 'obj_attr';
+    readonly currentVersion = 1;
+    readonly SOURCE_TYPE: HostSourceType = 'RPGLE';
+
+    getSourceSrc(): string { return OBJ_ATTR_RPGLE_SOURCE; }
+    getSQLSrc(library: string, version: number): string { return getSource_objattr(library, version); }
 }
 
 /**

@@ -180,6 +180,8 @@ assert.strictEqual(detectCommandEntryPrefix('SELECT * FROM QIWS.QCUSTCDT'), unde
 assert.strictEqual(resolveSqlNamingMode('sql'), 'sql');
 assert.strictEqual(resolveSqlNamingMode('system'), 'system');
 assert.strictEqual(resolveSqlNamingMode('SQL'), 'sql');
+assert.strictEqual(new CommandEntryJobManager().isContinuationUsable({ hasFetchMore: true, source: 'dedicated' } as any), false);
+assert.strictEqual(new CommandEntryJobManager().isContinuationUsable({ hasFetchMore: true, id: 'abc', source: 'dedicated' } as any), true);
 assert.deepStrictEqual(collectRunAfterSqlJobInit({ cmdEntry: { runAfterSqlJobInit: ['SET OPTION NAMING = *SQL', 'VALUES 1'] } }), ['SET OPTION NAMING = *SQL', 'VALUES 1']);
 assert.deepStrictEqual(collectRunAfterSqlJobInit({ clPrompter: { cmdEntry: { runAfterSqlJobInit: ['SET SYSIBMADM.SELFCODES = 1'] } } }), ['SET SYSIBMADM.SELFCODES = 1']);
 assert.deepStrictEqual(splitRunAfterSqlJobInitStatements('cl: dspjoblog;\nsql: values 1;'), ['cl: dspjoblog', 'sql: values 1']);

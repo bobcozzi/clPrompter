@@ -1389,11 +1389,11 @@ export class CommandEntryJobManager {
             return false;
         }
 
-        if (continuation.hasFetchMore) {
+        if (continuation.source === 'dedicated' && this.getContinuationToken(continuation)) {
             return true;
         }
 
-        if (continuation.source === 'dedicated' && this.getContinuationToken(continuation)) {
+        if (continuation.hasFetchMore && !!this.getContinuationToken(continuation)) {
             return true;
         }
 

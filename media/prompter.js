@@ -25,8 +25,46 @@ import { createCBInput } from './webview-assets/cbinput.js';
 import { CL_VARIABLE_PATTERN, getDefaultLengthForType, isValidNameValue, parseParenthesizedContent, getLengthClass, isSpecifiedFromChildDefault, isInternalConstantElemShellParm } from './promptHelpers.js';
 const WEBVIEW_DEBUG_LOGS = false;
 function debugLog(...args) {
-    if (WEBVIEW_DEBUG_LOGS) {
+    if (!WEBVIEW_DEBUG_LOGS) {
+        return;
+    }
+    try {
+        if (args.length === 1) {
+            console.log(args[0]);
+            return;
+        }
         console.log(...args);
+    }
+    catch {
+        try {
+            const safeArgs = args.map(arg => {
+                if (typeof arg === 'string')
+                    return arg;
+                try {
+                    return JSON.stringify(arg, (_key, value) => {
+                        if (typeof value === 'bigint')
+                            return value.toString();
+                        if (typeof value === 'function')
+                            return '[Function]';
+                        if (value instanceof Error) {
+                            return {
+                                name: value.name,
+                                message: value.message,
+                                stack: value.stack
+                            };
+                        }
+                        return value;
+                    });
+                }
+                catch {
+                    return Object.prototype.toString.call(arg);
+                }
+            });
+            console.log('[debugLog safe fallback]', safeArgs.join(' '));
+        }
+        catch {
+            // Intentionally swallow logging failures so they never break the webview.
+        }
     }
 }
 // Global state (typed)
