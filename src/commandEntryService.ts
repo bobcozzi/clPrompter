@@ -173,6 +173,28 @@ function normalizeColumnKey(value: string | undefined): string {
     return (value ?? '').trim().toUpperCase();
 }
 
+function resolveMetadataForColumn(
+    column: string,
+    index: number,
+    metadata: SqlColumnMetadata[] | undefined
+): SqlColumnMetadata | undefined {
+    if (!metadata || metadata.length === 0) {
+        return undefined;
+    }
+
+    const byName = metadata.find((entry) => normalizeColumnKey(entry.name) === normalizeColumnKey(column));
+    if (byName) {
+        return byName;
+    }
+
+    const byLabel = metadata.find((entry) => normalizeColumnKey(entry.label) === normalizeColumnKey(column));
+    if (byLabel) {
+        return byLabel;
+    }
+
+    return metadata[index];
+}
+
 function toOptionalNumber(value: unknown): number | undefined {
     if (typeof value === 'number') {
         return Number.isFinite(value) ? value : undefined;
@@ -258,7 +280,9 @@ function getFirstPositiveMetadataNumber(candidate: Record<string, unknown>, alia
     return undefined;
 }
 
-function extractSqlColumnMetadata(raw: unknown, fallbackNames: string[]): SqlColumnMetadata[] {
+export function extractSqlColumnMetadata(raw: unknown, fallbackNames: string[]): SqlColumnMetadata[] {
+    const normaliseKey = (key: string): string => key.replace(/[^a-z0-9]/gi, '').toLowerCase();
+
     const collectMetadataEntries = (value: unknown): unknown[] => {
         if (Array.isArray(value)) {
             return value;
@@ -275,18 +299,30 @@ function extractSqlColumnMetadata(raw: unknown, fallbackNames: string[]): SqlCol
             for (const item of items) {
                 if (Array.isArray(item)) {
                     entries.push(...item);
+                } else if (item && typeof item === 'object') {
+                    entries.push(item);
                 }
             }
         };
 
-        push(candidate.columns, candidate.columnMetadata, candidate.metadata, candidate.fields, candidate.result);
+        for (const key of Object.keys(candidate)) {
+            const normalizedKey = normaliseKey(key);
+            if (['columns', 'column', 'columnmetadata', 'metadata', 'fields', 'result'].includes(normalizedKey)) {
+                push(candidate[key]);
+            }
+        }
 
         const nestedMetadata = candidate.metadata && typeof candidate.metadata === 'object' && !Array.isArray(candidate.metadata)
             ? candidate.metadata as Record<string, unknown>
             : undefined;
 
         if (nestedMetadata) {
-            push(nestedMetadata.columns, nestedMetadata.columnMetadata, nestedMetadata.fields, nestedMetadata.metadata);
+            for (const key of Object.keys(nestedMetadata)) {
+                const normalizedKey = normaliseKey(key);
+                if (['columns', 'column', 'columnmetadata', 'metadata', 'fields'].includes(normalizedKey)) {
+                    push(nestedMetadata[key]);
+                }
+            }
         }
 
         return entries;
@@ -370,11 +406,15 @@ function extractColumnsNodeForLogging(raw: unknown): { source: string; node: unk
     }
 
     const candidate = raw as Record<string, unknown>;
-    const directKeys = ['columns', 'columnMetadata', 'metadata', 'fields', 'result'] as const;
-    for (const key of directKeys) {
-        const value = candidate[key];
-        if (Array.isArray(value)) {
-            return { source: key, node: value };
+    const directKeys = ['columns', 'column', 'columnMetadata', 'metadata', 'fields', 'result'] as const;
+    for (const key of Object.keys(candidate)) {
+        const normalizedKey = key.replace(/[^a-z0-9]/gi, '').toLowerCase();
+        const match = directKeys.find((alias) => alias.replace(/[^a-z0-9]/gi, '').toLowerCase() === normalizedKey);
+        if (match) {
+            const value = candidate[key];
+            if (Array.isArray(value)) {
+                return { source: key, node: value };
+            }
         }
     }
 
@@ -382,11 +422,14 @@ function extractColumnsNodeForLogging(raw: unknown): { source: string; node: unk
         ? candidate.metadata as Record<string, unknown>
         : undefined;
     if (nestedMetadata) {
-        const nestedKeys = ['columns', 'columnMetadata', 'fields', 'metadata'] as const;
-        for (const key of nestedKeys) {
-            const value = nestedMetadata[key];
-            if (Array.isArray(value)) {
-                return { source: `metadata.${key}`, node: value };
+        for (const key of Object.keys(nestedMetadata)) {
+            const normalizedKey = key.replace(/[^a-z0-9]/gi, '').toLowerCase();
+            const match = ['columns', 'column', 'columnMetadata', 'fields', 'metadata'].find((alias) => alias.replace(/[^a-z0-9]/gi, '').toLowerCase() === normalizedKey);
+            if (match) {
+                const value = nestedMetadata[key];
+                if (Array.isArray(value)) {
+                    return { source: `metadata.${key}`, node: value };
+                }
             }
         }
     }
@@ -1028,6 +1071,17 @@ export class CommandEntryService {
         const inferredColumns = deriveSqlColumns(rows);
         const metadataColumns = deriveColumnsFromMetadata(runtimeMetadata);
         const columns = inferredColumns.length > 0 ? inferredColumns : metadataColumns;
+
+        let metadataMatchedColumns = 0;
+        for (let index = 0; index < columns.length; index += 1) {
+            if (resolveMetadataForColumn(columns[index], index, runtimeMetadata)) {
+                metadataMatchedColumns += 1;
+            }
+        }
+        const fallbackInferredColumns = Math.max(0, columns.length - metadataMatchedColumns);
+        this.logSqlDiag(
+            `buildSqlResultPayload.coverage totalColumns=${columns.length} metadataMatched=${metadataMatchedColumns} fallbackInferred=${fallbackInferredColumns}`
+        );
 
         const finalMetadata = enrichMetadataWithInferredTypes(columns, runtimeMetadata, rows);
         return {

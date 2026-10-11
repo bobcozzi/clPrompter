@@ -123,15 +123,7 @@ const extensionObjectIds = new WeakMap<object, number>();
 
 function isCommandEntryDebugLoggingEnabled(): boolean {
     const config = vscode.workspace.getConfiguration('clPrompter');
-    const current = config.get<boolean | undefined>('cmdEntryDebugLogging');
-    if (current !== undefined) {
-        return current;
-    }
-    const previous = config.get<boolean | undefined>('cmdEntryVerboseLogging');
-    if (previous !== undefined) {
-        return previous;
-    }
-    return config.get<boolean>('commandEntryVerboseLogging', false);
+    return config.get<boolean>('cmdEntryDebugLogging', false);
 }
 
 function getKeepAliveSettings(): { enabled: boolean; intervalMs: number } {

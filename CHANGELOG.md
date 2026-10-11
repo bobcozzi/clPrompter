@@ -2,8 +2,16 @@
 
 All notable changes to this project are documented in this file.
 
-## [1.0.56] - 2026-10-09
+## [1.0.57] - 2026-10-11
+
 ### What's Fixed
+- The OBJ_ATTR table function was enhanced.
+- The SQL resulset columns for DATE fields was not right-aligned. This has been corrected.
+
+## [1.0.56] - 2026-10-09
+
+### What's Fixed
+
 - When resizing a resultSet column for SQL run via Command Entry, when the mouse leaves the VS CODE Editor window, the mouse movements are still tracked so it can be released "off screen" even when outside that window.
 - Added new OBJ_ATTR UDTF to obtain object or file->member attributes. Note this is for code for IBM i extension and only included here for completeness.
 - The CL Prompter now supports using the Arrow keys in the parameter input fields to move between pre-defined parmaeter option.

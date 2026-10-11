@@ -13,7 +13,14 @@ const vscodeMock = {
                 }
             };
         }
-    }
+    },
+    l10n: {
+        t(value: string, ..._args: unknown[]): string {
+            return value;
+        }
+    },
+    window: {},
+    ViewColumn: { Beside: 2, One: 1 }
 };
 
 Module._load = function (request: string) {
@@ -43,6 +50,8 @@ function requireFromOut(moduleName: string): any {
 }
 
 const { classifyMessage, determineOutcome, mapCommandMessages } = requireFromOut('commandEntryModel');
+const { extractSqlColumnMetadata } = requireFromOut('commandEntryService');
+const { profileColumn } = requireFromOut('sqlResultPanel');
 const { detectCommandEntryPrefix } = requireFromOut('commandEntryPrefixes');
 const { buildCancelSqlJobCommand, CMD_RUN_SQL, normalizeSqlJobId } = requireFromOut('commandEntrySqlHelpers');
 const { CommandEntryJobManager, buildJoblogQueryForSqlJob, collectRunAfterSqlJobInit, resolveRunAfterSqlJobInitMode, resolveSqlNamingMode } = requireFromOut('commandEntryJobManager');
@@ -53,6 +62,19 @@ const { buildChgCurlibCommandFromCurrentLibrary, buildChgLiblCommandFromLibraryL
 const { formatCLCommandText } = requireFromOut('formatCL');
 const { checkSQLForExecution } = requireFromOut('sqlSyntaxChecker');
 const { BUILT_IN_SQL_SNIPPETS } = requireFromOut('commandEntrySnippets');
+
+const dateMeta = extractSqlColumnMetadata({ COLUMN: [{ NAME: 'ORDER_DATE', TYPE_NAME: 'DATE' }] }, ['ORDER_DATE']);
+assert.deepStrictEqual(dateMeta[0]?.name, 'ORDER_DATE');
+assert.deepStrictEqual(dateMeta[0]?.typeName, 'DATE');
+assert.deepStrictEqual(dateMeta[0]?.label, 'ORDER_DATE');
+assert.strictEqual(
+    profileColumn([{ ORDER_DATE: 'n/a' }], 'ORDER_DATE', { name: 'ORDER_DATE', typeName: 'DATE' }).kind,
+    'date'
+);
+assert.strictEqual(
+    profileColumn([{ AMOUNT: 'n/a' }], 'AMOUNT', { name: 'AMOUNT', typeName: 'DECIMAL' }).kind,
+    'number'
+);
 
 const messages = mapCommandMessages([
     { ORDINAL_POSITION: 2, MSGID: 'CPF0001', MSGSEV: 40, MSGTYPE: 'ESCAPE', MSGTEXT: 'Failed', SECLVLMSG: 'Details' },

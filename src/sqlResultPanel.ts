@@ -1196,9 +1196,11 @@ function buildColumnProfiles(
 ): Record<string, ColumnProfile> {
     const out: Record<string, ColumnProfile> = {};
     const metadataByName = new Map(metadata.map((entry) => [normalizeColumnKey(entry.name), entry]));
-    for (const column of columns) {
+    for (let index = 0; index < columns.length; index += 1) {
+        const column = columns[index];
         const columnMetadata = metadataByName.get(normalizeColumnKey(column))
-            ?? metadata.find((entry) => normalizeColumnKey(entry.label) === normalizeColumnKey(column));
+            ?? metadata.find((entry) => normalizeColumnKey(entry.label) === normalizeColumnKey(column))
+            ?? metadata[index];
         out[column] = profileColumn(rows, column, columnMetadata);
     }
     return out;
@@ -1255,7 +1257,7 @@ function isExactNumericType(typeName: string | undefined): boolean {
     return jdbcTypeCode === 2 || jdbcTypeCode === 3;
 }
 
-function profileColumn(
+export function profileColumn(
     rows: Record<string, unknown>[],
     column: string,
     metadata?: SqlColumnMetadata
@@ -1264,9 +1266,27 @@ function profileColumn(
     let fractionDigits = 0;
     let sawFractionalNumber = false;
     let exactNumericScale: number | undefined;
+    let kindLocked = false;
+
+    if (metadata) {
+        const baseType = normalizedSqlTypeBase(metadata.typeName);
+        if (baseType === 'DATE') {
+            kind = 'date';
+            kindLocked = true;
+        } else if (baseType === 'TIME') {
+            kind = 'time';
+            kindLocked = true;
+        } else if (baseType === 'TIMESTAMP' || baseType === 'TIMESTMP'
+            || baseType === 'TIMESTAMP WITH TIME ZONE'
+            || baseType === 'TIMESTAMP WITHOUT TIME ZONE') {
+            kind = 'timestamp';
+            kindLocked = true;
+        }
+    }
 
     if (metadata && isNumericMetadataType(metadata.typeName)) {
         kind = 'number';
+        kindLocked = true;
     }
 
     if (metadata && isExactNumericType(metadata.typeName) && typeof metadata.scale === 'number' && metadata.scale >= 0) {
@@ -1282,12 +1302,16 @@ function profileColumn(
         }
 
         if (value instanceof Date) {
-            kind = 'timestamp';
+            if (!kindLocked) {
+                kind = 'timestamp';
+            }
             continue;
         }
 
         if (typeof value === 'number' && Number.isFinite(value)) {
-            kind = 'number';
+            if (!kindLocked) {
+                kind = 'number';
+            }
             if (!Number.isInteger(value)) {
                 sawFractionalNumber = true;
                 fractionDigits = Math.max(fractionDigits, countFractionDigits(value));
@@ -1301,27 +1325,31 @@ function profileColumn(
         }
 
         if (isNumericText(text)) {
-            kind = 'number';
+            if (!kindLocked) {
+                kind = 'number';
+            }
             fractionDigits = Math.max(fractionDigits, fractionDigitsFromText(text));
             continue;
         }
 
         if (isTimestampText(text)) {
-            if (kind === 'text') { kind = 'timestamp'; }
+            if (!kindLocked && kind === 'text') { kind = 'timestamp'; }
             continue;
         }
 
         if (isDateText(text)) {
-            if (kind === 'text') { kind = 'date'; }
+            if (!kindLocked && kind === 'text') { kind = 'date'; }
             continue;
         }
 
         if (isTimeText(text)) {
-            if (kind === 'text') { kind = 'time'; }
+            if (!kindLocked && kind === 'text') { kind = 'time'; }
             continue;
         }
 
-        kind = 'text';
+        if (!kindLocked) {
+            kind = 'text';
+        }
         break;
     }
 
@@ -1355,7 +1383,7 @@ function normalizeNumericTextToScale(value: string, scale: number): string {
     return `${sign}${integerPart}.${fractionPart.padEnd(scale, '0')}`;
 }
 
-function shouldRightAlign(kind: ColumnKind): boolean {
+export function shouldRightAlign(kind: ColumnKind): boolean {
     return kind === 'number' || kind === 'date' || kind === 'time' || kind === 'timestamp';
 }
 

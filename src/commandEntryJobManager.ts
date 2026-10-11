@@ -6,15 +6,7 @@ import { BUILT_IN_SQL_SNIPPETS } from './commandEntrySnippets';
 
 function isCommandEntryDebugLoggingEnabled(): boolean {
     const config = vscode.workspace.getConfiguration('clPrompter');
-    const current = config.get<boolean | undefined>('cmdEntryDebugLogging');
-    if (current !== undefined) {
-        return current;
-    }
-    const previous = config.get<boolean | undefined>('cmdEntryVerboseLogging');
-    if (previous !== undefined) {
-        return previous;
-    }
-    return config.get<boolean>('commandEntryVerboseLogging', false);
+    return config.get<boolean>('cmdEntryDebugLogging', false);
 }
 
 function normalizeSqlJobId(jobId: string | undefined): string | undefined {

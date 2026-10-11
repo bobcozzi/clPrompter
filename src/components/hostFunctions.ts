@@ -525,7 +525,7 @@ export class ObjAttrChecker extends UDTFChecker {
     readonly id = ObjAttrChecker.ID;
     readonly PGM_NAME = 'OBJ_ATTR';
     readonly UDTF_SPECIFIC = 'obj_attr';
-    readonly currentVersion = 1;
+    readonly currentVersion = 2;
     readonly SOURCE_TYPE: HostSourceType = 'RPGLE';
 
     getSourceSrc(): string { return OBJ_ATTR_RPGLE_SOURCE; }
