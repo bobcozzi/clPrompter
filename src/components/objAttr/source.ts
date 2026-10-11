@@ -352,21 +352,22 @@ dcl-Proc main ;
         outLast_USED_RESET DATE(*ISO);
         outAlloc_SIZE  LIKE(BIGINT);  // BIGINT are signed, so <= UNS(20)
         outData_SIZE   LIKE(BIGINT);
-        outccsid  INT(10);
-        outASPNbr int(5);
+        outCCSID  INT(10);
         outText   VARCHAR(50) CCSID(UTF8);
+
+        outASPNbr int(5);
+        outASPNAME VARCHAR(10);
 
         outLIBNAME VARCHAR(10);
         outOBJNAME VARCHAR(10);
         outOBJTYPE VARCHAR(10);
+
         outMBRNAME VARCHAR(10);
         outSRCTYPE VARCHAR(10);
         outROWCOUNT   LIKE(BIGINT);
         outSRCCHGDATE TIMESTAMP(0);
         outMBRCHGDATE TIMESTAMP(0);
         outEXPDATE DATE(*ISO);
-
-        outASPNAME VARCHAR(10);
 
                // UDTF interface checklist (DB2SQL parameter style):
                // 1) Null indicators must be 2-byte (SMALLINT) -> RPG INT(5).
@@ -395,19 +396,21 @@ dcl-Proc main ;
         indy_outALLOC_SIZE LIKE(SMALLINT);
         indy_outDATA_SIZE  LIKE(SMALLINT);
         indy_outCCSID      LIKE(SMALLINT);
-        indy_outASPNbr     LIKE(SMALLINT);
         indy_outTEXT       LIKE(SMALLINT);
+
+        indy_outASPNbr     LIKE(SMALLINT);
+        indy_outASPNAME    LIKE(SMALLINT);
 
         indy_outLIBNAME    LIKE(SMALLINT);
         indy_outOBJNAME    LIKE(SMALLINT);
         indy_outOBJTYPE    LIKE(SMALLINT);
+
         indy_outMBRNAME    LIKE(SMALLINT);
         indy_outSRCTYPE    LIKE(SMALLINT);
         indy_outROWCOUNT   LIKE(SMALLINT);
         indy_outSRCCHGDATE LIKE(SMALLINT);
         indy_outMBRCHGDATE LIKE(SMALLINT);
         indy_outEXPDATE    LIKE(SMALLINT);
-        indy_outASPNAME    LIKE(SMALLINT);
 
              // Standard DB2SQL scratchpad/diagnostic fields
         outSQLSTATE CHAR(5);
@@ -449,12 +452,13 @@ dcl-Proc main ;
         indy_outDATA_SIZE = 0;
         indy_outCCSID = 0;
         indy_outASPNbr = 0;
+        indy_outASPName = 0;
         indy_outTEXT = 0;
         indy_outLIBNAME = 0;
         indy_outOBJNAME = 0;
         indy_outOBJTYPE = 0;
         indy_outMBRNAME = 0;
-        indy_outASPNAME = 0;
+        indy_outROWCOUNT = 0;
         Scratch.length = scratch_len;
         return;
     endif;
@@ -716,6 +720,8 @@ dcl-Proc main ;
                 clear outMBRNAME;
                 indy_outSRCTYPE = -1;
                 clear outSRCTYPE;
+                indy_outROWCOUNT = -1;
+                clear outROWCOUNT;
             else;
                 outMBRNAME = %trimR(QSYS_Name.Mbr_Name : X'00');
                 indy_outMBRNAME = 0;
@@ -730,7 +736,8 @@ dcl-Proc main ;
                 if (mbrDesc.Bytes_returned > 8);
                     outSRCTYPE = mbrDesc.Src_Type;
                     indy_outSRCTYPE = 0;
-                    outRowCOunt = mbrDesc.Num_Cur_Rec_U;  // BIGINT
+                    outROWCOUNT = mbrDesc.Num_Cur_Rec_U;  // BIGINT
+                    indy_outROWCOUNT = 0;
                     monitor;
                      outMBRCHGDATE = %TimeStamp(
                         %DATE(%SUBST(mbrDesc.Change_Date : 1 : 7) : *CYMD0) +
@@ -850,7 +857,6 @@ end-proc;
 `;
 
 export const OBJ_ATTR_SQL_TEMPLATE = `
-
  -- Get Object Attributes
  -- @author BobCozzi
 
@@ -874,18 +880,21 @@ CREATE or REPLACE FUNCTION \${functionLibrary}.OBJ_ATTR(
             Allocate_size bigint,
             data_size bigint,
             object_CCSID int,
-            ASP_Nbr SMALLINT,
             OBJTEXT VARCHAR(50) CCSID 1208,
+
+            ASP_Nbr SMALLINT,
+            ASP_Name VARCHAR(10),
+
             LIBNAME VARCHAR(10),
             OBJNAME VARCHAR(10),
             OBJTYPE VARCHAR(10),
+
             MBRNAME VARCHAR(10),
             SRCTYPE VARCHAR(10),
             RCDCOUNT BIGINT,
             SRCCHGDATE TIMESTAMP(0),
             MBRCHGDATE TIMESTAMP(0),
-            MBREXPDATE DATE,
-            ASPNAME VARCHAR(10)
+            MBREXPDATE DATE
            )
   LANGUAGE RPGLE
   NO SQL
@@ -942,7 +951,7 @@ comment on parameter SPECIFIC FUNCTION \${functionLibrary}.OBJ_ATTR
    When ''YES'' or ''UPPER'' is specified, the path is converted to upper case.
    When ''LOWER'' is specified, the path is converted to lower case.
    When ''NO'' or ''NONE'' is specified (the default) the path_name parameter
-   value is uses as specified.'
+   value is use as specified.'
  );
 `;
 
