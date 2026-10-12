@@ -5,31 +5,30 @@ All notable changes to this project are documented in this file.
 ## [1.0.58] - 2026-10-11
 
 ### What's Fixed
-- The OBJ_ATTR table function was enhanced.
-- The SQL resulset columns for DATE fields was not right-aligned. This has been corrected.
+- The `OBJ_ATTR` table function was improved.
+- The SQL result-set columns for `DATE` fields were not right-aligned. This has been corrected.
 
 ## [1.0.56] - 2026-10-09
 
 ### What's Fixed
 
-- When resizing a resultSet column for SQL run via Command Entry, when the mouse leaves the VS CODE Editor window, the mouse movements are still tracked so it can be released "off screen" even when outside that window.
-- Added new OBJ_ATTR UDTF to obtain object or file->member attributes. Note this is for code for IBM i extension and only included here for completeness.
-- The CL Prompter now supports using the Arrow keys in the parameter input fields to move between pre-defined parmaeter option.
+- When resizing a result-set column for SQL run via Command Entry, if the mouse leaves the VS Code editor window, mouse movements continue to be tracked so it can be released "off screen" even when outside that window.
+- Added a new `OBJ_ATTR` UDTF to obtain object or file/member attributes. This is for the Code for IBM i extension and is included here for completeness only.
+- The CL Prompter now supports using the arrow keys in parameter input fields to move between predefined parameter options.
 
 ## [1.0.55] - 2026-10-05
 
 ### What's New
 
 - Command Entry UI improvements.
-- Command Entry Code Snippets UI improvements.
-- New SQL Job timers appear when running to indicate the job and length of time that it has been runing.
-- They auto-vanish when finished so you might see a quick flash for fast commands.
-
+- Command Entry code snippets UI improvements.
+- New SQL job timers appear when running to indicate the job and how long it has been running.
+- They auto-vanish when finished, so you may see a quick flash for fast commands.
 
 ## [1.0.54] - 2026-10-03
 
 ### What's New
-- Added a new JOB_LIBL SQL function (referred to as a "component" in Code for IBM i terminology). This library-list UDTF returns the library list similar to the system-supplied `LIBRARY_LIST_INFO` view, but it accepts a 3-part qualified job identifier so CL Prompter and Command Entry can retrieve the correct library list for the target job.
+- Added a new `JOB_LIBL` SQL function (referred to as a "component" in Code for IBM i terminology). This library-list UDTF returns the library list similar to the system-supplied `LIBRARY_LIST_INFO` view, but it accepts a 3-part qualified job identifier so CL Prompter and Command Entry can retrieve the correct library list for the target job.
 - For the small number of IBM i shops that do not install the C and C++ compilers, future components may be written in RPG IV instead of C/C++ when practical. Installing the C/C++ compilers is still recommended because they are included at no extra cost, unless company security policy prohibits them.
 - Centralized the component update process before pushing new components to the host server.
 - Aligned the implementation with the Code for IBM i component architecture.
@@ -38,10 +37,9 @@ All notable changes to this project are documented in this file.
 
 ### What's New
 - Added a generic, extensible registration hook for the CL Prompter so other integrations can supply a custom command-prompt handler without hard-coding extension IDs. The built-in CL Prompter continues to work normally, and the extension retains a safe fallback when no custom handler is registered.
-- Added new consistent interface to invoke the CL Prompter from anywhere via the codefori extension's API layer.
-
+- Added a consistent interface to invoke the CL Prompter from anywhere via the Code for IBM i extension API layer.
 - All SQL UDTF names used by this extension have been renamed consistently. We now incorporate an embedded underscore (`_`) character in the name to help make the names more consistent and unique.
-- All SQL UDTFs have had a version bump to insure they are re-uploaed and created on your host IBM i server.
+- All SQL UDTFs have had a version bump to ensure they are re-uploaded and created on your host IBM i server.
 - Command Entry now allows users to use Shift+Enter to go to a new line. Linefeeds are translated to blanks when the statement is assembled.
 
 ## [1.0.52] - 2026-09-30
