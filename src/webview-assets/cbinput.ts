@@ -58,6 +58,8 @@ export class CBInput {
   private button: HTMLButtonElement;
   private dropdown: HTMLDivElement;
   private options: string[];
+  private baseOptions: string[];
+  private transientOptions: string[] = [];
   private isOpen: boolean = false;
   private highlightedIndex: number = -1; // Current option highlighted in the dropdown
   private justFocused: boolean = false; // First arrow key after focus overrides browser selection collapse
@@ -69,8 +71,45 @@ export class CBInput {
     }
   }
 
+  private computeOpenOptions(): string[] {
+    const openOptions = this.baseOptions.slice();
+
+    // Include previously entered free-form values for this component instance.
+    for (const transient of this.transientOptions) {
+      if (!openOptions.some(opt => opt.toUpperCase() === transient.toUpperCase())) {
+        openOptions.push(transient);
+      }
+    }
+
+    const currentValue = this.input.value.trim();
+
+    // Preserve current free-form value as a temporary first option so users
+    // can recover it after browsing predefined options.
+    if (currentValue && !openOptions.some(opt => opt.toUpperCase() === currentValue.toUpperCase())) {
+      openOptions.unshift(currentValue);
+    }
+
+    return openOptions;
+  }
+
+  private addTransientOption(value: string): void {
+    const trimmed = (value || '').trim();
+    if (!trimmed) return;
+
+    const existsInBase = this.baseOptions.some(opt => opt.toUpperCase() === trimmed.toUpperCase());
+    if (existsInBase) return;
+
+    const existingIndex = this.transientOptions.findIndex(opt => opt.toUpperCase() === trimmed.toUpperCase());
+    if (existingIndex >= 0) {
+      // Move most recently used transient value to the front.
+      this.transientOptions.splice(existingIndex, 1);
+    }
+    this.transientOptions.unshift(trimmed);
+  }
+
   constructor(opts: CBInputOptions) {
-    this.options = opts.options || [];
+    this.baseOptions = (opts.options || []).slice();
+    this.options = this.baseOptions.slice();
 
     // Create main container
     this.container = document.createElement('div');
@@ -333,14 +372,21 @@ export class CBInput {
   }
 
   private openDropdown(): void {
+    this.options = this.computeOpenOptions();
+    this.renderOptions();
+
     this.dropdown.style.display = 'block';
     this.isOpen = true;
     this.button.textContent = '▲';
-    // Initialize highlighting to first option if none is selected
-    if (this.highlightedIndex < 0 && this.options.length > 0) {
+
+    // Do not mutate the input value on open. Only set highlight for navigation.
+    const currentIndex = cbinputResolveHighlightIndex(this.options, this.input.value);
+    if (currentIndex >= 0) {
+      this.highlightedIndex = currentIndex;
+    } else if (this.highlightedIndex < 0 && this.options.length > 0) {
       this.highlightedIndex = 0;
-      this.updateInputToHighlighted();
     }
+
     this.refreshDropdownHighlight();
   }
 
@@ -352,6 +398,9 @@ export class CBInput {
   }
 
   private selectOption(value: string): void {
+    const previousValue = this.input.value;
+    this.addTransientOption(previousValue);
+
     this.input.value = value;
     this.closeDropdown();
     this.input.focus();
@@ -371,11 +420,13 @@ export class CBInput {
 
   public setValue(value: string): void {
     this.input.value = value;
+    this.addTransientOption(value);
     this.syncHighlightedIndexToCurrentValue();
   }
 
   public setOptions(options: string[]): void {
-    this.options = options;
+    this.baseOptions = options.slice();
+    this.options = this.baseOptions.slice();
     this.syncHighlightedIndexToCurrentValue();
     this.renderOptions();
   }

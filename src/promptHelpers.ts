@@ -145,7 +145,7 @@ export function isInternalConstantElemShellParm(parm: Element | null): boolean {
 export const CL_VARIABLE_PATTERN = /^&[A-Z][A-Z0-9_]{0,21}$/i;
 
 // Shared validator for NAME-like values used by both formatter and prompter.
-// Supports IBM i name subtypes: NAME, SNAME, and CNAME.
+// Supports IBM i name subtypes: NAME, SNAME, CNAME, and PNAME.
 export function isValidNameValue(val: string, maxLen?: number, nameType?: string): boolean {
     const trimmed = (val || '').trim();
     if (!trimmed) {
@@ -163,6 +163,43 @@ export function isValidNameValue(val: string, maxLen?: number, nameType?: string
     const normalizedType = String(nameType || 'NAME').toUpperCase().replace('*', '');
     const isSName = normalizedType === 'SNAME';
     const isCName = normalizedType === 'CNAME';
+    const isPName = normalizedType === 'PNAME';
+
+    // NAME-like values may be parenthesized in some command help docs.
+    // Treat a single outer (...) pair as syntactic wrapping.
+    const candidate = (
+        trimmed.length >= 2 &&
+        trimmed.startsWith('(') &&
+        trimmed.endsWith(')')
+    ) ? trimmed.slice(1, -1).trim() : trimmed;
+
+    if (!candidate) {
+        return false;
+    }
+
+    if (isPName) {
+        const isAposQuoted = candidate.length >= 2 && candidate.startsWith("'") && candidate.endsWith("'");
+        const body = isAposQuoted ? candidate.slice(1, -1) : candidate;
+        if (!body) {
+            return false;
+        }
+
+        const pnameMax = Number.isFinite(maxLen as number) && (maxLen as number) > 0
+            ? Math.max(1, maxLen as number)
+            : 5000;
+
+        if (body.length > pnameMax) {
+            return false;
+        }
+
+        if (isAposQuoted) {
+            // Keep apostrophe handling strict and simple in the webview validator.
+            return !body.includes("'");
+        }
+
+        // Unquoted PNAME: conservative allowed set for path-like tokens.
+        return /^[A-Z0-9_$@#./*\-]+$/i.test(body);
+    }
 
     let unquotedCharClass = 'A-Z0-9$#@_.';
     if (isSName) {
@@ -174,8 +211,8 @@ export function isValidNameValue(val: string, maxLen?: number, nameType?: string
     const plainNamePattern = new RegExp(`^[A-Z$#@][${unquotedCharClass}]{0,${effectiveMax - 1}}$`, 'i');
 
     // Quoted *NAME form: must use double quotes.
-    if (trimmed.length >= 2 && trimmed.startsWith('"') && trimmed.endsWith('"')) {
-        const inner = trimmed.slice(1, -1);
+    if (candidate.length >= 2 && candidate.startsWith('"') && candidate.endsWith('"')) {
+        const inner = candidate.slice(1, -1);
         if (inner.length < 1) {
             return false;
         }
@@ -222,7 +259,7 @@ export function isValidNameValue(val: string, maxLen?: number, nameType?: string
     }
 
     // Unquoted basic name form.
-    return plainNamePattern.test(trimmed);
+    return plainNamePattern.test(candidate);
 }
 
 export function splitUnquotedSlash(str: string): string[] {

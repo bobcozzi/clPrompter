@@ -166,6 +166,7 @@ export interface FormDataMessage {
   valToMapToMap?: { [kwd: string]: { [val: string]: string } }; // Val→MapTo for Dep evaluation
   defaultValMap?: { [kwd: string]: string };   // Keyword → default display value (Dft attribute)
   pmtCtlMap?: PmtCtlMap;                       // Prompt-control visibility rules per keyword
+  l10n?: { [key: string]: string };            // Localized webview string table
   showComments?: boolean;
 }
 
@@ -209,6 +210,7 @@ export interface PrompterState {
   showAllParms: boolean;         // When true, suppress all pmtCtl hiding (F10 "View all")
   parmExpansionMax: number;  // Maximum expanded input field width (chars); user-configurable
   parmExpansionSize: number; // Characters added per & expansion; user-configurable
+  l10n: { [key: string]: string }; // Localized strings for webview-only messages
 }
 
 // Dep/DepParm cross-parameter constraint types

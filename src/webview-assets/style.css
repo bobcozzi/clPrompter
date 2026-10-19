@@ -690,6 +690,11 @@ textarea.long-text-input[style*="color: #006400"],
   color: var(--vscode-descriptionForeground, #888888);
   white-space: nowrap;
   font-style: italic;
+  display: none;
+}
+
+.parm-input-container:focus-within .constraint-hint {
+  display: inline;
 }
 
 /* Container for textarea with cbinput dropdown */

@@ -39,11 +39,43 @@ export class CBInput {
             this.refreshDropdownHighlight();
         }
     }
+    computeOpenOptions() {
+        const openOptions = this.baseOptions.slice();
+        // Include previously entered free-form values for this component instance.
+        for (const transient of this.transientOptions) {
+            if (!openOptions.some(opt => opt.toUpperCase() === transient.toUpperCase())) {
+                openOptions.push(transient);
+            }
+        }
+        const currentValue = this.input.value.trim();
+        // Preserve current free-form value as a temporary first option so users
+        // can recover it after browsing predefined options.
+        if (currentValue && !openOptions.some(opt => opt.toUpperCase() === currentValue.toUpperCase())) {
+            openOptions.unshift(currentValue);
+        }
+        return openOptions;
+    }
+    addTransientOption(value) {
+        const trimmed = (value || '').trim();
+        if (!trimmed)
+            return;
+        const existsInBase = this.baseOptions.some(opt => opt.toUpperCase() === trimmed.toUpperCase());
+        if (existsInBase)
+            return;
+        const existingIndex = this.transientOptions.findIndex(opt => opt.toUpperCase() === trimmed.toUpperCase());
+        if (existingIndex >= 0) {
+            // Move most recently used transient value to the front.
+            this.transientOptions.splice(existingIndex, 1);
+        }
+        this.transientOptions.unshift(trimmed);
+    }
     constructor(opts) {
+        this.transientOptions = [];
         this.isOpen = false;
         this.highlightedIndex = -1; // Current option highlighted in the dropdown
         this.justFocused = false; // First arrow key after focus overrides browser selection collapse
-        this.options = opts.options || [];
+        this.baseOptions = (opts.options || []).slice();
+        this.options = this.baseOptions.slice();
         // Create main container
         this.container = document.createElement('div');
         this.container.className = 'cbinput-container';
@@ -279,13 +311,18 @@ export class CBInput {
         }
     }
     openDropdown() {
+        this.options = this.computeOpenOptions();
+        this.renderOptions();
         this.dropdown.style.display = 'block';
         this.isOpen = true;
         this.button.textContent = '▲';
-        // Initialize highlighting to first option if none is selected
-        if (this.highlightedIndex < 0 && this.options.length > 0) {
+        // Do not mutate the input value on open. Only set highlight for navigation.
+        const currentIndex = cbinputResolveHighlightIndex(this.options, this.input.value);
+        if (currentIndex >= 0) {
+            this.highlightedIndex = currentIndex;
+        }
+        else if (this.highlightedIndex < 0 && this.options.length > 0) {
             this.highlightedIndex = 0;
-            this.updateInputToHighlighted();
         }
         this.refreshDropdownHighlight();
     }
@@ -296,6 +333,8 @@ export class CBInput {
         this.highlightedIndex = -1; // Reset navigation index
     }
     selectOption(value) {
+        const previousValue = this.input.value;
+        this.addTransientOption(previousValue);
         this.input.value = value;
         this.closeDropdown();
         this.input.focus();
@@ -311,10 +350,12 @@ export class CBInput {
     }
     setValue(value) {
         this.input.value = value;
+        this.addTransientOption(value);
         this.syncHighlightedIndexToCurrentValue();
     }
     setOptions(options) {
-        this.options = options;
+        this.baseOptions = options.slice();
+        this.options = this.baseOptions.slice();
         this.syncHighlightedIndexToCurrentValue();
         this.renderOptions();
     }

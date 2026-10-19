@@ -1734,6 +1734,10 @@ export class ClPromptPanel {
                     const convertParmValueToUpperCase = config.get('convertParmValueToUpperCase', true);
                     const parmExpansionMax = config.get('parmExpansionMax', 5000);
                     const parmExpansionSize = config.get('parmExpansionSize', 16);
+                    const prompterL10n = {
+                        'validation.clVariableNotAllowed': vscode.l10n.t('CL variable not allowed for this parameter'),
+                        'validation.restrictedValueNotAllowed': vscode.l10n.t("Value '{value}' for parameter {parmName} not allowed.")
+                    };
 
                     this.postMessageWithCommentToggleLog(panel.webview, 'host.formData.postMessage', {
                         type: 'formData',
@@ -1749,6 +1753,7 @@ export class ClPromptPanel {
                         parmMap: this._parmMap,
                         parmMetas: this._parmMetas,
                         config: { keywordColor, valueColor, autoAdjust, convertParmValueToUpperCase, parmExpansionMax, parmExpansionSize },
+                        l10n: prompterL10n,
                         showComments: this._showComments
                     });
                     this.postMessageWithCommentToggleLog(panel.webview, 'host.setLabel.postMessage', { type: "setLabel", label: this._cmdLabel, comment: this._cmdComment, showComments: this._showComments });

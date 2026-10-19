@@ -47,7 +47,7 @@ import {
   QualElement,
   ParmMeta,
   ParmMetaMap,
-  ParmValue,  // Add this
+  ParmValue,
   PrompterState,
   ParmMap,
   WebviewMessage,
@@ -59,6 +59,7 @@ import {
   PmtCtlGroup,
   PmtCtlMap
 } from './types.js';
+import { buildDepErrorMessage as buildDepDiagnosticMessage, buildRestrictedValueErrorMessage } from './depDiagnostics.js';
 
 const WEBVIEW_DEBUG_LOGS = false;
 function debugLog(...args: unknown[]): void {
@@ -124,7 +125,8 @@ let state: PrompterState = {
   pmtCtlMap: {},
   showAllParms: false,
   parmExpansionMax: 5000,
-  parmExpansionSize: 16
+  parmExpansionSize: 16,
+  l10n: {}
 };
 
 // VS Code API
@@ -135,10 +137,19 @@ declare global {
 }
 const vscode = typeof window !== 'undefined' ? window.vscodeApi : undefined;
 
+function tWebview(key: string, fallback: string): string {
+  const candidate = state.l10n[key];
+  return typeof candidate === 'string' && candidate.length > 0 ? candidate : fallback;
+}
+
 // Helper: Check if restricted
 function isRestricted(el: Element | null): boolean {
-  const rstd = el?.getAttribute('Rstd');
+  const rstd = String(el?.getAttribute('Rstd') || '').trim().toUpperCase();
   return rstd === 'YES' || rstd === 'Y' || rstd === '*YES' || rstd === '1' || rstd === 'TRUE';
+}
+
+function hasNoCustomInputFlag(values: unknown): boolean {
+  return Boolean(values && typeof values === 'object' && (values as any)._noCustomInput === true);
 }
 
 // ── Parameter help helpers ────────────────────────────────────────────────────
@@ -823,7 +834,7 @@ function configureRstdValidation(input: HTMLInputElement, suggestions: string[],
   debugLog(`[configureRstdValidation] ENTRY: input.name=${input.name}, idx=${idx}, parm=${parm?.getAttribute('Kwd')}, suggestions.length=${suggestions.length}`);
 
   // Filter metadata entries; only keep actual display values
-  const displayValues = suggestions.filter(s => !s.startsWith('_RANGE_') && !s.startsWith('_REL_'));
+  const displayValues = suggestions.filter(s => !s.startsWith('_RANGE_') && !s.startsWith('_REL_') && !s.startsWith('_DEPREL_'));
   debugLog(`[configureRstdValidation] displayValues for ${input.name}:`, displayValues);
 
   if (displayValues.length === 0) {
@@ -871,6 +882,7 @@ function configureRstdValidation(input: HTMLInputElement, suggestions: string[],
       input.setCustomValidity('');
       input.style.color = '';
       input.classList.remove('validation-error');
+      input.dataset.rstdValidationError = '0';
       errorSpan.classList.remove('visible');
       errorSpan.textContent = '';
       return;
@@ -879,9 +891,10 @@ function configureRstdValidation(input: HTMLInputElement, suggestions: string[],
     // CL variable handling — respect AlwVar attribute
     if (input.value.startsWith('&')) {
       if (alwVar === false) {
-        const msg = 'CL variable not allowed for this parameter';
+        const msg = tWebview('validation.clVariableNotAllowed', 'CL variable not allowed for this parameter');
         input.setCustomValidity(msg);
         input.classList.add('validation-error');
+        input.dataset.rstdValidationError = '0';
         errorSpan.textContent = msg;
         errorSpan.classList.add('visible');
         return;
@@ -889,6 +902,7 @@ function configureRstdValidation(input: HTMLInputElement, suggestions: string[],
       input.setCustomValidity('');
       input.style.color = '#006400';
       input.classList.remove('validation-error');
+      input.dataset.rstdValidationError = '0';
       errorSpan.classList.remove('visible');
       errorSpan.textContent = '';
       return;
@@ -904,6 +918,7 @@ function configureRstdValidation(input: HTMLInputElement, suggestions: string[],
       const msg = `${input.value} must be only value for parameter`;
       input.setCustomValidity(msg);
       input.classList.add('validation-error');
+      input.dataset.rstdValidationError = '0';
       errorSpan.textContent = msg;
       errorSpan.classList.add('visible');
       return;
@@ -917,12 +932,22 @@ function configureRstdValidation(input: HTMLInputElement, suggestions: string[],
       input.setCustomValidity('');
       input.style.color = '#006400';
       input.classList.remove('validation-error');
+      input.dataset.rstdValidationError = '0';
       errorSpan.classList.remove('visible');
       errorSpan.textContent = '';
     } else {
-      const msg = 'Value entered is not valid';
+      const parmName = (parm?.getAttribute('Kwd') || input.name || '').replace(/_QUAL\d+$/, '').replace(/_INST\d+_ELEM\d+$/, '').replace(/_INST\d+$/, '');
+      const fieldLength = input.maxLength > 0 ? input.maxLength : undefined;
+      const msg = buildRestrictedValueErrorMessage(displayValues, {
+        enteredValue: input.value,
+        parmName,
+        fieldLength,
+        msgId: 'CPD0133',
+        invalidValueTemplate: tWebview('validation.restrictedValueNotAllowed', `Value '{value}' for parameter {parmName} not allowed.`)
+      });
       input.setCustomValidity(msg);
       input.classList.add('validation-error');
+      input.dataset.rstdValidationError = '1';
       errorSpan.textContent = msg;
       errorSpan.classList.add('visible');
     }
@@ -932,6 +957,36 @@ function configureRstdValidation(input: HTMLInputElement, suggestions: string[],
   input.addEventListener('change', validateRstd);
   input.addEventListener('keydown', (e: KeyboardEvent) => {
     if (e.key === 'Enter') validateRstd();
+  });
+}
+
+function hasActiveRestrictedValueErrorForKwd(kwd: string): boolean {
+  const selector = [
+    `input[name="${kwd}"]`,
+    `textarea[name="${kwd}"]`,
+    `input[name="${kwd}_QUAL0"]`,
+    `input[name^="${kwd}_INST"]`,
+    `textarea[name^="${kwd}_INST"]`
+  ].join(', ');
+
+  const fields = Array.from(document.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>(selector));
+  return fields.some(field => field.dataset.rstdValidationError === '1');
+}
+
+function hasActiveInlineValidationErrorForKwd(kwd: string): boolean {
+  const selector = [
+    `input[name="${kwd}"]`,
+    `textarea[name="${kwd}"]`,
+    `input[name="${kwd}_QUAL0"]`,
+    `input[name^="${kwd}_INST"]`,
+    `textarea[name^="${kwd}_INST"]`
+  ].join(', ');
+
+  const fields = Array.from(document.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>(selector));
+  return fields.some(field => {
+    const hasClassError = field.classList.contains('validation-error');
+    const hasMessage = Boolean((field.validationMessage || '').trim());
+    return hasClassError && hasMessage;
   });
 }
 
@@ -949,12 +1004,26 @@ function parseRelConstraints(suggestions: string[]): { op: string; val: string }
 
 // Builds a human-readable constraint hint string from range/rel metadata (e.g. "> 50", "1 to 100")
 function buildConstraintHint(suggestions: string[]): string {
+  const relConstraints = parseRelConstraints(suggestions);
+  const hasRange = parseRange(suggestions) !== null;
+  const hasDepRel = parseDepRelConstraints(suggestions).length > 0;
+
+  // Avoid showing a permanent ">= 0" hint for optional numeric fields.
+  // This constraint is often a baseline domain check rather than user guidance.
+  if (!hasRange && !hasDepRel && relConstraints.length === 1) {
+    const only = relConstraints[0];
+    const n = Number(only.val);
+    if ((only.op === 'GE' || only.op === 'NL') && Number.isFinite(n) && n === 0) {
+      return '';
+    }
+  }
+
   const parts: string[] = [];
-  const range = parseRange(suggestions);
+  const range = hasRange ? parseRange(suggestions) : null;
   if (range) {
     parts.push(`${range.min} to ${range.max}`);
   }
-  for (const { op, val } of parseRelConstraints(suggestions)) {
+  for (const { op, val } of relConstraints) {
     switch (op) {
       case 'GE': case 'NL': parts.push(`>= ${val}`); break;
       case 'LE': case 'NG': parts.push(`<= ${val}`); break;
@@ -1595,15 +1664,35 @@ interface ValidationAttributes {
   parm?: Element;               // Parameter element for SNGVAL validation
 }
 
-function configureNameTypeValidation(input: HTMLInputElement, type?: string, len?: string, alwVar?: boolean, suggestions?: string[]): void {
+function configureNameTypeValidation(input: HTMLInputElement, type?: string, len?: string, alwVar?: boolean, suggestions?: string[], container?: HTMLElement): void {
   const typeUpper = String(type || '').toUpperCase().replace('*', '');
-  const isNameLikeType = typeUpper === 'NAME' || typeUpper === 'SNAME' || typeUpper === 'CNAME';
+  const isNameLikeType = typeUpper === 'NAME' || typeUpper === 'SNAME' || typeUpper === 'CNAME' || typeUpper === 'PNAME';
   if (!isNameLikeType) {
     return;
   }
 
   const maxLen = Number.parseInt(String(len || ''), 10) || getDefaultLengthForType(typeUpper);
-  const validationMessage = `Value must be a valid IBM i name (1-${maxLen} chars)`;
+  const validationMessage = tWebview('validation.nameLikeInvalid', `Value must be a valid IBM i name (1-${maxLen} chars)`);
+
+  // Render name-type validation inline (to the right) just like range/rstd validators.
+  const errorSpan = document.createElement('span');
+  errorSpan.className = 'prompter-error-msg';
+  const targetElement = container || input;
+  let parent = targetElement.parentElement;
+  if (!parent) return;
+
+  const inWrapper = parent.classList.contains('parm-validation-wrapper') ||
+    parent.classList.contains('range-validation-wrapper');
+
+  if (!inWrapper) {
+    const wrapper = document.createElement('div');
+    wrapper.className = 'parm-validation-wrapper';
+    parent.replaceChild(wrapper, targetElement);
+    wrapper.appendChild(targetElement);
+    wrapper.appendChild(errorSpan);
+  } else {
+    parent.appendChild(errorSpan);
+  }
 
   const validate = () => {
     const value = (input.value || '').trim();
@@ -1618,6 +1707,8 @@ function configureNameTypeValidation(input: HTMLInputElement, type?: string, len
         input.setCustomValidity('');
         input.classList.remove('validation-error');
         input.dataset.nameTypeValidationError = '0';
+        errorSpan.classList.remove('visible');
+        errorSpan.textContent = '';
       }
       return;
     }
@@ -1629,33 +1720,44 @@ function configureNameTypeValidation(input: HTMLInputElement, type?: string, len
         input.setCustomValidity(validationMessage);
         input.classList.add('validation-error');
         input.dataset.nameTypeValidationError = '1';
+        errorSpan.textContent = validationMessage;
+        errorSpan.classList.add('visible');
         return;
       }
       if (input.dataset.nameTypeValidationError === '1') {
         input.setCustomValidity('');
         input.classList.remove('validation-error');
         input.dataset.nameTypeValidationError = '0';
+        errorSpan.classList.remove('visible');
+        errorSpan.textContent = '';
       }
       return;
     }
 
     if (value.startsWith('&')) {
       if (alwVar === false) {
-        input.setCustomValidity('CL variable not allowed for this parameter');
+        const msg = tWebview('validation.clVariableNotAllowed', 'CL variable not allowed for this parameter');
+        input.setCustomValidity(msg);
         input.classList.add('validation-error');
         input.dataset.nameTypeValidationError = '1';
+        errorSpan.textContent = msg;
+        errorSpan.classList.add('visible');
         return;
       }
       if (!CL_VARIABLE_PATTERN.test(value)) {
         input.setCustomValidity(validationMessage);
         input.classList.add('validation-error');
         input.dataset.nameTypeValidationError = '1';
+        errorSpan.textContent = validationMessage;
+        errorSpan.classList.add('visible');
         return;
       }
       if (input.dataset.nameTypeValidationError === '1') {
         input.setCustomValidity('');
         input.classList.remove('validation-error');
         input.dataset.nameTypeValidationError = '0';
+        errorSpan.classList.remove('visible');
+        errorSpan.textContent = '';
       }
       return;
     }
@@ -1664,6 +1766,8 @@ function configureNameTypeValidation(input: HTMLInputElement, type?: string, len
       input.setCustomValidity(validationMessage);
       input.classList.add('validation-error');
       input.dataset.nameTypeValidationError = '1';
+      errorSpan.textContent = validationMessage;
+      errorSpan.classList.add('visible');
       return;
     }
 
@@ -1671,6 +1775,8 @@ function configureNameTypeValidation(input: HTMLInputElement, type?: string, len
       input.setCustomValidity('');
       input.classList.remove('validation-error');
       input.dataset.nameTypeValidationError = '0';
+      errorSpan.classList.remove('visible');
+      errorSpan.textContent = '';
     }
   };
 
@@ -1704,7 +1810,10 @@ function setupValidations(input: HTMLInputElement, attrs: ValidationAttributes, 
     }
 
     // Rstd=Y validation — value must be from the allowed values list
-    if (attrs.isRestricted && attrs.suggestions) {
+    const typeUpper = String(attrs.type || '').toUpperCase().replace('*', '');
+    const isNameLikeType = typeUpper === 'NAME' || typeUpper === 'SNAME' || typeUpper === 'CNAME' || typeUpper === 'PNAME';
+
+    if (attrs.isRestricted && attrs.suggestions && !isNameLikeType) {
       const displayVals = attrs.suggestions.filter(s => !s.startsWith('_RANGE_') && !s.startsWith('_REL_') && !s.startsWith('_DEPREL_'));
       if (displayVals.length > 0) {
         configureRstdValidation(input, attrs.suggestions, container, attrs.alwVar, attrs.idx, attrs.parm);
@@ -1733,7 +1842,7 @@ function setupValidations(input: HTMLInputElement, attrs: ValidationAttributes, 
       }
     }
 
-    configureNameTypeValidation(input, attrs.type, attrs.len, attrs.alwVar, attrs.suggestions);
+    configureNameTypeValidation(input, attrs.type, attrs.len, attrs.alwVar, attrs.suggestions, container);
   }, 0);
 }
 
@@ -2309,22 +2418,20 @@ function createInputForType(type: string, name: string, dft: string, len: string
       }
     });
 
-    // Add range validation if applicable - pass full suggestions array for validation
-    // Defer until after DOM insertion
-    if (parseRange(suggestions)) {
-      const container = cbinput.getElement();
-      setTimeout(() => {
-        configureRangeValidation(inputElement, suggestions, container, alwVar);
-      }, 0);
-    }
-
-    // Add Rel/RelVal validation if applicable (e.g. SpcVal + Rel constraint together)
-    if (parseRelConstraints(suggestions).length > 0) {
-      const relContainer = cbinput.getElement();
-      setTimeout(() => {
-        configureRelValidation(inputElement, suggestions, relContainer, alwVar);
-      }, 0);
-    }
+    // Run the standard validation pipeline for cbinput paths too.
+    // This is required for NAME/SNAME/CNAME + special-values combinations
+    // (e.g. TYPE on PARM) so field-level inline errors are attached.
+    setupValidations(inputElement, {
+      suggestions,
+      full,
+      len,
+      type,
+      alwVar,
+      rtnVal,
+      idx,
+      parm,
+      isRestricted
+    }, cbinput.getElement());
 
     return cbinput.getElement();
   }
@@ -2513,16 +2620,19 @@ function createParmInput(name: string, suggestions: string[], isRestricted: bool
       }
     });
 
-    // Attach Rstd validation (shows "Value entered is not valid" for values outside the allowed list)
-    // For secondary instances, this also shows SNGVAL-specific errors
-    setTimeout(() => {
-      debugLog(`[createParmInput setTimeout] About to call configureRstdValidation with idx=${idx}, parm=${parm?.getAttribute('Kwd')}`);
-      configureRstdValidation(inputElement, suggestions, cbinput.getElement(), alwVar, idx, parm);
-      // Also attach Rel/RelVal constraint validation if any _REL_ entries exist
-      if (parseRelConstraints(suggestions).length > 0) {
-        configureRelValidation(inputElement, suggestions, undefined, alwVar);
-      }
-    }, 0);
+    // Run the standard validation pipeline so NAME+SPCVAL fields get hybrid validation
+    // (valid IBM i name OR listed special value) with inline error rendering.
+    setupValidations(inputElement, {
+      suggestions,
+      full,
+      len,
+      type,
+      alwVar,
+      rtnVal,
+      idx,
+      parm,
+      isRestricted
+    }, cbinput.getElement());
 
     debugLog('[clPrompter] ', 'createParmInput end1');
     return cbinput.getElement();
@@ -2567,7 +2677,7 @@ function createQualInput(
 
   const fromMap = (state.allowedValsMap || {})[qualName] || [];
   const allowedVals = Array.from(new Set(fromMap.concat(xmlVals)));
-  const restricted = isRestricted(qual);
+  const restricted = isRestricted(qual) || hasNoCustomInputFlag(fromMap);
 
   debugLog(`[createQualInput] ${qualName}: xmlVals=`, xmlVals, 'fromMap=', fromMap, 'allowedVals=', allowedVals, 'restricted=', restricted);
 
@@ -2647,7 +2757,7 @@ function createElemInput(
     }
   }
 
-  const restricted = isRestricted(elem);
+  const restricted = isRestricted(elem) || hasNoCustomInputFlag(fromMap);
 
   // Default: for first top-level elem, prefer parent Dft when it’s among parent SngVal
   let dft = elemDft || '';
@@ -2692,7 +2802,7 @@ function renderSimpleParm(parm: ParmElement, kwd: string, container: HTMLElement
 
   const inputName = kwd;
   const allowedVals = (state.allowedValsMap || {})[inputName] || [];
-  const restricted = isRestricted(parm as unknown as Element);
+  const restricted = isRestricted(parm as unknown as Element) || hasNoCustomInputFlag(allowedVals);
 
   const len = Number.parseInt(lenAttr, 10) || undefined;
   const alwVar = parm.getAttribute('AlwVar') !== 'NO';
@@ -4874,17 +4984,26 @@ function evaluateDepParm(dp: DepParmEntry): boolean {
  * description string if it is violated.
  */
 function evaluateDepConstraint(constraint: DepConstraint, atSubmit = false): string | null {
+  const involvedKwds = new Set<string>();
+  if (constraint.ctlKwd) involvedKwds.add(constraint.ctlKwd);
+  for (const dp of constraint.depParms) {
+    involvedKwds.add(dp.kwd);
+    if (dp.cmpKwd) involvedKwds.add(dp.cmpKwd);
+  }
+
+  // If any involved keyword already has an active restricted-value error,
+  // suppress this Dep message so the field-level error remains primary.
+  for (const kwd of involvedKwds) {
+    if (hasActiveRestrictedValueErrorForKwd(kwd) || hasActiveInlineValidationErrorForKwd(kwd)) {
+      return null;
+    }
+  }
+
   // During live validation (blur), only show errors when the user has touched at least
   // one involved field — this prevents spurious errors on initial form load.
   // At submit time (atSubmit=true) we always evaluate, so "specify at least one" rules
   // fire even when the user pressed Enter/OK without touching any field.
   if (!atSubmit) {
-    const involvedKwds = new Set<string>();
-    if (constraint.ctlKwd) involvedKwds.add(constraint.ctlKwd);
-    for (const dp of constraint.depParms) {
-      involvedKwds.add(dp.kwd);
-      if (dp.cmpKwd) involvedKwds.add(dp.cmpKwd);
-    }
     // Expand QUAL/ELEM sub-field names into their base keyword for touched-field lookup
     const anyTouched = [...state.touchedFields].some(f => {
       const base = f.replace(/_QUAL\d+$/, '').replace(/_INST\d+_ELEM\d+$/, '').replace(/_INST\d+$/, '');
@@ -4954,8 +5073,22 @@ function evaluateDepConstraint(constraint: DepConstraint, atSubmit = false): str
  * Build a human-readable description of a Dep constraint violation.
  */
 function buildDepErrorMessage(constraint: DepConstraint, trueCount: number): string {
+  return buildDepDiagnosticMessage(constraint, trueCount, {
+    valueMap: state.valToMapToMap,
+    rawValueLookup: (kwd: string) => getFieldRawValue(kwd)
+  });
+}
+
+function buildDepErrorMessageLegacy(constraint: DepConstraint, trueCount: number): string {
   const opSymbols: Record<string, string> = {
     GT: '>', GE: '>=', NL: '>=', LT: '<', LE: '<=', NG: '<=', EQ: '=', NE: '<>'
+  };
+
+  const summarizeDepNames = (): string => {
+    const names = [...new Set(constraint.depParms.map(dp => dp.kwd))];
+    if (names.length === 0) return '';
+    const display = names.length > 6 ? `${names.slice(0, 5).join(', ')}, ...` : names.join(', ');
+    return display;
   };
 
   const isHexBlankLiteral = (val?: string): boolean => {
@@ -5121,9 +5254,22 @@ function buildDepErrorMessage(constraint: DepConstraint, trueCount: number): str
     }
   }
 
+  const depNames = summarizeDepNames();
+  if (depNames && constraint.nbrTrueRel === 'GE' && constraint.nbrTrue === 1 && total > 1) {
+    return `At least one of ${depNames} is required.`;
+  }
+  if (depNames && constraint.nbrTrueRel === 'GT' && constraint.nbrTrue === 0 && total > 1) {
+    return `At least one of ${depNames} is required.`;
+  }
+  if (depNames && constraint.nbrTrueRel === 'EQ' && constraint.nbrTrue === 1 && total > 1) {
+    return `Exactly one of ${depNames} must be specified.`;
+  }
+
   // Generic fallback
   return `Dependency constraint violated (${constraint.msgId || kwdList}): ${require} of ${total} conditions must hold`;
 }
+
+export { buildDepErrorMessage, buildDepErrorMessageLegacy };
 
 /**
  * Evaluate ALL Dep constraints and return an array of error messages.
@@ -5286,12 +5432,146 @@ function showDepErrorBanner(errors: string[]): void {
   }
 }
 
+function setInlineFieldError(
+  input: HTMLInputElement | HTMLTextAreaElement,
+  markerAttr: string,
+  message: string | null,
+  markerValue: string
+): void {
+  const cbContainer = input.parentElement?.classList.contains('cbinput-container')
+    ? input.parentElement as HTMLElement
+    : null;
+  const widget: HTMLElement = cbContainer ?? input;
+
+  let parent = widget.parentElement;
+  if (!parent) return;
+
+  const inWrapper = parent.classList.contains('parm-validation-wrapper') ||
+    parent.classList.contains('range-validation-wrapper');
+
+  if (!inWrapper) {
+    const wrapper = document.createElement('div');
+    wrapper.className = 'parm-validation-wrapper';
+    parent.replaceChild(wrapper, widget);
+    parent = wrapper;
+    wrapper.appendChild(widget);
+  }
+
+  let errSpan = parent.querySelector<HTMLSpanElement>(`[${markerAttr}="${markerValue}"]`);
+  if (!errSpan) {
+    errSpan = document.createElement('span');
+    errSpan.className = 'prompter-error-msg';
+    errSpan.setAttribute(markerAttr, markerValue);
+    parent.appendChild(errSpan);
+  }
+
+  if (message) {
+    input.setCustomValidity(message);
+    input.classList.add('validation-error');
+    errSpan.textContent = message;
+    errSpan.classList.add('visible');
+  } else {
+    errSpan.textContent = '';
+    errSpan.classList.remove('visible');
+  }
+}
+
+function runNameLikeSpecialValueSubmitValidation(): void {
+  for (const parm of state.parms) {
+    const constant = parm.getAttribute('Constant');
+    const parmType = String(parm.getAttribute('Type') || '').toUpperCase().replace('*', '');
+    if (constant || parmType === 'NULL') continue;
+
+    const isNameLikeType = parmType === 'NAME' || parmType === 'SNAME' || parmType === 'CNAME' || parmType === 'PNAME';
+    if (!isNameLikeType) continue;
+
+    const kwd = String(parm.getAttribute('Kwd') || '').trim();
+    if (!kwd) continue;
+
+    const input = findPrimaryInput(kwd);
+    if (!input || !(input instanceof HTMLInputElement || input instanceof HTMLTextAreaElement)) continue;
+
+    const value = (input.value || '').trim();
+    if (!value) {
+      if (input.dataset.nameTypeSubmitValidationError === '1') {
+        input.setCustomValidity('');
+        input.classList.remove('validation-error');
+        input.dataset.nameTypeSubmitValidationError = '0';
+        setInlineFieldError(input, 'data-name-submit-err', null, kwd);
+      }
+      continue;
+    }
+
+    const lenAttr = Number.parseInt(String(parm.getAttribute('Len') || ''), 10);
+    const maxLen = Number.isFinite(lenAttr) && lenAttr > 0 ? lenAttr : getDefaultLengthForType(parmType);
+    const alwVar = parm.getAttribute('AlwVar') !== 'NO';
+    const suggestions = ((state.allowedValsMap || {})[kwd] || []) as string[];
+    const displayVals = suggestions.filter(s => !s.startsWith('_RANGE_') && !s.startsWith('_REL_') && !s.startsWith('_DEPREL_'));
+
+    let msg: string | null = null;
+    if (value.startsWith('&')) {
+      if (!alwVar) {
+        msg = tWebview('validation.clVariableNotAllowed', 'CL variable not allowed for this parameter');
+      } else if (!CL_VARIABLE_PATTERN.test(value)) {
+        msg = tWebview('validation.nameLikeInvalid', `Value must be a valid IBM i name (1-${maxLen} chars)`);
+      }
+    } else if (value.startsWith('*')) {
+      const isKnownSpecialValue = displayVals.some(v => v.toUpperCase() === value.toUpperCase());
+      if (!isKnownSpecialValue) {
+        msg = buildRestrictedValueErrorMessage(displayVals, {
+          enteredValue: value,
+          parmName: kwd,
+          fieldLength: input instanceof HTMLInputElement && input.maxLength > 0 ? input.maxLength : maxLen,
+          msgId: 'CPD0133',
+          invalidValueTemplate: tWebview('validation.restrictedValueNotAllowed', `Value '{value}' for parameter {parmName} not allowed.`)
+        });
+      }
+    } else if (!isValidNameValue(value, maxLen, parmType)) {
+      msg = tWebview('validation.nameLikeInvalid', `Value must be a valid IBM i name (1-${maxLen} chars)`);
+    }
+
+    if (msg) {
+      input.dataset.nameTypeSubmitValidationError = '1';
+      setInlineFieldError(input, 'data-name-submit-err', msg, kwd);
+    } else if (input.dataset.nameTypeSubmitValidationError === '1') {
+      input.setCustomValidity('');
+      input.classList.remove('validation-error');
+      input.dataset.nameTypeSubmitValidationError = '0';
+      setInlineFieldError(input, 'data-name-submit-err', null, kwd);
+    }
+  }
+}
+
+/**
+ * Trigger blur/change-based validators for all editable form fields.
+ * Many prompter validators are attached to blur/change; without this pass,
+ * submit-time checks can miss invalid untouched values and fall through to
+ * higher-level Dep messages.
+ */
+function runSubmitValidationPass(): void {
+  const fields = document.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>(
+    '#clForm input:not([type="hidden"]):not([disabled]), #clForm textarea:not([disabled])'
+  );
+
+  fields.forEach((field) => {
+    field.dispatchEvent(new Event('change'));
+    field.dispatchEvent(new Event('blur'));
+  });
+}
+
 // Event handlers
 function onSubmit(opts: { bypassValidation?: boolean } = {}): void {
   const bypassValidation = opts.bypassValidation === true;
   debugLog('[clPrompter] ', `onSubmit (${bypassValidation ? 'F12=Return without validation' : 'Enter=Return with validation'}) start`);
 
   if (!bypassValidation) {
+    // Ensure all blur/change validators have a chance to mark field-level errors
+    // before form-wide validity and Dep checks run.
+    runSubmitValidationPass();
+    // Safety gate: enforce NAME/SNAME/CNAME + special-value rules directly from
+    // current XML-derived metadata, so invalid values surface on the field itself.
+    runNameLikeSpecialValueSubmitValidation();
+
     const formEl = document.getElementById('clForm') as HTMLFormElement | null;
     if (formEl) {
       // Hard gate: Enter submit must not proceed while any browser/custom validity
@@ -5538,6 +5818,7 @@ function resetPrompterState(): void {
   state.defaultValMap = {};
   state.pmtCtlMap = {};
   state.showAllParms = false;
+  state.l10n = {};
   state.originalParmMap = {};
   state.cmdName = '';
   state.hasProcessedFormData = false;
@@ -5579,6 +5860,7 @@ window.addEventListener('message', event => {
     state.valToMapToMap = (message as any).valToMapToMap || {};
     state.defaultValMap = (message as any).defaultValMap || {};
     state.pmtCtlMap = (message as any).pmtCtlMap || {};
+    state.l10n = (message as any).l10n || {};
     state.showAllParms = false;
     state.cmdName = message.cmdName || '';
     currentCommandXml = message.xml || '';
