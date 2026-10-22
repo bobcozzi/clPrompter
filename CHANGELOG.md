@@ -2,9 +2,11 @@
 
 All notable changes to this project are documented in this file.
 
-## [1.0.59] - 2026-10-22
+## [1.0.60] - 2026-10-22
 
 ### What's Fixed
+- Component install flow no longer does redundant source-file verification or per-component CRTLIB, and now updates only the installed component's cached version entry instead of invalidating the full managed UDTF cache.
+
 - Managed host components are no longer potentially re-installed or re-updated on each activation/connection; install/update now runs only when the remote state indicates a component is missing or out of date.
 - Component update diagnostics in the CL Prompter output channel are now clearer during remote checks. The check result now reports `state=UpToDate` instead of `status=Installed` when a component is already present and no rebuild is needed.
 - Removed deprecated `ComponentState` type usage in the component checker implementation and switched to the secure status type shape.

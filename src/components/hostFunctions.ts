@@ -121,13 +121,33 @@ WHERE ROUTINE_SCHEMA = '${schemaName}' \
     return versionsBySpecific;
 }
 
-function invalidateManagedUDTFVersionCache(connection: IBMi, schema: string): void {
+function updateManagedUDTFVersionCacheEntry(
+    connection: IBMi,
+    schema: string,
+    specificName: string,
+    version: number
+): void {
     const schemaName = schema.toUpperCase();
-    const perConnection = udtfVersionCache.get(connection);
+    const specific = specificName.toUpperCase();
+    const now = Date.now();
+
+    let perConnection = udtfVersionCache.get(connection);
     if (!perConnection) {
-        return;
+        perConnection = new Map<string, VersionCacheEntry>();
+        udtfVersionCache.set(connection, perConnection);
     }
-    perConnection.delete(schemaName);
+
+    let cacheEntry = perConnection.get(schemaName);
+    if (!cacheEntry || (now - cacheEntry.loadedAt) > VERSION_CACHE_TTL_MS) {
+        cacheEntry = {
+            loadedAt: now,
+            versionsBySpecific: new Map<string, number>()
+        };
+        perConnection.set(schemaName, cacheEntry);
+    }
+
+    cacheEntry.versionsBySpecific.set(specific, version);
+    cacheEntry.loadedAt = now;
 }
 
 /**
@@ -164,14 +184,12 @@ type HostSourceType = 'C' | 'CPP' | 'RPGLE' | 'SQLRPGLE';
 /**
  * Base class for clPrompter host-side UDTFs.
  *
- * Subclasses declare the UDTF-specific constants and source generators;
- * this class implements the shared 6-step install pipeline:
+ * Subclasses declare the UDTF-specific constants and source generators.
+ * This class implements the shared install pipeline:
  *   1. Upload C++ source to a temp IFS path
- *   2. Ensure the target library exists (CRTLIB)
- *   3. Compile the module (CRTSQLCPPI)
- *   4. Link the program (CRTPGM)
- *   5. Upload the SQL DDL
- *   6. Create/replace the UDTF (RUNSQLSTM)
+ *   2. Compile the module/program
+ *   3. Upload the SQL DDL
+ *   4. Create/replace the UDTF (RUNSQLSTM)
  */
 abstract class UDTFChecker implements IBMiComponent {
     /** Unique component name — must match the static ID of each subclass. */
@@ -435,7 +453,7 @@ abstract class UDTFChecker implements IBMiComponent {
 
             console.log(`[clPrompter] ${this.UDTF_SPECIFIC} UDTF installed in ${library} (version ${this.currentVersion})`);
             appendClPrompterOutputLine(`${logPrefix} update completed library=${library} version=${this.currentVersion} signature=${runtimeSignature}`);
-            invalidateManagedUDTFVersionCache(connection, library);
+            updateManagedUDTFVersionCacheEntry(connection, library, this.UDTF_SPECIFIC, this.currentVersion);
             return {
                 status: 'Installed',
                 remoteSignature: runtimeSignature
