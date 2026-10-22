@@ -2,6 +2,13 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.0.59] - 2026-10-22
+
+### What's Fixed
+- Managed host components are no longer potentially re-installed or re-updated on each activation/connection; install/update now runs only when the remote state indicates a component is missing or out of date.
+- Component update diagnostics in the CL Prompter output channel are now clearer during remote checks. The check result now reports `state=UpToDate` instead of `status=Installed` when a component is already present and no rebuild is needed.
+- Removed deprecated `ComponentState` type usage in the component checker implementation and switched to the secure status type shape.
+
 ## [1.0.58] - 2026-10-11
 
 ### What's Fixed

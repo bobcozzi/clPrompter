@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import { createHash } from 'crypto';
-import { ComponentIdentification, ComponentState, IBMiComponent, SecureComponentState } from '@halcyontech/vscode-ibmi-types/api/components/component';
+import { ComponentIdentification, IBMiComponent, SecureComponentState } from '@halcyontech/vscode-ibmi-types/api/components/component';
 import IBMi from '@halcyontech/vscode-ibmi-types/api/IBMi';
 
 import { getCmdHelpCPPSrc } from './cmdHelp/cmdHelpCppSource';
@@ -25,6 +25,7 @@ import { getJobLiblSQLSrc } from './joblibl/jobLiblSqlSource';
 import { getLastSplfCPPSrc } from './lastSplf/lastSplfCppSource';
 import { getLastSplfSQLSrc } from './lastSplf/lastSplfSqlSource';
 import { appendClPrompterOutputLine } from '../clPrompterOutput';
+import { COMPONENT_SIGNATURE_LIBRARY_TOKEN, normalizeComponentSqlForSignature } from './signatureUtils';
 
 // ---------------------------------------------------------------------------
 // Shared utilities
@@ -55,11 +56,10 @@ function getConfiguredUDTFSupportLibrary(): string {
 }
 
 function getSignatureLibraryForIdentification(): string {
-    const configured = getConfiguredUDTFSupportLibrary();
-    // Signature identification must be stable even before a connection exists.
-    // Keep the configured token as-is (*TEMPLIB or explicit library) so Code for
-    // IBM i compares deterministic local/remote values during startup checks.
-    return configured;
+    // The library name is an installation detail, not a functional change.
+    // Normalize it to a single token so the component signature stays stable even
+    // when *TEMPLIB resolves to a different library on different connections.
+    return COMPONENT_SIGNATURE_LIBRARY_TOKEN;
 }
 
 const MANAGED_SPECIFIC_NAMES = [
@@ -298,9 +298,10 @@ abstract class UDTFChecker implements IBMiComponent {
     }
 
     private getSignatureForLibrary(library: string): string {
+        const normalizedSql = normalizeComponentSqlForSignature(this.getSQLSrc(library, this.currentVersion), library);
         return createHash('sha256')
             .update(this.getSourceSrc())
-            .update(this.getSQLSrc(library, this.currentVersion))
+            .update(normalizedSql)
             .digest('hex');
     }
 
@@ -317,17 +318,23 @@ abstract class UDTFChecker implements IBMiComponent {
     async getRemoteState(connection: IBMi, _installDirectory: string): Promise<SecureComponentState> {
         const library = getUDTFLibrary(connection);
         const localSignature = this.getIdentification().signature;
-        console.log(`[clPrompter] ${this.id}.getRemoteState() — library=${library}`);
+        const logPrefix = `[clPrompter][Component:${this.id}]`;
+        appendClPrompterOutputLine(`${logPrefix} getRemoteState start library=${library} currentVersion=${this.currentVersion}`);
+        console.log(`${logPrefix} getRemoteState() — library=${library}`);
         try {
             const version = await getUDTFVersion(connection, library, this.UDTF_SPECIFIC);
-            const status: ComponentState = version >= this.currentVersion ? 'Installed' : 'NeedsUpdate';
-            console.log(`[clPrompter] ${this.id}.getRemoteState() — version=${version}, status=${status}`);
+            const status: SecureComponentState['status'] = version >= this.currentVersion ? 'Installed' : 'NeedsUpdate';
+            const statusLabel = status === 'Installed' ? 'UpToDate' : 'NeedsUpdate';
+            appendClPrompterOutputLine(`${logPrefix} getRemoteState result library=${library} remoteVersion=${version} state=${statusLabel} localSignature=${localSignature}`);
+            console.log(`${logPrefix} getRemoteState() — version=${version}, status=${status}`);
             return {
                 status,
                 remoteSignature: localSignature
             };
         } catch (e) {
-            console.log(`[clPrompter] ${this.id}.getRemoteState() — query threw: ${e}, returning NeedsUpdate`);
+            const errorText = e instanceof Error ? e.message : String(e);
+            appendClPrompterOutputLine(`${logPrefix} getRemoteState error library=${library} message=${errorText}`);
+            console.log(`${logPrefix} getRemoteState() — query threw: ${e}, returning NeedsUpdate`);
             return {
                 status: 'NeedsUpdate',
                 remoteSignature: localSignature
@@ -336,13 +343,16 @@ abstract class UDTFChecker implements IBMiComponent {
     }
 
     async update(connection: IBMi, _installDirectory: string): Promise<SecureComponentState> {
-        console.log(`[clPrompter] ${this.id}.update() — starting install`);
+        const logPrefix = `[clPrompter][Component:${this.id}]`;
+        appendClPrompterOutputLine(`${logPrefix} update starting library=${getUDTFLibrary(connection)} version=${this.currentVersion}`);
+        console.log(`${logPrefix} update() — starting install`);
         return connection.withTempDirectory(async (tempDir: string) => {
             const content = connection.getContent();
             const encoder = new TextEncoder();
             const library = getUDTFLibrary(connection);
             const runtimeSignature = this.getIdentification().signature;
-            console.log(`[clPrompter] ${this.id}.update() — tempDir=${tempDir}, library=${library}`);
+            console.log(`${logPrefix} update() — tempDir=${tempDir}, library=${library}`);
+            appendClPrompterOutputLine(`${logPrefix} update tempDir=${tempDir} library=${library} sourceType=${this.SOURCE_TYPE}`);
 
             // ── Step 1: upload source ───────────────────────────────────────
             // tempDir is a unique path prefix, not a subdirectory — append with '_'
@@ -362,27 +372,26 @@ abstract class UDTFChecker implements IBMiComponent {
             }
             if (sourceUploadErr) {
                 console.error(`[clPrompter] writeStreamfileRaw(source) failed: ${sourceUploadErr}`);
+                appendClPrompterOutputLine(`${logPrefix} update source upload failed message=${sourceUploadErr}`);
                 return {
                     status: 'Error',
                     remoteSignature: runtimeSignature
                 };
             }
-            const sourceVerify = await connection.runCommand({ command: `ls -la '${sourcePath}'`, environment: 'pase' });
-            console.log(`[clPrompter] ${this.id}.update() — source verify (code=${sourceVerify.code}): ${sourceVerify.stdout || sourceVerify.stderr}`);
-
-            // ── Step 1b: ensure target library exists ──────────────────────
-            const crtlibResult = await connection.runCommand({ command: `CRTLIB LIB(${library})`, noLibList: true });
-            console.log(`[clPrompter] ${this.id}.update() — CRTLIB(${library}) code=${crtlibResult.code}: ${crtlibResult.stderr}`);
-            // Non-zero just means library already existed — that's fine.
+            appendClPrompterOutputLine(`${logPrefix} update source upload succeeded path=${sourcePath}`);
+            // writeStreamfileRaw is authoritative; the extra ls check and CRTLIB call
+            // are redundant and slow down the component install path on every connect.
 
             // ── Step 2/3: compile + create program based on source type ──
             const compileResult = await this.compileAndCreateProgram(connection, library, sourcePath, this.id);
             if (!compileResult.ok) {
+                appendClPrompterOutputLine(`${logPrefix} update compile step failed detail=${compileResult.detail ?? '<none>'}`);
                 return {
                     status: 'Error',
                     remoteSignature: runtimeSignature
                 };
             }
+            appendClPrompterOutputLine(`${logPrefix} update compile step succeeded`);
 
             // ── Step 4: upload SQL DDL ─────────────────────────────────────
             const sqlPath = `${tempDir}_${this.UDTF_SPECIFIC}.sql`;
@@ -392,11 +401,13 @@ abstract class UDTFChecker implements IBMiComponent {
             );
             if (sqlUploadErr) {
                 console.error(`[clPrompter] writeStreamfileRaw(sql) failed: ${sqlUploadErr}`);
+                appendClPrompterOutputLine(`${logPrefix} update sql upload failed message=${sqlUploadErr}`);
                 return {
                     status: 'Error',
                     remoteSignature: runtimeSignature
                 };
             }
+            appendClPrompterOutputLine(`${logPrefix} update sql upload succeeded path=${sqlPath}`);
 
             // ── Step 5: drop existing specific function (ignore error) ─────
             try {
@@ -415,6 +426,7 @@ abstract class UDTFChecker implements IBMiComponent {
             });
             if (sqlResult.code !== 0) {
                 console.error(`[clPrompter] RUNSQLSTM failed for ${this.UDTF_SPECIFIC}: ${sqlResult.stderr}`);
+                appendClPrompterOutputLine(`${logPrefix} update sql create failed code=${sqlResult.code} stderr=${sqlResult.stderr}`);
                 return {
                     status: 'Error',
                     remoteSignature: runtimeSignature
@@ -422,6 +434,7 @@ abstract class UDTFChecker implements IBMiComponent {
             }
 
             console.log(`[clPrompter] ${this.UDTF_SPECIFIC} UDTF installed in ${library} (version ${this.currentVersion})`);
+            appendClPrompterOutputLine(`${logPrefix} update completed library=${library} version=${this.currentVersion} signature=${runtimeSignature}`);
             invalidateManagedUDTFVersionCache(connection, library);
             return {
                 status: 'Installed',
