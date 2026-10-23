@@ -201,6 +201,7 @@ export interface PrompterState {
   parmMetas: ParmMetaMap;  // Include this if not already present
   touchedFields: Set<string>; // Track which fields the user has interacted with
   isInitializing: boolean; // Flag to prevent touch tracking during form initialization
+  suppressTouchTracking: boolean; // Temporarily disable touch tracking for synthetic validation events
   elementsToTrack: HTMLElement[]; // Elements to attach listeners to after initialization
   convertParmValueToUpperCase: boolean; // Whether to auto-convert variables, operators, and built-in functions within parameter values to uppercase
   depConstraints: DepConstraint[];  // Cross-parameter Dep/DepParm constraints

@@ -82,6 +82,7 @@ import { getCMDXML, clearCMDXMLCache, warmXmlCache, getCmdHelpViaUDTF } from './
 
 import {
     tokenizeCL,
+    extractCommentFromCommand,
     safeExtractKwdArg,
     rewriteLeadingPositionalsByList
 } from './tokenizeCL';
@@ -1886,14 +1887,12 @@ export class ClPromptPanel {
                             cmd += ' ' + finalComment.trim();
                         }
 
-                        // Extract trailing comment from cmd if present
+                        // Extract trailing comment with quote-aware logic so comment-like
+                        // text inside quoted literals is not mistaken for a real comment.
                         let trailingComment: string | undefined;
-                        const commentMatch = cmd.match(/\s*(\/\*.*?\*\/)\s*$/);
-                        if (commentMatch) {
-                            trailingComment = commentMatch[1];
-                            // Remove comment from cmd for parameter extraction
-                            cmd = cmd.substring(0, cmd.lastIndexOf(trailingComment)).trim();
-                        }
+                        const extracted = extractCommentFromCommand(cmd);
+                        cmd = extracted.command.trim();
+                        trailingComment = extracted.comment;
 
                         // Extract label and param string for formatting
                         const label = extractCmdLabel(cmd);

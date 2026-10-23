@@ -2,7 +2,7 @@
   "name": "clprompter",
   "displayName": "%displayName%",
   "description": "%description%",
-  "version": "1.0.60",
+  "version": "1.0.61",
   "author": {
     "name": "Bob Cozzi",
     "url": "https://github.com/bobcozzi"
@@ -938,6 +938,7 @@
     "test:cbinput-arrow-navigation": "tsc src/test/testCBInputArrowNavigation.ts --outDir out --module commonjs --target es2020 --esModuleInterop --skipLibCheck && node out/test/testCBInputArrowNavigation.js",
     "test:dep-qual-default": "tsc src/test/testDepQualDefault.ts --outDir out --module commonjs --target es2020 --esModuleInterop --skipLibCheck && node out/test/testDepQualDefault.js",
     "test:dep-diagnostic": "tsc src/test/testDepDiagnostic.ts --outDir out --module commonjs --target es2020 --esModuleInterop --skipLibCheck && node out/test/testDepDiagnostic.js",
+    "test:quoted-whitespace": "tsc src/test/testQuotedWhitespacePreservation.ts --outDir out --module commonjs --target es2020 --esModuleInterop --skipLibCheck && node out/test/testQuotedWhitespacePreservation.js",
     "test:hidden-constant-elem-shell": "tsc src/test/testHiddenConstantElemShell.ts --outDir out --module commonjs --target es2020 --esModuleInterop --skipLibCheck && node out/test/testHiddenConstantElemShell.js",
     "test:component-signature": "tsc src/test/testComponentSignature.ts --outDir out --module commonjs --target es2020 --esModuleInterop --skipLibCheck && node out/test/testComponentSignature.js"
   },

@@ -84,6 +84,7 @@ let state = {
     parmMetas: {},
     touchedFields: new Set(),
     isInitializing: false,
+    suppressTouchTracking: false,
     elementsToTrack: [], // Elements to attach listeners to after initialization
     convertParmValueToUpperCase: true, // Default to true (traditional behavior)
     depConstraints: [],
@@ -444,6 +445,10 @@ function markFieldTouched(fieldName) {
         debugLog(`[${ts}] [markFieldTouched] ${fieldName} IGNORED - form is initializing`);
         return;
     }
+    if (state.suppressTouchTracking) {
+        debugLog(`[${ts}] [markFieldTouched] ${fieldName} IGNORED - touch tracking suppressed`);
+        return;
+    }
     state.touchedFields.add(fieldName);
     debugLog(`[${ts}] [markFieldTouched] ${fieldName} MARKED as touched (total: ${state.touchedFields.size})`);
     // Apply dark green color to touched field
@@ -644,9 +649,10 @@ function configureRangeValidation(input, suggestions, container, alwVar) {
     });
 }
 // Validate Full="YES" fields - exact length required unless CL variable/expression
-function configureFullValidation(input, requiredLength, container, alwVar) {
+function configureFullValidation(input, requiredLength, suggestions = [], container, alwVar) {
     if (!requiredLength || requiredLength <= 0)
         return;
+    const displayValues = suggestions.filter(s => !s.startsWith('_RANGE_') && !s.startsWith('_REL_') && !s.startsWith('_DEPREL_'));
     // Create error message span
     const errorSpan = document.createElement('span');
     errorSpan.className = 'prompter-error-msg';
@@ -682,6 +688,17 @@ function configureFullValidation(input, requiredLength, container, alwVar) {
                 errorSpan.classList.add('visible');
                 return;
             }
+            input.setCustomValidity('');
+            input.style.color = '#006400'; // Valid - dark green
+            input.classList.remove('validation-error');
+            errorSpan.classList.remove('visible');
+            errorSpan.textContent = '';
+            return;
+        }
+        // Special values (SpcVal/SngVal/Values) are always allowed regardless of Full length.
+        const valueUpper = input.value.trim().toUpperCase();
+        const isSpecialValue = displayValues.some(v => v.toUpperCase() === valueUpper);
+        if (isSpecialValue) {
             input.setCustomValidity('');
             input.style.color = '#006400'; // Valid - dark green
             input.classList.remove('validation-error');
@@ -1656,7 +1673,7 @@ function setupValidations(input, attrs, container) {
         if (attrs.full?.toUpperCase() === 'YES' && attrs.len) {
             const requiredLength = parseInt(attrs.len, 10);
             if (!isNaN(requiredLength) && requiredLength > 0) {
-                configureFullValidation(input, requiredLength, container, attrs.alwVar);
+                configureFullValidation(input, requiredLength, attrs.suggestions, container, attrs.alwVar);
             }
         }
         // Rstd=Y validation — value must be from the allowed values list
@@ -2408,6 +2425,14 @@ function createQualInput(parentParm, qual, qualName, qualType, qualLen, qualDft,
             if (val && val !== '*NULL')
                 xmlVals.push(val);
         });
+        const ownerElem = qual?.parentNode;
+        if (ownerElem && ownerElem.tagName === 'Elem') {
+            ownerElem.querySelectorAll(':scope > SpcVal > Value, :scope > SngVal > Value').forEach(v => {
+                const val = v.getAttribute('Val');
+                if (val && val !== '*NULL')
+                    xmlVals.push(val);
+            });
+        }
     }
     // Add this Qual's own special values
     if (qual) {
@@ -3227,6 +3252,114 @@ function joinQualParts(parts) {
         return clean[0];
     return clean.join('/');
 }
+function buildElemQualOutputParts(parts, qualNodes, fieldNameBuilder, parentInOriginal) {
+    let lastModifiedIndex = -1;
+    let anyQualTouched = false;
+    for (let q = 0; q < parts.length; q++) {
+        const userVal = (parts[q] || '').trim();
+        const touched = isFieldTouched(fieldNameBuilder(q));
+        if (userVal && (touched || parentInOriginal)) {
+            lastModifiedIndex = q;
+            if (touched)
+                anyQualTouched = true;
+        }
+    }
+    if (lastModifiedIndex < 0) {
+        if (parentInOriginal) {
+            return { joined: joinQualParts([...parts].reverse()), anyQualTouched };
+        }
+        return { joined: '', anyQualTouched };
+    }
+    const outputParts = [];
+    for (let q = 0; q <= lastModifiedIndex; q++) {
+        const userVal = (parts[q] || '').trim();
+        const dft = String(qualNodes[q]?.getAttribute('Dft') || '').trim();
+        outputParts.push(userVal || dft);
+    }
+    return { joined: joinQualParts([...outputParts].reverse()), anyQualTouched };
+}
+function hasAdditionalElemValues(root, parm, kwd, instIdx) {
+    const elemParts = parm.querySelectorAll(':scope > Elem');
+    const sameAsDefault = (value, defaultVal) => {
+        if (!defaultVal)
+            return false;
+        return value.trim().toUpperCase() === defaultVal.trim().toUpperCase();
+    };
+    for (let i = 1; i < elemParts.length; i++) {
+        const elem = elemParts[i];
+        const elemType = elem.getAttribute('Type') || 'CHAR';
+        if (elemType === 'QUAL') {
+            const qualNodes = elem.querySelectorAll(':scope > Qual');
+            for (let j = 0;; j++) {
+                const q = root.querySelector(`[name="${kwd}_INST${instIdx}_ELEM${i}_QUAL${j}"]`);
+                if (!q)
+                    break;
+                const val = (q.value || '').trim();
+                const touched = isFieldTouched(`${kwd}_INST${instIdx}_ELEM${i}_QUAL${j}`);
+                const qualNode = qualNodes[j];
+                const dft = qualNode ? getQualDefault(elem, j) : '';
+                if (touched && val.length > 0)
+                    return true;
+                if (val.length > 0 && !sameAsDefault(val, dft))
+                    return true;
+            }
+            continue;
+        }
+        const subElems = elem.querySelectorAll(':scope > Elem');
+        if (subElems.length > 0) {
+            for (let j = 0; j < subElems.length; j++) {
+                const sub = root.querySelector(`[name="${kwd}_INST${instIdx}_ELEM${i}_SUB${j}"]`);
+                const val = (sub?.value || '').trim();
+                const touched = isFieldTouched(`${kwd}_INST${instIdx}_ELEM${i}_SUB${j}`);
+                const subElem = subElems[j];
+                const explicitDft = String(subElem?.getAttribute('Dft') || '').trim();
+                const subDefault = explicitDft || (isRestricted(subElem) ? getFirstAllowedValue(subElem) : '');
+                if (touched && val.length > 0)
+                    return true;
+                if (val.length > 0 && !sameAsDefault(val, subDefault))
+                    return true;
+            }
+            continue;
+        }
+        const input = root.querySelector(`[name="${kwd}_INST${instIdx}_ELEM${i}"]`);
+        const val = (input?.value || '').trim();
+        const touched = isFieldTouched(`${kwd}_INST${instIdx}_ELEM${i}`);
+        const elemDefault = getElemFormDefault(parm, i);
+        if (touched && val.length > 0)
+            return true;
+        if (val.length > 0 && !sameAsDefault(val, elemDefault))
+            return true;
+    }
+    return false;
+}
+function hasAnyElemFieldTouched(root, parm, kwd, instIdx) {
+    const elemParts = parm.querySelectorAll(':scope > Elem');
+    for (let i = 0; i < elemParts.length; i++) {
+        const elem = elemParts[i];
+        const elemType = elem.getAttribute('Type') || 'CHAR';
+        if (elemType === 'QUAL') {
+            for (let j = 0;; j++) {
+                const q = root.querySelector(`[name="${kwd}_INST${instIdx}_ELEM${i}_QUAL${j}"]`);
+                if (!q)
+                    break;
+                if (isFieldTouched(`${kwd}_INST${instIdx}_ELEM${i}_QUAL${j}`))
+                    return true;
+            }
+            continue;
+        }
+        const subElems = elem.querySelectorAll(':scope > Elem');
+        if (subElems.length > 0) {
+            for (let j = 0; j < subElems.length; j++) {
+                if (isFieldTouched(`${kwd}_INST${instIdx}_ELEM${i}_SUB${j}`))
+                    return true;
+            }
+            continue;
+        }
+        if (isFieldTouched(`${kwd}_INST${instIdx}_ELEM${i}`))
+            return true;
+    }
+    return false;
+}
 // Helper: Get default value for a QUAL at given index
 function getQualDefault(parm, qualIndex) {
     const qualParts = parm.querySelectorAll(':scope > Qual');
@@ -3632,14 +3765,20 @@ function assembleCurrentParmMap() {
                     if (firstElem) {
                         const elem0SngVals = getElemSngVals(firstElem);
                         if (elem0SngVals.size > 0 && firstElemVal && elem0SngVals.has(firstElemVal.toUpperCase())) {
-                            debugLog(`[DEBUG] ${kwd} ELEM0 matches ELEM-level SngVal: ${firstElemVal}, returning single value`);
-                            arr.push(firstElemVal);
-                            return;
+                            const hasAdditional = hasAdditionalElemValues(inst, parm, kwd, instIdx);
+                            if (!hasAdditional) {
+                                debugLog(`[DEBUG] ${kwd} ELEM0 matches ELEM-level SngVal: ${firstElemVal}, returning single value`);
+                                arr.push(firstElemVal);
+                                return;
+                            }
+                            debugLog(`[DEBUG] ${kwd} ELEM0 matches ELEM-level SngVal but has additional ELEM values; keeping full ELEM group`);
                         }
                     }
                     // For parent SngVal exclusivity check, use parent PARM's default
                     const parentParmDefault = String(parm.getAttribute('Dft') || '');
                     let isFirstElemSpecialAndDefault = false;
+                    const parentInOriginal = wasInOriginalCommand(kwd);
+                    const anyElemTouched = hasAnyElemFieldTouched(inst, parm, kwd, instIdx);
                     // Check if value matches parent SngVal (PARM-level, can replace entire parameter)
                     if (firstElemVal && parentSngVals.has(firstElemVal.toUpperCase())) {
                         debugLog(`[DEBUG] ${kwd} ELEM0 matches parent SngVal: ${firstElemVal}`);
@@ -3702,8 +3841,11 @@ function assembleCurrentParmMap() {
                         }
                         // If no other ELEM has non-default value, omit entire parameter
                         if (!hasOtherNonDefault) {
-                            debugLog(`[DEBUG] ${kwd} instance SKIPPED - all ELEMs at defaults`);
-                            return;
+                            if (!parentInOriginal && !anyElemTouched) {
+                                debugLog(`[DEBUG] ${kwd} instance SKIPPED - all ELEMs at defaults`);
+                                return;
+                            }
+                            debugLog(`[DEBUG] ${kwd} instance retained - defaults only but touched/original state present`);
                         }
                         debugLog(`[DEBUG] ${kwd} instance INCLUDED - has non-default ELEM`);
                         // Otherwise fall through to assemble full ELEM group
@@ -3750,12 +3892,14 @@ function assembleCurrentParmMap() {
                             }
                         }
                         if (allAtDefaults) {
-                            debugLog(`[DEBUG] ${kwd} instance SKIPPED - all ELEMs at defaults`);
-                            return;
+                            if (!parentInOriginal && !anyElemTouched) {
+                                debugLog(`[DEBUG] ${kwd} instance SKIPPED - all ELEMs at defaults`);
+                                return;
+                            }
+                            debugLog(`[DEBUG] ${kwd} instance retained - all ELEMs at defaults but touched/original state present`);
                         }
                     }
                     // Assemble each top-level ELEM
-                    const parentInOriginal = wasInOriginalCommand(kwd);
                     const elemVals = [];
                     let lastNonDefaultIndex = -1;
                     debugLog(`[DEBUG] ${kwd} assembling elemVals, elemParts.length=${elemParts.length}, parentInOriginal=${parentInOriginal}`);
@@ -3766,17 +3910,14 @@ function assembleCurrentParmMap() {
                         if (elemType === 'QUAL') {
                             // Collect QUAL parts (UI order), then LIFO back out and join safely
                             const parts = [];
-                            let anyQualTouched = false;
+                            const qualNodes = elem.querySelectorAll(':scope > Qual');
                             for (let j = 0;; j++) {
                                 const q = inst.querySelector(`[name="${kwd}_INST${instIdx}_ELEM${i}_QUAL${j}"]`);
                                 if (!q)
                                     break;
                                 parts.push((q.value || '').trim());
-                                if (isFieldTouched(`${kwd}_INST${instIdx}_ELEM${i}_QUAL${j}`)) {
-                                    anyQualTouched = true;
-                                }
                             }
-                            const joined = joinQualParts([...parts].reverse()); // omit empties, no stray '/'
+                            const { joined, anyQualTouched } = buildElemQualOutputParts(parts, qualNodes, (qIdx) => `${kwd}_INST${instIdx}_ELEM${i}_QUAL${qIdx}`, parentInOriginal);
                             debugLog(`[DEBUG] ${kwd} ELEM${i} (QUAL): joined="${joined}", anyTouched=${anyQualTouched}`);
                             if (joined) {
                                 elemVals.push(joined);
@@ -3946,13 +4087,17 @@ function assembleCurrentParmMap() {
                         const touched = isFieldTouched(`${kwd}_INST0_ELEM0`);
                         const inOriginal = wasInOriginalCommand(kwd);
                         if (touched || inOriginal) {
-                            debugLog(`[assembleCommand] ${kwd}="${firstElemVal}" ✅ INCLUDED (ELEM SngVal, touched or in original)`);
-                            map[kwd] = firstElemVal;
+                            const hasAdditional = hasAdditionalElemValues(document, parm, kwd, 0);
+                            if (!hasAdditional) {
+                                debugLog(`[assembleCommand] ${kwd}="${firstElemVal}" ✅ INCLUDED (ELEM SngVal, touched or in original)`);
+                                map[kwd] = firstElemVal;
+                                return;
+                            }
+                            debugLog(`[assembleCommand] ${kwd}: ELEM SngVal matched but additional ELEM values exist; keeping full ELEM group`);
                         }
                         else {
                             debugLog(`[assembleCommand] ${kwd}="${firstElemVal}" ❌ SKIPPED (ELEM SngVal, not touched and not in original)`);
                         }
-                        return;
                     }
                 }
                 // For parent SngVal exclusivity check, use parent PARM's default
@@ -3972,13 +4117,17 @@ function assembleCurrentParmMap() {
                         const inOriginal = wasInOriginalCommand(kwd);
                         debugLog(`[assembleCommand] ${kwd}: SngVal "${firstElemVal}" != default, touched=${touched}, inOriginal=${inOriginal}`);
                         if (touched || inOriginal) {
-                            debugLog(`[assembleCommand] ${kwd}="${firstElemVal}" ✅ INCLUDED (SngVal path, touched or in original)`);
-                            map[kwd] = firstElemVal;
+                            const hasAdditional = hasAdditionalElemValues(document, parm, kwd, 0);
+                            if (!hasAdditional) {
+                                debugLog(`[assembleCommand] ${kwd}="${firstElemVal}" ✅ INCLUDED (SngVal path, touched or in original)`);
+                                map[kwd] = firstElemVal;
+                                return;
+                            }
+                            debugLog(`[assembleCommand] ${kwd}: parent SngVal matched but additional ELEM values exist; keeping full ELEM group`);
                         }
                         else {
                             debugLog(`[assembleCommand] ${kwd}="${firstElemVal}" ❌ SKIPPED (SngVal path, not touched and not in original)`);
                         }
-                        return;
                     }
                 }
                 else if (elemParts.length > 0) {
@@ -3998,13 +4147,17 @@ function assembleCurrentParmMap() {
                             const inOriginal = wasInOriginalCommand(kwd);
                             debugLog(`[assembleCommand] ${kwd}: SpcVal "${firstElemVal}" != default, touched=${touched}, inOriginal=${inOriginal}`);
                             if (touched || inOriginal) {
-                                debugLog(`[assembleCommand] ${kwd}="${firstElemVal}" ✅ INCLUDED (SpcVal path, touched or in original)`);
-                                map[kwd] = firstElemVal;
+                                const hasAdditional = hasAdditionalElemValues(document, parm, kwd, 0);
+                                if (!hasAdditional) {
+                                    debugLog(`[assembleCommand] ${kwd}="${firstElemVal}" ✅ INCLUDED (SpcVal path, touched or in original)`);
+                                    map[kwd] = firstElemVal;
+                                    return;
+                                }
+                                debugLog(`[assembleCommand] ${kwd}: ELEM SpcVal matched but additional ELEM values exist; keeping full ELEM group`);
                             }
                             else {
                                 debugLog(`[assembleCommand] ${kwd}="${firstElemVal}" ❌ SKIPPED (SpcVal path, not touched and not in original)`);
                             }
-                            return;
                         }
                     }
                 }
@@ -4020,17 +4173,14 @@ function assembleCurrentParmMap() {
                     const elemDefault = getElemFormDefault(parm, i); // Use form default for output assembly
                     if (elemType === 'QUAL') {
                         const parts = [];
-                        let anyQualTouched = false;
+                        const qualNodes = elem.querySelectorAll(':scope > Qual');
                         for (let j = 0;; j++) {
                             const q = document.querySelector(`[name="${kwd}_INST0_ELEM${i}_QUAL${j}"]`);
                             if (!q)
                                 break;
                             parts.push((q.value || '').trim());
-                            if (isFieldTouched(`${kwd}_INST0_ELEM${i}_QUAL${j}`)) {
-                                anyQualTouched = true;
-                            }
                         }
-                        const joined = joinQualParts([...parts].reverse());
+                        const { joined, anyQualTouched } = buildElemQualOutputParts(parts, qualNodes, (qIdx) => `${kwd}_INST0_ELEM${i}_QUAL${qIdx}`, parentInOriginal);
                         debugLog(`[assembleCommand] ${kwd}_ELEM${i} (QUAL): joined="${joined}", anyTouched=${anyQualTouched}`);
                         if (joined) {
                             elemVals.push(joined);
@@ -4086,7 +4236,7 @@ function assembleCurrentParmMap() {
                                     debugLog(`[assembleCommand] ${kwd}_ELEM${i}: set lastNonDefaultIndex=${i} (field was touched)`);
                                 }
                                 else {
-                                    debugLog(`[assembleCommand] ${kwd}_ELEM${i}: not touched, not marking as modified`);
+                                    debugLog(`[assembleCommand] ${kwd}_ELEM${i}: touched/default state does not mark as modified`);
                                 }
                             }
                             else {
@@ -4163,11 +4313,12 @@ function assembleCurrentParmMap() {
                 else {
                     // IBM i Rule #3: Find last user-modified QUAL and include all QUALs up to that point
                     let lastModifiedIndex = -1;
+                    const parentInOriginal = wasInOriginalCommand(kwd);
                     for (let i = 0; i < parts.length; i++) {
-                        const qualDft = getQualDefault(parm, i);
+                        const fieldName = `${kwd}_QUAL${i}`;
                         const userVal = parts[i];
-                        // A QUAL is considered "modified" if user entered something different from default
-                        if (userVal && !matchesDefault(userVal, qualDft)) {
+                        // A QUAL is considered "modified" if user touched it OR parent parameter was in original command.
+                        if (userVal && (isFieldTouched(fieldName) || parentInOriginal)) {
                             lastModifiedIndex = i;
                         }
                     }
@@ -5140,10 +5291,16 @@ function runNameLikeSpecialValueSubmitValidation() {
  */
 function runSubmitValidationPass() {
     const fields = document.querySelectorAll('#clForm input:not([type="hidden"]):not([disabled]), #clForm textarea:not([disabled])');
-    fields.forEach((field) => {
-        field.dispatchEvent(new Event('change'));
-        field.dispatchEvent(new Event('blur'));
-    });
+    state.suppressTouchTracking = true;
+    try {
+        fields.forEach((field) => {
+            field.dispatchEvent(new Event('change'));
+            field.dispatchEvent(new Event('blur'));
+        });
+    }
+    finally {
+        state.suppressTouchTracking = false;
+    }
 }
 // Event handlers
 function onSubmit(opts = {}) {

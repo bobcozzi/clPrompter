@@ -2,6 +2,12 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.0.61] - 2026-10-23
+
+### What's Fixed
+- Fixed CL prompter ELEM/QUAL return assembly so prompted values now behave closer to IBM i green-screen prompting: values supplied in the original command or explicitly touched are retained (including defaults), untouched trailing defaults are not force-emitted, and cases such as `TOPGMQ(*SAME)` no longer expand to `TOPGMQ(*SAME (* *NONE *NONE))` unless those trailing ELEM fields were actually changed.
+- Fixed prompt-input parsing so spacing inside quoted literals is preserved when opening and returning from the prompter (including embedded blanks and quote-like/comment-like text inside the literal), rather than being collapsed by outside-quote whitespace normalization.
+
 ## [1.0.60] - 2026-10-22
 
 ### What's Fixed

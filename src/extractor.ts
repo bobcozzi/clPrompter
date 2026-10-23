@@ -45,6 +45,58 @@ export interface ExtractedValues {
     isRestricted: boolean;
 }
 
+function normalizeWhitespaceOutsideQuotes(input: string): string {
+    let out = '';
+    let pendingSpace = false;
+    let inSingle = false;
+    let inDouble = false;
+
+    for (let i = 0; i < input.length; i++) {
+        const ch = input[i];
+
+        if (inSingle) {
+            out += ch;
+            if (ch === "'") {
+                // IBM i CL escaping for single quotes is doubled apostrophes.
+                if (input[i + 1] === "'") {
+                    out += input[i + 1];
+                    i++;
+                } else {
+                    inSingle = false;
+                }
+            }
+            continue;
+        }
+
+        if (inDouble) {
+            out += ch;
+            if (ch === '"') {
+                inDouble = false;
+            }
+            continue;
+        }
+
+        if (/\s/.test(ch)) {
+            pendingSpace = true;
+            continue;
+        }
+
+        if (pendingSpace && out.length > 0) {
+            out += ' ';
+        }
+        pendingSpace = false;
+        out += ch;
+
+        if (ch === "'") {
+            inSingle = true;
+        } else if (ch === '"') {
+            inDouble = true;
+        }
+    }
+
+    return out.trim();
+}
+
 
 /**
  * Extracts a full CL (Command Language) command from a document starting from a given line index.
@@ -62,155 +114,155 @@ export interface ExtractedValues {
  *   - `endLine`: The index of the last line of the command.
  */
 export function collectCLCmdFromLine(
-  doc: vscode.TextDocument,
-  currentLine: number
+    doc: vscode.TextDocument,
+    currentLine: number
 ): { command: string; startLine: number; endLine: number; comment?: string } {
 
-  let startLine = currentLine;
-  let endLine = currentLine;
+    let startLine = currentLine;
+    let endLine = currentLine;
 
-  // Scan backward for start of command
-  while (startLine > 0) {
-    const prevLineText = doc.lineAt(startLine - 1).text;
-    const codePart = prevLineText.replace(/\/\*.*\*\//g, '').trimEnd();
-    if (codePart.endsWith('+') || codePart.endsWith('-')) {
-      startLine--;
-    } else {
-      break;
-    }
-  }
-
-  let command = '';
-  let commentParts: string[] = [];
-  let inComment = false;
-  let inQuote = false; // Track quote state across continuation lines
-  let lineIndex = startLine;
-  const totalLines = doc.lineCount;
-  let prevContChar = '';
-
-  while (lineIndex < totalLines) {
-    let line = doc.lineAt(lineIndex).text;
-
-    let codePart = line;
-    let commentPart = '';
-
-    // Check if we're continuing a multi-line comment
-    if (inComment) {
-      // Entire line is part of the comment
-      commentPart = line.trim();
-      codePart = '';
-
-      // Check if comment ends on this line
-      if (commentPart.includes('*/')) {
-        inComment = false;
-      }
-
-      commentParts.push(commentPart);
-    } else {
-      // Check if comment starts on this line
-      // Per IBM i CL rules: /* is only a comment if:
-      // 1. It starts at position 0, OR
-      // 2. It is preceded by at least one space AND not inside quotes
-      let commentIdx = -1;
-
-      if (line.startsWith('/*')) {
-        // Comment at position 0
-        commentIdx = 0;
-      } else {
-        // Look for the pattern ' /*' (space followed by /*) that is NOT inside quotes
-        // Scan through the line, tracking whether we're inside a quoted string
-        // Note: inQuote is now tracked across continuation lines
-        for (let i = 0; i < line.length - 2; i++) {
-          const char = line[i];
-
-          // Toggle quote state when we encounter a single quote
-          if (char === "'") {
-            // Check if it's a doubled quote (escaped quote)
-            if (i + 1 < line.length && line[i + 1] === "'") {
-              i++; // Skip the next quote
-              continue;
-            }
-            inQuote = !inQuote;
-          }
-
-          // Check for ' /*' pattern when not inside quotes
-          if (!inQuote && char === ' ' && line[i + 1] === '/' && line[i + 2] === '*') {
-            commentIdx = i + 1; // Point to the '/' character
+    // Scan backward for start of command
+    while (startLine > 0) {
+        const prevLineText = doc.lineAt(startLine - 1).text;
+        const codePart = prevLineText.replace(/\/\*.*\*\//g, '').trimEnd();
+        if (codePart.endsWith('+') || codePart.endsWith('-')) {
+            startLine--;
+        } else {
             break;
-          }
         }
-      }
+    }
 
-      if (commentIdx !== -1) {
-        commentPart = line.substring(commentIdx).trim();
-        codePart = line.substring(0, commentIdx);
+    let command = '';
+    let commentParts: string[] = [];
+    let inComment = false;
+    let inQuote = false; // Track quote state across continuation lines
+    let lineIndex = startLine;
+    const totalLines = doc.lineCount;
+    let prevContChar = '';
 
-        // Check if comment ends on same line
-        if (!commentPart.includes('*/')) {
-          inComment = true;
+    while (lineIndex < totalLines) {
+        let line = doc.lineAt(lineIndex).text;
+
+        let codePart = line;
+        let commentPart = '';
+
+        // Check if we're continuing a multi-line comment
+        if (inComment) {
+            // Entire line is part of the comment
+            commentPart = line.trim();
+            codePart = '';
+
+            // Check if comment ends on this line
+            if (commentPart.includes('*/')) {
+                inComment = false;
+            }
+
+            commentParts.push(commentPart);
+        } else {
+            // Check if comment starts on this line
+            // Per IBM i CL rules: /* is only a comment if:
+            // 1. It starts at position 0, OR
+            // 2. It is preceded by at least one space AND not inside quotes
+            let commentIdx = -1;
+
+            if (line.startsWith('/*')) {
+                // Comment at position 0
+                commentIdx = 0;
+            } else {
+                // Look for the pattern ' /*' (space followed by /*) that is NOT inside quotes
+                // Scan through the line, tracking whether we're inside a quoted string
+                // Note: inQuote is now tracked across continuation lines
+                for (let i = 0; i < line.length - 2; i++) {
+                    const char = line[i];
+
+                    // Toggle quote state when we encounter a single quote
+                    if (char === "'") {
+                        // Check if it's a doubled quote (escaped quote)
+                        if (i + 1 < line.length && line[i + 1] === "'") {
+                            i++; // Skip the next quote
+                            continue;
+                        }
+                        inQuote = !inQuote;
+                    }
+
+                    // Check for ' /*' pattern when not inside quotes
+                    if (!inQuote && char === ' ' && line[i + 1] === '/' && line[i + 2] === '*') {
+                        commentIdx = i + 1; // Point to the '/' character
+                        break;
+                    }
+                }
+            }
+
+            if (commentIdx !== -1) {
+                commentPart = line.substring(commentIdx).trim();
+                codePart = line.substring(0, commentIdx);
+
+                // Check if comment ends on same line
+                if (!commentPart.includes('*/')) {
+                    inComment = true;
+                }
+
+                commentParts.push(commentPart);
+            }
         }
 
-        commentParts.push(commentPart);
-      }
+        codePart = codePart.replace(/[ \t]+$/, '');
+
+        let contChar = '';
+        let lineContent = codePart;
+        if (codePart.length > 0 && (codePart[codePart.length - 1] === '+' || codePart[codePart.length - 1] === '-')) {
+            contChar = codePart[codePart.length - 1];
+            lineContent = codePart.slice(0, -1);
+        }
+
+        // Trim leading whitespace if previous line had '+' continuation
+        if (prevContChar === '+') {
+            lineContent = lineContent.trimStart();
+        }
+
+        command += lineContent;
+        endLine = lineIndex;
+
+        // If we're in a multi-line comment, continue to next line
+        if (inComment) {
+            prevContChar = '+'; // Treat as continuation
+            lineIndex++;
+            continue;
+        }
+
+        // If no continuation character, we're done
+        if (!contChar) {
+            break;
+        }
+
+        // Remember this line's continuation character for next iteration
+        prevContChar = contChar;
+
+        // Move to next line to continue processing
+        lineIndex++;
     }
 
-    codePart = codePart.replace(/[ \t]+$/, '');
+    command = normalizeWhitespaceOutsideQuotes(command);
 
-    let contChar = '';
-    let lineContent = codePart;
-    if (codePart.length > 0 && (codePart[codePart.length - 1] === '+' || codePart[codePart.length - 1] === '-')) {
-      contChar = codePart[codePart.length - 1];
-      lineContent = codePart.slice(0, -1);
+    // Reconstruct the full comment from accumulated parts
+    let fullComment: string | undefined;
+    if (commentParts.length > 0) {
+        // Join all comment parts, removing continuation characters and extra whitespace
+        const commentContent = commentParts
+            .map(part => {
+                // Remove /* from beginning and */ from end, and trim
+                part = part.replace(/^\/\*\s*/, '').replace(/\s*\*\/\s*$/, '').replace(/\s*\+\s*$/, '').trim();
+                return part;
+            })
+            .filter(part => part.length > 0)
+            .join(' ');
+
+        if (commentContent.length > 0) {
+            fullComment = '/* ' + commentContent + ' */';
+        }
     }
 
-    // Trim leading whitespace if previous line had '+' continuation
-    if (prevContChar === '+') {
-      lineContent = lineContent.trimStart();
-    }
-
-    command += lineContent;
-    endLine = lineIndex;
-
-    // If we're in a multi-line comment, continue to next line
-    if (inComment) {
-      prevContChar = '+'; // Treat as continuation
-      lineIndex++;
-      continue;
-    }
-
-    // If no continuation character, we're done
-    if (!contChar) {
-      break;
-    }
-
-    // Remember this line's continuation character for next iteration
-    prevContChar = contChar;
-
-    // Move to next line to continue processing
-    lineIndex++;
-  }
-
-  command = command.replace(/\s{2,}/g, ' ').trim();
-
-  // Reconstruct the full comment from accumulated parts
-  let fullComment: string | undefined;
-  if (commentParts.length > 0) {
-    // Join all comment parts, removing continuation characters and extra whitespace
-    const commentContent = commentParts
-      .map(part => {
-        // Remove /* from beginning and */ from end, and trim
-        part = part.replace(/^\/\*\s*/, '').replace(/\s*\*\/\s*$/, '').replace(/\s*\+\s*$/, '').trim();
-        return part;
-      })
-      .filter(part => part.length > 0)
-      .join(' ');
-
-    if (commentContent.length > 0) {
-      fullComment = '/* ' + commentContent + ' */';
-    }
-  }
-
-  return { command, startLine, endLine, comment: fullComment };
+    return { command, startLine, endLine, comment: fullComment };
 }
 
 /**
@@ -221,11 +273,11 @@ export function collectCLCmdFromLine(
  * @returns An object containing the command string, startLine, endLine, and optional comment
  */
 export function collectCLCmd(
-  editor: vscode.TextEditor
+    editor: vscode.TextEditor
 ): { command: string; startLine: number; endLine: number; comment?: string } {
-  const doc = editor.document;
-  const currentLine = editor.selection.active.line;
-  return collectCLCmdFromLine(doc, currentLine);
+    const doc = editor.document;
+    const currentLine = editor.selection.active.line;
+    return collectCLCmdFromLine(doc, currentLine);
 }
 
 /**
