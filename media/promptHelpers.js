@@ -161,6 +161,14 @@ export function isValidNameValue(val, maxLen, nameType) {
     if (!candidate) {
         return false;
     }
+    // IBM i command values commonly use qualified names such as LIB/OBJ or LIB/FILE(MBR).
+    // Validate each path segment independently rather than rejecting the entire string.
+    if (candidate.includes('/')) {
+        const qualifiedParts = splitCLQual(candidate).filter(part => part.length > 0);
+        if (qualifiedParts.length > 1) {
+            return qualifiedParts.every(part => isValidNameValue(part, maxLen, nameType));
+        }
+    }
     if (isPName) {
         const isAposQuoted = candidate.length >= 2 && candidate.startsWith("'") && candidate.endsWith("'");
         const body = isAposQuoted ? candidate.slice(1, -1) : candidate;

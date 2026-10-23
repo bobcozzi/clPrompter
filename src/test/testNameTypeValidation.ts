@@ -37,7 +37,11 @@ const cases: Case[] = [
 
     // Variables
     { label: 'Allows CL variable name', value: '&LIBNAME', nameType: 'NAME', expected: true },
-    { label: 'Rejects invalid CL variable name', value: '&1BAD', nameType: 'NAME', expected: false }
+    { label: 'Rejects invalid CL variable name', value: '&1BAD', nameType: 'NAME', expected: false },
+
+    // Qualified names and member-style paths commonly used in IBM i commands
+    { label: 'Allows qualified object name', value: 'QGPL/COZTEST', nameType: 'NAME', expected: true },
+    { label: 'Allows qualified file/member name', value: 'QSYS2/SYSLIB', nameType: 'NAME', expected: true }
 ];
 
 let pass = 0;

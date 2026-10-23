@@ -86,7 +86,7 @@ import {
     safeExtractKwdArg,
     rewriteLeadingPositionalsByList
 } from './tokenizeCL';
-import { clearClPrompterOutputChannel, setClPrompterOutputChannel } from './clPrompterOutput';
+import { appendClPrompterOutputLine, clearClPrompterOutputChannel, setClPrompterOutputChannel } from './clPrompterOutput';
 
 let baseExtension: Extension<CodeForIBMi> | undefined;
 let sharedCommandEntryService: CommandEntryService | undefined;
@@ -1797,7 +1797,14 @@ export class ClPromptPanel {
         this._panel.webview.onDidReceiveMessage(
             async message => {
                 switch (message.type) {
+                    case 'validationDebug': {
+                        const event = typeof message.event === 'string' ? message.event : 'validationDebug';
+                        const details = message.details && typeof message.details === 'object' ? message.details : {};
+                        appendClPrompterOutputLine(`[clPrompter][validationDebug] ${event} ${JSON.stringify(details)}`);
+                        break;
+                    }
                     case 'submit': {
+                        appendClPrompterOutputLine(`[clPrompter][submit] mode=${message.submitMode ?? 'enter'} cmd=${this._cmdName ?? '<none>'} parmCount=${Object.keys(message.values ?? {}).length}`);
                         if (message.submitMode === 'f12') {
                             vscode.window.setStatusBarMessage('CL Command prompting ended with F12=Cancel', 3000);
                         }

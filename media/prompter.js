@@ -1591,6 +1591,17 @@ function configureNameTypeValidation(input, type, len, alwVar, suggestions, cont
             const allowedDisplayValues = (suggestions || []).filter(s => !s.startsWith('_RANGE_') && !s.startsWith('_REL_') && !s.startsWith('_DEPREL_'));
             const isKnownSpecialValue = allowedDisplayValues.some(v => v.toUpperCase() === value.toUpperCase());
             if (!isKnownSpecialValue) {
+                const defaultVal = String(input.dataset.default || '').trim();
+                const wasTouched = isFieldTouched(input.name);
+                // Allow untouched XML default placeholders (such as "*") to pass validation.
+                if (defaultVal && value === defaultVal && !wasTouched) {
+                    input.setCustomValidity('');
+                    input.classList.remove('validation-error');
+                    input.dataset.nameTypeValidationError = '0';
+                    errorSpan.classList.remove('visible');
+                    errorSpan.textContent = '';
+                    return;
+                }
                 input.setCustomValidity(validationMessage);
                 input.classList.add('validation-error');
                 input.dataset.nameTypeValidationError = '1';
@@ -5213,6 +5224,8 @@ function setInlineFieldError(input, markerAttr, message, markerValue) {
         errSpan.classList.add('visible');
     }
     else {
+        input.setCustomValidity('');
+        input.classList.remove('validation-error');
         errSpan.textContent = '';
         errSpan.classList.remove('visible');
     }
@@ -5259,13 +5272,19 @@ function runNameLikeSpecialValueSubmitValidation() {
         else if (value.startsWith('*')) {
             const isKnownSpecialValue = displayVals.some(v => v.toUpperCase() === value.toUpperCase());
             if (!isKnownSpecialValue) {
-                msg = buildRestrictedValueErrorMessage(displayVals, {
-                    enteredValue: value,
-                    parmName: kwd,
-                    fieldLength: input instanceof HTMLInputElement && input.maxLength > 0 ? input.maxLength : maxLen,
-                    msgId: 'CPD0133',
-                    invalidValueTemplate: tWebview('validation.restrictedValueNotAllowed', `Value '{value}' for parameter {parmName} not allowed.`)
-                });
+                const defaultVal = String(input.dataset.default || '').trim();
+                const wasTouched = isFieldTouched(input.name || kwd);
+                // Some command XML defaults are symbolic placeholders (e.g. "*").
+                // If the user never touched the field, do not block Enter submit on that default.
+                if (!(defaultVal && value === defaultVal && !wasTouched)) {
+                    msg = buildRestrictedValueErrorMessage(displayVals, {
+                        enteredValue: value,
+                        parmName: kwd,
+                        fieldLength: input instanceof HTMLInputElement && input.maxLength > 0 ? input.maxLength : maxLen,
+                        msgId: 'CPD0133',
+                        invalidValueTemplate: tWebview('validation.restrictedValueNotAllowed', `Value '{value}' for parameter {parmName} not allowed.`)
+                    });
+                }
             }
         }
         else if (!isValidNameValue(value, maxLen, parmType)) {
@@ -5291,6 +5310,10 @@ function runNameLikeSpecialValueSubmitValidation() {
  */
 function runSubmitValidationPass() {
     const fields = document.querySelectorAll('#clForm input:not([type="hidden"]):not([disabled]), #clForm textarea:not([disabled])');
+    emitSubmitValidationDebug('runSubmitValidationPass', {
+        fieldCount: fields.length,
+        submitMode: 'enter'
+    });
     state.suppressTouchTracking = true;
     try {
         fields.forEach((field) => {
@@ -5302,10 +5325,41 @@ function runSubmitValidationPass() {
         state.suppressTouchTracking = false;
     }
 }
+function emitSubmitValidationDebug(event, details = {}) {
+    if (!vscode) {
+        return;
+    }
+    try {
+        vscode.postMessage({
+            type: 'validationDebug',
+            event,
+            details
+        });
+    }
+    catch {
+        // Ignore message transport failures so validation logging never breaks the form.
+    }
+}
+function collectInvalidFieldNames(formEl) {
+    const fields = Array.from(formEl.querySelectorAll('input:not([type="hidden"]):not([disabled]), textarea:not([disabled])'));
+    return fields
+        .filter(field => !field.checkValidity())
+        .map(field => {
+        const name = field.name || field.id || '<unnamed>';
+        const value = field.value ? String(field.value).slice(0, 80) : '';
+        const message = field.validationMessage ? String(field.validationMessage).slice(0, 120) : '';
+        return `${name}=${JSON.stringify(value)}${message ? ` msg=${JSON.stringify(message)}` : ''}`;
+    })
+        .slice(0, 10);
+}
 // Event handlers
 function onSubmit(opts = {}) {
     const bypassValidation = opts.bypassValidation === true;
     debugLog('[clPrompter] ', `onSubmit (${bypassValidation ? 'F12=Return without validation' : 'Enter=Return with validation'}) start`);
+    emitSubmitValidationDebug('onSubmit', {
+        bypassValidation,
+        trigger: bypassValidation ? 'f12' : 'enter'
+    });
     if (!bypassValidation) {
         // Ensure all blur/change validators have a chance to mark field-level errors
         // before form-wide validity and Dep checks run.
@@ -5321,6 +5375,12 @@ function onSubmit(opts = {}) {
             const hasNativeInvalid = !formEl.checkValidity();
             const hasInlineErrors = formEl.querySelector('.validation-error, .prompter-error-msg.visible') !== null;
             if (hasNativeInvalid || hasInlineErrors) {
+                emitSubmitValidationDebug('submitBlocked.validation', {
+                    hasNativeInvalid,
+                    hasInlineErrors,
+                    invalidFields: collectInvalidFieldNames(formEl),
+                    formHasVisibleErrors: hasInlineErrors
+                });
                 formEl.reportValidity();
                 debugLog('[clPrompter] onSubmit blocked: unresolved field validation errors present');
                 return;
@@ -5335,6 +5395,14 @@ function onSubmit(opts = {}) {
         // Per-field "Required" error messages are shown inline next to each missing field.
         const missingRequired = checkRequiredParms();
         if (missingRequired > 0) {
+            const requiredFields = Array.from(document.querySelectorAll('#clForm input:not([type="hidden"]):not([disabled]), #clForm textarea:not([disabled])'))
+                .filter(field => !field.value.trim() && field.name)
+                .map(field => field.name)
+                .slice(0, 20);
+            emitSubmitValidationDebug('submitBlocked.required', {
+                missingRequired,
+                requiredFields
+            });
             debugLog('[clPrompter] onSubmit blocked: ' + missingRequired + ' required parameter(s) missing');
             return;
         }
@@ -5344,6 +5412,9 @@ function onSubmit(opts = {}) {
         const depErrors = evaluateAllDepConstraints(true);
         showDepErrorBanner(depErrors);
         if (depErrors.length > 0) {
+            emitSubmitValidationDebug('submitBlocked.dep', {
+                depErrors: depErrors.slice(0, 20)
+            });
             debugLog('[clPrompter] onSubmit blocked by Dep constraint violations:', depErrors);
             return;
         }
@@ -5367,6 +5438,11 @@ function onSubmit(opts = {}) {
         cmdName,
         values,
         submitMode: bypassValidation ? 'f12' : 'enter'
+    });
+    emitSubmitValidationDebug('submitSucceeded', {
+        cmdName,
+        submitMode: bypassValidation ? 'f12' : 'enter',
+        parmCount: Object.keys(values).length
     });
     debugLog('[clPrompter] ', `onSubmit (${bypassValidation ? 'F12' : 'Enter'}) end`);
 }
