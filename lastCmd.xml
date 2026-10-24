@@ -1,0 +1,732 @@
+<QcdCLCmd DTDVersion="2.0">
+    <Cmd CmdName="SAVOBJ" CmdLib="__LIBL" CCSID="37" HlpPnlGrp="QHSRCMD" HlpPnlGrpLib="__LIBL" HlpID="SAVOBJ" MaxPos="5" Prompt="Save Object" PromptMsgID="TXT0212" MsgF="QCPFMSG" MsgFLib="__LIBL" PmtFile="QCPFPMT" PmtFileLib="*LIBL" PmtFileMsg="DYNAMIC" ExecBatch="YES" ChgCmdExit="NO" RtvCmdExit="NO">
+        <Parm Kwd="OBJ" PosNbr="1" KeyParm="NO" RtnVal="NO" PassVal="DFT" Type="GENERIC" Min="1" Max="300" Prompt="Objects" PromptMsgID="TXT0804" Len="10" Rstd="NO" AlwUnprt="YES" AlwVar="YES" Expr="YES" Full="NO" DspInput="YES" Vary="INT2" PassAtr="NO" Case="MONO" CCSID="JOB" InlPmtLen="10" IsDtaAra="NO" IsFile="NO" IsPgm="NO" Choice="Name, generic*">
+            <SngVal>
+                <Value Val="*ALL" MapTo="*ALL"/>
+            </SngVal>
+        </Parm>
+        <Parm Kwd="LIB" PosNbr="2" KeyParm="NO" RtnVal="NO" PassVal="DFT" Type="GENERIC" Min="1" Max="300" Prompt="Library" PromptMsgID="TXT0558" Len="10" Rstd="NO" AlwUnprt="YES" AlwVar="YES" Expr="YES" Full="NO" DspInput="YES" Vary="INT2" PassAtr="NO" Case="MONO" CCSID="JOB" InlPmtLen="10" IsDtaAra="NO" IsFile="NO" IsPgm="NO" Choice="Name, generic*">
+            <SngVal>
+                <Value Val="*SELECT" MapTo="*SELECT"/>
+                <Value Val="*USRSPC" MapTo="*USRSPC"/>
+            </SngVal>
+        </Parm>
+        <Parm Kwd="DEV" PosNbr="3" KeyParm="NO" PmtCtlPgm="QPTEXDEV" PmtCtlLib="QSYS" RtnVal="NO" PassVal="DFT" Type="NAME" Min="1" Max="4" Prompt="Device" PromptMsgID="TXT0461" Len="10" Rstd="NO" AlwUnprt="YES" AlwVar="YES" Expr="YES" Full="NO" DspInput="YES" Vary="NO" PassAtr="NO" Case="MONO" CCSID="JOB" InlPmtLen="10" IsDtaAra="NO" IsFile="NO" IsPgm="NO" Choice="Name">
+            <SngVal>
+                <Value Val="*SAVF" MapTo="*SAVF"/>
+                <Value Val="*MEDDFN" MapTo="*MEDDFN"/>
+            </SngVal>
+        </Parm>
+        <Parm Kwd="OBJTYPE" PosNbr="4" KeyParm="NO" RtnVal="NO" PassVal="DFT" Type="CHAR" Min="0" Max="300" Prompt="Object types" PromptMsgID="TXT1099" Len="7" Rstd="NO" Dft="*ALL" AlwUnprt="YES" AlwVar="YES" Expr="YES" Full="NO" DspInput="YES" Vary="NO" PassAtr="NO" Case="MONO" CCSID="JOB" InlPmtLen="7" IsDtaAra="NO" IsFile="NO" IsPgm="NO" Choice="__PGM" ChoicePgm="QSRCHIGC" ChoiceLib="QSYS">
+            <SngVal>
+                <Value Val="*ALL" MapTo="*ALL"/>
+            </SngVal>
+            <ChoicePgmText Text= "*ALL, *ALRTBL, *BNDDIR..."></ChoicePgmText>
+            <ChoicePgmValues>
+                <Value Val="*ALRTBL"/>
+                <Value Val="*BNDDIR"/>
+                <Value Val="*CHTFMT"/>
+                <Value Val="*CLD"/>
+                <Value Val="*CLS"/>
+                <Value Val="*CMD"/>
+                <Value Val="*CRG"/>
+                <Value Val="*CRQD"/>
+                <Value Val="*CSI"/>
+                <Value Val="*CSPMAP"/>
+                <Value Val="*CSPTBL"/>
+                <Value Val="*DTAARA"/>
+                <Value Val="*DTAQ"/>
+                <Value Val="*EDTD"/>
+                <Value Val="*EXITRG"/>
+                <Value Val="*FCT"/>
+                <Value Val="*FILE"/>
+                <Value Val="*FNTRSC"/>
+                <Value Val="*FNTTBL"/>
+                <Value Val="*FORMDF"/>
+                <Value Val="*FTR"/>
+                <Value Val="*GSS"/>
+                <Value Val="*IGCDCT"/>
+                <Value Val="*IGCSRT"/>
+                <Value Val="*IGCTBL"/>
+                <Value Val="*IMGCLG"/>
+                <Value Val="*JOBD"/>
+                <Value Val="*JOBQ"/>
+                <Value Val="*JOBSCD"/>
+                <Value Val="*JRN"/>
+                <Value Val="*JRNRCV"/>
+                <Value Val="*LOCALE"/>
+                <Value Val="*MEDDFN"/>
+                <Value Val="*MENU"/>
+                <Value Val="*MGTCOL"/>
+                <Value Val="*MODULE"/>
+                <Value Val="*MSGF"/>
+                <Value Val="*MSGQ"/>
+                <Value Val="*NODGRP"/>
+                <Value Val="*NODL"/>
+                <Value Val="*NWSCFG"/>
+                <Value Val="*OUTQ"/>
+                <Value Val="*OVL"/>
+                <Value Val="*PAGDFN"/>
+                <Value Val="*PAGSEG"/>
+                <Value Val="*PDFMAP"/>
+                <Value Val="*PDG"/>
+                <Value Val="*PGM"/>
+                <Value Val="*PNLGRP"/>
+                <Value Val="*PRDAVL"/>
+                <Value Val="*PRDDFN"/>
+                <Value Val="*PRDLOD"/>
+                <Value Val="*PSFCFG"/>
+                <Value Val="*QMFORM"/>
+                <Value Val="*QMQRY"/>
+                <Value Val="*QRYDFN"/>
+                <Value Val="*RCT"/>
+                <Value Val="*SBSD"/>
+                <Value Val="*SCHIDX"/>
+                <Value Val="*SPADCT"/>
+                <Value Val="*SQLPKG"/>
+                <Value Val="*SQLUDT"/>
+                <Value Val="*SQLXSR"/>
+                <Value Val="*SRVPGM"/>
+                <Value Val="*SSND"/>
+                <Value Val="*SVRSTG"/>
+                <Value Val="*S36"/>
+                <Value Val="*TBL"/>
+                <Value Val="*TIMZON"/>
+                <Value Val="*USRIDX"/>
+                <Value Val="*USRQ"/>
+                <Value Val="*USRSPC"/>
+                <Value Val="*VLDL"/>
+                <Value Val="*WSCST"/>
+            </ChoicePgmValues>
+        </Parm>
+        <Parm Kwd="OBJJRN" KeyParm="NO" Type="CHAR" Min="0" Len="1" Vary="NO" PassAtr="NO" Constant="*YES">
+            <SpcVal>
+                <Value Val="*YES" MapTo="Y"/>
+            </SpcVal>
+        </Parm>
+        <Parm Kwd="REFDATE" KeyParm="NO" Type="DATE" Min="0" Vary="NO" PassAtr="NO" Constant="*SAVLIB">
+            <SpcVal>
+                <Value Val="*SAVLIB" MapTo="0000000"/>
+            </SpcVal>
+        </Parm>
+        <Parm Kwd="REFTIME" KeyParm="NO" Type="TIME" Min="0" Vary="NO" PassAtr="NO" Constant="*NONE">
+            <SpcVal>
+                <Value Val="*NONE" MapTo="000000"/>
+            </SpcVal>
+        </Parm>
+        <Parm Kwd="LOC" KeyParm="NO" ListDspl="INT2" Type="ELEM" Min="0">
+            <Elem Type="CHAR" Min="0" Len="5" Vary="NO" PassAtr="NO" Constant="*S1"></Elem>
+            <Elem Type="INT2" Min="0" Vary="NO" PassAtr="NO" Constant="1"></Elem>
+        </Parm>
+        <Parm Kwd="VOL" PosNbr="5" KeyParm="NO" PmtCtl="PMTCTL" RtnVal="NO" PassVal="DFT" Type="CHAR" Min="0" Max="75" Prompt="Volume identifier" PromptMsgID="TXT0785" Len="32" Rstd="NO" Dft="*MOUNTED" AlwUnprt="YES" AlwVar="YES" Expr="YES" Full="NO" DspInput="YES" Vary="INT2" PassAtr="NO" Case="MONO" CCSID="JOB" InlPmtLen="32" IsDtaAra="NO" IsFile="NO" IsPgm="NO" Choice="Character value">
+            <SngVal>
+                <Value Val="*MOUNTED" MapTo="*M"/>
+            </SngVal>
+            <PmtCtl CtlKwd="DEV" NbrTrueRel="GT" NbrTrue="0">
+                <PmtCtlCond Rel="EQ" CmpVal="*TAPE"/>
+                <PmtCtlCond Rel="EQ" CmpVal="*DKT"/>
+                <PmtCtlCond Rel="EQ" CmpVal="*OPT"/>
+                <PmtCtlCond Rel="EQ" CmpVal="*"/>
+            </PmtCtl>
+        </Parm>
+        <Parm Kwd="SEQNBR" PosNbr="6" KeyParm="NO" PmtCtl="PMTCTL" RtnVal="NO" PassVal="DFT" Type="INT4" Min="0" Max="1" Prompt="Sequence number" PromptMsgID="TXT0707" Rstd="NO" Dft="*END" RangeMinVal="1" RangeMaxVal="16777215" AlwUnprt="YES" AlwVar="YES" Expr="YES" Full="NO" DspInput="YES" Vary="NO" PassAtr="NO" Case="MONO" CCSID="JOB" IsDtaAra="NO" IsFile="NO" IsPgm="NO" Choice="1-16777215">
+            <SpcVal>
+                <Value Val="*END" MapTo="-3"/>
+            </SpcVal>
+            <PmtCtl CtlKwd="DEV" NbrTrueRel="GT" NbrTrue="0">
+                <PmtCtlCond Rel="EQ" CmpVal="*TAPE"/>
+                <PmtCtlCond Rel="EQ" CmpVal="*"/>
+            </PmtCtl>
+        </Parm>
+        <Parm Kwd="LABEL" PosNbr="7" KeyParm="NO" PmtCtl="PMTCTL" RtnVal="NO" PassVal="DFT" Type="CHAR" Min="0" Max="1" Prompt="Label" PromptMsgID="TXT5419" Len="17" Rstd="NO" Dft="*LIB" Rel="NE" RelVal="*SAVLIB" AlwUnprt="YES" AlwVar="YES" Expr="YES" Full="NO" DspInput="YES" Vary="INT2" PassAtr="NO" Case="MONO" CCSID="JOB" InlPmtLen="17" IsDtaAra="NO" IsFile="NO" IsPgm="NO" Choice="Character value">
+            <SpcVal>
+                <Value Val="*LIB" MapTo="*LIB"/>
+            </SpcVal>
+            <PmtCtl CtlKwd="DEV" NbrTrueRel="GT" NbrTrue="0">
+                <PmtCtlCond Rel="EQ" CmpVal="*TAPE"/>
+                <PmtCtlCond Rel="EQ" CmpVal="*DKT"/>
+                <PmtCtlCond Rel="EQ" CmpVal="*"/>
+            </PmtCtl>
+        </Parm>
+        <Parm Kwd="EXPDATE" PosNbr="8" KeyParm="NO" PmtCtl="PMTCTL" RtnVal="NO" PassVal="DFT" Type="DATE" Min="0" Max="1" Prompt="File expiration date" PromptMsgID="TXT1111" Rstd="NO" Dft="*PERM" AlwUnprt="YES" AlwVar="YES" Expr="YES" Full="NO" DspInput="YES" Vary="NO" PassAtr="NO" Case="MONO" CCSID="JOB" IsDtaAra="NO" IsFile="NO" IsPgm="NO" Choice="Date">
+            <SpcVal>
+                <Value Val="*PERM" MapTo="0999999"/>
+            </SpcVal>
+            <PmtCtl CtlKwd="DEV" NbrTrueRel="GT" NbrTrue="0">
+                <PmtCtlCond Rel="EQ" CmpVal="*TAPE"/>
+                <PmtCtlCond Rel="EQ" CmpVal="*DKT"/>
+                <PmtCtlCond Rel="EQ" CmpVal="*OPT"/>
+                <PmtCtlCond Rel="EQ" CmpVal="*"/>
+            </PmtCtl>
+        </Parm>
+        <Parm Kwd="TGTRLS" PosNbr="14" KeyParm="NO" PmtCtl="PMTRQS" RtnVal="NO" PassVal="DFT" Type="CHAR" Min="0" Max="1" Prompt="Target release" PromptMsgID="TXT4767" Len="6" Rstd="YES" Dft="*CURRENT" AlwUnprt="YES" AlwVar="YES" Expr="YES" Full="NO" DspInput="YES" Vary="NO" PassAtr="NO" Case="MONO" CCSID="JOB" IsDtaAra="NO" IsFile="NO" IsPgm="NO" Choice="*CURRENT, *PRV, V7R2M0...">
+            <SpcVal>
+                <Value Val="*CURRENT" MapTo="C"/>
+                <Value Val="*PRV" MapTo="P"/>
+                <Value Val="V7R2M0" MapTo="V7R2M0"/>
+                <Value Val="V7R3M0" MapTo="P"/>
+                <Value Val="V7R4M0" MapTo="C"/>
+            </SpcVal>
+        </Parm>
+        <Parm Kwd="ENDOPT" PosNbr="9" KeyParm="NO" PmtCtl="PMTCTL" RtnVal="NO" PassVal="DFT" Type="CHAR" Min="0" Max="1" Prompt="End of media option" PromptMsgID="TXTC599" Len="1" Rstd="YES" Dft="*REWIND" AlwUnprt="YES" AlwVar="YES" Expr="YES" Full="NO" DspInput="YES" Vary="NO" PassAtr="NO" Case="MONO" CCSID="JOB" IsDtaAra="NO" IsFile="NO" IsPgm="NO" Choice="*REWIND, *LEAVE, *UNLOAD">
+            <SpcVal>
+                <Value Val="*REWIND" MapTo="X&apos;40&apos;"/>
+                <Value Val="*LEAVE" MapTo="X&apos;00&apos;"/>
+                <Value Val="*UNLOAD" MapTo="X&apos;80&apos;"/>
+            </SpcVal>
+            <PmtCtl CtlKwd="DEV" NbrTrueRel="GT" NbrTrue="0">
+                <PmtCtlCond Rel="EQ" CmpVal="*TAPE"/>
+                <PmtCtlCond Rel="EQ" CmpVal="*OPT"/>
+                <PmtCtlCond Rel="EQ" CmpVal="*"/>
+            </PmtCtl>
+        </Parm>
+        <Parm Kwd="STRLIB" KeyParm="NO" Type="NAME" Min="0" Len="10" Vary="NO" PassAtr="NO" Constant="*FIRST">
+            <SpcVal>
+                <Value Val="*FIRST" MapTo="*FIRST"/>
+            </SpcVal>
+        </Parm>
+        <Parm Kwd="SAVF" PosNbr="10" KeyParm="NO" PmtCtl="PMTCTL" ListDspl="INT2" RtnVal="NO" PassVal="DFT" Type="QUAL" Min="0" Max="1" Prompt="Save file" PromptMsgID="TXT4041" Rstd="NO" AlwUnprt="YES" AlwVar="YES" Expr="YES" Full="NO" DspInput="YES" IsDtaAra="NO" IsFile="UNSPFD" IsPgm="NO">
+            <PmtCtl CtlKwd="DEV" NbrTrueRel="EQ" NbrTrue="1">
+                <PmtCtlCond Rel="EQ" CmpVal="*SAVF"/>
+            </PmtCtl>
+            <Qual Type="NAME" Min="1" Max="1" Len="10" Rstd="NO" AlwUnprt="YES" AlwVar="YES" Expr="YES" Full="NO" DspInput="YES" Vary="NO" PassAtr="NO" InlPmtLen="10" Choice="Name"></Qual>
+            <Qual Type="NAME" Min="0" Max="1" Prompt="Library" PromptMsgID="TXT0909" Len="10" Rstd="NO" Dft="*LIBL" AlwUnprt="YES" AlwVar="YES" Expr="YES" Full="NO" DspInput="YES" Vary="NO" PassAtr="NO" InlPmtLen="10" Choice="Name">
+                <SpcVal>
+                    <Value Val="*LIBL" MapTo="*LIBL"/>
+                    <Value Val="*CURLIB" MapTo="*CURLIB   "/>
+                </SpcVal>
+            </Qual>
+        </Parm>
+        <Parm Kwd="MEDDFN" PosNbr="11" KeyParm="NO" PmtCtl="PMTCTL" ListDspl="INT2" RtnVal="NO" PassVal="DFT" Type="QUAL" Min="0" Max="1" Prompt="Media definition" PromptMsgID="TXTC559" Rstd="NO" AlwUnprt="YES" AlwVar="YES" Expr="YES" Full="NO" DspInput="YES" IsDtaAra="NO" IsFile="UNSPFD" IsPgm="NO">
+            <PmtCtl CtlKwd="DEV" NbrTrueRel="EQ" NbrTrue="1">
+                <PmtCtlCond Rel="EQ" CmpVal="*MEDDFN"/>
+            </PmtCtl>
+            <Qual Type="NAME" Min="1" Max="1" Len="10" Rstd="NO" AlwUnprt="YES" AlwVar="YES" Expr="YES" Full="NO" DspInput="YES" Vary="NO" PassAtr="NO" InlPmtLen="10" Choice="Name"></Qual>
+            <Qual Type="NAME" Min="0" Max="1" Prompt="Library" PromptMsgID="TXT0909" Len="10" Rstd="NO" Dft="*LIBL" AlwUnprt="YES" AlwVar="YES" Expr="YES" Full="NO" DspInput="YES" Vary="NO" PassAtr="NO" InlPmtLen="10" Choice="Name">
+                <SpcVal>
+                    <Value Val="*LIBL" MapTo="*LIBL"/>
+                    <Value Val="*CURLIB" MapTo="*CURLIB   "/>
+                </SpcVal>
+            </Qual>
+        </Parm>
+        <Parm Kwd="UPDHST" PosNbr="15" KeyParm="NO" PmtCtl="PMTRQS" RtnVal="NO" PassVal="DFT" Type="CHAR" Min="0" Max="1" Prompt="Update history" PromptMsgID="TXT4042" Len="1" Rstd="YES" Dft="*YES" AlwUnprt="YES" AlwVar="YES" Expr="YES" Full="NO" DspInput="YES" Vary="NO" PassAtr="NO" Case="MONO" CCSID="JOB" IsDtaAra="NO" IsFile="NO" IsPgm="NO" Choice="*YES, *NO">
+            <SpcVal>
+                <Value Val="*YES" MapTo="Y"/>
+                <Value Val="*NO" MapTo="N"/>
+            </SpcVal>
+        </Parm>
+        <Parm Kwd="CLEAR" PosNbr="16" KeyParm="NO" PmtCtl="PMTRQS" RtnVal="NO" PassVal="DFT" Type="CHAR" Min="0" Max="1" Prompt="Clear" PromptMsgID="TXT5420" Len="1" Rstd="YES" Dft="*NONE" AlwUnprt="YES" AlwVar="YES" Expr="YES" Full="NO" DspInput="YES" Vary="NO" PassAtr="NO" Case="MONO" CCSID="JOB" IsDtaAra="NO" IsFile="NO" IsPgm="NO" Choice="*NONE, *ALL, *AFTER, *REPLACE">
+            <SpcVal>
+                <Value Val="*NONE" MapTo="N"/>
+                <Value Val="*ALL" MapTo="Y"/>
+                <Value Val="*AFTER" MapTo="A"/>
+                <Value Val="*REPLACE" MapTo="R"/>
+            </SpcVal>
+        </Parm>
+        <Parm Kwd="PRECHK" PosNbr="17" KeyParm="NO" PmtCtl="PMTRQS" RtnVal="NO" PassVal="DFT" Type="CHAR" Min="0" Max="1" Prompt="Object pre-check" PromptMsgID="TXT3343" Len="1" Rstd="YES" Dft="*NO" AlwUnprt="YES" AlwVar="YES" Expr="YES" Full="NO" DspInput="YES" Vary="NO" PassAtr="NO" Case="MONO" CCSID="JOB" IsDtaAra="NO" IsFile="NO" IsPgm="NO" Choice="*NO, *YES">
+            <SpcVal>
+                <Value Val="*NO" MapTo="N"/>
+                <Value Val="*YES" MapTo="Y"/>
+            </SpcVal>
+        </Parm>
+        <Parm Kwd="SAVACT" PosNbr="18" KeyParm="NO" PmtCtl="PMTRQS" RtnVal="NO" PassVal="DFT" Type="CHAR" Min="0" Max="1" Prompt="Save active" PromptMsgID="TXT6825" Len="1" Rstd="YES" Dft="*NO" AlwUnprt="YES" AlwVar="YES" Expr="YES" Full="NO" DspInput="YES" Vary="NO" PassAtr="NO" Case="MONO" CCSID="JOB" IsDtaAra="NO" IsFile="NO" IsPgm="NO" Choice="*NO, *LIB, *SYNCLIB, *SYSDFN">
+            <SpcVal>
+                <Value Val="*NO" MapTo="N"/>
+                <Value Val="*LIB" MapTo="L"/>
+                <Value Val="*SYNCLIB" MapTo="R"/>
+                <Value Val="*SYSDFN" MapTo="S"/>
+            </SpcVal>
+        </Parm>
+        <Parm Kwd="SAVACTWAIT" PosNbr="19" KeyParm="NO" PmtCtl="PMTRQS" ListDspl="INT2" RtnVal="NO" PassVal="DFT" Type="ELEM" Min="0" Max="1" Prompt="Save active wait time" PromptMsgID="TXT6826" Rstd="NO" AlwUnprt="YES" AlwVar="YES" Expr="YES" Full="NO" DspInput="YES" IsDtaAra="NO" IsFile="NO" IsPgm="NO">
+            <Elem Type="INT4" Min="0" Max="1" Prompt="Object locks" PromptMsgID="TXTC905" Rstd="NO" Dft="120" RangeMinVal="0" RangeMaxVal="99999" AlwUnprt="YES" AlwVar="YES" Expr="YES" Full="NO" DspInput="YES" Vary="NO" PassAtr="NO" Case="MONO" CCSID="JOB" IsDtaAra="NO" IsFile="NO" IsPgm="NO" Choice="0-99999">
+                <SpcVal>
+                    <Value Val="*NOMAX" MapTo="-1"/>
+                </SpcVal>
+            </Elem>
+            <Elem Type="INT4" Min="0" Max="1" Prompt="Pending record changes" PromptMsgID="TXTC880" Rstd="NO" Dft="*LOCKWAIT" RangeMinVal="0" RangeMaxVal="99999" AlwUnprt="YES" AlwVar="YES" Expr="YES" Full="NO" DspInput="YES" Vary="NO" PassAtr="NO" Case="MONO" CCSID="JOB" IsDtaAra="NO" IsFile="NO" IsPgm="NO" Choice="0-99999">
+                <SpcVal>
+                    <Value Val="*LOCKWAIT" MapTo="-2"/>
+                    <Value Val="*NOCMTBDY" MapTo="-3"/>
+                    <Value Val="*NOMAX" MapTo="-1"/>
+                </SpcVal>
+            </Elem>
+            <Elem Type="INT4" Min="0" Max="1" Prompt="Other pending changes" PromptMsgID="TXTC928" Rstd="NO" Dft="*LOCKWAIT" RangeMinVal="0" RangeMaxVal="99999" AlwUnprt="YES" AlwVar="YES" Expr="YES" Full="NO" DspInput="YES" Vary="NO" PassAtr="NO" Case="MONO" CCSID="JOB" IsDtaAra="NO" IsFile="NO" IsPgm="NO" Choice="0-99999">
+                <SpcVal>
+                    <Value Val="*LOCKWAIT" MapTo="-2"/>
+                    <Value Val="*NOMAX" MapTo="-1"/>
+                </SpcVal>
+            </Elem>
+        </Parm>
+        <Parm Kwd="SAVACTMSGQ" PosNbr="20" KeyParm="NO" PmtCtl="PMTRQS" ListDspl="INT2" RtnVal="NO" PassVal="DFT" Type="QUAL" Min="0" Max="1" Prompt="Save active message queue" PromptMsgID="TXT6827" Rstd="NO" AlwUnprt="YES" AlwVar="YES" Expr="YES" Full="NO" DspInput="YES" IsDtaAra="NO" IsFile="UNSPFD" IsPgm="NO">
+            <Qual Type="NAME" Min="0" Max="1" Len="10" Rstd="NO" Dft="*NONE" AlwUnprt="YES" AlwVar="YES" Expr="YES" Full="NO" DspInput="YES" Vary="NO" PassAtr="NO" InlPmtLen="10" Choice="Name">
+                <SpcVal>
+                    <Value Val="*NONE" MapTo="*NONE"/>
+                    <Value Val="*WRKSTN" MapTo="*WRKSTN"/>
+                </SpcVal>
+            </Qual>
+            <Qual Type="NAME" Min="0" Max="1" Prompt="Library" PromptMsgID="TXT0909" Len="10" Rstd="NO" Dft="*LIBL" AlwUnprt="YES" AlwVar="YES" Expr="YES" Full="NO" DspInput="YES" Vary="NO" PassAtr="NO" InlPmtLen="10" Choice="Name">
+                <SpcVal>
+                    <Value Val="*LIBL" MapTo="*LIBL"/>
+                    <Value Val="*CURLIB" MapTo="*CURLIB   "/>
+                </SpcVal>
+            </Qual>
+        </Parm>
+        <Parm Kwd="SYNCID" PosNbr="21" KeyParm="NO" PmtCtl="PMTRQS" RtnVal="NO" PassVal="DFT" Type="NAME" Min="0" Max="1" Prompt="Synchronization ID" PromptMsgID="TXTD5EB" Len="10" Rstd="NO" Dft="*NONE" AlwUnprt="YES" AlwVar="YES" Expr="YES" Full="NO" DspInput="YES" Vary="NO" PassAtr="NO" Case="MONO" CCSID="JOB" InlPmtLen="10" IsDtaAra="NO" IsFile="NO" IsPgm="NO" Choice="Name">
+            <SpcVal>
+                <Value Val="*NONE" MapTo="*NONE"/>
+            </SpcVal>
+        </Parm>
+        <Parm Kwd="FILEMBR" PosNbr="22" KeyParm="NO" PmtCtl="PMTRQS" ListDspl="INT2" RtnVal="NO" PassVal="DFT" Type="ELEM" Min="0" Max="50" Prompt="File member" PromptMsgID="TXT4703" Rstd="NO" AlwUnprt="YES" AlwVar="YES" Expr="YES" Full="NO" DspInput="YES" IsDtaAra="NO" IsFile="NO" IsPgm="NO">
+            <Elem Type="NAME" Min="0" Max="1" Prompt="File" PromptMsgID="TXT0463" Len="10" Rstd="NO" Dft="*ALL" AlwUnprt="YES" AlwVar="YES" Expr="YES" Full="NO" DspInput="YES" Vary="NO" PassAtr="NO" Case="MONO" CCSID="JOB" InlPmtLen="10" IsDtaAra="NO" IsFile="NO" IsPgm="NO" Choice="Name">
+                <SpcVal>
+                    <Value Val="*ALL" MapTo="*ALL"/>
+                </SpcVal>
+            </Elem>
+            <Elem Type="GENERIC" Min="0" Max="50" Prompt="Member" PromptMsgID="TXT0594" Len="10" Rstd="NO" Dft="*ALL" AlwUnprt="YES" AlwVar="YES" Expr="YES" Full="NO" DspInput="YES" Vary="NO" PassAtr="NO" Case="MONO" CCSID="JOB" InlPmtLen="10" IsDtaAra="NO" IsFile="NO" IsPgm="NO" Choice="Name, generic*">
+                <SngVal>
+                    <Value Val="*ALL" MapTo="*ALL"/>
+                    <Value Val="*NONE" MapTo="*NONE"/>
+                </SngVal>
+            </Elem>
+        </Parm>
+        <Parm Kwd="ACCPTH" PosNbr="23" KeyParm="NO" PmtCtl="PMTRQS" RtnVal="NO" PassVal="DFT" Type="CHAR" Min="0" Max="1" Prompt="Save access paths" PromptMsgID="TXT3348" Len="1" Rstd="YES" Dft="*SYSVAL" AlwUnprt="YES" AlwVar="YES" Expr="YES" Full="NO" DspInput="YES" Vary="NO" PassAtr="NO" Case="MONO" CCSID="JOB" IsDtaAra="NO" IsFile="NO" IsPgm="NO" Choice="*SYSVAL, *NO, *YES">
+            <SpcVal>
+                <Value Val="*SYSVAL" MapTo="S"/>
+                <Value Val="*NO" MapTo="N"/>
+                <Value Val="*YES" MapTo="Y"/>
+            </SpcVal>
+        </Parm>
+        <Parm Kwd="SAVFDTA" PosNbr="24" KeyParm="NO" PmtCtl="PMTRQS" RtnVal="NO" PassVal="DFT" Type="CHAR" Min="0" Max="1" Prompt="Save file data" PromptMsgID="TXT6169" Len="1" Rstd="YES" Dft="*YES" AlwUnprt="YES" AlwVar="YES" Expr="YES" Full="NO" DspInput="YES" Vary="NO" PassAtr="NO" Case="MONO" CCSID="JOB" IsDtaAra="NO" IsFile="NO" IsPgm="NO" Choice="*YES, *NO">
+            <SpcVal>
+                <Value Val="*YES" MapTo="Y"/>
+                <Value Val="*NO" MapTo="N"/>
+            </SpcVal>
+        </Parm>
+        <Parm Kwd="SPLFDTA" PosNbr="25" KeyParm="NO" PmtCtl="PMTRQS" RtnVal="NO" PassVal="DFT" Type="INT4" Min="0" Max="1" Prompt="Spooled file data" PromptMsgID="TXTD4D9" Rstd="YES" Dft="*NONE" AlwUnprt="YES" AlwVar="YES" Expr="NO" Full="NO" DspInput="YES" Vary="NO" PassAtr="NO" Case="MONO" CCSID="JOB" IsDtaAra="NO" IsFile="NO" IsPgm="NO" Choice="*NONE, *ALL">
+            <SpcVal>
+                <Value Val="*NONE" MapTo="0"/>
+                <Value Val="*ALL" MapTo="1"/>
+            </SpcVal>
+        </Parm>
+        <Parm Kwd="QDTA" PosNbr="26" KeyParm="NO" PmtCtl="PMTRQS" RtnVal="NO" PassVal="DFT" Type="CHAR" Min="0" Max="1" Prompt="Queue data" PromptMsgID="TXTD525" Len="1" Rstd="YES" Dft="*NONE" AlwUnprt="YES" AlwVar="YES" Expr="YES" Full="NO" DspInput="YES" Vary="NO" PassAtr="NO" Case="MONO" CCSID="JOB" IsDtaAra="NO" IsFile="NO" IsPgm="NO" Choice="*NONE, *DTAQ">
+            <SpcVal>
+                <Value Val="*NONE" MapTo="N"/>
+                <Value Val="*DTAQ" MapTo="D"/>
+            </SpcVal>
+        </Parm>
+        <Parm Kwd="PVTAUT" PosNbr="27" KeyParm="NO" PmtCtl="PMTRQS" RtnVal="NO" PassVal="DFT" Type="INT4" Min="0" Max="1" Prompt="Private authorities" PromptMsgID="TXTD5EE" Rstd="YES" Dft="*NO" AlwUnprt="YES" AlwVar="YES" Expr="YES" Full="NO" DspInput="YES" Vary="NO" PassAtr="NO" Case="MONO" CCSID="JOB" IsDtaAra="NO" IsFile="NO" IsPgm="NO" Choice="*NO, *YES">
+            <SpcVal>
+                <Value Val="*NO" MapTo="0"/>
+                <Value Val="*YES" MapTo="1"/>
+            </SpcVal>
+        </Parm>
+        <Parm Kwd="STG" PosNbr="28" KeyParm="NO" PmtCtl="PMTRQS" RtnVal="NO" PassVal="DFT" Type="CHAR" Min="0" Max="1" Prompt="Storage" PromptMsgID="TXT0728" Len="1" Rstd="YES" Dft="*KEEP" AlwUnprt="YES" AlwVar="YES" Expr="YES" Full="NO" DspInput="YES" Vary="NO" PassAtr="NO" Case="MONO" CCSID="JOB" IsDtaAra="NO" IsFile="NO" IsPgm="NO" Choice="*KEEP, *FREE">
+            <SpcVal>
+                <Value Val="*KEEP" MapTo="K"/>
+                <Value Val="*FREE" MapTo="F"/>
+            </SpcVal>
+        </Parm>
+        <Parm Kwd="DTACPR" PosNbr="29" KeyParm="NO" PmtCtl="PMTRQS" RtnVal="NO" PassVal="DFT" Type="CHAR" Min="0" Max="1" Prompt="Data compression" PromptMsgID="TXT3681" Len="1" Rstd="YES" Dft="*DEV" AlwUnprt="YES" AlwVar="YES" Expr="YES" Full="NO" DspInput="YES" Vary="NO" PassAtr="NO" Case="MONO" CCSID="JOB" IsDtaAra="NO" IsFile="NO" IsPgm="NO" Choice="*DEV, *NO, *YES, *LOW...">
+            <SpcVal>
+                <Value Val="*DEV" MapTo="D"/>
+                <Value Val="*NO" MapTo="N"/>
+                <Value Val="*YES" MapTo="Y"/>
+                <Value Val="*LOW" MapTo="L"/>
+                <Value Val="*MEDIUM" MapTo="M"/>
+                <Value Val="*HIGH" MapTo="H"/>
+                <Value Val="*ZLIB" MapTo="Z"/>
+            </SpcVal>
+        </Parm>
+        <Parm Kwd="COMPACT" PosNbr="30" KeyParm="NO" PmtCtl="PMTRQS" RtnVal="NO" PassVal="DFT" Type="CHAR" Min="0" Max="1" Prompt="Data compaction" PromptMsgID="TXT6353" Len="1" Rstd="YES" Dft="*DEV" AlwUnprt="YES" AlwVar="YES" Expr="YES" Full="NO" DspInput="YES" Vary="NO" PassAtr="NO" Case="MONO" CCSID="JOB" IsDtaAra="NO" IsFile="NO" IsPgm="NO" Choice="*DEV, *NO">
+            <SpcVal>
+                <Value Val="*DEV" MapTo="D"/>
+                <Value Val="*NO" MapTo="N"/>
+            </SpcVal>
+        </Parm>
+        <Parm Kwd="OMITLIB" PosNbr="31" KeyParm="NO" PmtCtl="PMTRQS" RtnVal="NO" PassVal="DFT" Type="GENERIC" Min="0" Max="300" Prompt="Libraries to omit" PromptMsgID="TXT6354" Len="10" Rstd="NO" Dft="*NONE" AlwUnprt="YES" AlwVar="YES" Expr="YES" Full="NO" DspInput="YES" Vary="INT2" PassAtr="NO" Case="MONO" CCSID="JOB" InlPmtLen="10" IsDtaAra="NO" IsFile="NO" IsPgm="NO" Choice="Name, generic*">
+            <SngVal>
+                <Value Val="*NONE" MapTo="*NONE"/>
+                <Value Val="*USRSPC" MapTo="*USRSPC"/>
+            </SngVal>
+        </Parm>
+        <Parm Kwd="OMITOBJ" PosNbr="32" KeyParm="NO" PmtCtl="PMTRQS" ListDspl="INT2" RtnVal="NO" PassVal="DFT" Type="ELEM" Min="0" Max="300" Prompt="Objects to omit" PromptMsgID="TXTC477" Rstd="NO" AlwUnprt="YES" AlwVar="YES" Expr="NO" Full="NO" DspInput="YES" IsDtaAra="NO" IsFile="NO" IsPgm="NO" Choice="*USRSPC">
+            <SngVal>
+                <Value Val="*USRSPC" MapTo="*USRSPC"/>
+            </SngVal>
+            <Elem Type="QUAL" Min="0" Max="1" Prompt="Object" PromptMsgID="TXT0620" Rstd="NO" AlwUnprt="YES" AlwVar="YES" Expr="NO" Full="NO" DspInput="YES" IsDtaAra="NO" IsFile="NO" IsPgm="NO">
+                <Qual Type="GENERIC" Min="0" Max="1" Len="10" Rstd="NO" Dft="*NONE" AlwUnprt="YES" AlwVar="YES" Expr="NO" Full="NO" DspInput="YES" Vary="NO" PassAtr="NO" InlPmtLen="10" Choice="Name, generic*">
+                    <SpcVal>
+                        <Value Val="*NONE" MapTo="*NONE"/>
+                        <Value Val="*ALL" MapTo="*ALL"/>
+                    </SpcVal>
+                </Qual>
+                <Qual Type="GENERIC" Min="0" Max="1" Prompt="Library" PromptMsgID="TXT0909" Len="10" Rstd="NO" Dft="*ALL" AlwUnprt="YES" AlwVar="YES" Expr="NO" Full="NO" DspInput="YES" Vary="NO" PassAtr="NO" InlPmtLen="10" Choice="Name, generic*">
+                    <SpcVal>
+                        <Value Val="*ALL" MapTo="*ALL"/>
+                    </SpcVal>
+                </Qual>
+            </Elem>
+            <Elem Type="CHAR" Min="0" Max="1" Prompt="Object type" PromptMsgID="TXT0621" Len="7" Rstd="NO" Dft="*ALL" AlwUnprt="YES" AlwVar="YES" Expr="NO" Full="NO" DspInput="YES" Vary="NO" PassAtr="NO" Case="MONO" CCSID="JOB" InlPmtLen="7" IsDtaAra="NO" IsFile="NO" IsPgm="NO" Choice="__PGM" ChoicePgm="QSRCHIGC" ChoiceLib="QSYS">
+                <SpcVal>
+                    <Value Val="*ALL" MapTo="*ALL"/>
+                </SpcVal>
+                <ChoicePgmText Text= "*ALL, *ALRTBL, *BNDDIR..."></ChoicePgmText>
+                <ChoicePgmValues>
+                    <Value Val="*ALRTBL"/>
+                    <Value Val="*BNDDIR"/>
+                    <Value Val="*CHTFMT"/>
+                    <Value Val="*CLD"/>
+                    <Value Val="*CLS"/>
+                    <Value Val="*CMD"/>
+                    <Value Val="*CRG"/>
+                    <Value Val="*CRQD"/>
+                    <Value Val="*CSI"/>
+                    <Value Val="*CSPMAP"/>
+                    <Value Val="*CSPTBL"/>
+                    <Value Val="*DTAARA"/>
+                    <Value Val="*DTAQ"/>
+                    <Value Val="*EDTD"/>
+                    <Value Val="*EXITRG"/>
+                    <Value Val="*FCT"/>
+                    <Value Val="*FILE"/>
+                    <Value Val="*FNTRSC"/>
+                    <Value Val="*FNTTBL"/>
+                    <Value Val="*FORMDF"/>
+                    <Value Val="*FTR"/>
+                    <Value Val="*GSS"/>
+                    <Value Val="*IGCDCT"/>
+                    <Value Val="*IGCSRT"/>
+                    <Value Val="*IGCTBL"/>
+                    <Value Val="*IMGCLG"/>
+                    <Value Val="*JOBD"/>
+                    <Value Val="*JOBQ"/>
+                    <Value Val="*JOBSCD"/>
+                    <Value Val="*JRN"/>
+                    <Value Val="*JRNRCV"/>
+                    <Value Val="*LOCALE"/>
+                    <Value Val="*MEDDFN"/>
+                    <Value Val="*MENU"/>
+                    <Value Val="*MGTCOL"/>
+                    <Value Val="*MODULE"/>
+                    <Value Val="*MSGF"/>
+                    <Value Val="*MSGQ"/>
+                    <Value Val="*NODGRP"/>
+                    <Value Val="*NODL"/>
+                    <Value Val="*NWSCFG"/>
+                    <Value Val="*OUTQ"/>
+                    <Value Val="*OVL"/>
+                    <Value Val="*PAGDFN"/>
+                    <Value Val="*PAGSEG"/>
+                    <Value Val="*PDFMAP"/>
+                    <Value Val="*PDG"/>
+                    <Value Val="*PGM"/>
+                    <Value Val="*PNLGRP"/>
+                    <Value Val="*PRDAVL"/>
+                    <Value Val="*PRDDFN"/>
+                    <Value Val="*PRDLOD"/>
+                    <Value Val="*PSFCFG"/>
+                    <Value Val="*QMFORM"/>
+                    <Value Val="*QMQRY"/>
+                    <Value Val="*QRYDFN"/>
+                    <Value Val="*RCT"/>
+                    <Value Val="*SBSD"/>
+                    <Value Val="*SCHIDX"/>
+                    <Value Val="*SPADCT"/>
+                    <Value Val="*SQLPKG"/>
+                    <Value Val="*SQLUDT"/>
+                    <Value Val="*SQLXSR"/>
+                    <Value Val="*SRVPGM"/>
+                    <Value Val="*SSND"/>
+                    <Value Val="*SVRSTG"/>
+                    <Value Val="*S36"/>
+                    <Value Val="*TBL"/>
+                    <Value Val="*TIMZON"/>
+                    <Value Val="*USRIDX"/>
+                    <Value Val="*USRQ"/>
+                    <Value Val="*USRSPC"/>
+                    <Value Val="*VLDL"/>
+                    <Value Val="*WSCST"/>
+                </ChoicePgmValues>
+            </Elem>
+        </Parm>
+        <Parm Kwd="SELECT" PosNbr="33" KeyParm="NO" PmtCtl="PMTRQS" ListDspl="INT2" RtnVal="NO" PassVal="DFT" Type="ELEM" Min="0" Max="300" Prompt="Select" PromptMsgID="TXT0483" Rstd="NO" AlwUnprt="YES" AlwVar="YES" Expr="NO" Full="NO" DspInput="YES" IsDtaAra="NO" IsFile="NO" IsPgm="NO" Choice="*USRSPC">
+            <SngVal>
+                <Value Val="*USRSPC" MapTo="U"/>
+            </SngVal>
+            <Elem Type="CHAR" Min="0" Max="1" Prompt="Include or omit" PromptMsgID="TXT0687" Len="1" Rstd="YES" Dft="*INCLUDE" AlwUnprt="YES" AlwVar="YES" Expr="NO" Full="NO" DspInput="YES" Vary="NO" PassAtr="NO" Case="MONO" CCSID="JOB" IsDtaAra="NO" IsFile="NO" IsPgm="NO" Choice="*INCLUDE, *OMIT">
+                <SpcVal>
+                    <Value Val="*INCLUDE" MapTo="I"/>
+                    <Value Val="*OMIT" MapTo="O"/>
+                </SpcVal>
+            </Elem>
+            <Elem Type="QUAL" Min="0" Max="1" Prompt="Object" PromptMsgID="TXT0620" Rstd="NO" AlwUnprt="YES" AlwVar="YES" Expr="NO" Full="NO" DspInput="YES" IsDtaAra="NO" IsFile="NO" IsPgm="NO">
+                <Qual Type="GENERIC" Min="0" Max="1" Len="10" Rstd="NO" Dft="*ALL" AlwUnprt="YES" AlwVar="YES" Expr="NO" Full="NO" DspInput="YES" Vary="NO" PassAtr="NO" InlPmtLen="10" Choice="Name, generic*">
+                    <SpcVal>
+                        <Value Val="*ALL" MapTo="*ALL"/>
+                    </SpcVal>
+                </Qual>
+                <Qual Type="GENERIC" Min="0" Max="1" Prompt="Library" PromptMsgID="TXT0909" Len="10" Rstd="NO" Dft="*ALL" AlwUnprt="YES" AlwVar="YES" Expr="NO" Full="NO" DspInput="YES" Vary="NO" PassAtr="NO" InlPmtLen="10" Choice="Name, generic*">
+                    <SpcVal>
+                        <Value Val="*ALL" MapTo="*ALL"/>
+                    </SpcVal>
+                </Qual>
+            </Elem>
+            <Elem Type="CHAR" Min="0" Max="1" Prompt="Object type" PromptMsgID="TXT0621" Len="7" Rstd="NO" Dft="*ALL" AlwUnprt="YES" AlwVar="YES" Expr="NO" Full="NO" DspInput="YES" Vary="NO" PassAtr="NO" Case="MONO" CCSID="JOB" InlPmtLen="7" IsDtaAra="NO" IsFile="NO" IsPgm="NO" Choice="__PGM" ChoicePgm="QSRCHIGC" ChoiceLib="QSYS">
+                <SpcVal>
+                    <Value Val="*ALL" MapTo="*ALL"/>
+                </SpcVal>
+                <ChoicePgmText Text= "*ALL, *ALRTBL, *BNDDIR..."></ChoicePgmText>
+                <ChoicePgmValues>
+                    <Value Val="*ALRTBL"/>
+                    <Value Val="*BNDDIR"/>
+                    <Value Val="*CHTFMT"/>
+                    <Value Val="*CLD"/>
+                    <Value Val="*CLS"/>
+                    <Value Val="*CMD"/>
+                    <Value Val="*CRG"/>
+                    <Value Val="*CRQD"/>
+                    <Value Val="*CSI"/>
+                    <Value Val="*CSPMAP"/>
+                    <Value Val="*CSPTBL"/>
+                    <Value Val="*DTAARA"/>
+                    <Value Val="*DTAQ"/>
+                    <Value Val="*EDTD"/>
+                    <Value Val="*EXITRG"/>
+                    <Value Val="*FCT"/>
+                    <Value Val="*FILE"/>
+                    <Value Val="*FNTRSC"/>
+                    <Value Val="*FNTTBL"/>
+                    <Value Val="*FORMDF"/>
+                    <Value Val="*FTR"/>
+                    <Value Val="*GSS"/>
+                    <Value Val="*IGCDCT"/>
+                    <Value Val="*IGCSRT"/>
+                    <Value Val="*IGCTBL"/>
+                    <Value Val="*IMGCLG"/>
+                    <Value Val="*JOBD"/>
+                    <Value Val="*JOBQ"/>
+                    <Value Val="*JOBSCD"/>
+                    <Value Val="*JRN"/>
+                    <Value Val="*JRNRCV"/>
+                    <Value Val="*LOCALE"/>
+                    <Value Val="*MEDDFN"/>
+                    <Value Val="*MENU"/>
+                    <Value Val="*MGTCOL"/>
+                    <Value Val="*MODULE"/>
+                    <Value Val="*MSGF"/>
+                    <Value Val="*MSGQ"/>
+                    <Value Val="*NODGRP"/>
+                    <Value Val="*NODL"/>
+                    <Value Val="*NWSCFG"/>
+                    <Value Val="*OUTQ"/>
+                    <Value Val="*OVL"/>
+                    <Value Val="*PAGDFN"/>
+                    <Value Val="*PAGSEG"/>
+                    <Value Val="*PDFMAP"/>
+                    <Value Val="*PDG"/>
+                    <Value Val="*PGM"/>
+                    <Value Val="*PNLGRP"/>
+                    <Value Val="*PRDAVL"/>
+                    <Value Val="*PRDDFN"/>
+                    <Value Val="*PRDLOD"/>
+                    <Value Val="*PSFCFG"/>
+                    <Value Val="*QMFORM"/>
+                    <Value Val="*QMQRY"/>
+                    <Value Val="*QRYDFN"/>
+                    <Value Val="*RCT"/>
+                    <Value Val="*SBSD"/>
+                    <Value Val="*SCHIDX"/>
+                    <Value Val="*SPADCT"/>
+                    <Value Val="*SQLPKG"/>
+                    <Value Val="*SQLUDT"/>
+                    <Value Val="*SQLXSR"/>
+                    <Value Val="*SRVPGM"/>
+                    <Value Val="*SSND"/>
+                    <Value Val="*SVRSTG"/>
+                    <Value Val="*S36"/>
+                    <Value Val="*TBL"/>
+                    <Value Val="*TIMZON"/>
+                    <Value Val="*USRIDX"/>
+                    <Value Val="*USRQ"/>
+                    <Value Val="*USRSPC"/>
+                    <Value Val="*VLDL"/>
+                    <Value Val="*WSCST"/>
+                </ChoicePgmValues>
+            </Elem>
+            <Elem Type="CHAR" Min="0" Max="1" Prompt="Object attribute" PromptMsgID="TXT5104" Len="10" Rstd="NO" Dft="*ALL" AlwUnprt="YES" AlwVar="YES" Expr="NO" Full="NO" DspInput="YES" Vary="NO" PassAtr="NO" Case="MONO" CCSID="JOB" InlPmtLen="10" IsDtaAra="NO" IsFile="NO" IsPgm="NO" Choice="Character value">
+                <SpcVal>
+                    <Value Val="*ALL" MapTo="*ALL"/>
+                    <Value Val="*BLANK" MapTo="*BLANK"/>
+                </SpcVal>
+            </Elem>
+            <Elem Type="GENERIC" Min="0" Max="1" Prompt="File member" PromptMsgID="TXT4703" Len="10" Rstd="NO" Dft="*ALL" AlwUnprt="YES" AlwVar="YES" Expr="NO" Full="NO" DspInput="YES" Vary="NO" PassAtr="NO" Case="MONO" CCSID="JOB" InlPmtLen="10" IsDtaAra="NO" IsFile="NO" IsPgm="NO" Choice="Name, generic*">
+                <SpcVal>
+                    <Value Val="*ALL" MapTo="*ALL"/>
+                    <Value Val="*ALLMBR" MapTo="*ALLMBR"/>
+                </SpcVal>
+            </Elem>
+        </Parm>
+        <Parm Kwd="ASPDEV" PosNbr="34" KeyParm="NO" PmtCtl="PMTRQS" RtnVal="NO" PassVal="DFT" Type="NAME" Min="0" Max="1" Prompt="ASP device" PromptMsgID="TXTC705" Len="10" Rstd="NO" Dft="*" AlwUnprt="YES" AlwVar="YES" Expr="YES" Full="NO" DspInput="YES" Vary="NO" PassAtr="NO" Case="MONO" CCSID="JOB" InlPmtLen="10" IsDtaAra="NO" IsFile="NO" IsPgm="NO" Choice="Name">
+            <SpcVal>
+                <Value Val="*" MapTo="*"/>
+                <Value Val="*SYSBAS" MapTo="*SYSBAS"/>
+                <Value Val="*CURASPGRP" MapTo="*CURASPGRP"/>
+            </SpcVal>
+        </Parm>
+        <Parm Kwd="OUTPUT" PosNbr="35" KeyParm="NO" PmtCtl="PMTRQS" RtnVal="NO" PassVal="DFT" Type="CHAR" Min="0" Max="1" Prompt="Output" PromptMsgID="TXT0637" Len="1" Rstd="YES" Dft="*NONE" AlwUnprt="YES" AlwVar="YES" Expr="YES" Full="NO" DspInput="YES" Vary="NO" PassAtr="NO" Case="MONO" CCSID="JOB" IsDtaAra="NO" IsFile="NO" IsPgm="NO" Choice="*NONE, *PRINT, *OUTFILE">
+            <SpcVal>
+                <Value Val="*NONE" MapTo="N"/>
+                <Value Val="*PRINT" MapTo="L"/>
+                <Value Val="*OUTFILE" MapTo="F"/>
+            </SpcVal>
+        </Parm>
+        <Parm Kwd="OUTFILE" PosNbr="36" KeyParm="NO" PmtCtl="PMTRQS" ListDspl="INT2" RtnVal="NO" PassVal="DFT" Type="QUAL" Min="0" Max="1" Prompt="File to receive output" PromptMsgID="TXT0636" Rstd="NO" AlwUnprt="YES" AlwVar="YES" Expr="YES" Full="NO" DspInput="YES" IsDtaAra="NO" IsFile="OUT" IsPgm="NO">
+            <Qual Type="NAME" Min="1" Max="1" Len="10" Rstd="NO" AlwUnprt="YES" AlwVar="YES" Expr="YES" Full="NO" DspInput="YES" Vary="NO" PassAtr="NO" InlPmtLen="10" Choice="Name"></Qual>
+            <Qual Type="NAME" Min="0" Max="1" Prompt="Library" PromptMsgID="TXT0909" Len="10" Rstd="NO" Dft="*LIBL" AlwUnprt="YES" AlwVar="YES" Expr="YES" Full="NO" DspInput="YES" Vary="NO" PassAtr="NO" InlPmtLen="10" Choice="Name">
+                <SpcVal>
+                    <Value Val="*LIBL" MapTo="*LIBL"/>
+                    <Value Val="*CURLIB" MapTo="*CURLIB   "/>
+                </SpcVal>
+            </Qual>
+        </Parm>
+        <Parm Kwd="OUTMBR" PosNbr="37" KeyParm="NO" PmtCtl="PMTRQS" ListDspl="INT2" RtnVal="NO" PassVal="DFT" Type="ELEM" Min="0" Max="1" Prompt="Output member options" PromptMsgID="TXT4245" Rstd="NO" AlwUnprt="YES" AlwVar="YES" Expr="YES" Full="NO" DspInput="YES" IsDtaAra="NO" IsFile="NO" IsPgm="NO">
+            <Elem Type="NAME" Min="0" Max="1" Prompt="Member to receive output" PromptMsgID="TXT3134" Len="10" Rstd="NO" Dft="*FIRST" AlwUnprt="YES" AlwVar="YES" Expr="YES" Full="NO" DspInput="YES" Vary="NO" PassAtr="NO" Case="MONO" CCSID="JOB" InlPmtLen="10" IsDtaAra="NO" IsFile="NO" IsPgm="NO" Choice="Name">
+                <SpcVal>
+                    <Value Val="*FIRST" MapTo="*FIRST"/>
+                </SpcVal>
+            </Elem>
+            <Elem Type="CHAR" Min="0" Max="1" Prompt="Replace or add records" PromptMsgID="TXT0595" Len="1" Rstd="YES" Dft="*REPLACE" AlwUnprt="YES" AlwVar="YES" Expr="YES" Full="NO" DspInput="YES" Vary="NO" PassAtr="NO" Case="MONO" CCSID="JOB" IsDtaAra="NO" IsFile="NO" IsPgm="NO" Choice="*REPLACE, *ADD">
+                <SpcVal>
+                    <Value Val="*REPLACE" MapTo="R"/>
+                    <Value Val="*ADD" MapTo="A"/>
+                </SpcVal>
+            </Elem>
+        </Parm>
+        <Parm Kwd="INFTYPE" PosNbr="38" KeyParm="NO" PmtCtl="PMTRQS" RtnVal="NO" PassVal="DFT" Type="CHAR" Min="0" Max="1" Prompt="Type of output information" PromptMsgID="TXT6872" Len="1" Rstd="YES" Dft="*OBJ" AlwUnprt="YES" AlwVar="YES" Expr="YES" Full="NO" DspInput="YES" Vary="NO" PassAtr="NO" Case="MONO" CCSID="JOB" IsDtaAra="NO" IsFile="NO" IsPgm="NO" Choice="*OBJ, *LIB, *MBR, *ERR">
+            <SpcVal>
+                <Value Val="*OBJ" MapTo="O"/>
+                <Value Val="*LIB" MapTo="L"/>
+                <Value Val="*MBR" MapTo="M"/>
+                <Value Val="*ERR" MapTo="E"/>
+            </SpcVal>
+        </Parm>
+        <Parm Kwd="SAVE" KeyParm="NO" Type="CHAR" Min="0" Len="1" Vary="NO" PassAtr="NO" Constant="X&apos;10&apos;"></Parm>
+        <Parm Kwd="FEATURE" KeyParm="NO" Type="CHAR" Min="0" Len="1" Vary="NO" PassAtr="NO" Constant="X&apos;02&apos;"></Parm>
+        <Parm Kwd="OPTFILE" PosNbr="12" KeyParm="NO" PmtCtl="PMTCTL" RtnVal="NO" PassVal="DFT" Type="PNAME" Min="0" Max="1" Prompt="Optical file" PromptMsgID="TXTA144" Len="256" Rstd="NO" Dft="*" AlwUnprt="YES" AlwVar="YES" Expr="NO" Full="NO" DspInput="YES" Vary="INT2" PassAtr="NO" Case="MIXED" CCSID="JOB" InlPmtLen="256" IsDtaAra="NO" IsFile="NO" IsPgm="NO" Choice="Path name">
+            <PmtCtl CtlKwd="DEV" NbrTrueRel="EQ" NbrTrue="1">
+                <PmtCtlCond Rel="EQ" CmpVal="*OPT"/>
+            </PmtCtl>
+        </Parm>
+        <Parm Kwd="USEOPTBLK" PosNbr="13" KeyParm="NO" PmtCtl="PMTCTL" RtnVal="NO" PassVal="DFT" Type="CHAR" Min="0" Max="1" Prompt="Use optimum block" PromptMsgID="TXTC186" Len="1" Rstd="YES" Dft="*YES" AlwUnprt="YES" AlwVar="YES" Expr="NO" Full="NO" DspInput="YES" Vary="NO" PassAtr="NO" Case="MONO" CCSID="JOB" IsDtaAra="NO" IsFile="NO" IsPgm="NO" Choice="*YES, *NO">
+            <SpcVal>
+                <Value Val="*YES" MapTo="Y"/>
+                <Value Val="*NO" MapTo="N"/>
+            </SpcVal>
+            <PmtCtl CtlKwd="DEV" NbrTrueRel="GT" NbrTrue="0">
+                <PmtCtlCond Rel="EQ" CmpVal="*TAPE"/>
+                <PmtCtlCond Rel="EQ" CmpVal="*"/>
+            </PmtCtl>
+        </Parm>
+        <Parm Kwd="SPANOPTVOL" KeyParm="NO" Type="CHAR" Min="0" Len="1" Vary="NO" PassAtr="NO" Constant="*YES">
+            <SpcVal>
+                <Value Val="*YES" MapTo="Y"/>
+                <Value Val="*NO" MapTo="N"/>
+            </SpcVal>
+        </Parm>
+        <Parm Kwd="CMDUSRSPC" PosNbr="39" KeyParm="NO" PmtCtl="PMTRQS" ListDspl="INT2" RtnVal="NO" PassVal="DFT" Type="QUAL" Min="0" Max="1" Prompt="Command user space" PromptMsgID="TXTD552" Rstd="NO" AlwUnprt="YES" AlwVar="YES" Expr="YES" Full="NO" DspInput="YES" IsDtaAra="NO" IsFile="NO" IsPgm="NO">
+            <Qual Type="NAME" Min="1" Max="1" Len="10" Rstd="NO" AlwUnprt="YES" AlwVar="YES" Expr="YES" Full="NO" DspInput="YES" Vary="NO" PassAtr="NO" InlPmtLen="10" Choice="Name"></Qual>
+            <Qual Type="NAME" Min="0" Max="1" Prompt="Library" PromptMsgID="TXT0909" Len="10" Rstd="NO" Dft="*LIBL" AlwUnprt="YES" AlwVar="YES" Expr="YES" Full="NO" DspInput="YES" Vary="NO" PassAtr="NO" InlPmtLen="10" Choice="Name">
+                <SpcVal>
+                    <Value Val="*LIBL" MapTo="*LIBL"/>
+                    <Value Val="*CURLIB" MapTo="*CURLIB   "/>
+                </SpcVal>
+            </Qual>
+        </Parm>
+        <Parm Kwd="SORT" KeyParm="NO" Type="CHAR" Min="0" Len="1" Vary="NO" PassAtr="NO" Constant="*NAME">
+            <SpcVal>
+                <Value Val="*NAME" MapTo="N"/>
+            </SpcVal>
+        </Parm>
+        <Dep CtlKwdRel="SPCFD" CtlKwd="SAVF" NbrTrueRel="EQ" NbrTrue="0" MsgID="CPD3754">
+            <DepParm Kwd="VOL" Rel="SPCFD"/>
+            <DepParm Kwd="SEQNBR" Rel="SPCFD"/>
+            <DepParm Kwd="LABEL" Rel="SPCFD"/>
+            <DepParm Kwd="EXPDATE" Rel="SPCFD"/>
+            <DepParm Kwd="ENDOPT" Rel="SPCFD"/>
+            <DepParm Kwd="OPTFILE" Rel="SPCFD"/>
+        </Dep>
+        <Dep CtlKwdRel="EQ" CtlKwd="DEV" CmpVal="*SAVF" NbrTrueRel="EQ" NbrTrue="1" MsgID="CPD3760">
+            <DepParm Kwd="SAVF" Rel="SPCFD"/>
+        </Dep>
+        <Dep CtlKwdRel="NE" CtlKwd="DEV" CmpVal="*SAVF" NbrTrueRel="EQ" NbrTrue="0" MsgID="CPD3754">
+            <DepParm Kwd="SAVF" Rel="SPCFD"/>
+        </Dep>
+        <Dep CtlKwdRel="SPCFD" CtlKwd="MEDDFN" NbrTrueRel="EQ" NbrTrue="0" MsgID="CPD3798">
+            <DepParm Kwd="VOL" Rel="SPCFD"/>
+            <DepParm Kwd="SEQNBR" Rel="SPCFD"/>
+            <DepParm Kwd="SAVF" Rel="SPCFD"/>
+            <DepParm Kwd="OPTFILE" Rel="SPCFD"/>
+        </Dep>
+        <Dep CtlKwdRel="EQ" CtlKwd="DEV" CmpVal="*MEDDFN" NbrTrueRel="EQ" NbrTrue="1" MsgID="CPD3799">
+            <DepParm Kwd="MEDDFN" Rel="SPCFD"/>
+        </Dep>
+        <Dep CtlKwdRel="NE" CtlKwd="DEV" CmpVal="*MEDDFN" NbrTrueRel="EQ" NbrTrue="0" MsgID="CPD379E">
+            <DepParm Kwd="MEDDFN" Rel="SPCFD"/>
+        </Dep>
+        <Dep CtlKwdRel="EQ" CtlKwd="CLEAR" CmpVal="A" NbrTrueRel="EQ" NbrTrue="0" MsgID="CPD3754">
+            <DepParm Kwd="SAVF" Rel="SPCFD"/>
+        </Dep>
+        <Dep CtlKwdRel="SPCFD" CtlKwd="OPTFILE" NbrTrueRel="EQ" NbrTrue="0" MsgID="CPD376E">
+            <DepParm Kwd="SEQNBR" Rel="SPCFD"/>
+            <DepParm Kwd="LABEL" Rel="SPCFD"/>
+        </Dep>
+        <Dep CtlKwdRel="SPCFD" CtlKwd="SAVACTWAIT" NbrTrueRel="EQ" NbrTrue="1" MsgID="CPD3726">
+            <DepParm Kwd="SAVACT" Rel="NE" CmpVal="N" />
+        </Dep>
+        <Dep CtlKwdRel="SPCFD" CtlKwd="SAVACTMSGQ" NbrTrueRel="EQ" NbrTrue="1" MsgID="CPD3726">
+            <DepParm Kwd="SAVACT" Rel="NE" CmpVal="N" />
+        </Dep>
+        <Dep CtlKwdRel="SPCFD" CtlKwd="SYNCID" NbrTrueRel="EQ" NbrTrue="1" MsgID="CPD37B6">
+            <DepParm Kwd="SAVACT" Rel="EQ" CmpVal="R" />
+        </Dep>
+        <Dep CtlKwdRel="NE" CtlKwd="SAVACT" CmpVal="N" NbrTrueRel="EQ" NbrTrue="0" MsgID="CPD3727">
+            <DepParm Kwd="STG" Rel="EQ" CmpVal="F" />
+        </Dep>
+        <Dep CtlKwdRel="EQ" CtlKwd="OUTPUT" CmpVal="F" NbrTrueRel="EQ" NbrTrue="1" MsgID="CPD371E">
+            <DepParm Kwd="OUTFILE" Rel="NE" CmpVal="X&apos;40&apos;" />
+        </Dep>
+        <Dep CtlKwdRel="NE" CtlKwd="OUTMBR" CmpVal="*FIRST" NbrTrueRel="EQ" NbrTrue="0" MsgID="CPD9867">
+            <DepParm Kwd="OUTFILE" Rel="EQ" CmpVal="X&apos;40&apos;" />
+        </Dep>
+        <Dep CtlKwdRel="NE" CtlKwd="OUTPUT" CmpVal="F" NbrTrueRel="EQ" NbrTrue="1" MsgID="CPD371F">
+            <DepParm Kwd="OUTFILE" Rel="EQ" CmpVal="X&apos;40&apos;" />
+        </Dep>
+        <Dep CtlKwdRel="SPCFD" CtlKwd="INFTYPE" NbrTrueRel="EQ" NbrTrue="0" MsgID="CPD371D">
+            <DepParm Kwd="OUTPUT" Rel="EQ" CmpVal="N" />
+        </Dep>
+        <Dep CtlKwdRel="EQ" CtlKwd="INFTYPE" CmpVal="E" NbrTrueRel="EQ" NbrTrue="0" MsgID="CPD3794">
+            <DepParm Kwd="OUTPUT" Rel="NE" CmpVal="F" />
+        </Dep>
+        <Dep CtlKwdRel="SPCFD" CtlKwd="CMDUSRSPC" NbrTrueRel="GT" NbrTrue="0" MsgID="CPD37B3">
+            <DepParm Kwd="LIB" Rel="EQ" CmpVal="*USRSPC" />
+            <DepParm Kwd="OMITLIB" Rel="EQ" CmpVal="*USRSPC" />
+            <DepParm Kwd="OMITOBJ" Rel="EQ" CmpVal="*USRSPC" />
+            <DepParm Kwd="SELECT" Rel="EQ" CmpVal="U" />
+        </Dep>
+        <Dep CtlKwdRel="EQ" CtlKwd="LIB" CmpVal="*USRSPC" NbrTrueRel="EQ" NbrTrue="1" MsgID="CPD37B2">
+            <DepParm Kwd="CMDUSRSPC" Rel="SPCFD"/>
+        </Dep>
+        <Dep CtlKwdRel="EQ" CtlKwd="OMITLIB" CmpVal="*USRSPC" NbrTrueRel="EQ" NbrTrue="1" MsgID="CPD37B2">
+            <DepParm Kwd="CMDUSRSPC" Rel="SPCFD"/>
+        </Dep>
+        <Dep CtlKwdRel="EQ" CtlKwd="OMITOBJ" CmpVal="*USRSPC" NbrTrueRel="EQ" NbrTrue="1" MsgID="CPD37B2">
+            <DepParm Kwd="CMDUSRSPC" Rel="SPCFD"/>
+        </Dep>
+        <Dep CtlKwdRel="EQ" CtlKwd="SELECT" CmpVal="U" NbrTrueRel="EQ" NbrTrue="1" MsgID="CPD37B2">
+            <DepParm Kwd="CMDUSRSPC" Rel="SPCFD"/>
+        </Dep>
+        <Dep CtlKwdRel="EQ" CtlKwd="LIB" CmpVal="*SELECT" NbrTrueRel="EQ" NbrTrue="1" MsgID="CPD37C5">
+            <DepParm Kwd="SELECT" Rel="SPCFD"/>
+        </Dep>
+    </Cmd>
+</QcdCLCmd>

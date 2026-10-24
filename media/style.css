@@ -60,6 +60,29 @@ body[data-vscode-theme-kind="vscode-high-contrast"] .parm-kwd {
   font-family: var(--vscode-editor-font-family, 'Courier New', monospace);
 }
 
+.cmd-preview-group {
+  margin: 0 0 12px 0;
+}
+
+#cmdPreview {
+  display: block;
+  width: 100%;
+  min-height: calc(1.4em + 10px);
+  padding: 5px 7px;
+  box-sizing: border-box;
+  color: var(--vscode-editor-foreground, #cccccc);
+  background: var(--vscode-editorWidget-background, #252526);
+  border: 1px solid var(--vscode-editorWidget-border, #454545);
+  border-radius: 3px;
+  font-family: ui-monospace, 'SFMono-Regular', Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
+  font-size: 0.95em;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  line-height: 1.4;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 /* CL Command Label styling */
 #cmdLabel {
   color: #00AA00;

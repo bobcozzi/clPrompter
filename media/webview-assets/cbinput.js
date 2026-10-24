@@ -282,7 +282,13 @@ export class CBInput {
     }
     updateInputToHighlighted() {
         if (this.highlightedIndex >= 0 && this.highlightedIndex < this.options.length) {
-            this.input.value = this.options[this.highlightedIndex];
+            const nextValue = this.options[this.highlightedIndex];
+            if (this.input.value !== nextValue) {
+                this.input.value = nextValue;
+                // Keep host listeners (touch tracking, validators) in sync with
+                // keyboard-only selection via ArrowUp/ArrowDown.
+                this.input.dispatchEvent(new Event('input', { bubbles: true }));
+            }
         }
     }
     refreshDropdownHighlight() {

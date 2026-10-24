@@ -96,6 +96,9 @@ let state = {
     parmExpansionSize: 16,
     l10n: {}
 };
+let tabOrderRefreshFrame = null;
+let tabOrderRefreshFocusFirst = false;
+let tabOrderSignature = '';
 const vscode = typeof window !== 'undefined' ? window.vscodeApi : undefined;
 function tWebview(key, fallback) {
     const candidate = state.l10n[key];
@@ -1544,9 +1547,26 @@ function configureSngValExclusivityForFirstInstance(input, parm, container) {
     input.addEventListener('change', handleChange);
     input.addEventListener('keydown', handleEnter);
 }
+function isValidGenericNameValue(value, maxLen) {
+    const trimmed = String(value || '').trim();
+    if (!trimmed) {
+        return false;
+    }
+    // Generic form: NAME* (asterisk suffix only), e.g. ABC*.
+    if (trimmed.endsWith('*')) {
+        const stem = trimmed.slice(0, -1).trim();
+        if (!stem) {
+            return false;
+        }
+        // Keep total length including '*' within the declared field length.
+        return isValidNameValue(stem, Math.max(1, maxLen - 1), 'NAME');
+    }
+    // Full object name is also valid for GENERIC-typed parms.
+    return isValidNameValue(trimmed, maxLen, 'NAME');
+}
 function configureNameTypeValidation(input, type, len, alwVar, suggestions, container) {
     const typeUpper = String(type || '').toUpperCase().replace('*', '');
-    const isNameLikeType = typeUpper === 'NAME' || typeUpper === 'SNAME' || typeUpper === 'CNAME' || typeUpper === 'PNAME';
+    const isNameLikeType = typeUpper === 'NAME' || typeUpper === 'SNAME' || typeUpper === 'CNAME' || typeUpper === 'PNAME' || typeUpper === 'GENERIC';
     if (!isNameLikeType) {
         return;
     }
@@ -1645,7 +1665,10 @@ function configureNameTypeValidation(input, type, len, alwVar, suggestions, cont
             }
             return;
         }
-        if (!isValidNameValue(value, maxLen, typeUpper)) {
+        const isNameLikeValid = typeUpper === 'GENERIC'
+            ? isValidGenericNameValue(value, maxLen)
+            : isValidNameValue(value, maxLen, typeUpper);
+        if (!isNameLikeValid) {
             input.setCustomValidity(validationMessage);
             input.classList.add('validation-error');
             input.dataset.nameTypeValidationError = '1';
@@ -1859,6 +1882,53 @@ function configureTabOrder(focusFirst = true) {
         }, 100);
     }
     debugLog(`[${ts}] [configureTabOrder] COMPLETE - Tab order configured for ${visibleInputs.length} inputs`);
+}
+function buildVisibleTabOrderSignature() {
+    const form = document.getElementById('clForm');
+    if (!form) {
+        return 'no-form';
+    }
+    const cmdLabel = document.getElementById('cmdLabel');
+    const cmdComment = document.getElementById('cmdComment');
+    const allInputs = [];
+    if (cmdLabel)
+        allInputs.push(cmdLabel);
+    const formInputs = Array.from(form.querySelectorAll('input[type="text"], input[type="password"], textarea, select, .cbinput-input'));
+    allInputs.push(...formInputs);
+    if (state.showComments && cmdComment)
+        allInputs.push(cmdComment);
+    return allInputs
+        .filter(input => input.offsetParent !== null && !input.disabled)
+        .map(input => input.name || input.id || 'unnamed')
+        .join('|');
+}
+function refreshTABOrder(reason, opts = {}) {
+    const requestFocusFirst = opts.focusFirst === true;
+    if (requestFocusFirst) {
+        tabOrderRefreshFocusFirst = true;
+    }
+    if (tabOrderRefreshFrame !== null) {
+        return;
+    }
+    tabOrderRefreshFrame = window.requestAnimationFrame(() => {
+        tabOrderRefreshFrame = null;
+        const focusFirst = tabOrderRefreshFocusFirst;
+        tabOrderRefreshFocusFirst = false;
+        const nextSignature = buildVisibleTabOrderSignature();
+        if (!focusFirst && nextSignature === tabOrderSignature) {
+            return;
+        }
+        tabOrderSignature = nextSignature;
+        const visibleCount = nextSignature ? nextSignature.split('|').filter(Boolean).length : 0;
+        vscode?.postMessage({
+            type: 'tabOrderDebug',
+            reason,
+            visibleCount,
+            sequence: nextSignature
+        });
+        debugLog(`[refreshTABOrder] reason=${reason}, focusFirst=${focusFirst}`);
+        configureTabOrder(focusFirst);
+    });
 }
 /**
  * Add focus indicators (arrow) to all input fields for better visual feedback
@@ -3052,7 +3122,7 @@ function addMultiInstanceControls(container, parm, kwd, idx, max, multiGroupDiv)
                     debugLog('[+ button] NOT applying color. newInput:', !!newInput, 'wasInOriginalCommand:', wasInOriginalCommand(newInput?.name || ''));
                 }
                 // Reconfigure tab order to include the newly added instance
-                configureTabOrder(false);
+                refreshTABOrder('multi-instance-add');
                 // Reconfigure focus indicators for newly added elements
                 configureFocusIndicators();
                 // Focus the newly added input — but not during initial form population
@@ -3082,7 +3152,7 @@ function addMultiInstanceControls(container, parm, kwd, idx, max, multiGroupDiv)
             const wasInputInRemovedContainer = container.contains(activeElement);
             container.remove();
             // Reconfigure tab order after removing instance (without forcing focus)
-            configureTabOrder(false);
+            refreshTABOrder('multi-instance-remove');
             // Reconfigure focus indicators after removing
             configureFocusIndicators();
             // If the removed container had focus, focus the next available input
@@ -3104,6 +3174,7 @@ function loadForm() {
     const _tLF = performance.now();
     debugLog(`[${ts}] [loadForm] START`);
     state.isInitializing = true;
+    tabOrderSignature = '';
     state.touchedFields.clear();
     state.elementsToTrack = [];
     debugLog(`[${ts}] [loadForm] isInitializing = true, touchedFields cleared, queue cleared`);
@@ -3168,6 +3239,7 @@ function loadForm() {
     debugLog(`[clPrompter:PERF]   configureFocusIndicators: ${(performance.now() - _tFocus).toFixed(1)}ms`);
     const _tPmtctl = performance.now();
     applyPmtCtlVisibility(); // Apply initial prompt-control show/hide based on current field values
+    refreshTABOrder('loadForm.applyPmtCtlVisibility', { focusFirst: !_willPopulate });
     debugLog(`[clPrompter:PERF]   applyPmtCtlVisibility: ${(performance.now() - _tPmtctl).toFixed(1)}ms`);
     debugLog(`[${ts2}] [loadForm] END - Form ready for user interaction`);
 }
@@ -5236,7 +5308,7 @@ function runNameLikeSpecialValueSubmitValidation() {
         const parmType = String(parm.getAttribute('Type') || '').toUpperCase().replace('*', '');
         if (constant || parmType === 'NULL')
             continue;
-        const isNameLikeType = parmType === 'NAME' || parmType === 'SNAME' || parmType === 'CNAME' || parmType === 'PNAME';
+        const isNameLikeType = parmType === 'NAME' || parmType === 'SNAME' || parmType === 'CNAME' || parmType === 'PNAME' || parmType === 'GENERIC';
         if (!isNameLikeType)
             continue;
         const kwd = String(parm.getAttribute('Kwd') || '').trim();
@@ -5287,8 +5359,13 @@ function runNameLikeSpecialValueSubmitValidation() {
                 }
             }
         }
-        else if (!isValidNameValue(value, maxLen, parmType)) {
-            msg = tWebview('validation.nameLikeInvalid', `Value must be a valid IBM i name (1-${maxLen} chars)`);
+        else {
+            const isNameLikeValid = parmType === 'GENERIC'
+                ? isValidGenericNameValue(value, maxLen)
+                : isValidNameValue(value, maxLen, parmType);
+            if (!isNameLikeValid) {
+                msg = tWebview('validation.nameLikeInvalid', `Value must be a valid IBM i name (1-${maxLen} chars)`);
+            }
         }
         if (msg) {
             input.dataset.nameTypeSubmitValidationError = '1';
@@ -5352,6 +5429,46 @@ function collectInvalidFieldNames(formEl) {
     })
         .slice(0, 10);
 }
+function buildPreviewValues() {
+    const values = assembleCurrentParmMap();
+    normalizeNewlinesInValues(values);
+    if (state.cmdLabel && state.cmdLabel.trim()) {
+        values['label'] = state.cmdLabel.replace(/\r\n|\n|\r/g, ' ').trim();
+    }
+    if (state.showComments && state.cmdComment && state.cmdComment.trim()) {
+        const normalizedComment = state.cmdComment.replace(/\r\n|\n|\r/g, ' ').trim();
+        values['comment'] = '/* ' + normalizedComment + ' */';
+    }
+    return values;
+}
+function requestCommandPreview() {
+    try {
+        const cmdName = state.xmlDoc?.querySelector('Cmd')?.getAttribute('CmdName') || state.cmdName;
+        if (!cmdName) {
+            return;
+        }
+        vscode?.postMessage({
+            type: 'previewCommand',
+            cmdName,
+            values: buildPreviewValues()
+        });
+    }
+    catch (error) {
+        debugLog('[clPrompter] preview request failed', error);
+    }
+}
+function requestCommandPreviewDeferred() {
+    setTimeout(() => {
+        requestCommandPreview();
+    }, 0);
+}
+function setCommandPreviewText(command) {
+    const preview = document.getElementById('cmdPreview');
+    if (!preview) {
+        return;
+    }
+    preview.textContent = String(command || '').trim();
+}
 // Event handlers
 function onSubmit(opts = {}) {
     const bypassValidation = opts.bypassValidation === true;
@@ -5387,9 +5504,7 @@ function onSubmit(opts = {}) {
             }
         }
     }
-    const values = assembleCurrentParmMap();
-    // Normalize newlines in all parameter values (textarea fields can have Shift+Enter)
-    normalizeNewlinesInValues(values);
+    const values = buildPreviewValues();
     if (!bypassValidation) {
         // Check required parameters (Min >= 1 at PARM level) first.
         // Per-field "Required" error messages are shown inline next to each missing field.
@@ -5422,15 +5537,6 @@ function onSubmit(opts = {}) {
     else {
         // F12 behavior: return current command regardless of any validation state.
         showDepErrorBanner([]);
-    }
-    // Include label in values if present (normalize newlines just in case)
-    if (state.cmdLabel && state.cmdLabel.trim()) {
-        values['label'] = state.cmdLabel.replace(/\r\n|\n|\r/g, ' ').trim();
-    }
-    // Include comment with delimiters if present (normalize newlines)
-    if (state.showComments && state.cmdComment && state.cmdComment.trim()) {
-        const normalizedComment = state.cmdComment.replace(/\r\n|\n|\r/g, ' ').trim();
-        values['comment'] = '/* ' + normalizedComment + ' */';
     }
     const cmdName = state.xmlDoc?.querySelector('Cmd')?.getAttribute('CmdName') || state.cmdName;
     vscode?.postMessage({
@@ -5478,6 +5584,9 @@ function wirePrompterControls() {
         labelInput.addEventListener('input', () => {
             state.cmdLabel = labelInput.value;
         });
+        labelInput.addEventListener('blur', () => {
+            requestCommandPreviewDeferred();
+        });
     }
     // Wire up comment input
     if (state.showComments && commentInput) {
@@ -5487,6 +5596,9 @@ function wirePrompterControls() {
         commentInput.addEventListener('input', () => {
             // Store without delimiters, we'll add them back on submit
             state.cmdComment = commentInput.value.trim();
+        });
+        commentInput.addEventListener('blur', () => {
+            requestCommandPreviewDeferred();
         });
     }
     if (submitBtn) {
@@ -5567,9 +5679,12 @@ function wirePrompterControls() {
             const errors = evaluateAllDepConstraints();
             showDepErrorBanner(errors);
             applyPmtCtlVisibility();
+            refreshTABOrder('wirePrompterControls.refreshDepAndPmtCtl');
         };
         depForm.addEventListener('blur', () => {
             refreshDepAndPmtCtl();
+            // Defer preview so field-level blur validators complete first.
+            requestCommandPreviewDeferred();
         }, true); // capture phase catches all blur events inside the form
         // PmtCtl/Dep re-evaluation on edits: some controls do not trigger a useful blur
         // timing, so also recalculate as values change.
@@ -5590,6 +5705,7 @@ function wirePrompterControls() {
             state.showAllParms = !state.showAllParms;
             viewAllBtn.textContent = state.showAllParms ? 'View basic parameters' : 'View all parameters';
             applyPmtCtlVisibility();
+            refreshTABOrder('viewAllParms.toggle');
         });
     }
     // Wire help overlay close button and backdrop click
@@ -5746,6 +5862,7 @@ window.addEventListener('message', event => {
                 populateFormFromValues(state.originalParmMap);
                 // Re-evaluate PmtCtl visibility now that pre-filled values are in the DOM
                 applyPmtCtlVisibility();
+                refreshTABOrder('formData.populate.applyPmtCtlVisibility', { focusFirst: true });
                 // The Range/Full/Rstd/Rel validators are queued via setTimeout(0)
                 // from setupValidations() / createInputForType() and each WRAPS its
                 // input in a <div class="range-validation-wrapper">. If we reveal
@@ -5773,12 +5890,14 @@ window.addEventListener('message', event => {
                                 document.body.style.opacity = '1';
                                 state.hasBeenRevealed = true;
                                 debugLog('[clPrompter:PERF] body opacity set to 1 (with-values path)');
+                                requestCommandPreview();
                             });
                         }).catch(err => {
                             console.error('[clPrompter] waitForCustomElements rejected:', err);
                             document.documentElement.style.visibility = 'visible';
                             document.body.style.opacity = '1';
                             state.hasBeenRevealed = true;
+                            requestCommandPreview();
                         });
                     }, 0);
                 }, 0);
@@ -5800,12 +5919,14 @@ window.addEventListener('message', event => {
                                 document.body.style.opacity = '1';
                                 state.hasBeenRevealed = true;
                                 debugLog('[clPrompter:PERF] body opacity set to 1 (no-values path)');
+                                requestCommandPreview();
                             });
                         }).catch(err => {
                             console.error('[clPrompter] waitForCustomElements rejected:', err);
                             document.documentElement.style.visibility = 'visible';
                             document.body.style.opacity = '1';
                             state.hasBeenRevealed = true;
+                            requestCommandPreview();
                         });
                     }, 0);
                 }, 0);
@@ -5838,6 +5959,7 @@ window.addEventListener('message', event => {
         if (commentInput && state.showComments) {
             commentInput.value = state.cmdComment;
         }
+        requestCommandPreview();
         // If formData hasn't been processed yet, this is a label-only prompter
         // Wire up controls so submit/cancel buttons work
         if (!state.hasProcessedFormData) {
@@ -5899,6 +6021,10 @@ window.addEventListener('message', event => {
         if (mainTitle) {
             mainTitle.textContent = '';
         }
+        setCommandPreviewText('');
+    }
+    else if (message.type === 'commandPreview') {
+        setCommandPreviewText(message.command || '');
     }
     else if (message.type === 'paramHelp') {
         // Discard stale responses — only show if this is still the pending keyword

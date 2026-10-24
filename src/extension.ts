@@ -1797,10 +1797,55 @@ export class ClPromptPanel {
         this._panel.webview.onDidReceiveMessage(
             async message => {
                 switch (message.type) {
+                    case 'tabOrderDebug': {
+                        const reason = typeof message.reason === 'string' ? message.reason : 'unknown';
+                        const visibleCount = Number.isFinite(message.visibleCount) ? Number(message.visibleCount) : 0;
+                        const sequence = typeof message.sequence === 'string' ? message.sequence : '';
+                        appendClPrompterOutputLine(`[clPrompter][tabOrder] reason=${reason} visibleCount=${visibleCount} sequence=${sequence}`);
+                        break;
+                    }
                     case 'validationDebug': {
                         const event = typeof message.event === 'string' ? message.event : 'validationDebug';
                         const details = message.details && typeof message.details === 'object' ? message.details : {};
                         appendClPrompterOutputLine(`[clPrompter][validationDebug] ${event} ${JSON.stringify(details)}`);
+                        break;
+                    }
+                    case 'previewCommand': {
+                        try {
+                            const values = message.values && typeof message.values === 'object' ? message.values : {};
+                            const { allowedValsMap, parmTypeMap } = extractAllowedValsAndTypes(this._xml);
+                            const defaults = extractDefaultsFromXML(this._xml);
+                            const config = vscode.workspace.getConfiguration('clPrompter');
+                            const convertParmValueToUpperCase = config.get('convertParmValueToUpperCase', true);
+
+                            let previewCommand = buildCLCommand(
+                                this._cmdName,
+                                values,
+                                defaults,
+                                allowedValsMap,
+                                parmTypeMap,
+                                this._parmMetas,
+                                this._presentParms,
+                                undefined,
+                                convertParmValueToUpperCase
+                            );
+
+                            // Mirror submit-path comment handling so preview tracks caller return text.
+                            const submittedComment = values['comment'] as string | undefined;
+                            const normalizedComment = submittedComment ? submittedComment.replace(/\r\n|\n|\r/g, ' ') : submittedComment;
+                            const finalComment = normalizedComment || (this._cmdComment ? this._cmdComment.replace(/\r\n|\n|\r/g, ' ') : this._cmdComment);
+                            if (finalComment && finalComment.trim()) {
+                                previewCommand += ' ' + finalComment.trim();
+                            }
+
+                            const extractedPreview = extractCommentFromCommand(previewCommand);
+                            this._panel.webview.postMessage({
+                                type: 'commandPreview',
+                                command: extractedPreview.command.trim()
+                            });
+                        } catch {
+                            this._panel.webview.postMessage({ type: 'commandPreview', command: '' });
+                        }
                         break;
                     }
                     case 'submit': {
