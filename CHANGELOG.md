@@ -2,6 +2,12 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.0.64] - 2026-10-30
+
+### Documentation
+- **Breaking API change (shipped in v1.0.48, documented now)**: The `CLPrompter()` function exported to other extensions resolves with `Promise<CLPrompterResult>` (`{ command: string; action: 'submit' | 'cancel' | 'error' }`) instead of `Promise<string | null>`. The `CLPrompter()` method was not removed; only the resolved value changed. On `cancel` and `error`, `result.command` contains the original command, so the minimal migration is `command = (await CLPrompter(command)).command`. Reported in issue #22.
+- Updated CLPROMPTER_API.md: all signatures, type declarations, and examples now reflect `CLPrompterResult`, and a "Migrating from v1.x API" section was added.
+
 ## [1.0.63] - 2026-10-23
 
 ### What's Fixed

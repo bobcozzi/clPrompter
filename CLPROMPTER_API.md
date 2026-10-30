@@ -2,6 +2,49 @@
 
 The CLPrompter extension provides a simple API that allows other VS Code extensions to programmatically invoke the CL prompter and receive the updated command string.
 
+## Migrating from v1.x API
+
+**Breaking change (shipped in v1.0.48):** `CLPrompter()` no longer returns `Promise<string | null>`. It now returns `Promise<CLPrompterResult>`:
+
+```typescript
+interface CLPrompterResult {
+    /** The updated command on submit; the original command on cancel or error. */
+    command: string;
+    /** The outcome of the prompt. */
+    action: 'submit' | 'cancel' | 'error';
+}
+```
+
+The `CLPrompter()` method itself was **not** removed — only the resolved value changed. `result.command` is always safe to use, so the minimal migration is one line:
+
+```typescript
+// Before (v1.x)
+const newCommand = await CLPrompter(command);
+if (newCommand !== null) {
+    command = newCommand;
+}
+
+// After
+const result = await CLPrompter(command);
+command = result.command;  // submit -> updated; cancel/error -> original
+```
+
+To distinguish outcomes (not possible with the v1.x API):
+
+```typescript
+const result = await CLPrompter(command);
+if (result.action === 'error') {
+    console.error('CLPrompter failed for:', command);
+    return '';
+}
+if (result.action === 'cancel') {
+    return '';
+}
+command = result.command;  // action === 'submit'
+```
+
+Note: `CLPrompter()` never resolves to `null` anymore. It rejects (throws) only when the extension itself is not initialized.
+
 ## Two Integration Approaches
 
 You can integrate CLPrompter in two ways depending on your needs:
@@ -55,6 +98,9 @@ In addition to CLPrompter and CLPrompterCallback, the extension now exports `mul
 - CLPrompter
 - CLPrompterCallback
 - multiSqlJob
+- registerCLPrompterHandler
+- unregisterCLPrompterHandler
+- promptWithRegisteredCLPrompter
 
 ### multiSqlJob methods (v1)
 
@@ -143,34 +189,42 @@ Create a file `clprompter.d.ts` in your extension's source directory:
 declare module 'CozziResearch.clprompter' {
   import * as vscode from 'vscode';
 
-  /**
-   * Prompt a CL command and return the updated command string
-   * @param commandString - The CL command to prompt
-   * @returns Promise with updated command string or original if cancelled
-   */
-  export function CLPrompter(commandString: string): Promise<string | null>;
+  /** Result of prompting a CL command. */
+  export interface CLPrompterResult {
+    /** The updated command on submit; the original command on cancel or error. */
+    command: string;
+    /** The outcome of the prompt. */
+    action: 'submit' | 'cancel' | 'error';
+  }
 
   /**
-   * Prompt a CL command and return the updated command string
+   * Prompt a CL command and return the result
+   * @param commandString - The CL command to prompt
+   * @returns Promise resolving with a CLPrompterResult ({ command, action })
+   */
+  export function CLPrompter(commandString: string): Promise<CLPrompterResult>;
+
+  /**
+   * Prompt a CL command and return the result
    * @param extensionUri - The URI of the calling extension
    * @param commandString - The CL command to prompt
-   * @returns Promise with updated command string or original if cancelled
+   * @returns Promise resolving with a CLPrompterResult ({ command, action })
    */
   export function CLPrompter(
     extensionUri: vscode.Uri,
     commandString: string
-  ): Promise<string | null>;
+  ): Promise<CLPrompterResult>;
 
   /**
    * Callback-based version of CLPrompter
    * @param extensionUri - The URI of the calling extension
    * @param commandString - The CL command to prompt
-   * @param callback - Called with the result
+   * @param callback - Called with the updated command on submit, or the original command on cancel or error
    */
   export function CLPrompterCallback(
     extensionUri: vscode.Uri,
     commandString: string,
-    callback: (result: string | null) => void
+    callback: (result: string) => void
   ): void;
 }
 ```
@@ -271,7 +325,7 @@ The simplest way to use the CLPrompter is by accessing it through the extension 
 ```typescript
 import * as vscode from 'vscode';
 
-async function promptCommand(command: string): Promise<string | null> {
+async function promptCommand(command: string): Promise<CLPrompterResult | null> {
     // Get the CLPrompter extension
     const clPrompterExt = vscode.extensions.getExtension('CozziResearch.clprompter');
 
@@ -300,9 +354,9 @@ async function promptCommand(command: string): Promise<string | null> {
 // Use it
 const result = await promptCommand('CRTPF FILE(MYLIB/MYFILE)');
 
-if (result && result !== 'CRTPF FILE(MYLIB/MYFILE)') {
+if (result?.action === 'submit' && result.command !== 'CRTPF FILE(MYLIB/MYFILE)') {
     // User submitted changes
-    console.log('Updated command:', result);
+    console.log('Updated command:', result.command);
 } else {
     // User cancelled or no changes made
     console.log('Command unchanged');
@@ -346,11 +400,20 @@ if (clPrompterExt?.isActive) {
 
 ## Return Values
 
-The `CLPrompter` function returns a Promise that resolves with:
+`CLPrompter()` returns a Promise that resolves with a `CLPrompterResult`:
 
-- **Updated command string** - if the user makes changes and clicks OK
-- **Original command string** - if the user cancels without making changes
-- **null** - if an error occurs (rare)
+```typescript
+interface CLPrompterResult {
+    command: string;
+    action: 'submit' | 'cancel' | 'error';
+}
+```
+
+- **`action: 'submit'`** - the user made changes and clicked OK; `command` is the updated command string
+- **`action: 'cancel'`** - the user cancelled; `command` is the original command string
+- **`action: 'error'`** - an error occurred (e.g., the command definition could not be retrieved); `command` is the original command string
+
+The promise never resolves to `null`. It rejects only if the extension itself is not initialized.
 
 ## Complete Example
 
@@ -398,22 +461,25 @@ export function activate(context: vscode.ExtensionContext) {
         // Prompt the command
         const result = await CLPrompter(command);
 
-        if (result && result !== command) {
+        if (result.action === 'submit' && result.command !== command) {
           // User made changes
           vscode.window.showInformationMessage(
-            `Command updated to: ${result}`
+            `Command updated to: ${result.command}`
           );
 
           // Insert into active editor or use the result
           const editor = vscode.window.activeTextEditor;
           if (editor) {
             editor.edit(editBuilder => {
-              editBuilder.insert(editor.selection.active, result);
+              editBuilder.insert(editor.selection.active, result.command);
             });
           }
-        } else if (result === command) {
+        } else if (result.action === 'cancel') {
           // User cancelled
           vscode.window.showInformationMessage('Prompt cancelled');
+        } else {
+          // Error prompting (e.g., command definition not found)
+          vscode.window.showWarningMessage(`CLPrompter could not prompt: ${command}`);
         }
       } catch (error) {
         vscode.window.showErrorMessage(
@@ -440,11 +506,16 @@ Create `src/clprompter.d.ts` in your extension:
 declare module 'CozziResearch.clprompter' {
   import * as vscode from 'vscode';
 
-  export function CLPrompter(commandString: string): Promise<string | null>;
+  export interface CLPrompterResult {
+    command: string;
+    action: 'submit' | 'cancel' | 'error';
+  }
+
+  export function CLPrompter(commandString: string): Promise<CLPrompterResult>;
   export function CLPrompter(
     extensionUri: vscode.Uri,
     commandString: string
-  ): Promise<string | null>;
+  ): Promise<CLPrompterResult>;
 }
 ```
 
@@ -453,7 +524,7 @@ declare module 'CozziResearch.clprompter' {
 ```typescript
 import * as vscode from 'vscode';
 
-async function promptCommand(command: string): Promise<string | null> {
+async function promptCommand(command: string): Promise<string> {
     const clPrompterExt = vscode.extensions.getExtension('CozziResearch.clprompter');
 
     if (clPrompterExt) {
@@ -463,7 +534,8 @@ async function promptCommand(command: string): Promise<string | null> {
 
         if (clPrompterExt.exports?.CLPrompter) {
             try {
-                return await clPrompterExt.exports.CLPrompter(command);
+                // result.command is the updated command on submit, the original on cancel/error
+                return (await clPrompterExt.exports.CLPrompter(command)).command;
             } catch (error) {
                 console.error('CLPrompter error:', error);
             }
@@ -508,11 +580,16 @@ Create `src/clprompter.d.ts` in your extension:
 declare module 'CozziResearch.clprompter' {
   import * as vscode from 'vscode';
 
-  export function CLPrompter(commandString: string): Promise<string | null>;
+  export interface CLPrompterResult {
+    command: string;
+    action: 'submit' | 'cancel' | 'error';
+  }
+
+  export function CLPrompter(commandString: string): Promise<CLPrompterResult>;
   export function CLPrompter(
     extensionUri: vscode.Uri,
     commandString: string
-  ): Promise<string | null>;
+  ): Promise<CLPrompterResult>;
 }
 ```
 
@@ -533,8 +610,8 @@ if (clPrompterExt) {
 
   if (typeof CLPrompter === 'function') {
     const result = await CLPrompter('CRTPF FILE(MYLIB/MYFILE)');
-    if (result && result !== 'CRTPF FILE(MYLIB/MYFILE)') {
-      console.log('Updated:', result);
+    if (result.action === 'submit') {
+      console.log('Updated:', result.command);
     }
   }
 }
@@ -600,12 +677,12 @@ const { CLPrompter } = clPrompterExt.exports;
 let compileCommand = 'CRTBNDRPG PGM(MYLIB/MYPGM) SRCFILE(QRPGLESRC)';
 const result = await CLPrompter(compileCommand);
 
-if (result && result !== compileCommand) {
+if (result.action === 'submit' && result.command !== compileCommand) {
     // User made changes - update and run
-    compileCommand = result;
+    compileCommand = result.command;
     console.log('Running updated command:', compileCommand);
     // ... run compile
-} else if (result === compileCommand) {
+} else if (result.action === 'cancel') {
     // User cancelled (no changes)
     console.log('User cancelled prompt');
 } else {
@@ -660,9 +737,9 @@ if (selected) {
     // Prompt the selected command
     const updated = await CLPrompter(step.command);
 
-    if (updated && updated !== step.command) {
+    if (updated.action === 'submit') {
         // Update the build step
-        step.command = updated;
+        step.command = updated.command;
         vscode.window.showInformationMessage(`Updated: ${step.name}`);
 
         // Optionally save to configuration
@@ -676,7 +753,7 @@ if (selected) {
 ```typescript
 import * as vscode from 'vscode';
 
-async function promptCommand(command: string): Promise<string | null> {
+async function promptCommand(command: string): Promise<string> {
     // Check if clPrompter is available
     const clPrompterExt = vscode.extensions.getExtension('CozziResearch.clprompter');
 
@@ -691,7 +768,8 @@ async function promptCommand(command: string): Promise<string | null> {
 
             if (typeof CLPrompter === 'function') {
                 try {
-                    return await CLPrompter(command);
+                    // result.command is updated on submit, original on cancel/error
+                    return (await CLPrompter(command)).command;
                 } catch (error) {
                     console.error('CLPrompter error:', error);
                     // Fall through to fallback
@@ -766,23 +844,46 @@ The CLPrompter API provides:
 
 ## API Reference
 
-### CLPrompter(commandString: string): Promise<string | null>
+### CLPrompterResult
 
-Prompts a CL command and returns the updated command string.
+```typescript
+interface CLPrompterResult {
+    /** The updated command on submit; the original command on cancel or error. */
+    command: string;
+    /** The outcome of the prompt. */
+    action: 'submit' | 'cancel' | 'error';
+}
+```
+
+### CLPrompter(commandString: string, options?: CLPrompterOptions): Promise<CLPrompterResult>
+
+Prompts a CL command and resolves with a `CLPrompterResult`.
 
 **Parameters:**
 - `commandString` - The CL command to prompt (e.g., "CRTPF FILE(MYLIB/MYFILE)")
+- `options` - Optional `CLPrompterOptions` (`cmdXmlOptions` controls how the command definition XML is retrieved)
 
 **Returns:**
-- Promise that resolves with the updated command string, original command if cancelled, or null on error
+- `action: 'submit'` - user clicked OK; `command` is the updated command string
+- `action: 'cancel'` - user cancelled; `command` is the original command string
+- `action: 'error'` - an error occurred; `command` is the original command string
 
-### CLPrompter(extensionUri: vscode.Uri, commandString: string): Promise<string | null>
+### CLPrompter(extensionUri: vscode.Uri, commandString: string, options?: CLPrompterOptions): Promise<CLPrompterResult>
 
 Alternative signature that accepts an explicit extension URI (for advanced use).
 
-### CLPrompterCallback(extensionUri: vscode.Uri, commandString: string, callback: Function): void
+### CLPrompterCallback(extensionUri: vscode.Uri, commandString: string, callback: (result: string) => void): void
 
-Callback-based API as an alternative to Promises.
+Callback-based API as an alternative to Promises. The callback always receives a command string: the updated command on submit, or the original command on cancel or error.
+
+### registerCLPrompterHandler(handler, extensionUri?): void
+### unregisterCLPrompterHandler(): void
+
+Register (or clear) a custom prompt handler for integrations that supply their own prompting UI. The handler receives `(command: string, options?: CLPrompterOptions)` and returns a `CLPrompterResult` (or a Promise of one).
+
+### promptWithRegisteredCLPrompter(command: string, options?: CLPrompterOptions): Promise<CLPrompterResult>
+
+Invoke the registered handler. When no handler is registered, a simple input box is shown as a fallback.
 
 ## Troubleshooting
 
