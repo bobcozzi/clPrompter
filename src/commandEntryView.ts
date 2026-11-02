@@ -315,6 +315,7 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
     private clearInputOnFirstReady = true;
     private clearHistoryOnFirstReady = true;
     private lastPostedSqlJobId: string | undefined;
+    private lastPostedStatusIdentity: string | undefined;
     private pendingCmdEntryCancelConfirmationJobId: string | undefined;
     private readonly autoInitInFlightConnectionKeys = new Set<string>();
     private readonly autoInitLastFailureByConnectionKey = new Map<string, number>();
@@ -700,6 +701,7 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
                 const clearInputOnStartup = this.clearInputOnFirstReady;
                 const firstReadyHistoryClearEligible = this.clearHistoryOnFirstReady;
                 this.lastPostedSqlJobId = this.currentSqlJobId();
+                this.lastPostedStatusIdentity = this.currentStatusIdentity();
                 this.post({
                     type: 'initialize',
                     connectionScopeKey: this.buildHistoryConnectionKey(),
@@ -798,7 +800,7 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
                 await this.checkForMsgw(message.sqlJobId);
                 break;
             case 'requestSqlJobId':
-                this.refreshSqlJobId();
+                this.refreshSqlJobId(undefined, { force: true });
                 break;
             case 'requestCancelSqlJob':
                 await this.requestCancelSqlJob();
@@ -923,8 +925,10 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
 
             const displaySqlJobId = resolvedSqlJobId ?? this.currentSqlJobId(connection) ?? '';
             this.safeOutputAppendLine(`[Cmd Entry] SQL job mode switch => useSharedJob=${useSharedJob} resolvedSqlJobId=${displaySqlJobId || '<none>'} currentSqlJobId=${this.currentSqlJobId(connection) || '<none>'}`);
-            this.lastPostedSqlJobId = undefined;
-            this.post({ type: 'sqlJobId', sqlJobId: displaySqlJobId, statusIdentity: this.currentStatusIdentity(connection) });
+            const modeSwitchStatusIdentity = this.currentStatusIdentity(connection);
+            this.post({ type: 'sqlJobId', sqlJobId: displaySqlJobId, statusIdentity: modeSwitchStatusIdentity });
+            this.lastPostedSqlJobId = displaySqlJobId || undefined;
+            this.lastPostedStatusIdentity = modeSwitchStatusIdentity;
             this.postJobCapabilities();
             this.refreshSqlJobId(connection);
             this.post({
@@ -1596,6 +1600,7 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
             ? 'Starting new mapepire job...'
             : undefined;
         this.lastPostedSqlJobId = sqlJobId;
+        this.lastPostedStatusIdentity = this.currentStatusIdentity(connection);
         this.post({
             type: 'running',
             running: true,
@@ -1691,8 +1696,10 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
             this.activeExecutionId = undefined;
             this.stopMsgwAutoCheckMonitor();
             const latestSqlJobId = this.currentSqlJobId(connection);
+            const latestStatusIdentity = this.currentStatusIdentity(connection);
             this.lastPostedSqlJobId = latestSqlJobId;
-            this.post({ type: 'running', running: false, sqlJobId: latestSqlJobId, statusIdentity: this.currentStatusIdentity(connection) });
+            this.lastPostedStatusIdentity = latestStatusIdentity;
+            this.post({ type: 'running', running: false, sqlJobId: latestSqlJobId, statusIdentity: latestStatusIdentity });
             if (this.pendingCmdEntryCancelConfirmationJobId) {
                 if (!this.jobManager.hasPendingDedicatedRequest(connection)) {
                     this.post({ type: 'notice', message: vscode.l10n.t('> Cancel request completed.'), severity: 'warning' });
@@ -2988,23 +2995,29 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
         this.refreshSqlJobId(connection);
     }
 
-    public refreshSqlJobId(connection = this.getConnection()): void {
+    public refreshSqlJobId(connection = this.getConnection(), options: { force?: boolean } = {}): void {
         const sqlJobId = this.currentSqlJobId(connection);
         const statusIdentity = this.currentStatusIdentity(connection);
-        this.lastPostedSqlJobId = sqlJobId;
         const snippetDisplayContextKey = this.buildSnippetDisplayContextKey(connection);
 
-        const debugEnabled = vscode.workspace.getConfiguration('clPrompter').get<boolean>('cmdEntryDebugLogging', false);
-        if (debugEnabled) {
-            console.log('[Cmd Entry][SqlJobDisplayRefresh] posting sqlJobId', {
-                sqlJobId: sqlJobId ?? '<none>',
-                statusIdentity: statusIdentity ?? '<none>',
-                connection: connection?.currentConnectionName ?? '<unknown>',
-                dedicatedEnabled: this.jobManager.isDedicatedEnabled(connection),
-                sharedJobId: connection?.getSqlJobId?.() ?? '<none>'
-            });
+        const jobDisplayChanged = options.force === true
+            || sqlJobId !== this.lastPostedSqlJobId
+            || statusIdentity !== this.lastPostedStatusIdentity;
+        if (jobDisplayChanged) {
+            this.lastPostedSqlJobId = sqlJobId;
+            this.lastPostedStatusIdentity = statusIdentity;
+            const debugEnabled = vscode.workspace.getConfiguration('clPrompter').get<boolean>('cmdEntryDebugLogging', false);
+            if (debugEnabled) {
+                console.log('[Cmd Entry][SqlJobDisplayRefresh] posting sqlJobId', {
+                    sqlJobId: sqlJobId ?? '<none>',
+                    statusIdentity: statusIdentity ?? '<none>',
+                    connection: connection?.currentConnectionName ?? '<unknown>',
+                    dedicatedEnabled: this.jobManager.isDedicatedEnabled(connection),
+                    sharedJobId: connection?.getSqlJobId?.() ?? '<none>'
+                });
+            }
+            this.post({ type: 'sqlJobId', sqlJobId, statusIdentity });
         }
-        this.post({ type: 'sqlJobId', sqlJobId, statusIdentity });
         if (snippetDisplayContextKey !== this.lastSnippetDisplayContextKey) {
             this.lastSnippetDisplayContextKey = snippetDisplayContextKey;
             this.notifyCodeSnippetsChanged();
