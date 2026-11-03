@@ -79,6 +79,7 @@ import * as path from 'path';
 import { buildAPI2PartName, buildQualName } from './QlgPathName';
 import { collectCLCmd, buildAllowedValsMap, buildDepConstraints, buildValToMapToMap, buildDefaultValMap, buildPmtCtlMap, buildAllMaps } from './extractor';
 import { getCMDXML, clearCMDXMLCache, warmXmlCache, getCmdHelpViaUDTF } from './getcmdxml';
+import { registerRunInCommandEntry } from './runInCommandEntry';
 
 import {
     tokenizeCL,
@@ -593,6 +594,7 @@ export async function activate(context: vscode.ExtensionContext) {
             void vscode.commands.executeCommand('setContext', 'clprompter.commandEntry.usePrivateSqlJob', true);
             commandEntry.requestUsePrivateSqlJob();
         }),
+        ...(() => { registerRunInCommandEntry(context, commandEntry); return []; })(),
         vscode.commands.registerCommand('clprompter.commandEntry.menu.viewHistory', () => commandEntry.requestViewHistory()),
         vscode.commands.registerCommand('clprompter.commandEntry.menu.toggleMessageDetails', () => commandEntry.requestToggleMessageDetails()),
         vscode.commands.registerCommand('clprompter.commandEntry.menu.toggleSqlLog', () => {

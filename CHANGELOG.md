@@ -2,6 +2,15 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.0.65] - 2026-11-03
+
+### What's New
+- **Run CL source statements in Command Entry** — A new editor context-menu submenu, **Run in Command Entry**, appears for CL source editors (`clle`, `clp`, `cl`). It offers **Run Selected** (runs the selection expanded to whole-statement boundaries, or the statement at the cursor when nothing is selected) and **Run All** (the entire source file). Statements run sequentially in Command Entry exactly as if typed in, and are logged to the Command/Message Log and history per your existing settings. If a statement fails, a notification offers **Retry** / **Ignore** / **Ignore All** / **Stop** and stays until you answer it. Program-only commands (`PGM`, `ENDPGM`, `DCL`, `DCLF`, `MONMSG`, `CHGVAR`, `SNDPGMMSG`, and `RTV*`) are skipped with a notice since they cannot run outside a compiled CL program. Running `GOTO <label>` / `GOTO CMDLBL(<label>)` (including `MONMSG ... EXEC(GOTO <label>)`) jumps the editor to that label instead of sending it to the server.
+- **CL variable prompting** — When running commands from a source file, each `&variable` in the command prompts for a value (title shows the variable, e.g. `CL Variable &TESTFILE`). Values substitute into the command before it runs; add quotes for character values where needed. A variable used multiple times (any casing) prompts once. Control with the `clPrompter.cmdEntryPromptForVariables` setting (default on).
+
+### What's Fixed
+- Command Entry now only posts the SQL job status refresh when the job ID or identity actually changes, avoiding redundant status updates.
+
 ## [1.0.64] - 2026-10-30
 
 ### Documentation

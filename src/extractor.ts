@@ -27,6 +27,7 @@ import * as vscode from 'vscode';
 
 import { DOMParser, Element as XMLElement, Node as XMLNode } from '@xmldom/xmldom';
 import { DepConstraint, DepParmEntry, PmtCtlCond, PmtCtlGroup, PmtCtlMap } from './types';
+import { tokenizeCL, parseCL } from './tokenizeCL';
 
 export interface AllowedValuesMap {
     [key: string]: string[] & { _noCustomInput?: boolean };
@@ -278,6 +279,217 @@ export function collectCLCmd(
     const doc = editor.document;
     const currentLine = editor.selection.active.line;
     return collectCLCmdFromLine(doc, currentLine);
+}
+
+/**
+ * Extracts the target label from a GOTO statement, accepting both the keyword form
+ * (`GOTO CMDLBL(READNEXT)`) and the positional form (`GOTO READNEXT`), including
+ * continuation-collapsed statements. Uses the CL tokenizer/parser
+ * (tokenizeCL/parseCL) rather than ad hoc text matching, so keyword ordering and
+ * label values behave the same way the rest of the extension parses CL.
+ * Labels are never quoted in CL. Returns the label text, or undefined when there
+ * is no recognizable target.
+ */
+export function extractGotoTargetLabel(command: string): string | undefined {
+    // parseCL() expects the first token to be the command: trim leading whitespace
+    // and force the first non-space token to 'command' (tokenizeCL only types the
+    // very first input token as 'command', which breaks on any leading whitespace).
+    const tokens = tokenizeCL(command.trim());
+    const firstToken = tokens.find((token) => token.type !== 'space');
+    if (!firstToken) {
+        return undefined;
+    }
+    firstToken.type = 'command';
+
+    let node;
+    try {
+        node = parseCL(tokens);
+    } catch {
+        return undefined;
+    }
+    if (node.name.toUpperCase() === 'MONMSG') {
+        // MONMSG EXEC(...) accepts a nested CL command; when it is a GOTO, resolve it.
+        const exec = node.parameters.find((parm) => parm.name.toUpperCase() === 'EXEC');
+        return clGotoTargetFromValue(exec?.value);
+    }
+    if (node.name.toUpperCase() !== 'GOTO') {
+        return undefined;
+    }
+
+    return clGotoTargetFromTokens(tokens, node);
+}
+
+/**
+ * Resolves a GOTO target from a tokenized GOTO statement. Named CMDLBL(...) wins;
+ * otherwise the first positional value. Because parseCL drops keyword-typed
+ * positional values (e.g. `GOTO READNEXT` -> parameters: []) and the label inside
+ * CMDLBL(...), resolution falls back to the token stream for both cases.
+ */
+function clGotoTargetFromTokens(tokens: Array<{ type: string; value: string }>, node: { name: string; parameters: Array<{ name: string; value: unknown }> }): string | undefined {
+    const isValueToken = (token: { type: string }): boolean =>
+        token.type === 'keyword' || token.type === 'value' || token.type === 'string' || token.type === 'symbolic_value' || token.type === 'variable';
+
+    const commandIndex = tokens.findIndex((token) => token.type === 'command');
+    const afterCommand = commandIndex >= 0 ? tokens.slice(commandIndex + 1) : tokens;
+
+    // Named CMDLBL( label ) — read the token following the '(' that opens CMDLBL.
+    const cmdlblIndex = afterCommand.findIndex((token) => token.type === 'keyword' && token.value.toUpperCase() === 'CMDLBL');
+    if (cmdlblIndex >= 0) {
+        const openParen = afterCommand.findIndex((token, index) => index > cmdlblIndex && token.type === 'paren_open');
+        const labelToken = openParen >= 0 ? afterCommand.slice(openParen + 1).find(isValueToken) : undefined;
+        if (labelToken) {
+            return clScalarValue(labelToken.value);
+        }
+    }
+
+    // Named parameter parsed by parseCL (e.g. CMDLBL('label') keeps a string value).
+    const cmdlblParm = node.parameters.find((parm) => parm.name.toUpperCase() === 'CMDLBL');
+    const cmdlblValue = clScalarValue(cmdlblParm?.value);
+    if (cmdlblValue !== undefined) {
+        return cmdlblValue;
+    }
+
+    // Positional: first value token after the command token.
+    const positional = afterCommand.find(isValueToken);
+    return positional ? clScalarValue(positional.value) : undefined;
+}
+
+/**
+ * Narrows a parsed CL parameter value to a plain label string, or undefined.
+ * Unwraps the parser's { type:'expression', tokens:[...] } shape (e.g. CMDLBL(X))
+ * down to its single text token, and strips surrounding quotes from quoted labels.
+ */
+function clScalarValue(value: unknown): string | undefined {
+    let text: string | undefined;
+    if (typeof value === 'string') {
+        text = value;
+    } else if (value && typeof value === 'object' && !Array.isArray(value) && (value as { type?: string }).type === 'expression') {
+        const tokens = (value as { tokens?: Array<{ type: string; value: string }> }).tokens ?? [];
+        const textToken = tokens.find((token) => token.type !== 'space');
+        if (textToken) {
+            text = textToken.value;
+        }
+    }
+    if (text === undefined) {
+        return undefined;
+    }
+    const trimmed = text.trim();
+    return trimmed.length > 0 ? trimmed : undefined;
+}
+
+/**
+ * Extracts a GOTO target from a parsed parameter value (e.g. MONMSG's EXEC).
+ * parseCL flattens nested commands into token expressions (and arrays of them),
+ * so the value is reconstructed into its command text and re-parsed; anything
+ * that does not rebuild a GOTO statement yields undefined.
+ */
+function clGotoTargetFromValue(value: unknown): string | undefined {
+    const text = clCommandTextFromValue(value);
+    return text !== undefined ? extractGotoTargetLabel(text) : undefined;
+}
+
+/**
+ * Rebuilds the command text from a parsed parameter value so a nested command can
+ * be re-parsed. Handles the shapes parseCL produces for nested commands:
+ *  - a single token expression:        { type:'expression', tokens:[GOTO, ' ', LBL] }
+ *  - an array of expressions:          [ {tokens:[GOTO,' ',CMDLBL]}, {tokens:[LBL], wrapped:true} ]
+ *    (the 'wrapped' flag marks a group that was parenthesized and needs its parens back)
+ */
+function clCommandTextFromValue(value: unknown): string | undefined {
+    if (Array.isArray(value)) {
+        const parts = value.map((entry) => clCommandTextFromValue(entry));
+        if (parts.some((part) => part === undefined)) {
+            return undefined;
+        }
+        return (parts as string[]).join(' ');
+    }
+    if (value && typeof value === 'object' && (value as { type?: string }).type === 'expression') {
+        const tokens = (value as { tokens?: Array<{ value: string }>; wrapped?: boolean }).tokens ?? [];
+        if (tokens.length === 0) {
+            return undefined;
+        }
+        const inner = tokens.map((token) => token.value).join('');
+        return (value as { wrapped?: boolean }).wrapped ? `(${inner})` : inner;
+    }
+    return undefined;
+}
+
+/**
+ * Finds the first line whose code (text before any block comment) starts with
+ * `label:`, case-insensitively. CL labels are line-initial, so the match is
+ * anchored to the start of the code portion of a line.
+ */
+export function findCLLabelLine(document: vscode.TextDocument, label: string): number | undefined {
+    const labelRegex = new RegExp(`^\\s*${escapeRegExpText(label)}\\s*:`, 'i');
+    for (let i = 0; i < document.lineCount; i++) {
+        const codePart = document.lineAt(i).text.replace(/\/\*.*$/, '');
+        if (labelRegex.test(codePart)) {
+            return i;
+        }
+    }
+    return undefined;
+}
+
+function escapeRegExpText(text: string): string {
+    return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+export interface CollectedCLCmd {
+    command: string;
+    startLine: number;
+    endLine: number;
+}
+
+/**
+ * Removes a leading CL label (`LABEL:`) from a statement, when present.
+ * Labels are only valid in compiled CL programs; they are stripped so the
+ * statement can run interactively (e.g. via QSYS2.CMD_RUN).
+ * A label is a name token immediately followed by ':' at the very start of the
+ * statement, so colons inside quoted strings or later in the statement are
+ * never treated as labels.
+ */
+export function stripCLLabel(command: string): string {
+    const trimmed = command.trimStart();
+    const labelMatch = /^[A-Za-z@#$][A-Za-z0-9@#$.]*:/.exec(trimmed);
+    if (!labelMatch) {
+        return command;
+    }
+    return trimmed.slice(labelMatch[0].length).trimStart();
+}
+
+/**
+ * Collects every runnable CL statement in the given line range (inclusive).
+ *
+ * Built on collectCLCmdFromLine, so `+`/`-` continuations, position-0 and
+ * space-preceded block comments, multi-line comments, and quoted strings are
+ * all handled. Blank and comment-only lines produce no statement. A leading
+ * CL label (LABEL:) is stripped from each statement.
+ *
+ * @param doc - The text document.
+ * @param startLine - First line to consider (defaults to document start).
+ * @param endLine - Last line to consider (defaults to document end).
+ * @returns Statements in source order with their source line spans.
+ */
+export function collectAllCLCmds(
+    doc: vscode.TextDocument,
+    startLine: number = 0,
+    endLine: number = doc.lineCount - 1
+): CollectedCLCmd[] {
+    const statements: CollectedCLCmd[] = [];
+    const lastLine = Math.min(Math.max(endLine, 0), doc.lineCount - 1);
+    let line = Math.max(startLine, 0);
+
+    while (line <= lastLine) {
+        const collected = collectCLCmdFromLine(doc, line);
+        const command = stripCLLabel(collected.command).trim();
+        if (command.length > 0) {
+            statements.push({ command, startLine: collected.startLine, endLine: collected.endLine });
+        }
+        // Continue after the collected statement; guard against no-progress loops.
+        line = Math.max(collected.endLine + 1, line + 1);
+    }
+
+    return statements;
 }
 
 /**

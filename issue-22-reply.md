@@ -1,4 +1,4 @@
-The `CLPrompter()` API was **not** removed — but its return type changed in v1.0.48 and the docs weren't updated. That's on me; it's fixed now.
+The `CLPrompter()` API was **not** removed — but its return type WAS changed in v1.0.48 and the docs weren't updated. That's on me; it's fixed now.
 
 **What changed:** `CLPrompter()` used to resolve with `Promise<string | null>`. It now resolves with `Promise<CLPrompterResult>`:
 

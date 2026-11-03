@@ -26,15 +26,15 @@
 // All rights reserved. Reproduction in whole or part is prohibited.
 
 interface QlgPathName {
-    CCSID: number; // int (4 bytes)
-    Country_ID: string; // 2 chars
-    Language_ID: string; // 3 chars
-    Reserved: string; // 3 chars
-    Path_Type: number; // unsigned int (4 bytes)
-    Path_Length: number; // int (4 bytes)
-    Path_Name_Delimiter: string; // 2 chars
-    Reserved2: string; // 10 chars
-    Path_Name: string; // up to 4096 chars
+  CCSID: number; // int (4 bytes)
+  Country_ID: string; // 2 chars
+  Language_ID: string; // 3 chars
+  Reserved: string; // 3 chars
+  Path_Type: number; // unsigned int (4 bytes)
+  Path_Length: number; // int (4 bytes)
+  Path_Name_Delimiter: string; // 2 chars
+  Reserved2: string; // 10 chars
+  Path_Name: string; // up to 4096 chars
 }
 
 // Replace Buffer-based helpers with browser-safe encoders
@@ -66,23 +66,23 @@ function writeAsciiFixed(buf: Uint8Array, offset: number, s: string, len: number
 // such as qgpl/customter
 // or an API-structure of: OBJECT....LIBRARY...
 // and returns library/object to the caller.
-// If only somethig like "OBJECT" is passed in (i.e., no library)
+// If only something like "OBJECT" is passed in (i.e., no library)
 // then it is returned as "OBJECT" without a qualified library name.
 
 export function buildQualName(input: string): string {
-    // If the input name is already a fully-qualified object name,
-    // then simply round-trip it.
-    if (input.includes('/')) {
-        return input;
-    }
-    // Extract first 10 and second 10 bytes
-    const part1 = input.substring(0, 10).trimEnd();
-    const part2 = input.substring(10, 20).trimEnd();
-    if (part2) { // return newly qualified name
-        return `${part2}/${part1}`;
-    } else { // return just the object name
-        return part1;
-    }
+  // If the input name is already a fully-qualified object name,
+  // then simply round-trip it.
+  if (input.includes('/')) {
+    return input;
+  }
+  // Extract first 10 and second 10 bytes
+  const part1 = input.substring(0, 10).trimEnd();
+  const part2 = input.substring(10, 20).trimEnd();
+  if (part2) { // return newly qualified name
+    return `${part2}/${part1}`;
+  } else { // return just the object name
+    return part1;
+  }
 }
 
 export function buildAPI2PartName(cmdString: string): Uint8Array {

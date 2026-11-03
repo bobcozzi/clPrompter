@@ -83,6 +83,7 @@
     "contributes.configuration.properties.clPrompter.cmdEntryCodeSnippetTreeClickAction.enumDescriptions.2": "Do nothing when a Code Snippet node is clicked.",
     "contributes.configuration.properties.clPrompter.cmdEntryCodeSnippetTreeClickAction.description": "Controls what happens when you click a Code Snippet in the tree view (setting key: clPrompter.cmdEntryCodeSnippetTreeClickAction).",
     "contributes.configuration.properties.clPrompter.cmdEntryOpenSnippetsInNewView.description": "When enabled, running a snippet opens/reuses a dedicated SQL Results view for that snippet. Use 'Run in New View' to force an additional comparison view.",
+    "contributes.configuration.properties.clPrompter.cmdEntryPromptForVariables.description": "When running CL commands from a source file (Run in Command Entry), prompt for a value for each &variable in the command. Values replace the variable text as-is; add quotes for character values where needed.",
     "contributes.configuration.properties.clPrompter.kwdColor.description": "PARM keyword color in prompter.  Use CSS color values like ##1a237e, blue, or rgb(34,170,34).",
     "contributes.configuration.properties.clPrompter.kwdValueColor.description": "PARM value color in prompter.  Use CSS color values like ##1a237e, blue, or rgb(34,170,34).",
     "contributes.configuration.properties.clPrompter.kwdColorAutoAdjust.description": "PARM keyword color Auto-adjust for best contrast in dark/light/high-contrast themes. If false, uses your color exactly as specified.",

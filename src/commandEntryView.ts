@@ -4,7 +4,7 @@ import { buildChgCurlibCommandFromCurrentLibrary, buildChgLiblCommandFromLibrary
 import { getUDTFLibrary } from './components/hostFunctions';
 import { CLPrompter } from './clPrompter';
 import { CommandEntryJobManager } from './commandEntryJobManager';
-import { CommandEntryHistory, CommandExecutionMode, SqlResultPayload, determineOutcome, mapCommandMessages } from './commandEntryModel';
+import { CommandEntryHistory, CommandExecution, CommandExecutionMode, SqlResultPayload, determineOutcome, mapCommandMessages } from './commandEntryModel';
 import { detectCommandEntryPrefix } from './commandEntryPrefixes';
 import { CommandEntryService } from './commandEntryService';
 import { buildMsgwReplyCommandForQueue, checkForMsgw } from './commandEntryMsgw';
@@ -309,6 +309,8 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
     public static readonly viewType = 'clprompter.commandEntryView.main';
     private view: vscode.WebviewView | undefined;
     private running = false;
+    private webviewReady = false;
+    private readonly webviewReadyResolvers: Array<() => void> = [];
     private activeExecutionId: string | undefined;
     private pendingCommandText: string | undefined;
     private currentRunMode: CommandExecutionMode = '*RUN';
@@ -419,6 +421,7 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
 
     resolveWebviewView(view: vscode.WebviewView): void {
         this.view = view;
+        this.webviewReady = false;
         view.webview.options = { enableScripts: true, localResourceRoots: [vscode.Uri.joinPath(this.context.extensionUri, 'media')] };
         view.webview.html = this.html(view.webview);
         this.syncRunModeContext(this.currentRunMode);
@@ -448,6 +451,33 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
 
     requestRun(): void { this.post({ type: 'runCurrent' }); }
     requestPrompt(): void { this.post({ type: 'promptCurrent' }); }
+
+    /** Resolves once the Command Entry webview has finished loading (its 'ready' handshake). */
+    whenWebviewReady(): Promise<void> {
+        if (this.view && this.webviewReady) {
+            return Promise.resolve();
+        }
+        return new Promise<void>((resolve) => {
+            this.webviewReadyResolvers.push(resolve);
+        });
+    }
+
+    /**
+     * Runs a single CL command (or `sql:` statement) through the normal Command Entry
+     * execution path, exactly as if it were typed into the input line, except the run
+     * mode is always *RUN. Returns the execution result so batch callers can inspect
+     * the outcome; returns undefined when the statement was re-routed to the prompter
+     * or a command picker instead of being executed.
+     */
+    runStatementFromSource(command: string): Promise<CommandExecution | undefined> {
+        return this.run(command, '*RUN', { sourceType: 'user' });
+    }
+
+    /** Appends a notice line to the Command Entry message log. */
+    postNotice(severity: CmdEntryNoticeSeverity, message: string): void {
+        this.post({ type: 'notice', message, severity });
+    }
+
     setCommandText(command: string): void {
         const text = String(command || '');
         this.pendingCommandText = text;
@@ -698,6 +728,11 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
                 this.syncRunModeContext(message.mode);
                 break;
             case 'ready':
+                this.webviewReady = true;
+                const readyResolvers = this.webviewReadyResolvers.splice(0);
+                for (const resolveReady of readyResolvers) {
+                    resolveReady();
+                }
                 const clearInputOnStartup = this.clearInputOnFirstReady;
                 const firstReadyHistoryClearEligible = this.clearHistoryOnFirstReady;
                 this.lastPostedSqlJobId = this.currentSqlJobId();
@@ -1520,31 +1555,31 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
             snippetViewMode?: 'singleton' | 'reuse' | 'forceNew';
             snippetRunInstanceId?: string;
         } = {}
-    ): Promise<void> {
+    ): Promise<CommandExecution | undefined> {
         const promptPrefixResolution = resolvePromptPrefixedCommand(command);
         if (promptPrefixResolution !== undefined) {
             if (promptPrefixResolution.syntaxError) {
                 this.post({ type: 'notice', message: vscode.l10n.t(promptPrefixResolution.syntaxError) });
-                return;
+                return undefined;
             }
 
             const promptPrefixedCommand = String(promptPrefixResolution.promptCommand || '');
             if (!promptPrefixedCommand.trim()) {
                 this.post({ type: 'notice', message: vscode.l10n.t('Enter a CL command to prompt.') });
-                return;
+                return undefined;
             }
             if (isSqlCommandText(promptPrefixedCommand)) {
                 this.post({ type: 'notice', message: vscode.l10n.t('Prompt is only available for CL commands. Run SQL statements directly.') });
-                return;
+                return undefined;
             }
 
             // Mirror 5250/F4 behavior: treat leading ? as a prompt request, not execution.
             await this.prompt(command);
-            return;
+            return undefined;
         }
 
-        if (this.running) { return; }
-        if (!command.trim()) { this.post({ type: 'notice', message: vscode.l10n.t('Enter a CL command to run.') }); return; }
+        if (this.running) { return undefined; }
+        if (!command.trim()) { this.post({ type: 'notice', message: vscode.l10n.t('Enter a CL command to run.') }); return undefined; }
 
         const sourceType = options.sourceType ?? 'user';
         const isSql = isSqlCommandText(command);
@@ -1578,12 +1613,12 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
                 addToHistory: shouldAddToHistory,
                 addToCommandEntryLog: shouldLogExecutionToCommandEntry(failedExecution)
             });
-            return;
+            return failedExecution;
         }
 
         const genericSelection = await this.resolveGenericCommandSelectionRequest(command, connection);
         if (genericSelection !== undefined) {
-            return;
+            return undefined;
         }
 
         this.running = true;
@@ -1690,6 +1725,7 @@ export class CommandEntryViewProvider implements vscode.WebviewViewProvider {
             if (shouldShowSqlNotLoggedFeedback) {
                 completionNotice = sqlNotLoggedMessage;
             }
+            return executionForPost;
         } finally {
             this.postRunLane('end', runLane, runLaneId);
             this.running = false;

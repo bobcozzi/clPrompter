@@ -48,7 +48,7 @@ function writeAsciiFixed(buf, offset, s, len) {
 // such as qgpl/customter
 // or an API-structure of: OBJECT....LIBRARY...
 // and returns library/object to the caller.
-// If only somethig like "OBJECT" is passed in (i.e., no library)
+// If only something like "OBJECT" is passed in (i.e., no library)
 // then it is returned as "OBJECT" without a qualified library name.
 export function buildQualName(input) {
     // If the input name is already a fully-qualified object name,

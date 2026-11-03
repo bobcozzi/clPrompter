@@ -2,7 +2,7 @@
   "name": "clprompter",
   "displayName": "%displayName%",
   "description": "%description%",
-  "version": "1.0.64",
+  "version": "1.0.65",
   "author": {
     "name": "Bob Cozzi",
     "url": "https://github.com/bobcozzi"
@@ -249,6 +249,16 @@
         "command": "clprompter.commandEntry.title.openSettings",
         "title": "Command Entry Settings",
         "icon": "$(gear)"
+      },
+      {
+        "command": "clprompter.runSelectedInCommandEntry",
+        "title": "Run Selected",
+        "icon": "$(play)"
+      },
+      {
+        "command": "clprompter.runFileInCommandEntry",
+        "title": "Run All",
+        "icon": "$(play-circle)"
       }
     ],
     "submenus": [
@@ -264,6 +274,10 @@
         "id": "clprompter.commandEntry.settingsMenu",
         "label": "Command Entry Options",
         "icon": "$(ellipsis)"
+      },
+      {
+        "id": "clprompter.runInCommandEntry",
+        "label": "Run in Command Entry"
       }
     ],
     "keybindings": [
@@ -465,6 +479,12 @@
           "default": true,
           "description": "%contributes.configuration.properties.clPrompter.cmdEntryOpenSnippetsInNewView.description%"
         },
+        "clPrompter.cmdEntryPromptForVariables": {
+          "order": 113.2,
+          "type": "boolean",
+          "default": true,
+          "description": "%contributes.configuration.properties.clPrompter.cmdEntryPromptForVariables.description%"
+        },
         "clPrompter.kwdColor": {
           "type": "string",
           "format": "color",
@@ -623,6 +643,16 @@
       }
     },
     "menus": {
+      "clprompter.runInCommandEntry": [
+        {
+          "command": "clprompter.runSelectedInCommandEntry",
+          "group": "1_run@1"
+        },
+        {
+          "command": "clprompter.runFileInCommandEntry",
+          "group": "1_run@2"
+        }
+      ],
       "view/title": [
         {
           "command": "clprompter.commandEntry.title.openHelp",
@@ -876,6 +906,11 @@
       ],
       "editor/context": [
         {
+          "submenu": "clprompter.runInCommandEntry",
+          "when": "clprompter.connected && (editorLangId == clle || editorLangId == clp || editorLangId == cl)",
+          "group": "navigation@2"
+        },
+        {
           "command": "clPrompter.clPrompter",
           "when": "editorLangId == clle || editorLangId == clp || editorLangId == cmd || editorLangId == cl || editorLangId == bnd || editorLangId == cmd",
           "group": "navigation"
@@ -940,7 +975,8 @@
     "test:dep-diagnostic": "tsc src/test/testDepDiagnostic.ts --outDir out --module commonjs --target es2020 --esModuleInterop --skipLibCheck && node out/test/testDepDiagnostic.js",
     "test:quoted-whitespace": "tsc src/test/testQuotedWhitespacePreservation.ts --outDir out --module commonjs --target es2020 --esModuleInterop --skipLibCheck && node out/test/testQuotedWhitespacePreservation.js",
     "test:hidden-constant-elem-shell": "tsc src/test/testHiddenConstantElemShell.ts --outDir out --module commonjs --target es2020 --esModuleInterop --skipLibCheck && node out/test/testHiddenConstantElemShell.js",
-    "test:component-signature": "tsc src/test/testComponentSignature.ts --outDir out --module commonjs --target es2020 --esModuleInterop --skipLibCheck && node out/test/testComponentSignature.js"
+    "test:component-signature": "tsc src/test/testComponentSignature.ts --outDir out --module commonjs --target es2020 --esModuleInterop --skipLibCheck && node out/test/testComponentSignature.js",
+    "test:collect-all-cl-cmds": "tsc src/tokenizeCL.ts src/extractor.ts src/test/testCollectAllCLCmds.ts --outDir out --module commonjs --target es2020 --esModuleInterop --skipLibCheck --rootDir src && node out/test/testCollectAllCLCmds.js"
   },
   "devDependencies": {
     "@types/node": "20.8.10",
