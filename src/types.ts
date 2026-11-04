@@ -226,7 +226,7 @@ export interface DepConstraint {
   ctlKwdRel: string;  // ALWAYS, EQ, NE, SPCFD
   ctlKwd?: string;    // controlling keyword (absent when ALWAYS)
   cmpVal?: string;    // internal value to compare ctlKwd against
-  nbrTrueRel: string; // GT, GE, EQ, LE, LT, NE
+  nbrTrueRel: string; // GT, GE, EQ, LE, LT, NE, ALL
   nbrTrue: number;    // threshold count
   msgId: string;      // e.g. "CPD2830"
   depParms: DepParmEntry[];
@@ -234,13 +234,13 @@ export interface DepConstraint {
 
 // PmtCtl (Prompt Control) types — used to show/hide parameters based on controlling field values
 export interface PmtCtlCond {
-  rel: string;    // EQ, NE, GT, LT, GE, LE, NL, NG, SPCFD, UNSPCFD
-  cmpVal: string; // internal/MapTo value to compare against
+  rel: string;     // EQ, NE, GT, LT, GE, LE, NL, NG, SPCFD, UNSPCFD
+  cmpVal?: string; // internal/MapTo value to compare against (absent for SPCFD/UNSPCFD)
 }
 
 export interface PmtCtlGroup {
   ctlKwd: string;     // controlling keyword
-  nbrTrueRel: string; // EQ, NE, GT, LT, GE, LE, NL, NG
+  nbrTrueRel: string; // EQ, NE, GT, LT, GE, LE, NL, NG, ALL
   nbrTrue: number;    // threshold count
   lglRel?: string;    // AND | OR (logical relation to previous group; undefined = first group)
   conds: PmtCtlCond[];

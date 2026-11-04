@@ -720,6 +720,17 @@ textarea.long-text-input[style*="color: #006400"],
   display: inline;
 }
 
+/* Choice text (from the Choice= attribute) shown to the right of the input;
+   always visible, matching the 5250 prompter's right-hand choice column.
+   Unlike .constraint-hint this is NOT focus-gated. */
+.choice-hint {
+  margin-left: 0.5cm;
+  font-size: 0.8em;
+  color: var(--vscode-descriptionForeground, #888888);
+  white-space: nowrap;
+  font-style: italic;
+}
+
 /* Container for textarea with cbinput dropdown */
 .textarea-cbinput-container {
   display: flex;

@@ -1,0 +1,216 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE QcdCLCmd [
+
+    <!-- =========================================================== -->
+    <!-- Elements/Attributes section:                                -->
+    <!-- =========================================================== -->
+    <!--                   AS/400 Command Language tag               -->
+    <!--                   Root AS/400 Command language tag          -->
+    <!ELEMENT  QcdCLCmd     (Cmd+)                                     >
+    <!ATTLIST  QcdCLCmd
+                 DTDVersion (1.0)                       #REQUIRED      >
+ 
+    <!-- =========================================================== -->
+    <!--                   CL command definition for AS400Cmd tag    -->
+    <!-- =========================================================== -->
+    <!ELEMENT  Cmd          (Parm|Dep)*                                >
+    <!ATTLIST  Cmd
+                 CmdName    CDATA                       #REQUIRED
+                 CmdLib     CDATA                       #REQUIRED
+                 CCSID      CDATA                       #REQUIRED
+                 Prompt     CDATA                       #IMPLIED
+                 HlpPnlGrp  CDATA                       #IMPLIED
+                 HlpPnlGrpLib  CDATA                    #IMPLIED
+                 HlpID      CDATA                       #IMPLIED
+                 MaxPos     CDATA                       #IMPLIED
+                 CurLib     CDATA                       #IMPLIED
+                 PrdLib     CDATA                       #IMPLIED
+                 PmtOvrPgm  CDATA                       #IMPLIED
+                 PmtOvrLib  CDATA                       #IMPLIED
+                 MsgF        CDATA                      #IMPLIED
+                 MsgFLib     CDATA                      #IMPLIED
+                 RtvCmdExit  CDATA                      #IMPLIED
+                 ExecBatch  (YES|NO)                    #REQUIRED
+                 ChgCmdExit (YES|NO)                    #REQUIRED      >
+ 
+    <!-- =========================================================== -->
+    <!--                   Parameter definition for Cmd tag          -->
+    <!-- =========================================================== -->
+    <!ELEMENT  Parm (Elem|Qual|PmtCtl|Values|SngVal|SpcVal|
+                     ChoicePgmText|ChoicePgmValues)*                   >
+    <!ATTLIST  Parm
+                 Kwd        CDATA                       #REQUIRED
+                 Type       (DEC|INT2|INT4|UINT2|UINT4|CHAR|
+                             NAME|GENERIC|LGL|HEX|VARNAME|
+                             DATE|TIME|X|CMD|CMDSTR|
+                             SNAME|CNAME|PNAME|ELEM|
+                             QUAL)                      #REQUIRED
+                 Min         CDATA                      #IMPLIED
+                 Max        CDATA                       #IMPLIED
+                 PmtCtlPgm  CDATA                       #IMPLIED
+                 PmtCtlLib  CDATA                       #IMPLIED
+                 PmtCtl     (PMTRQS|PMTCTL)             #IMPLIED
+                 KeyParm    (YES|NO)                    "NO"
+                 PosNbr     CDATA                       #IMPLIED
+                 Prompt      CDATA                      #IMPLIED
+                 Len         CDATA                      #IMPLIED
+                 Dft         CDATA                      #IMPLIED
+                 Rel         (GT|EQ|GE|LT|NE|LE)        #IMPLIED
+                 RelVal      CDATA                      #IMPLIED
+                 RelKwd      CDATA                      #IMPLIED
+                 RangeMinKwd CDATA                      #IMPLIED
+                 RangeMaxKwd CDATA                      #IMPLIED
+                 RangeMinVal CDATA                      #IMPLIED
+                 RangeMaxVal CDATA                      #IMPLIED
+                 DspInput    (YES|NO|PROMPT)            #IMPLIED
+                 ChoicePgm   CDATA                      #IMPLIED
+                 ChoiceLib   CDATA                      #IMPLIED
+                 Rstd        (YES|NO)                   #IMPLIED
+                 Full        (YES|NO)                   #IMPLIED
+                 AlwUnprt    (YES|NO)                   #IMPLIED
+                 AlwVar      (YES|NO)                   #IMPLIED
+                 Expr        (YES|NO)                   #IMPLIED
+                 Choice      CDATA                      #IMPLIED       >
+ 
+    <!-- =========================================================== -->
+    <!--                    Parameter element for Parm/Elem tags     -->
+    <!-- =========================================================== -->
+    <!ELEMENT  Elem   (Elem|Qual|Values|SngVal|SpcVal|
+                       ChoicePgmText|ChoicePgmValues)*                 >
+    <!ATTLIST  Elem
+                 Type       (DEC|INT2|INT4|UINT2|UINT4|CHAR|NAME|
+                             GENERIC|LGL|HEX|VARNAME|
+                             DATE|TIME|X|SNAME|CNAME|PNAME|
+                             ELEM|QUAL)                 #REQUIRED
+                 Max        CDATA                       #IMPLIED 
+                 Prompt      CDATA                      #IMPLIED
+                 Len         CDATA                      #IMPLIED
+                 Min         CDATA                      #IMPLIED
+                 Dft         CDATA                      #IMPLIED
+                 Rel         (GT|EQ|GE|LT|NE|LE)        #IMPLIED
+                 RelVal      CDATA                      #IMPLIED
+                 RelKwd      CDATA                      #IMPLIED
+                 RangeMinKwd CDATA                      #IMPLIED
+                 RangeMaxKwd CDATA                      #IMPLIED
+                 RangeMinVal CDATA                      #IMPLIED
+                 RangeMaxVal CDATA                      #IMPLIED
+                 DspInput    (YES|NO|PROMPT)            #IMPLIED
+                 ChoicePgm   CDATA                      #IMPLIED
+                 ChoiceLib   CDATA                      #IMPLIED
+                 Rstd        (YES|NO)                   #IMPLIED
+                 Full        (YES|NO)                   #IMPLIED
+                 AlwUnprt    (YES|NO)                   #IMPLIED
+                 AlwVar      (YES|NO)                   #IMPLIED
+                 Expr        (YES|NO)                   #IMPLIED
+                 Choice      CDATA                      #IMPLIED       >
+ 
+    <!-- =========================================================== -->
+    <!--                    Parameter qualifier for Parm/Elem tags   -->
+    <!-- =========================================================== -->
+    <!ELEMENT  Qual         (Values|SpcVal|
+                             ChoicePgmText|ChoicePgmValues)*           >
+    <!ATTLIST  Qual
+                 Type       (DEC|INT2|INT4|UINT2|UINT4|CHAR|NAME|
+                             GENERIC|SNAME|CNAME)       #REQUIRED
+                 Max        CDATA                       #IMPLIED 
+                 Prompt      CDATA                      #IMPLIED
+                 Len         CDATA                      #IMPLIED
+                 Min         CDATA                      #IMPLIED
+                 Dft         CDATA                      #IMPLIED
+                 Rel         (GT|EQ|GE|LT|NE|LE)        #IMPLIED
+                 RelVal      CDATA                      #IMPLIED
+                 RelKwd      CDATA                      #IMPLIED
+                 RangeMinKwd CDATA                      #IMPLIED
+                 RangeMaxKwd CDATA                      #IMPLIED
+                 RangeMinVal CDATA                      #IMPLIED
+                 RangeMaxVal CDATA                      #IMPLIED
+                 DspInput    (YES|NO|PROMPT)            #IMPLIED
+                 ChoicePgm   CDATA                      #IMPLIED
+                 ChoiceLib   CDATA                      #IMPLIED
+                 Rstd        (YES|NO)                   #IMPLIED
+                 Full        (YES|NO)                   #IMPLIED
+                 AlwUnprt    (YES|NO)                   #IMPLIED
+                 AlwVar      (YES|NO)                   #IMPLIED
+                 Expr        (YES|NO)                   #IMPLIED
+                 Choice      CDATA                      #IMPLIED       >
+ 
+    <!-- =========================================================== -->
+    <!--                    Prompt control for a Parm tag            -->
+    <!-- =========================================================== -->
+    <!ELEMENT  PmtCtl       (PmtCtlCond*)                              >
+    <!ATTLIST  PmtCtl
+                 CtlKwd     CDATA                       #REQUIRED
+                 NbrTrueRel (ALL|GT|EQ|GE|LT|NE|LE)     #REQUIRED
+                 NbrTrue    CDATA                       #IMPLIED
+                 LglRel     (AND|OR)                    #IMPLIED       >
+ 
+    <!-- =========================================================== -->
+    <!--              Prompt control condition for PmtCtl tag        -->
+    <!-- =========================================================== -->
+    <!ELEMENT  PmtCtlCond   EMPTY                                      >
+    <!ATTLIST  PmtCtlCond
+                 Rel      (GT|EQ|GE|LT|NE|LE|SPCFD|UNSPCFD) #IMPLIED
+                 CmpVal        CDATA                        #IMPLIED   >
+ 
+ 
+    <!-- =========================================================== -->
+    <!--                    Normal values for Parm/Elem/Qual tags    -->
+    <!-- =========================================================== -->
+    <!ELEMENT  Values       (Value*)                                   >
+ 
+    <!-- =========================================================== -->
+    <!--                    Single values for Parm/Elem tags         -->
+    <!-- =========================================================== -->
+    <!ELEMENT  SngVal       (Value*)                                   >
+ 
+    <!-- =========================================================== -->
+    <!--                    Special values for Parm/Elem/Qual tags   -->
+    <!-- =========================================================== -->
+    <!ELEMENT  SpcVal       (Value*)                                   >
+ 
+    <!-- =========================================================== -->
+    <!--              Choice program values for Parm/Elem/Qual tags  -->
+    <!-- =========================================================== -->
+    <!ELEMENT  ChoicePgmValues  (Value*)                               >
+ 
+    <!-- =========================================================== -->
+    <!--              Choice program text for Parm/Elem/Qual tags    -->
+    <!-- =========================================================== -->
+    <!ELEMENT  ChoicePgmText  EMPTY                                    >
+    <!ATTLIST  ChoicePgmText
+                 Text       CDATA                       #REQUIRED      >
+ 
+    <!-- =========================================================== -->
+    <!--   Value list for Values/SpcVal/SngVal/ChoicePgmValues tags  -->
+    <!-- =========================================================== -->
+    <!ELEMENT  Value        EMPTY                                      >
+    <!ATTLIST  Value
+                 Val        CDATA                       #REQUIRED
+                 MapTo      CDATA                       #IMPLIED       >
+ 
+    <!-- =========================================================== -->
+    <!--                    Parameter dependency for Cmd tag         -->
+    <!-- =========================================================== -->
+    <!ELEMENT  Dep       (DepParm+)                                    >
+    <!ATTLIST  Dep
+                 CtlKwdRel  (GT|EQ|GE|LT|NE|LE|SPCFD|
+                             ALWAYS)                    #REQUIRED
+                 CtlKwd     CDATA                       #IMPLIED
+                 CmpKwd     CDATA                       #IMPLIED
+                 CmpVal     CDATA                       #IMPLIED
+                 NbrTrueRel (GT|EQ|GE|LT|NE|LE|ALL)     #IMPLIED
+                 NbrTrue    CDATA                       #IMPLIED
+                 MsgID      CDATA                       #IMPLIED       >
+ 
+    <!-- =========================================================== -->
+    <!--                    Dependency condition for Dep tag         -->
+    <!-- =========================================================== -->
+    <!ELEMENT  DepParm      EMPTY                                      >
+    <!ATTLIST  DepParm
+                 Kwd        CDATA                       #REQUIRED
+                 Rel       (GT|EQ|GE|LT|NE|LE|SPCFD)    #REQUIRED
+                 CmpKwd     CDATA                       #IMPLIED
+                 CmpVal     CDATA                       #IMPLIED       >
+
+       
+]>

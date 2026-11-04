@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<QcdCLCmd DTDVersion="1.0">
+    <!-- Synthetic fixture for DTD-coverage items: NbrTrueRel=ALL, CmpVal-less SPCFD/UNSPCFD,
+         RelKwd, RangeMinKwd/RangeMaxKwd, Choice hint, Expr, ChoicePgmText/ChoicePgmValues. -->
+    <Cmd CmdName="DTDCOVER" CmdLib="__LIBL" CCSID="37" Prompt="DTD coverage test" MaxPos="2" ExecBatch="YES" ChgCmdExit="NO" RtvCmdExit="NO">
+        <!-- ALL on PmtCtl: both conditions must be true for the parm to be visible -->
+        <Parm Kwd="CTL" PosNbr="1" KeyParm="NO" Type="CHAR" Min="0" Max="1" Len="10" Prompt="Controlling parm" Rstd="YES" Dft="*NO" AlwVar="NO" Expr="NO" Full="NO" DspInput="YES" Choice="*NO, *YES">
+            <SpcVal>
+                <Value Val="*NO" MapTo="0" />
+                <Value Val="*YES" MapTo="1" />
+            </SpcVal>
+        </Parm>
+        <!-- CmpVal-less SPCFD: no CmpVal attribute at all (legal per DTD #IMPLIED) -->
+        <Parm Kwd="DEPONCTL" PosNbr="2" KeyParm="NO" Type="CHAR" Min="0" Max="1" Len="10" Prompt="Shown when CTL specified" Rstd="NO" AlwVar="YES" Expr="NO" Full="NO" DspInput="YES" PmtCtl="PMTCTL" Choice="Character value">
+            <PmtCtl CtlKwd="CTL" NbrTrueRel="ALL" NbrTrue="2">
+                <PmtCtlCond Rel="SPCFD" />
+                <PmtCtlCond Rel="NE" CmpVal="0" />
+            </PmtCtl>
+        </Parm>
+        <!-- RelKwd: value must be GE the current value of MIN -->
+        <Parm Kwd="MAX" PosNbr="3" KeyParm="NO" Type="INT2" Min="0" Max="1" Prompt="Upper bound" Rstd="NO" Rel="GE" RelKwd="MIN" AlwVar="YES" Expr="NO" Full="NO" DspInput="YES" Choice="Number" />
+        <Parm Kwd="MIN" PosNbr="4" KeyParm="NO" Type="INT2" Min="0" Max="1" Prompt="Lower bound" Rstd="NO" Dft="0" RangeMinVal="0" RangeMaxVal="300" AlwVar="YES" Expr="NO" Full="NO" DspInput="YES" Choice="0-300" />
+        <!-- RangeMinKwd/RangeMaxKwd: bounds come from other keywords -->
+        <Parm Kwd="WITHIN" PosNbr="5" KeyParm="NO" Type="INT2" Min="0" Max="1" Prompt="Within range" Rstd="NO" RangeMinKwd="LOW" RangeMaxKwd="HIGH" AlwVar="YES" Expr="NO" Full="NO" DspInput="YES" Choice="Number" />
+        <Parm Kwd="LOW" PosNbr="6" KeyParm="NO" Type="INT2" Min="0" Max="1" Prompt="Low" Rstd="NO" Dft="1" AlwVar="YES" Expr="NO" Full="NO" DspInput="YES" Choice="Number" />
+        <Parm Kwd="HIGH" PosNbr="7" KeyParm="NO" Type="INT2" Min="0" Max="1" Prompt="High" Rstd="NO" Dft="100" AlwVar="YES" Expr="NO" Full="NO" DspInput="YES" Choice="Number" />
+        <!-- Expr=YES: expression values allowed on a NAME-typed parm -->
+        <Parm Kwd="EXPRNAME" PosNbr="8" KeyParm="NO" Type="NAME" Min="0" Max="1" Len="10" Prompt="Name or expression" Rstd="NO" AlwVar="YES" Expr="YES" Full="NO" DspInput="YES" Choice="Name" />
+        <!-- ChoicePgm/ChoicePgmValues/ChoicePgmText: statically-resolved choice values -->
+        <Parm Kwd="OBJ" PosNbr="9" KeyParm="NO" Type="NAME" Min="0" Max="1" Len="10" Prompt="Object" Rstd="NO" AlwVar="YES" Expr="NO" Full="NO" DspInput="YES" ChoicePgm="MYCPOBJ" ChoiceLib="MYLIB" Choice="Name">
+            <ChoicePgmValues>
+                <Value Val="QSYS" />
+                <Value Val="QGPL" />
+            </ChoicePgmValues>
+            <ChoicePgmText Text="Objects in library list" />
+        </Parm>
+        <!-- Dep with NbrTrueRel=ALL: every DepParm must hold -->
+        <Dep CtlKwdRel="ALWAYS" NbrTrueRel="ALL">
+            <DepParm Kwd="MIN" Rel="SPCFD" />
+            <DepParm Kwd="MAX" Rel="SPCFD" />
+        </Dep>
+    </Cmd>
+</QcdCLCmd>

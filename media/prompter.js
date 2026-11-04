@@ -950,6 +950,33 @@ function parseRelConstraints(suggestions) {
     }
     return result;
 }
+// Helper: Parse Rel/RelKwd constraint metadata — value must satisfy Rel vs another keyword's current value
+// Returns an array of { op, kwd } objects (op: GE, LE, GT, LT, EQ, NE)
+function parseRelKwdConstraints(suggestions) {
+    const result = [];
+    const pattern = /^_RELKWD_([A-Z]+)_(.+)$/;
+    for (const s of suggestions) {
+        const m = s.match(pattern);
+        if (m)
+            result.push({ op: m[1], kwd: m[2] });
+    }
+    return result;
+}
+// Helper: Parse RangeMinKwd/RangeMaxKwd constraint metadata — bound is another keyword's current value
+// Returns { minKwd?, maxKwd? } or null when neither marker is present
+function parseRangeKwdConstraints(suggestions) {
+    let minKwd;
+    let maxKwd;
+    for (const s of suggestions) {
+        const minMatch = s.match(/^_RANGEMINKWD_(.+)$/);
+        if (minMatch)
+            minKwd = minMatch[1];
+        const maxMatch = s.match(/^_RANGEMAXKWD_(.+)$/);
+        if (maxMatch)
+            maxKwd = maxMatch[1];
+    }
+    return (minKwd || maxKwd) ? { minKwd, maxKwd } : null;
+}
 // Builds a human-readable constraint hint string from range/rel metadata (e.g. "> 50", "1 to 100")
 function buildConstraintHint(suggestions) {
     const relConstraints = parseRelConstraints(suggestions);
@@ -1017,6 +1044,36 @@ function buildConstraintHint(suggestions) {
                 parts.push(`<> ${cmpKwd}`);
                 break;
         }
+    }
+    // RelKwd constraints — value must satisfy Rel vs the referenced keyword's value
+    for (const { op, kwd } of parseRelKwdConstraints(suggestions)) {
+        switch (op) {
+            case 'GE':
+            case 'NL':
+                parts.push(`>= ${kwd}`);
+                break;
+            case 'LE':
+            case 'NG':
+                parts.push(`<= ${kwd}`);
+                break;
+            case 'GT':
+                parts.push(`> ${kwd}`);
+                break;
+            case 'LT':
+                parts.push(`< ${kwd}`);
+                break;
+            case 'EQ':
+                parts.push(`= ${kwd}`);
+                break;
+            case 'NE':
+                parts.push(`<> ${kwd}`);
+                break;
+        }
+    }
+    // RangeMinKwd/RangeMaxKwd — keyword-bounded range hint
+    const rangeKwd = parseRangeKwdConstraints(suggestions);
+    if (rangeKwd) {
+        parts.push(`${rangeKwd.minKwd ?? ''} to ${rangeKwd.maxKwd ?? ''}`.trim());
     }
     return parts.join(', ');
 }
@@ -1143,6 +1200,148 @@ function configureRelValidation(input, suggestions, container, alwVar) {
     input.addEventListener('keydown', (e) => {
         if (e.key === 'Enter')
             validateRel();
+    });
+}
+// Validate RelKwd and RangeMinKwd/RangeMaxKwd constraints — the comparison value is
+// another parameter's current field value, resolved live from the form.
+function configureKwdConstraintValidation(input, suggestions, container, alwVar) {
+    const relKwds = parseRelKwdConstraints(suggestions);
+    const rangeKwd = parseRangeKwdConstraints(suggestions);
+    if (relKwds.length === 0 && !rangeKwd)
+        return;
+    const specialValues = suggestions.filter(s => !s.startsWith('_RANGE_') && !s.startsWith('_REL_') && !s.startsWith('_DEPREL_') && !s.startsWith('_RELKWD_') && !s.startsWith('_RANGEMINKWD_') && !s.startsWith('_RANGEMAXKWD_'));
+    const errorSpan = document.createElement('span');
+    errorSpan.className = 'prompter-error-msg';
+    const targetElement = container || input;
+    const parent = targetElement.parentElement || targetElement.parentNode;
+    if (parent) {
+        const wrapper = document.createElement('div');
+        wrapper.className = 'parm-validation-wrapper';
+        parent.replaceChild(wrapper, targetElement);
+        wrapper.appendChild(targetElement);
+        wrapper.appendChild(errorSpan);
+    }
+    const opSymbol = (op) => {
+        switch (op) {
+            case 'GE':
+            case 'NL': return '>=';
+            case 'LE':
+            case 'NG': return '<=';
+            case 'GT': return '>';
+            case 'LT': return '<';
+            case 'EQ': return '=';
+            case 'NE': return '<>';
+            default: return op;
+        }
+    };
+    const getKwdValue = (kwd) => {
+        const el = document.querySelector(`input[name="${kwd}"], textarea[name="${kwd}"]`);
+        return el ? el.value.trim() : '';
+    };
+    const compare = (a, op, b) => {
+        const numA = parseFloat(a);
+        const numB = parseFloat(b);
+        if (!isNaN(numA) && !isNaN(numB)) {
+            switch (op) {
+                case 'GE':
+                case 'NL': return numA >= numB;
+                case 'LE':
+                case 'NG': return numA <= numB;
+                case 'GT': return numA > numB;
+                case 'LT': return numA < numB;
+                case 'EQ': return numA === numB;
+                case 'NE': return numA !== numB;
+                default: return true;
+            }
+        }
+        switch (op) {
+            case 'GE':
+            case 'NL': return a >= b;
+            case 'LE':
+            case 'NG': return a <= b;
+            case 'GT': return a > b;
+            case 'LT': return a < b;
+            case 'EQ': return a === b;
+            case 'NE': return a !== b;
+            default: return true;
+        }
+    };
+    const validate = () => {
+        if (!input.value) {
+            input.setCustomValidity('');
+            input.style.color = '';
+            input.classList.remove('validation-error');
+            errorSpan.classList.remove('visible');
+            errorSpan.textContent = '';
+            return;
+        }
+        // CL variable handling — respect AlwVar attribute
+        if (input.value.startsWith('&')) {
+            if (alwVar === false) {
+                const msg = 'CL variable not allowed for this parameter';
+                input.setCustomValidity(msg);
+                input.classList.add('validation-error');
+                errorSpan.textContent = msg;
+                errorSpan.classList.add('visible');
+                return;
+            }
+            input.setCustomValidity('');
+            input.style.color = '#006400';
+            input.classList.remove('validation-error');
+            errorSpan.classList.remove('visible');
+            errorSpan.textContent = '';
+            return;
+        }
+        // Special values always pass (case-insensitive)
+        const valueUpper = input.value.toUpperCase();
+        if (specialValues.some(sv => sv.toUpperCase() === valueUpper)) {
+            input.setCustomValidity('');
+            input.style.color = '#006400';
+            input.classList.remove('validation-error');
+            errorSpan.classList.remove('visible');
+            errorSpan.textContent = '';
+            return;
+        }
+        // RelKwd: value must satisfy Rel vs the referenced keyword's current value
+        for (const { op, kwd } of relKwds) {
+            const cmpValue = getKwdValue(kwd);
+            if (!cmpValue)
+                continue; // referenced keyword empty — nothing to compare against
+            if (!compare(input.value, op, cmpValue)) {
+                const msg = `Value must be ${opSymbol(op)} ${kwd} (${cmpValue})`;
+                input.setCustomValidity(msg);
+                input.classList.add('validation-error');
+                errorSpan.textContent = msg;
+                errorSpan.classList.add('visible');
+                return;
+            }
+        }
+        // RangeMinKwd/RangeMaxKwd: value must fall within the keyword-bounded range
+        if (rangeKwd) {
+            const minVal = rangeKwd.minKwd ? getKwdValue(rangeKwd.minKwd) : '';
+            const maxVal = rangeKwd.maxKwd ? getKwdValue(rangeKwd.maxKwd) : '';
+            const inRange = (!minVal || compare(input.value, 'GE', minVal)) && (!maxVal || compare(input.value, 'LE', maxVal));
+            if (!inRange) {
+                const lo = rangeKwd.minKwd ? `${rangeKwd.minKwd}${minVal ? ` (${minVal})` : ''}` : '';
+                const hi = rangeKwd.maxKwd ? `${rangeKwd.maxKwd}${maxVal ? ` (${maxVal})` : ''}` : '';
+                const msg = `Value must be between ${lo} and ${hi}`.replace(/\s+/g, ' ');
+                input.setCustomValidity(msg);
+                input.classList.add('validation-error');
+                errorSpan.textContent = msg;
+                errorSpan.classList.add('visible');
+                return;
+            }
+        }
+        input.setCustomValidity('');
+        input.style.color = '#006400';
+        input.classList.remove('validation-error');
+        errorSpan.classList.remove('visible');
+        errorSpan.textContent = '';
+    };
+    input.addEventListener('blur', validate);
+    input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter')
+            validate();
     });
 }
 // Helper: Parse _DEPREL_ cross-parameter constraint metadata
@@ -1609,7 +1808,7 @@ function isValidGenericNameValue(value, maxLen) {
     // Full object name is also valid for GENERIC-typed parms.
     return isValidNameValue(trimmed, maxLen, 'NAME');
 }
-function configureNameTypeValidation(input, type, len, alwVar, suggestions, container) {
+function configureNameTypeValidation(input, type, len, alwVar, suggestions, container, expr) {
     const typeUpper = String(type || '').toUpperCase().replace('*', '');
     const isNameLikeType = typeUpper === 'NAME' || typeUpper === 'SNAME' || typeUpper === 'CNAME' || typeUpper === 'PNAME' || typeUpper === 'GENERIC';
     if (!isNameLikeType) {
@@ -1654,7 +1853,9 @@ function configureNameTypeValidation(input, type, len, alwVar, suggestions, cont
         }
         // CL expressions (%SST(...), 'Q' *TCAT &LIB) are evaluated at runtime by IBM i;
         // the static name/length check must not apply.
-        if (isCLExpressionValue(value)) {
+        // When Expr=YES the parameter is declared to accept expressions, so we also skip
+        // the check for any parenthesized/operator-bearing value the heuristic catches.
+        if (isCLExpressionValue(value) || (expr === true && /[()]/.test(value))) {
             if (input.dataset.nameTypeValidationError === '1') {
                 input.setCustomValidity('');
                 input.classList.remove('validation-error');
@@ -1784,6 +1985,10 @@ function setupValidations(input, attrs, container) {
         if (attrs.suggestions && parseDepRelConstraints(attrs.suggestions).length > 0) {
             configureDepRelValidation(input, attrs.suggestions, container, attrs.alwVar);
         }
+        // Keyword-referenced constraints (RelKwd, RangeMinKwd/RangeMaxKwd)
+        if (attrs.suggestions && (parseRelKwdConstraints(attrs.suggestions).length > 0 || parseRangeKwdConstraints(attrs.suggestions))) {
+            configureKwdConstraintValidation(input, attrs.suggestions, container, attrs.alwVar);
+        }
         // AlwVar=NO: reject CL variables — add standalone check if no other validator covers it
         if (attrs.alwVar === false) {
             const hasRangeValidation = attrs.suggestions && parseRange(attrs.suggestions);
@@ -1795,7 +2000,7 @@ function setupValidations(input, attrs, container) {
                 configureAlwVarValidation(input, container);
             }
         }
-        configureNameTypeValidation(input, attrs.type, attrs.len, attrs.alwVar, attrs.suggestions, container);
+        configureNameTypeValidation(input, attrs.type, attrs.len, attrs.alwVar, attrs.suggestions, container, attrs.expr);
     }, 0);
 }
 // Helper: Validate all inputs with range validation after form population
@@ -2151,10 +2356,29 @@ function configureFocusIndicators() {
         currentlyFocused.dispatchEvent(new FocusEvent('focus'));
     }
 }
-function createInputForType(type, name, dft, len, suggestions, isRestricted = false, full, alwVar, dspInput, rtnVal, idx, parm) {
+// Wrap an element (input or cbInput) in a .parm-input-container so the Choice
+// text shows to the right of it. Only used when no constraint hint and no
+// validation metadata claims that right-hand slot. Always visible (5250-style),
+// NOT focus-gated like .constraint-hint.
+function wrapWithChoiceHint(el, choiceHint) {
+    if (!choiceHint)
+        return el;
+    const container = document.createElement('div');
+    container.className = 'parm-input-container';
+    container.appendChild(el);
+    const hintSpan = document.createElement('span');
+    hintSpan.className = 'choice-hint';
+    hintSpan.textContent = choiceHint;
+    container.appendChild(hintSpan);
+    return container;
+}
+function createInputForType(type, name, dft, len, suggestions, isRestricted = false, full, alwVar, dspInput, rtnVal, idx, parm, choiceHint, expr, alwUnprt) {
     const effectiveLen = len ? parseInt(len, 10) : getDefaultLengthForType(type);
     const dftLen = (dft || '').length;
     const typeUpper = type.toUpperCase();
+    // True when any metadata marker would claim the right-hand slot (constraint hint
+    // or a validation error span), so the Choice hint must not also go there.
+    const hasRightHandSlotContent = (sug) => sug.some(s => s.startsWith('_'));
     // LGL type should use textarea for CL expressions, but only when NOT restricted (Rstd=NO)
     const isLglType = !isRestricted && (typeUpper === 'LGL' || typeUpper === '*LGL');
     // CMD/CMDSTR types should always use textarea for command strings (can be up to 20000 chars)
@@ -2259,6 +2483,8 @@ function createInputForType(type, name, dft, len, suggestions, isRestricted = fa
             input.name = name;
             input.value = dft || '';
             input.dataset.default = dft || '';
+            if (choiceHint)
+                input.placeholder = choiceHint;
             input.classList.add(getLengthClass(effectiveLen));
             attachTouchTracking(input);
             // Track the most-recent non-& value for & expansion.
@@ -2291,10 +2517,16 @@ function createInputForType(type, name, dft, len, suggestions, isRestricted = fa
                 hintSpan.className = 'constraint-hint';
                 hintSpan.textContent = hint;
                 hintContainer.appendChild(hintSpan);
-                setupValidations(input, { suggestions, full, len, type, alwVar, rtnVal }, hintContainer);
+                setupValidations(input, { suggestions, full, len, type, alwVar, rtnVal, expr, alwUnprt }, hintContainer);
                 return hintContainer;
             }
-            setupValidations(input, { suggestions, full, len, type, alwVar, rtnVal });
+            // No constraint hint and no right-hand-slot metadata — put Choice text there
+            if (choiceHint && !hasRightHandSlotContent(suggestions)) {
+                const wrapped = wrapWithChoiceHint(input, choiceHint);
+                setupValidations(input, { suggestions, full, len, type, alwVar, rtnVal, expr, alwUnprt }, wrapped);
+                return wrapped;
+            }
+            setupValidations(input, { suggestions, full, len, type, alwVar, rtnVal, expr, alwUnprt });
             return input;
         }
         // Has actual special values - use CBInput but with filtered suggestions
@@ -2356,8 +2588,16 @@ function createInputForType(type, name, dft, len, suggestions, isRestricted = fa
             rtnVal,
             idx,
             parm,
-            isRestricted
+            isRestricted,
+            expr,
+            alwUnprt
         }, cbinput.getElement());
+        // Dropdown fields still get the 5250-style Choice text to the right (it adds
+        // info the dropdown lacks, e.g. "Name, generic*"), unless a constraint hint
+        // already claims that slot.
+        if (choiceHint && !buildConstraintHint(suggestions)) {
+            return wrapWithChoiceHint(cbinput.getElement(), choiceHint);
+        }
         return cbinput.getElement();
     }
     // No suggestions - regular input or textarea for long values
@@ -2366,6 +2606,8 @@ function createInputForType(type, name, dft, len, suggestions, isRestricted = fa
         textarea.name = name;
         textarea.value = dft || '';
         textarea.dataset.default = dft || '';
+        if (choiceHint)
+            textarea.placeholder = choiceHint;
         textarea.rows = 3;
         textarea.classList.add('long-text-input');
         attachTouchTracking(textarea);
@@ -2413,6 +2655,8 @@ function createInputForType(type, name, dft, len, suggestions, isRestricted = fa
         input.name = name;
         input.value = dft || '';
         input.dataset.default = dft || '';
+        if (choiceHint)
+            input.placeholder = choiceHint;
         input.classList.add(getLengthClass(effectiveLen));
         attachTouchTracking(input);
         // Add blur handler for VARNAME validation only (no case conversion)
@@ -2463,12 +2707,16 @@ function createInputForType(type, name, dft, len, suggestions, isRestricted = fa
             // Note: Case conversion is handled by buildCLCommand() based on convertParmValueToUpperCase setting
         });
         // Configure all validations (range, full, alwVar, rtnVal, etc.)
-        setupValidations(input, { suggestions, full, len, type, alwVar, rtnVal, idx, parm });
+        setupValidations(input, { suggestions, full, len, type, alwVar, rtnVal, idx, parm, expr, alwUnprt });
+        // No validation metadata claiming the right-hand slot — put Choice text there
+        if (choiceHint && !hasRightHandSlotContent(suggestions)) {
+            return wrapWithChoiceHint(input, choiceHint);
+        }
         return input;
     }
 }
 // Create parm input (cbInput or textfield for all parameters to support CL variables)
-function createParmInput(name, suggestions, isRestricted, dft, len, type, full, alwVar, dspInput, rtnVal, idx, parm) {
+function createParmInput(name, suggestions, isRestricted, dft, len, type, full, alwVar, dspInput, rtnVal, idx, parm, choiceHint, expr, alwUnprt) {
     debugLog(`[createParmInput] ${name}: idx=${idx}, isRestricted=${isRestricted}, suggestions.length=${suggestions.length}`);
     // Filter out SNGVAL values from dropdown for secondary instances (idx > 0)
     // SNGVAL values are exclusive and must be the only value for a parameter
@@ -2538,14 +2786,21 @@ function createParmInput(name, suggestions, isRestricted, dft, len, type, full, 
             rtnVal,
             idx,
             parm,
-            isRestricted
+            isRestricted,
+            expr,
+            alwUnprt
         }, cbinput.getElement());
         debugLog('[clPrompter] ', 'createParmInput end1');
+        // Restricted dropdown fields still get the 5250-style Choice text to the right
+        // unless a constraint hint already claims that slot.
+        if (choiceHint && !buildConstraintHint(suggestions)) {
+            return wrapWithChoiceHint(cbinput.getElement(), choiceHint);
+        }
         return cbinput.getElement();
     }
     else {
         debugLog('[clPrompter] ', 'createParmInput end2');
-        return createInputForType(type || 'CHAR', name, dft, len || '', suggestions, isRestricted, full, alwVar, dspInput, rtnVal, idx, parm);
+        return createInputForType(type || 'CHAR', name, dft, len || '', suggestions, isRestricted, full, alwVar, dspInput, rtnVal, idx, parm, choiceHint, expr, alwUnprt);
     }
 }
 function createQualInput(parentParm, qual, qualName, qualType, qualLen, qualDft, isFirstPart, idx) {
@@ -2604,7 +2859,10 @@ function createQualInput(parentParm, qual, qualName, qualType, qualLen, qualDft,
     const full = String(qual?.getAttribute('Full') || '');
     const alwVar = qual?.getAttribute('AlwVar') !== 'NO';
     const dspInput = String(qual?.getAttribute('DspInput') || '');
-    const input = createParmInput(qualName, allowedVals, restricted, dft, qualLen, qualType, full, alwVar, dspInput, undefined, idx, parentParm);
+    const choiceHint = String(qual?.getAttribute('Choice') || '') || undefined;
+    const expr = String(qual?.getAttribute('Expr') || '').toUpperCase() === 'YES';
+    const alwUnprt = String(qual?.getAttribute('AlwUnprt') || '').toUpperCase() === 'YES';
+    const input = createParmInput(qualName, allowedVals, restricted, dft, qualLen, qualType, full, alwVar, dspInput, undefined, idx, parentParm, choiceHint, expr, alwUnprt);
     ensureMinInputWidth(input, { len, inlPmtLen: inl });
     return input;
 }
@@ -2668,7 +2926,10 @@ function createElemInput(parentParm, elem, elemName, elemType, elemLen, elemDft,
     const full = String(elem?.getAttribute('Full') || '');
     const alwVar = elem?.getAttribute('AlwVar') !== 'NO';
     const dspInput = String(elem?.getAttribute('DspInput') || '');
-    const input = createParmInput(elemName, allowedVals, restricted, dft, elemLen, elemType, full, alwVar, dspInput, undefined, idx, parentParm);
+    const choiceHint = String(elem?.getAttribute('Choice') || '') || undefined;
+    const expr = String(elem?.getAttribute('Expr') || '').toUpperCase() === 'YES';
+    const alwUnprt = String(elem?.getAttribute('AlwUnprt') || '').toUpperCase() === 'YES';
+    const input = createParmInput(elemName, allowedVals, restricted, dft, elemLen, elemType, full, alwVar, dspInput, undefined, idx, parentParm, choiceHint, expr, alwUnprt);
     ensureMinInputWidth(input, { len, inlPmtLen: inl });
     return input;
 }
@@ -2693,6 +2954,9 @@ function renderSimpleParm(parm, kwd, container, dft, required, instanceId) {
     const alwVar = parm.getAttribute('AlwVar') !== 'NO';
     const dspInput = String(parm.getAttribute('DspInput') || '');
     const rtnVal = parm.getAttribute('RtnVal') === 'YES';
+    const choiceHint = String(parm.getAttribute('Choice') || '') || undefined;
+    const expr = String(parm.getAttribute('Expr') || '').toUpperCase() === 'YES';
+    const alwUnprt = String(parm.getAttribute('AlwUnprt') || '').toUpperCase() === 'YES';
     // Extract idx for SNGVAL filtering and validation
     let idx = undefined;
     if (instanceId && /_INST\d+$/.test(instanceId)) {
@@ -2702,7 +2966,7 @@ function renderSimpleParm(parm, kwd, container, dft, required, instanceId) {
     else {
         debugLog(`[renderSimpleParm] No idx extracted (instanceId=${instanceId}) for kwd=${kwd}`);
     }
-    const input = createParmInput(inputName, allowedVals, restricted, dft, effectiveLenAttr, type, fullAttr, alwVar, dspInput, rtnVal, idx, parm);
+    const input = createParmInput(inputName, allowedVals, restricted, dft, effectiveLenAttr, type, fullAttr, alwVar, dspInput, rtnVal, idx, parm, choiceHint, expr, alwUnprt);
     ensureMinInputWidth(input, { len, inlPmtLen: inl });
     // Wrap in form-group for 5250-style grid layout with prompt and keyword in label
     const formGroup = document.createElement('div');
@@ -4763,7 +5027,7 @@ function evaluatePmtCtlGroup(group) {
             condMet = ctlRaw === '' || ctlRaw === ' ';
         }
         else {
-            const cmpResolved = resolveHexLiteral(cond.cmpVal);
+            const cmpResolved = resolveHexLiteral(cond.cmpVal ?? '');
             const ctlNorm = ctlVal === '' ? ' ' : ctlVal;
             condMet = compareDepValues(ctlNorm, cond.rel, cmpResolved);
         }
@@ -4772,6 +5036,7 @@ function evaluatePmtCtlGroup(group) {
     }
     // Compare trueCount to nbrTrue using nbrTrueRel
     switch (group.nbrTrueRel) {
+        case 'ALL': return trueCount === group.conds.length && group.conds.length > 0;
         case 'EQ': return trueCount === group.nbrTrue;
         case 'NE': return trueCount !== group.nbrTrue;
         case 'GT': return trueCount > group.nbrTrue;
@@ -4933,6 +5198,9 @@ function evaluateDepConstraint(constraint, atSubmit = false) {
     // Step 3: Check NbrTrueRel/NbrTrue
     let passes;
     switch (constraint.nbrTrueRel) {
+        case 'ALL':
+            passes = trueCount === constraint.depParms.length && constraint.depParms.length > 0;
+            break;
         case 'GT':
             passes = trueCount > constraint.nbrTrue;
             break;

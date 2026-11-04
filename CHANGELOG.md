@@ -2,6 +2,20 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.0.67] - 2026-11-04
+
+### What's New
+- **CL prompter choice text** — The `Choice text` in the command definition (e.g. `Name, *LIBL, *CURLIB`, `*NO, *YES`, `Name, generic*, *FIRST, *ALL`) now appears to the right of each parameter, matching the 5250 prompter's right-hand column. It shows on plain inputs, dropdowns, and text areas, and also serves as the field's placeholder when no value is present. Fields that already carry a constraint hint or validation message in that spot keep those instead. Fields with no `Choice text` show nothing, exactly as on the 5250.
+- **Prompter reads more of the CL command definition XML** — Following an audit against the QCDRCMDD API and DTD, the prompter now consumes attributes it previously ignored:
+  - `ChoicePgm, PmtOvrPgm, and others` — on in plan to be implemented in a future release.
+  - Keyword-referenced constraints are now enforced live: `RelKwd` (a value must satisfy a relational operator against another parameter's current value, e.g. `MAX >= MIN`) and `RangeMinKwd`/`RangeMaxKwd` (a range whose bounds come from other parameters), with matching constraint hints to the right of the field.
+  - `Expr=YES` parameters no longer trip name/type validation on parenthesized or operator-bearing expression values.
+
+### What's Fixed
+- Prompter `PmtCtl`/`Dep` conditions with `NbrTrueRel="ALL"` were evaluated as "at least one condition true"; they now correctly require *every* condition to hold.
+- `PmtCtlCond` prompt-control conditions using `SPCFD`/`UNSPCFD` with no comparison value (legal per IBM's DTD) were silently dropped, so some parameters never showed/hid; they are now honored.
+- The command-level `MaxPos` attribute is now passed through to the prompter's positional-parameter handling on every form load path.
+
 ## [1.0.66] - 2026-11-04
 
 ### What's New

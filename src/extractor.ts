@@ -571,6 +571,35 @@ export function extractAllowedValues(element: XMLElement): string[] {
         console.log(`[clPrompter] Added rel metadata Rel=${rel} RelVal=${relVal} for ${element.tagName}`);
     }
 
+    // Parse Rel/RelKwd — keyword-referenced relational constraint (value must satisfy Rel vs another keyword's value)
+    const relKwd = element.getAttribute("RelKwd");
+    if (rel && relKwd !== null && relVal === null) {
+        vals.push(`_RELKWD_${rel}_${relKwd}`);
+        console.log(`[clPrompter] Added rel-kwd metadata Rel=${rel} RelKwd=${relKwd} for ${element.tagName}`);
+    }
+
+    // Parse RangeMinKwd/RangeMaxKwd — keyword-bounded range (bound is another keyword's current value)
+    const rangeMinKwd = element.getAttribute("RangeMinKwd");
+    if (rangeMinKwd !== null) {
+        vals.push(`_RANGEMINKWD_${rangeMinKwd}`);
+    }
+    const rangeMaxKwd = element.getAttribute("RangeMaxKwd");
+    if (rangeMaxKwd !== null) {
+        vals.push(`_RANGEMAXKWD_${rangeMaxKwd}`);
+    }
+
+    // ✅ Consume ChoicePgmValues: statically-resolved choice values IBM emits when the
+    // command's choice program values were resolvable at QCDRCMDD time. No runtime
+    // CHOICEPGM call is made — this only stops dropping data already in the XML.
+    const choicePgmVals = element.getElementsByTagName("ChoicePgmValues");
+    if (choicePgmVals.length > 0) {
+        const cpvElements = Array.from(choicePgmVals[0].getElementsByTagName("Value"));
+        const extractedCpvValues = cpvElements
+            .map(v => (v as any).getAttribute("Val") || (v as any).getAttribute("Value"))
+            .filter(Boolean) as string[];
+        vals.push(...extractedCpvValues);
+    }
+
     return [...new Set(vals)]; // Remove duplicates
 }
 
@@ -963,8 +992,9 @@ function buildPmtCtlMapFromDoc(xmlDoc: any): PmtCtlMap {
             for (const cond of condEls) {
                 const rel = cond.getAttribute('Rel');
                 const cmpVal = cond.getAttribute('CmpVal');
-                if (rel !== null && cmpVal !== null) {
-                    conds.push({ rel, cmpVal });
+                // CmpVal is #IMPLIED in the DTD — SPCFD/UNSPCFD conditions carry no CmpVal.
+                if (rel !== null && (cmpVal !== null || rel === 'SPCFD' || rel === 'UNSPCFD')) {
+                    conds.push(cmpVal !== null ? { rel, cmpVal } : { rel });
                 }
             }
 

@@ -1805,6 +1805,7 @@ export class ClPromptPanel {
                         console.error('[clPrompter] webviewReady: Failed to parse XML for command prompt:', err);
                     }
 
+                    const cmdMaxPos = getMaxPos(this._xml);
                     const { allowedValsMap, depConstraints, valToMapToMap, defaultValMap, pmtCtlMap } = buildAllMaps(this._xml);
                     const config = vscode.workspace.getConfiguration('clPrompter');
                     const keywordColor = config.get('kwdColor');
@@ -1828,6 +1829,7 @@ export class ClPromptPanel {
                         pmtCtlMap,
                         cmdName: this._cmdName,
                         cmdPrompt: cmdPrompt,
+                        cmdMaxPos,
                         paramMap: this._parmMap,
                         parmMap: this._parmMap,
                         parmMetas: this._parmMetas,
@@ -2147,6 +2149,7 @@ export class ClPromptPanel {
 
                         this._panel.webview.postMessage({ type: 'formXml', xml: this._xml, cmdName: this._cmdName, cmdPrompt: cmdPrompt });
 
+                        const cmdMaxPos = getMaxPos(this._xml);
                         const { allowedValsMap, depConstraints, valToMapToMap, defaultValMap } = buildAllMaps(this._xml);
                         const config = vscode.workspace.getConfiguration('clPrompter');
                         const keywordColor = config.get('kwdColor');
@@ -2164,6 +2167,7 @@ export class ClPromptPanel {
                             defaultValMap,
                             cmdName: this._cmdName,
                             cmdPrompt: cmdPrompt,
+                            cmdMaxPos,
                             parmMap: this._parmMap,
                             paramMap: this._parmMap,
                             parmMetas: this._parmMetas,
@@ -2189,6 +2193,7 @@ export class ClPromptPanel {
                             }
 
                             // Resend the form data to reinitialize the webview
+                            const cmdMaxPos = getMaxPos(this._xml);
                             const { allowedValsMap, depConstraints, valToMapToMap, defaultValMap } = buildAllMaps(this._xml);
                             const config = vscode.workspace.getConfiguration('clPrompter');
                             const keywordColor = config.get('kwdColor');
@@ -2218,6 +2223,7 @@ export class ClPromptPanel {
                                 defaultValMap,
                                 cmdName: this._cmdName,
                                 cmdPrompt: cmdPrompt,
+                                cmdMaxPos,
                                 parmMap: this._parmMap,
                                 paramMap: this._parmMap,
                                 parmMetas: this._parmMetas,
@@ -2426,6 +2432,7 @@ export class ClPromptPanel {
         if (!cmdName || cmdName.trim() === '') {
             this.postMessageWithCommentToggleLog(this._panel.webview, 'host.setXML.labelOnly.setLabel.postMessage', { type: 'setLabel', label: this._cmdLabel, comment: this._cmdComment, showComments: this._showComments });
         } else {
+            const cmdMaxPos = getMaxPos(this._xml);
             const { allowedValsMap, depConstraints, valToMapToMap, defaultValMap, pmtCtlMap } = buildAllMaps(this._xml);
             const config = vscode.workspace.getConfiguration('clPrompter');
             const keywordColor = config.get('kwdColor');
@@ -2444,6 +2451,7 @@ export class ClPromptPanel {
                 pmtCtlMap,
                 cmdName: this._cmdName,
                 cmdPrompt: cmdPrompt || '',
+                cmdMaxPos,
                 paramMap: this._parmMap,
                 parmMap: this._parmMap,
                 parmMetas: this._parmMetas,
