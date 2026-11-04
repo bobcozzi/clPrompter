@@ -208,5 +208,12 @@ export function buildDepErrorMessage(
         return `Exactly one of ${depNames} must be specified.`;
     }
 
-    return `Dependency constraint violated (${constraint.msgId || kwdList}): ${require} of ${total} conditions must hold`;
+    // Generic fallback: describe the actual condition(s) rather than the vague
+    // "N of M conditions must hold". For a single condition, name it directly.
+    const conditionDescs = constraint.depParms.map(dp => describeDepParm(dp));
+    const conditionText = conditionDescs.length === 1
+        ? conditionDescs[0]
+        : conditionDescs.join(', ');
+    const id = constraint.msgId || kwdList;
+    return `Dependency constraint violated (${id}): ${require} of ${total} must be met (${conditionText})`;
 }

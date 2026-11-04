@@ -2,7 +2,7 @@
   "name": "clprompter",
   "displayName": "%displayName%",
   "description": "%description%",
-  "version": "1.0.65",
+  "version": "1.0.66",
   "author": {
     "name": "Bob Cozzi",
     "url": "https://github.com/bobcozzi"
@@ -50,6 +50,10 @@
       {
         "command": "clPrompter.formatCurrentCommand",
         "title": "%contributes.commands.1.title%"
+      },
+      {
+        "command": "clPrompter.formatSelection",
+        "title": "%contributes.commands.31.title%"
       },
       {
         "command": "clPrompter.formatEntireFile",
@@ -916,7 +920,7 @@
           "group": "navigation"
         },
         {
-          "command": "clPrompter.formatCurrentCommand",
+          "command": "clPrompter.formatSelection",
           "when": "editorTextFocus && (editorLangId == clle || editorLangId == clp || editorLangId == cl || editorLangId == bnd || editorLangId == cmd)",
           "group": "1_modification"
         },

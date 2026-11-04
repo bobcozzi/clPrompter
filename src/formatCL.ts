@@ -316,6 +316,19 @@ export function buildCLCommand(
     const parmType = updatedTypeMap[key] || "";
     const isMixedCase = meta.Case?.toUpperCase() === 'MIXED';
 
+    // *CMD/*CMDSTR parameters hold an entire nested CL command as a single string
+    // (e.g. IF's THEN = "CLRPFM FILE(EDIT)"). The prompter's parm map may carry that
+    // string nested as string[][] ([["CLRPFM FILE(EDIT)"]]) or string[] — flatten it to
+    // a plain string here so the value-emit branches below never see an array (which
+    // would otherwise crash quoteIfNeeded with "val.trim is not a function" and silently
+    // drop the nested command's parameters).
+    const parmTypeUpper = parmType.toUpperCase().replace(/^[*]/, '');
+    if (parmTypeUpper.startsWith('CMD') && Array.isArray(value)) {
+      const flattenDeep = (v: any): string =>
+        Array.isArray(v) ? v.map(flattenDeep).filter(s => s !== '').join(' ') : String(v ?? '');
+      value = flattenDeep(value).trim();
+    }
+
     // --- BEGIN ELEM-EMIT ---
     if (hasElemChildren && Array.isArray(value)) {
       if (parmType === 'ELEM') {
@@ -660,6 +673,16 @@ export function quoteIfNeeded(val: string, allowedVals: string[] = [], parmType:
         return trimmed;
       }
     }
+  }
+
+  // 6b. Plain character types (CHAR, DATE, etc.) that are NOT name-typed do not need to
+  // satisfy CL "valid name" rules (which require a leading letter). A CHAR value such as
+  // a product ID (5733WQX) or license-key fragment (04747B) is valid unquoted as long as
+  // it contains no blanks or CL delimiter characters (space, parens, quotes, operators).
+  // Only NAME-family types (NAME/PNAME/SNAME/CNAME) must match the valid-name pattern.
+  const isNameTyped = ["NAME", "PNAME", "SNAME", "CNAME"].includes(type);
+  if (!isNameTyped && /^[^\s()'"/=<>&|*+%]+$/.test(trimmed)) {
+    return trimmed;
   }
 
   // 7. Unqualified valid CL name

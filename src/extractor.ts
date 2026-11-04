@@ -321,9 +321,10 @@ export function extractGotoTargetLabel(command: string): string | undefined {
 
 /**
  * Resolves a GOTO target from a tokenized GOTO statement. Named CMDLBL(...) wins;
- * otherwise the first positional value. Because parseCL drops keyword-typed
- * positional values (e.g. `GOTO READNEXT` -> parameters: []) and the label inside
- * CMDLBL(...), resolution falls back to the token stream for both cases.
+ * otherwise the first positional value. parseCL keeps bare positional values
+ * (e.g. `GOTO READNEXT` -> __pos1), but wraps the label inside CMDLBL(...) as an
+ * expression object rather than a plain string, so resolution reads the token
+ * stream directly for both cases.
  */
 function clGotoTargetFromTokens(tokens: Array<{ type: string; value: string }>, node: { name: string; parameters: Array<{ name: string; value: unknown }> }): string | undefined {
     const isValueToken = (token: { type: string }): boolean =>

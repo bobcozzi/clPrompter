@@ -651,6 +651,32 @@ function configureRangeValidation(input, suggestions, container, alwVar) {
         errorSpan.classList.add('visible');
     });
 }
+/**
+ * Returns true when a parameter value is a CL expression rather than a literal.
+ * IBM i evaluates expressions at runtime, so static length checks (Len, Full=YES)
+ * must not apply. Detects:
+ *  - built-in function calls: %SST(...), %SUBSTRING(...), %BINARY(...), etc.
+ *  - symbolic operators: *CAT *TCAT *BCAT *AND *OR *NOT *EQ *NE *GT *GE *LT *LE *NG *NL
+ *  - a CL variable (&X) combined with an arithmetic/relational operator: &A + 1, &Y > 100, &LEN * 2
+ * A bare literal like "A=B" (no & or %) is NOT treated as an expression.
+ */
+function isCLExpressionValue(value) {
+    const trimmed = String(value || '').trim();
+    if (!trimmed)
+        return false;
+    // Built-in function call: %SST(...), %SUBSTRING(...), %BINARY(...), %CHAR(...), etc.
+    if (/%[A-Z][A-Z0-9]*\s*\(/i.test(trimmed))
+        return true;
+    // Symbolic operators (*CAT, *TCAT, *BCAT, *AND, *OR, *NOT, *EQ, *NE, *GT, *GE, *LT, *LE, *NG, *NL)
+    if (/\*(CAT|TCAT|BCAT|AND|OR|NOT|EQ|NE|GT|GE|LT|LE|NG|NL)\b/i.test(trimmed))
+        return true;
+    // A CL variable combined with an arithmetic/relational operator is an expression:
+    //   &A + 1 | &Y > 100 | &LEN * 2 | 'Q' = &X
+    // Requires a &variable AND an operator; a lone &VAR or a literal A=B is not an expression.
+    if (/&[A-Z0-9_$#@.]/i.test(trimmed) && /(\+|-|\*|\/|=|<=|>=|<|>|¬=|¬<|¬>)/.test(trimmed))
+        return true;
+    return false;
+}
 // Validate Full="YES" fields - exact length required unless CL variable/expression
 function configureFullValidation(input, requiredLength, suggestions = [], container, alwVar) {
     if (!requiredLength || requiredLength <= 0)
@@ -676,6 +702,16 @@ function configureFullValidation(input, requiredLength, suggestions = [], contai
         if (!input.value) {
             input.setCustomValidity('');
             input.style.color = '';
+            input.classList.remove('validation-error');
+            errorSpan.classList.remove('visible');
+            errorSpan.textContent = '';
+            return;
+        }
+        // CL expressions (%SST(...), 'Q' *TCAT &LIB) are evaluated at runtime by IBM i;
+        // the static Full=YES exact-length check must not apply.
+        if (isCLExpressionValue(input.value)) {
+            input.setCustomValidity('');
+            input.style.color = '#006400'; // Valid - dark green
             input.classList.remove('validation-error');
             errorSpan.classList.remove('visible');
             errorSpan.textContent = '';
@@ -709,8 +745,17 @@ function configureFullValidation(input, requiredLength, suggestions = [], contai
             errorSpan.textContent = '';
             return;
         }
-        // Validate exact length
-        if (input.value.length === requiredLength) {
+        // Validate exact length. For a quoted value, measure the content length
+        // (surrounding quotes removed, escaped '' counted as one char), not the
+        // quoted string's raw length. 'HelloWorld' (Len=10) is 10 content chars.
+        const rawValue = input.value;
+        let measuredLength = rawValue.length;
+        if (rawValue.length >= 2 && rawValue.startsWith("'") && rawValue.endsWith("'")) {
+            const inner = rawValue.slice(1, -1);
+            // Each escaped '' pair is a single character
+            measuredLength = inner.replace(/''/g, "'").length;
+        }
+        if (measuredLength === requiredLength) {
             input.setCustomValidity('');
             input.style.color = '#006400'; // Valid - dark green
             input.classList.remove('validation-error');
@@ -1598,6 +1643,18 @@ function configureNameTypeValidation(input, type, len, alwVar, suggestions, cont
             return;
         }
         if (!value) {
+            if (input.dataset.nameTypeValidationError === '1') {
+                input.setCustomValidity('');
+                input.classList.remove('validation-error');
+                input.dataset.nameTypeValidationError = '0';
+                errorSpan.classList.remove('visible');
+                errorSpan.textContent = '';
+            }
+            return;
+        }
+        // CL expressions (%SST(...), 'Q' *TCAT &LIB) are evaluated at runtime by IBM i;
+        // the static name/length check must not apply.
+        if (isCLExpressionValue(value)) {
             if (input.dataset.nameTypeValidationError === '1') {
                 input.setCustomValidity('');
                 input.classList.remove('validation-error');

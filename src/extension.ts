@@ -1223,6 +1223,79 @@ export async function activate(context: vscode.ExtensionContext) {
             })
         );
 
+        // Register Format CL Selection
+        context.subscriptions.push(
+            vscode.commands.registerCommand('clPrompter.formatSelection', async () => {
+                const editor = vscode.window.activeTextEditor;
+                if (!editor) {
+                    vscode.window.showInformationMessage(vscode.l10n.t('No active editor'));
+                    return;
+                }
+
+                const document = editor.document;
+
+                // Only activate for supported languages
+                const supportedLangs = ['clle', 'clp', 'cl', 'cmd', 'bnd'];
+                if (!supportedLangs.includes(document.languageId)) {
+                    vscode.window.showInformationMessage(vscode.l10n.t('CL Prompter: Not a supported IBM i source type.'));
+                    return;
+                }
+
+                const selection = editor.selection;
+
+                // Get format options from configuration
+                const config = vscode.workspace.getConfiguration('clPrompter');
+                const formatOptions: FormatOptions = {
+                    cvtcase: config.get('convertCmdAndParmNameCase', '*UPPER') as '*UPPER' | '*LOWER' | '*NONE',
+                    indrmks: config.get('formatIndentComments', '*YES') as '*NO' | '*YES',
+                    labelpos: config.get('formatLabelPosition', 2),
+                    bgncol: config.get('formatCmdPosition', 14),
+                    indcol: config.get('formatKwdPosition', 25),
+                    indcont: config.get('formatContinuePosition', 27)
+                };
+
+                // Determine the line range to format. With an active selection, format the
+                // selected lines. With no selection (caret only), format the CL command
+                // under the caret (resolved via collectCLCmd, including continuations).
+                let startLine: number;
+                let endLine: number;
+                if (selection.isEmpty) {
+                    const commandInfo = collectCLCmd(editor);
+                    if (!commandInfo || !commandInfo.command) {
+                        vscode.window.showInformationMessage(vscode.l10n.t('No CL command found at cursor'));
+                        return;
+                    }
+                    startLine = commandInfo.startLine;
+                    endLine = commandInfo.endLine;
+                } else {
+                    startLine = selection.start.line;
+                    endLine = selection.end.line;
+                }
+
+                // Collect the target lines. Expand to full lines so every statement
+                // touching the range is included.
+                const selectedLines: string[] = [];
+                for (let i = startLine; i <= endLine; i++) {
+                    selectedLines.push(document.lineAt(i).text);
+                }
+
+                // formatCLSource walks each statement within the array via
+                // collectCLCmdFromLine (statement start/end + continuations), so all
+                // CL commands that fall within the selection are formatted in turn.
+                const formatted = formatCLSource(selectedLines, formatOptions, 0);
+
+                await editor.edit(editBuilder => {
+                    const range = new vscode.Range(
+                        startLine, 0,
+                        endLine, document.lineAt(endLine).text.length
+                    );
+                    editBuilder.replace(range, formatted.join('\n'));
+                });
+
+                vscode.window.showInformationMessage(vscode.l10n.t('CL selection formatted'));
+            })
+        );
+
         // Register Format CL Entire File
         context.subscriptions.push(
             vscode.commands.registerCommand('clPrompter.formatEntireFile', async () => {
@@ -1671,10 +1744,13 @@ export class ClPromptPanel {
             // 2) MaxPos
             const maxPos = getMaxPos(xml);
 
-            // 3) Rewrite leading positionals by XML arrival order, then parse
+            // 3) Rewrite leading positionals by XML arrival order, then parse.
+            // Pass a keyword→Type map so *CMD/*CMDSTR positional parameters
+            // (e.g. IF's THEN, MONMSG's EXEC) gobble the entire nested command.
+            const parmTypeMap = buildParmTypeMap(this._parmMetas);
             const cmdWithKeywords =
                 (maxPos ?? 0) > 0 && posOrderByArrival.length > 0
-                    ? rewriteLeadingPositionalsByList(fullCmd, posOrderByArrival, maxPos)
+                    ? rewriteLeadingPositionalsByList(fullCmd, posOrderByArrival, maxPos, parmTypeMap)
                     : fullCmd;
 
             try {
@@ -2322,9 +2398,10 @@ export class ClPromptPanel {
                 })
                 .map(x => x.m);
             const maxPos = getMaxPos(xml);
+            const parmTypeMap = buildParmTypeMap(this._parmMetas);
             const cmdWithKeywords =
                 (maxPos ?? 0) > 0 && posOrderByArrival.length > 0
-                    ? rewriteLeadingPositionalsByList(fullCmd, posOrderByArrival, maxPos)
+                    ? rewriteLeadingPositionalsByList(fullCmd, posOrderByArrival, maxPos, parmTypeMap)
                     : fullCmd;
             try {
                 this._parmMap = parseCLParms(cmdWithKeywords, this._parmMetas);
@@ -2823,6 +2900,20 @@ export function getHtmlForPrompter(
 function getMaxPos(xml: string): number | undefined {
     const m = xml.match(/\bMaxPos="(\d+)"/i);
     return m ? parseInt(m[1], 10) : undefined;
+}
+
+/**
+ * Build a keyword→Type map from ParmMeta[] so positional rewriting can identify
+ * *CMD/*CMDSTR parameters (which hold an entire nested CL command and must gobble
+ * the rest of the statement). Keys are uppercased for case-insensitive lookup.
+ */
+function buildParmTypeMap(parmMetas: Array<{ Kwd?: string; Type?: string }>): Record<string, string> {
+    const map: Record<string, string> = {};
+    for (const m of parmMetas ?? []) {
+        const kwd = String(m?.Kwd ?? '').toUpperCase();
+        if (kwd) map[kwd] = String(m?.Type ?? '');
+    }
+    return map;
 }
 
 function getThrowawayKwdsFromXML(xml: string): Set<string> {

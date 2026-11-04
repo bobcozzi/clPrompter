@@ -2,6 +2,21 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.0.66] - 2026-11-04
+
+### What's New
+- **Format CL (selection)** — A new editor context-menu command formats the CL commands in the current selection. With no selection, it formats the CL command under the caret (including `+`/`-` continuations). The context menu now offers **Format CL (selection)** and **Format CL (file)**.
+
+### What's Fixed
+- Formatter dropped bare positional parameter values (e.g. `DLTF SVHDR`, `MONMSG CPF0000`) — the value was silently removed, leaving just `DLTF`. Bare-word and parenthesized positional values are now preserved.
+- Formatter leaked internal `__POS1(...)` markers into output when case-conversion was active.
+- Formatter removed parentheses around positional values and parenthesized expressions, producing invalid statements (e.g. `IF (&A = '1') GOTO ENDPGM` became `IF &A = '1' GOTO ENDPGM`; `MONMSG (CPF0000 CPF9999)` became `MONMSG CPF0000 CPF9999`). Parentheses are now preserved.
+- Prompter dropped the contents of a `*CMD`/`*CMDSTR` positional parameter's nested command. For example:`IF (&TEST *EQ &TRUE) CLRPFM FILE(EDIT)` now populates THEN with the full `CLRPFM FILE(EDIT)` instead of just `CLRPFM`. Applies to IF/ELSE THEN and MONMSG EXEC.
+- Prompter's "exactly N characters" (Full=YES) and name/length validations no longer fire on CL expressions (built-in functions like `%SST(...)`/`%SUBSTRING(...)`, or expressions combining a variable with an operator like `'Q' *TCAT &LIB`, `&Y > 100`), which IBM i evaluates at runtime.
+- Prompter's Full=YES length check counted the surrounding quotes of a quoted value, so `'HelloWorld'` failed `Len=10`. The check now measures content length (quotes removed, escaped `''` counted as one).
+- Character (CHAR and other non-NAME) parameter values such as `5733WQX` or `04747B` were incorrectly quoted (e.g. `PRDID('5733WQX')`) because they were held to the CL "valid name" leading-letter rule. Non-NAME-typed values with no delimiter characters are now returned unquoted.
+- Dependency-constraint error messages named only the count ("exactly 1 of 1 conditions must hold"). They now describe the actual condition, e.g. `(CPD0141): exactly 1 of 1 must be met (AMOUNT > B)`.
+
 ## [1.0.65] - 2026-11-03
 
 ### What's New

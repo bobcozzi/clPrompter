@@ -226,6 +226,9 @@ function valueToLayoutTokens(value: CLValue, context: { inWrappedExpr?: boolean 
         const expr = value as any;
         const exprTokens = expr.tokens as CLToken[];
         const layoutTokens: LayoutToken[] = [];
+        // A wrapped expression (e.g. a parenthesized IF condition or a positional
+        // value enclosed in parens) must be emitted with its surrounding parens.
+        const isWrapped = expr.wrapped === true;
 
         for (let idx = 0; idx < exprTokens.length; idx++) {
             const tok = exprTokens[idx];
@@ -255,6 +258,20 @@ function valueToLayoutTokens(value: CLValue, context: { inWrappedExpr?: boolean 
                 layoutTokens.push({ text: tok.value, type: 'text', atomic: true });
             }
         }
+
+        if (isWrapped && layoutTokens.length > 0) {
+            // Prepend '(' to first token, append ')' to last token
+            const first = layoutTokens[0];
+            first.text = '(' + first.text;
+            const last = layoutTokens[layoutTokens.length - 1];
+            if (last.type === 'text' && last.atomic) {
+                last.text += ')';
+                last.type = 'break-after';
+            } else {
+                layoutTokens.push({ text: ')', type: 'break-after', atomic: false });
+            }
+        }
+
         tokens.push(...layoutTokens);
         return tokens;
     }
@@ -782,37 +799,37 @@ export function formatCLCommand_v2(node: CLNode, label?: string, config: Partial
                         // Comment spans multiple lines
                         lines[lastLineIdx] = trimmedLine + openMarker + firstPart + contMarker;
 
-                    // Wrap remaining comment text
-                    let textToWrap = remainingText;
-                    while (textToWrap.length > 0) {
-                        const closeMarker = ' */';
-                        const contMarker = ' +';
-                        const suffix = textToWrap.length <= finalConfig.rightMargin - commentIndent.length - 3 ? closeMarker : contMarker;
-                        const availableSpace = finalConfig.rightMargin - commentIndent.length - suffix.length;
+                        // Wrap remaining comment text
+                        let textToWrap = remainingText;
+                        while (textToWrap.length > 0) {
+                            const closeMarker = ' */';
+                            const contMarker = ' +';
+                            const suffix = textToWrap.length <= finalConfig.rightMargin - commentIndent.length - 3 ? closeMarker : contMarker;
+                            const availableSpace = finalConfig.rightMargin - commentIndent.length - suffix.length;
 
-                        if (textToWrap.length <= availableSpace) {
-                            // Remaining text fits
-                            lines.push(commentIndent + textToWrap + closeMarker);
-                            break;
+                            if (textToWrap.length <= availableSpace) {
+                                // Remaining text fits
+                                lines.push(commentIndent + textToWrap + closeMarker);
+                                break;
+                            }
+
+                            // Find break point
+                            let bp = textToWrap.lastIndexOf(' ', availableSpace);
+                            if (bp <= 0) {
+                                bp = availableSpace;
+                            }
+
+                            const line = textToWrap.substring(0, bp).trim();
+                            textToWrap = textToWrap.substring(bp).trim();
+                            lines.push(commentIndent + line + ' +');
                         }
-
-                        // Find break point
-                        let bp = textToWrap.lastIndexOf(' ', availableSpace);
-                        if (bp <= 0) {
-                            bp = availableSpace;
-                        }
-
-                        const line = textToWrap.substring(0, bp).trim();
-                        textToWrap = textToWrap.substring(bp).trim();
-                        lines.push(commentIndent + line + ' +');
                     }
-                }
                 } else {
                     // Not enough room to start comment on same line - check if continuation fits
                     if (trimmedLine.length + 2 > finalConfig.rightMargin) {
                         // Need to break line before adding continuation
                         const maxLen = finalConfig.rightMargin - 2;
-                            let breakPoint = trimmedLine.lastIndexOf(' ', maxLen);
+                        let breakPoint = trimmedLine.lastIndexOf(' ', maxLen);
 
                         if (breakPoint > finalConfig.contIndent) {
                             const firstPart = trimmedLine.substring(0, breakPoint);

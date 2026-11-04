@@ -246,8 +246,34 @@ export function parseCL(tokens: CLToken[], comment?: string): CLNode {
       }
     }
 
-    // Positional parameter(s) allowed only before first named parameter
-    if (!seenNamed && (tok.type === 'value' || tok.type === 'string' || tok.type === 'variable' || tok.type === 'symbolic_value' || tok.type === 'function')) {
+    // Paren-wrapped positional group: '(' value ')' before first named parameter.
+    // CL allows a single positional parameter to be enclosed in parens (e.g.
+    // "MONMSG (CPF0000)" or "MONMSG (CPF0000 CPF9999)"). The parens are part of
+    // the syntax and must be preserved, so keep the wrapped group intact as one
+    // positional value rather than dropping the parens and leaking bare tokens.
+    if (!seenNamed && tok.type === 'paren_open') {
+      next(); // consume '('
+      const exprTokens: CLToken[] = [];
+      let depth = 1;
+      while (i < tokens.length && depth > 0) {
+        const inner = next();
+        if (inner.type === 'paren_open') depth++;
+        if (inner.type === 'paren_close') depth--;
+        if (depth > 0) exprTokens.push(inner);
+      }
+      parameters.push({
+        name: `__pos${positionalIndex++}`,
+        value: { type: 'expression', tokens: exprTokens, wrapped: true } as any
+      });
+      continue;
+    }
+
+    // Positional parameter(s) allowed only before first named parameter.
+    // Note: a bare word like SVHDR in "DLTF SVHDR" is tokenized as 'keyword'
+    // (it matches the keyword pattern); since the named-parameter branch above
+    // only consumes keyword tokens followed by '(', a 'keyword' token reaching
+    // here is a bare positional value and must not be dropped.
+    if (!seenNamed && (tok.type === 'value' || tok.type === 'string' || tok.type === 'variable' || tok.type === 'symbolic_value' || tok.type === 'function' || tok.type === 'keyword')) {
       const posTok = next(); // consume the positional token
       parameters.push({ name: `__pos${positionalIndex++}`, value: posTok.value });
       continue;
@@ -340,7 +366,7 @@ function getPosNbrMeta(m: any): number {
 }
 
 //////////
-export function rewriteLeadingPositionalsByList(fullCmd: string, positionalKwds: string[], cmdMaxPos?: number): string {
+export function rewriteLeadingPositionalsByList(fullCmd: string, positionalKwds: string[], cmdMaxPos?: number, parmTypeMap?: Record<string, string>): string {
   const tokens = tokenizeCL(fullCmd);
   if (!tokens.length || positionalKwds.length === 0) return fullCmd;
 
@@ -354,7 +380,7 @@ export function rewriteLeadingPositionalsByList(fullCmd: string, positionalKwds:
     if (commandText.trim().length === 0) {
       return fullCmd;
     }
-    const rewrittenCommandText = rewriteLeadingPositionalsByList(commandText, positionalKwds, cmdMaxPos);
+    const rewrittenCommandText = rewriteLeadingPositionalsByList(commandText, positionalKwds, cmdMaxPos, parmTypeMap);
     return `${labelPrefix}${rewrittenCommandText}`;
   }
 
@@ -372,6 +398,18 @@ export function rewriteLeadingPositionalsByList(fullCmd: string, positionalKwds:
   const isNamedAt = (idx: number) =>
     tokens[idx]?.type === 'keyword' && tokens[idx + 1]?.type === 'paren_open';
 
+  // A positional parameter whose Type is CMD or CMDSTR holds an entire nested
+  // CL command (e.g. IF's THEN, ELSE's command, MONMSG's EXEC). Such parameters
+  // are always the final positional parameter, and their value is everything from
+  // the current token to the end of the statement.
+  // Note: the XML Type attribute has NO leading star (Type="CMD", not "*CMD"),
+  // so strip any leading '*' before comparing.
+  const isCmdType = (kwd: string): boolean => {
+    if (!parmTypeMap) return false;
+    const type = String(parmTypeMap[kwd] ?? '').toUpperCase().replace(/^[*]/, '');
+    return type === 'CMD' || type === 'CMDSTR';
+  };
+
   let i = cmdIdx + 1;
   let posIdx = 0;
   let madeChange = false;
@@ -380,6 +418,30 @@ export function rewriteLeadingPositionalsByList(fullCmd: string, positionalKwds:
     const t = tokens[i];
     if (t.type === 'space') { i++; continue; }
     if (isNamedAt(i)) break; // stop at first named parm (KWD()
+
+    const currentKwd = kwdList[posIdx];
+
+    // Case 0: *CMD/*CMDSTR positional → gobble everything to end of statement.
+    // The nested command (e.g. "GOTO ENDPGM" or "SNDUSRMSG MSG(...) TOUSR(...)")
+    // must be captured whole, not just its first token. Because it runs to the
+    // end of the statement, no further positional rewriting can follow.
+    if (isCmdType(currentKwd)) {
+      // Skip leading spaces within the nested command
+      let start = i;
+      while (start < tokens.length && tokens[start].type === 'space') start++;
+      if (start >= tokens.length) break; // no command present
+
+      const inner = tokens.slice(start).map(x => x.value).join('').trim();
+      if (inner.length === 0) break;
+
+      // Emit KEYWD(<rest of statement>) at the first token position, blank the rest
+      outVals[start] = `${currentKwd}(${inner})`;
+      for (let k = start + 1; k < tokens.length; k++) outVals[k] = '';
+      madeChange = true;
+      posIdx++;
+      i = tokens.length; // nothing more to rewrite
+      continue;
+    }
 
     // Case 1: positional wrapped in (...) → capture group
     if (t.type === 'paren_open') {
@@ -663,7 +725,9 @@ export function applyCmdAndParmNameCase(ast: CLNode, label: string | undefined, 
   }
 
   for (const param of ast.parameters) {
-    if (param.name) {
+    // Skip internal __posN positional markers: they are not real keywords and
+    // must stay lowercase so formatters recognize them via startsWith('__pos').
+    if (param.name && !param.name.startsWith('__pos')) {
       param.name = translateCase(param.name, fromCase, toCase);
     }
   }

@@ -4,6 +4,7 @@
     "contributes.commands.0.title": "CL Prompter",
     "contributes.commands.1.title": "Format CL (current line)",
     "contributes.commands.2.title": "Format CL (file)",
+    "contributes.commands.31.title": "Format CL (selection)",
     "contributes.commands.3.title": "CLPROMPTER: Open CL Command Entry",
     "contributes.commands.4.title": "CLPROMPTER: Close CL Command Entry",
     "contributes.commands.5.title": "CLPROMPTER: Run Command Entry",
