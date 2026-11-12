@@ -375,9 +375,9 @@ export function buildCLCommand(
             (v === undefined || v === null || v === '' ||
               (!userChanged &&
                 defaultVal &&
-                Array.isArray(defaultVal[idx])
-                ? v.toString().trim().toUpperCase() === (defaultVal[idx][j] || '').toString().trim().toUpperCase()
-                : v.toString().trim().toUpperCase() === (defaultVal[j] || '').toString().trim().toUpperCase()
+                (Array.isArray(defaultVal[idx])
+                  ? v.toString().trim().toUpperCase() === (defaultVal[idx][j] || '').toString().trim().toUpperCase()
+                  : v.toString().trim().toUpperCase() === (defaultVal[j] || '').toString().trim().toUpperCase())
               )
             )
             )
