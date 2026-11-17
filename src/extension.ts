@@ -28,7 +28,10 @@ import * as os from 'os';
 
 
 import { CodeForIBMi } from "@halcyontech/vscode-ibmi-types";
-export let code4i: CodeForIBMi;
+type CodeForIBMiWithCommandPrompter = CodeForIBMi & {
+    registerCommandPrompter?: (prompter: (commandToPrompt: string) => Promise<string | undefined> | string | undefined) => vscode.Disposable;
+};
+export let code4i: CodeForIBMiWithCommandPrompter;
 import { Extension, extensions } from "vscode";
 import {
     ChkAuthChecker,
@@ -89,7 +92,7 @@ import {
 } from './tokenizeCL';
 import { appendClPrompterOutputLine, clearClPrompterOutputChannel, setClPrompterOutputChannel } from './clPrompterOutput';
 
-let baseExtension: Extension<CodeForIBMi> | undefined;
+let baseExtension: Extension<CodeForIBMiWithCommandPrompter> | undefined;
 let sharedCommandEntryService: CommandEntryService | undefined;
 let sharedCommandEntryJobManager: CommandEntryJobManager | undefined;
 let sharedCommandEntryViewProvider: CommandEntryViewProvider | undefined;
@@ -1361,6 +1364,14 @@ export async function activate(context: vscode.ExtensionContext) {
     registerCLPrompterHandler(async (command: string, options?: CLPrompterOptions) => {
         return await CLPrompter(context.extensionUri, command, options);
     }, context.extensionUri);
+
+    const commandPrompterRegistration = code4i?.registerCommandPrompter?.(async commandToPrompt => {
+        const result = await CLPrompter(commandToPrompt);
+        return result.action === 'submit' ? result.command : undefined;
+    });
+    if (commandPrompterRegistration) {
+        context.subscriptions.push(commandPrompterRegistration);
+    }
 
     context.subscriptions.push(
         vscode.commands.registerCommand('clPrompter.registerPromptHandler', (handler?: ((command: string, options?: CLPrompterOptions) => Promise<CLPrompterResult> | CLPrompterResult) | undefined) => {
