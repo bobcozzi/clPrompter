@@ -99,6 +99,26 @@ function getDirectChildElementsByTagName(parent, tagName) {
     }
     return out;
 }
+export function getMissingRequiredElemIndexes(parm, values) {
+    if (String(parm.getAttribute('Type') || '').toUpperCase() !== 'ELEM')
+        return [];
+    const elemParts = getDirectChildElementsByTagName(parm, 'Elem');
+    if (elemParts.length < 2 || values.every((value) => !value.trim()))
+        return [];
+    const singleValues = [
+        ...getDirectChildElementsByTagName(parm, 'SngVal'),
+        ...getDirectChildElementsByTagName(elemParts[0], 'SngVal')
+    ].flatMap((sngVal) => getDirectChildElementsByTagName(sngVal, 'Value'))
+        .map((value) => String(value.getAttribute('Val') || '').trim().toUpperCase())
+        .filter(Boolean);
+    const firstValue = String(values[0] || '').trim().toUpperCase();
+    if (firstValue && singleValues.includes(firstValue))
+        return [];
+    return elemParts.flatMap((elem, index) => {
+        const min = Number.parseInt(elem.getAttribute('Min') || '0', 10);
+        return min > 0 && !String(values[index] || '').trim() ? [index] : [];
+    });
+}
 // Detect non-promptable internal shell PARM entries that wrap constant ELEM values.
 // This is attribute/structure based and does not depend on a specific Kwd name.
 export function isInternalConstantElemShellParm(parm) {

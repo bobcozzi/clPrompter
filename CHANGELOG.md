@@ -2,6 +2,11 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.0.68] - 2026-11-25
+
+### What's Fixed
+- Required child values in ELEM parameters are now validated for every materialized instance when that tuple is used. Optional blank tuples remain optional, and parent-level or first-ELEM SNGVAL values continue to stand alone without requiring later ELEM values.
+
 ## [1.0.67] - 2026-11-04
 
 ### What's New

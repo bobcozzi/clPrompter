@@ -2,7 +2,7 @@
   "name": "clprompter",
   "displayName": "%displayName%",
   "description": "%description%",
-  "version": "1.0.67",
+  "version": "1.0.68",
   "author": {
     "name": "Bob Cozzi",
     "url": "https://github.com/bobcozzi"
@@ -979,6 +979,7 @@
     "test:dep-diagnostic": "tsc src/test/testDepDiagnostic.ts --outDir out --module commonjs --target es2020 --esModuleInterop --skipLibCheck && node out/test/testDepDiagnostic.js",
     "test:quoted-whitespace": "tsc src/test/testQuotedWhitespacePreservation.ts --outDir out --module commonjs --target es2020 --esModuleInterop --skipLibCheck && node out/test/testQuotedWhitespacePreservation.js",
     "test:hidden-constant-elem-shell": "tsc src/test/testHiddenConstantElemShell.ts --outDir out --module commonjs --target es2020 --esModuleInterop --skipLibCheck && node out/test/testHiddenConstantElemShell.js",
+    "test:elem-child-min": "tsc src/test/testElemChildMinValidation.ts --outDir out --module commonjs --target es2020 --esModuleInterop --skipLibCheck && node out/test/testElemChildMinValidation.js",
     "test:component-signature": "tsc src/test/testComponentSignature.ts --outDir out --module commonjs --target es2020 --esModuleInterop --skipLibCheck && node out/test/testComponentSignature.js",
     "test:collect-all-cl-cmds": "tsc src/tokenizeCL.ts src/extractor.ts src/test/testCollectAllCLCmds.ts --outDir out --module commonjs --target es2020 --esModuleInterop --skipLibCheck --rootDir src && node out/test/testCollectAllCLCmds.js",
     "test:dtd-coverage": "tsc src/tokenizeCL.ts src/extractor.ts src/test/testDtdCoverage.ts --outDir out --module commonjs --target es2020 --esModuleInterop --skipLibCheck --rootDir src && node out/test/testDtdCoverage.js"

@@ -22,7 +22,7 @@
  * SOFTWARE.
  */
 import { createCBInput } from './webview-assets/cbinput.js';
-import { CL_VARIABLE_PATTERN, getDefaultLengthForType, isValidNameValue, parseParenthesizedContent, getLengthClass, isSpecifiedFromChildDefault, isInternalConstantElemShellParm } from './promptHelpers.js';
+import { CL_VARIABLE_PATTERN, getDefaultLengthForType, isValidNameValue, parseParenthesizedContent, getLengthClass, isSpecifiedFromChildDefault, isInternalConstantElemShellParm, getMissingRequiredElemIndexes } from './promptHelpers.js';
 import { buildDepErrorMessage as buildDepDiagnosticMessage, buildRestrictedValueErrorMessage } from './depDiagnostics.js';
 const WEBVIEW_DEBUG_LOGS = false;
 function debugLog(...args) {
@@ -5533,9 +5533,8 @@ function setRequiredParmError(kwd, show) {
     }
 }
 /**
- * Validate all PARM-level required parameters (Min >= 1 on the <Parm> element).
- * Child QUAL/ELEM Min values are intentionally ignored here — the PARM Min takes
- * priority.  Returns the number of parameters that are missing a value.
+ * Validate required parameters and active ELEM list items in every materialized instance.
+ * Child QUAL Min remains ignored; ELEM child Min applies once an optional tuple is used.
  * As a side-effect, shows or clears the per-field "Required" error indicator for
  * every required parameter.
  */
@@ -5557,6 +5556,44 @@ function checkRequiredParms() {
         setRequiredParmError(kwd, !specified);
         if (!specified)
             missingCount++;
+    }
+    return missingCount + checkRequiredElemListItems();
+}
+function checkRequiredElemListItems() {
+    const formEl = document.getElementById('clForm');
+    if (!formEl)
+        return 0;
+    let missingCount = 0;
+    for (const parm of state.parms) {
+        const kwd = parm.getAttribute('Kwd') || '';
+        const type = String(parm.getAttribute('Type') || '').toUpperCase();
+        const max = Number.parseInt(parm.getAttribute('Max') || '1', 10);
+        if (!kwd || type !== 'ELEM')
+            continue;
+        const elemParts = Array.from(parm.querySelectorAll(':scope > Elem'));
+        if (elemParts.length < 2 || elemParts.some((elem) => {
+            const elemType = String(elem.getAttribute('Type') || '').toUpperCase();
+            return elemType === 'ELEM' || elemType === 'QUAL' || elem.querySelector(':scope > Elem, :scope > Qual') !== null;
+        }))
+            continue;
+        const instances = max > 1
+            ? Array.from(formEl.querySelectorAll(`.parm-multi-group[data-kwd="${kwd}"] > .parm-instance`))
+            : Array.from(formEl.querySelectorAll(`.parm-instance[data-kwd="${kwd}"]`));
+        instances.forEach((instance, instanceIndex) => {
+            const inputNames = elemParts.map((_, elemIndex) => `${kwd}_INST${instanceIndex}_ELEM${elemIndex}`);
+            if (instance.closest('.pmtctl-hidden') || instance.hidden) {
+                inputNames.forEach((name) => setRequiredParmError(name, false));
+                return;
+            }
+            const inputs = inputNames.map((name) => formEl.querySelector(`[name="${name}"]`));
+            if (inputs.some((input) => !input))
+                return;
+            const missingIndexes = new Set(getMissingRequiredElemIndexes(parm, inputs.map((input) => input?.value || '')));
+            inputNames.forEach((name, elemIndex) => {
+                setRequiredParmError(name, missingIndexes.has(elemIndex));
+            });
+            missingCount += missingIndexes.size;
+        });
     }
     return missingCount;
 }
@@ -6008,6 +6045,7 @@ function wirePrompterControls() {
         };
         depForm.addEventListener('blur', () => {
             refreshDepAndPmtCtl();
+            checkRequiredElemListItems();
             // Defer preview so field-level blur validators complete first.
             requestCommandPreviewDeferred();
         }, true); // capture phase catches all blur events inside the form

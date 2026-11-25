@@ -1,9 +1,15 @@
 node_modules/**
-!node_modules/@xmldom/xmldom/**
-!node_modules/@halcyontech/vscode-ibmi-types/**
+!node_modules/@xmldom/xmldom/**/*.js
+!node_modules/@xmldom/xmldom/**/*.json
+!node_modules/@xmldom/xmldom/**/LICENSE
+!node_modules/@halcyontech/vscode-ibmi-types/**/*.js
+!node_modules/@halcyontech/vscode-ibmi-types/**/*.json
+!node_modules/@halcyontech/vscode-ibmi-types/**/*.d.ts
+!node_modules/@halcyontech/vscode-ibmi-types/**/LICENSE
 !node_modules/@vscode/codicons/dist/**
 
 .vscode/
+.github/
 src/
 src/test/
 nls/
@@ -21,6 +27,7 @@ tsconfig.json
 xpackage.json
 .DS_Store
 publish.sh
+lastCmd.xml
 *.log
 .vs
 node_original/
@@ -67,3 +74,7 @@ out/vscode-mock.js
 out/vscode-mock.js.map
 out/analyzeIBM.js
 out/analyzeIBM.js.map
+node_modules/**/*.md
+node_modules/**/*.MD
+node_modules/**/*.markdown
+node_modules/**/*.MARKDOWN
