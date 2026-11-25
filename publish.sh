@@ -1,15 +1,11 @@
 #!/bin/bash
 set -euo pipefail
 
-# Publish workaround notes:
-# - Marketplace publish can intermittently hang/reject a burst of attempts after a recent failure.
-# - We add a short delay before the first Marketplace attempt and refresh the VSCE CLI before building the VSIX.
+# Microsoft Marketplace publishing is dispatched to GitHub Actions for OIDC authentication.
 
 PUBLISH_ONLY=false
 MP_ONLY=false
 OPENVSX_ONLY=false
-FORCE_RETRY=false
-PUBLISH_DEBUG="${PUBLISH_DEBUG:-false}"
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -25,22 +21,16 @@ while [ $# -gt 0 ]; do
       OPENVSX_ONLY=true
       shift
       ;;
-    --force)
-      FORCE_RETRY=true
-      shift
-      ;;
-    --debug)
-      PUBLISH_DEBUG=true
-      shift
-      ;;
     --help|-h)
-      echo "Usage: $0 [--debug] [--force] [-p] [-m|--mp-only] [-o|--ovsx-only] \"commit message\""
+      echo "Usage: $0 [-p] [-m|--mp-only] [-o|--ovsx-only] \"commit message\""
       echo "  -p: publish-only mode (skip git tag/commit/push and GitHub release steps)"
-      echo "  -m, --mp-only: publish only to VS Code Marketplace (skip Open VSX)"
-      echo "  -o, --ovsx-only: publish only to Open VSX (skip VS Code Marketplace)"
-      echo "  --force: clear Marketplace cooldown state before publish checks"
-      echo "  --debug: enable Node HTTP/TLS tracing for Marketplace publish attempts"
+      echo "  -m, --mp-only: publish only to VS Code Marketplace through GitHub Actions"
+      echo "  -o, --ovsx-only: publish only to Open VSX (skip the Marketplace workflow)"
       exit 0
+      ;;
+    --force|--debug)
+      echo "❌ Error: $1 is no longer used; Marketplace publishing runs through GitHub Actions."
+      exit 1
       ;;
     --)
       shift
@@ -67,12 +57,10 @@ if { [ "$MP_ONLY" = true ] || [ "$OPENVSX_ONLY" = true ]; } && [ -z "${1:-}" ]; 
 fi
 
 if [ "$PUBLISH_ONLY" != true ] && [ -z "${1:-}" ]; then
-  echo "Usage: $0 [--debug] [--force] [-p] [-m|--mp-only] [-o|--ovsx-only] \"commit message\""
+  echo "Usage: $0 [-p] [-m|--mp-only] [-o|--ovsx-only] \"commit message\""
   echo "  -p: publish-only mode (skip git tag/commit/push and GitHub release steps)"
-  echo "  -m, --mp-only: publish only to VS Code Marketplace (skip Open VSX)"
-  echo "  -o, --ovsx-only: publish only to Open VSX (skip VS Code Marketplace)"
-  echo "  --force: clear Marketplace cooldown state before publish checks"
-  echo "  --debug: enable Node HTTP/TLS tracing for Marketplace publish attempts"
+  echo "  -m, --mp-only: publish only to VS Code Marketplace through GitHub Actions"
+  echo "  -o, --ovsx-only: publish only to Open VSX (skip the Marketplace workflow)"
   exit 1
 fi
 
@@ -158,186 +146,39 @@ if [ "$PUBLISH_ONLY" != true ]; then
   git push origin "$TAG" || exit 1
 fi
 
-read_cooldown_state() {
-  if [ ! -f "$PUBLISH_COOLDOWN_STATE_FILE" ]; then
-    return 1
-  fi
-
-  local last_failed_epoch now_epoch elapsed_seconds remaining_seconds
-  last_failed_epoch=$(cut -d' ' -f1 "$PUBLISH_COOLDOWN_STATE_FILE" 2>/dev/null || true)
-  if ! [[ "$last_failed_epoch" =~ ^[0-9]+$ ]]; then
-    return 1
-  fi
-
-  now_epoch=$(date +%s)
-  elapsed_seconds=$(( now_epoch - last_failed_epoch ))
-  if [ "$elapsed_seconds" -lt "$PUBLISH_COOLDOWN_SECONDS" ]; then
-    remaining_seconds=$(( PUBLISH_COOLDOWN_SECONDS - elapsed_seconds ))
-    echo "$remaining_seconds"
-    return 0
-  fi
-
-  return 1
-}
-
-clear_cooldown_state() {
-  rm -f "$PUBLISH_COOLDOWN_STATE_FILE"
-}
-
-write_cooldown_state() {
-  local reason="$1"
-  printf '%s %s\n' "$(date +%s)" "$reason" >"$PUBLISH_COOLDOWN_STATE_FILE"
-}
-
-run_with_timeout() {
-  local timeout_seconds="$1"
-  shift
-
-  node -e '
-const { spawn } = require("child_process");
-
-const timeoutSeconds = Number(process.argv[1]);
-const args = process.argv.slice(2);
-const nodeDebugFlags = process.env.PUBLISH_NODE_DEBUG_FLAGS || "";
-
-if (args.length === 0) {
-  console.error("No command provided.");
-  process.exit(1);
-}
-
-const childEnv = { ...process.env };
-if (nodeDebugFlags) {
-  childEnv.NODE_DEBUG = nodeDebugFlags;
-}
-
-const child = spawn(args[0], args.slice(1), { stdio: "inherit", env: childEnv });
-const timeoutHandle = setTimeout(() => {
-  console.error(`Marketplace publish timed out after ${timeoutSeconds}s; terminating the publish process.`);
-  child.kill("SIGTERM");
-  setTimeout(() => child.kill("SIGKILL"), 5000).unref();
-}, timeoutSeconds * 1000);
-
-child.on("exit", (code) => {
-  clearTimeout(timeoutHandle);
-  process.exit(code === null ? 124 : code);
-});
-
-child.on("error", (error) => {
-  clearTimeout(timeoutHandle);
-  console.error(error.message);
-  process.exit(1);
-});
-' "$timeout_seconds" "$@"
-}
-
-# Publish to Open VSX first (independent of Marketplace availability)
+# Publish to Open VSX before queueing the independent Marketplace workflow.
 if [ "$MP_ONLY" = true ]; then
   echo "⏭️  Marketplace-only mode enabled: skipping Open VSX publish."
 else
-  if [ -z "${OVSX_PAT:-${VSCE_PAT:-}}" ]; then
-    echo "❌ Error: OVSX_PAT (or VSCE_PAT fallback) environment variable is not set."
+  if [ -z "${OVSX_PAT:-}" ]; then
+    echo "❌ Error: OVSX_PAT environment variable is not set."
     echo "Run: export OVSX_PAT=<your-open-vsx-token>"
     exit 1
   fi
   echo "📤 Publishing to Open VSX..."
-  npx ovsx publish --packagePath "$VSIX_FILE" -p "${OVSX_PAT:-$VSCE_PAT}" || {
-    echo "⚠️  Open VSX publish failed (continuing to VS Code Marketplace publish)"
+  npx ovsx publish --packagePath "$VSIX_FILE" -p "$OVSX_PAT" || {
+    echo "⚠️  Open VSX publish failed (continuing to GitHub Marketplace workflow)"
   }
 fi
 
-# Publish to Microsoft Marketplace
-PUBLISH_SUCCESS=true
+# Publish to Microsoft Marketplace through GitHub Actions Trusted Publishing.
 if [ "$OPENVSX_ONLY" = true ]; then
-  echo "⏭️  Open VSX-only mode enabled: skipping VS Code Marketplace publish."
+  echo "⏭️  Open VSX-only mode enabled: skipping VS Code Marketplace workflow."
 else
-  MARKETPLACE_PUBLISH_DELAY_SECONDS="${MARKETPLACE_PUBLISH_DELAY_SECONDS:-12}"
-  echo "⏳ Waiting ${MARKETPLACE_PUBLISH_DELAY_SECONDS}s before starting the VS Code Marketplace publish to reduce transient publish hangs."
-  sleep "$MARKETPLACE_PUBLISH_DELAY_SECONDS"
-
-  echo "📤 Publishing to VS Code Marketplace..."
-  MAX_PUBLISH_ATTEMPTS="${MAX_PUBLISH_ATTEMPTS:-3}"
-  PUBLISH_ATTEMPT_TIMEOUT_SECONDS="${PUBLISH_ATTEMPT_TIMEOUT_SECONDS:-180}"
-  PUBLISH_RETRY_DELAY_SECONDS="${PUBLISH_RETRY_DELAY_SECONDS:-20}"
-  PUBLISH_COOLDOWN_SECONDS="${PUBLISH_COOLDOWN_SECONDS:-1500}"
-  PUBLISH_COOLDOWN_STATE_FILE="${TMPDIR:-/tmp}/clprompter-marketplace-publish.state"
-  PUBLISH_NODE_DEBUG_FLAGS=""
-  if [ "$PUBLISH_DEBUG" = true ]; then
-    PUBLISH_NODE_DEBUG_FLAGS="http,https,tls"
-    echo "🪲 Publish debug enabled: Marketplace publish will emit Node HTTP/TLS traces."
-  fi
-  PUBLISH_LOG_FILE=$(mktemp)
-  PUBLISH_SUCCESS=false
-
-  if [ "$FORCE_RETRY" = true ]; then
-    if [ -f "$PUBLISH_COOLDOWN_STATE_FILE" ]; then
-      echo "🧹 --force enabled: clearing Marketplace cooldown state file."
-      rm -f "$PUBLISH_COOLDOWN_STATE_FILE"
-    else
-      echo "🧹 --force enabled: no Marketplace cooldown state file found."
-    fi
-  fi
-
-  if [ -z "${VSCE_PAT:-}" ]; then
-    echo "❌ Error: VSCE_PAT environment variable is not set."
-    echo "Run: export VSCE_PAT=<your-personal-access-token>"
+  if ! command -v gh >/dev/null 2>&1; then
+    echo "❌ GitHub CLI (gh) is required to trigger Marketplace publishing."
+    echo "Install gh, authenticate with 'gh auth login', then run this command again."
     exit 1
   fi
 
-  COOLDOWN_REMAINING_SECONDS="$(read_cooldown_state || true)"
-  if [ -n "$COOLDOWN_REMAINING_SECONDS" ]; then
-    echo "❌ Marketplace publish recently failed. Wait about $(( (COOLDOWN_REMAINING_SECONDS + 59) / 60 )) minute(s) before trying again."
-    echo "   This avoids re-running a publish while the Marketplace is still rejecting it."
-    exit 1
-  fi
-
-  for ATTEMPT in $(seq 1 "$MAX_PUBLISH_ATTEMPTS"); do
-    TRANSIENT_FAILURE=false
-    echo "📡 Marketplace publish attempt ${ATTEMPT}/${MAX_PUBLISH_ATTEMPTS}..."
-
-    # Publish the already-validated VSIX to avoid re-packaging drift between attempts.
-    if run_with_timeout "$PUBLISH_ATTEMPT_TIMEOUT_SECONDS" vsce publish --packagePath "$VSIX_FILE" -p "$VSCE_PAT" >"$PUBLISH_LOG_FILE" 2>&1; then
-      cat "$PUBLISH_LOG_FILE"
-      PUBLISH_SUCCESS=true
-      clear_cooldown_state
-      break
-    fi
-
-    PUBLISH_EXIT_CODE=$?
-    cat "$PUBLISH_LOG_FILE"
-
-    if [ "$PUBLISH_EXIT_CODE" -eq 124 ] || grep -Eiq "request timeout|timed out|etimedout|econnreset|eai_again|socket hang up|temporar|service unavailable|too many requests|http[[:space:]]*429|http[[:space:]]*500|http[[:space:]]*502|http[[:space:]]*503|http[[:space:]]*504|_apis/gallery" "$PUBLISH_LOG_FILE"; then
-      TRANSIENT_FAILURE=true
-    fi
-
-    if [ "$ATTEMPT" -lt "$MAX_PUBLISH_ATTEMPTS" ]; then
-      if [ "$TRANSIENT_FAILURE" = true ]; then
-        echo "⚠️  Transient Marketplace failure detected. Retrying in ${PUBLISH_RETRY_DELAY_SECONDS}s..."
-      else
-        echo "⚠️  Marketplace publish failed. Retrying in ${PUBLISH_RETRY_DELAY_SECONDS}s..."
-      fi
-      sleep "$PUBLISH_RETRY_DELAY_SECONDS"
-      continue
-    fi
-
-    if [ "$TRANSIENT_FAILURE" = true ]; then
-      write_cooldown_state "timeout-or-transient"
-    fi
-
-    break
-  done
-
-  rm -f "$PUBLISH_LOG_FILE"
-fi
-
-if [ "$PUBLISH_SUCCESS" != true ]; then
   if [ "$PUBLISH_ONLY" = true ]; then
-    echo "❌ Marketplace publish failed after ${MAX_PUBLISH_ATTEMPTS} attempt(s)."
+    PUBLISH_REF="$CURRENT_BRANCH"
   else
-    echo "❌ Marketplace publish failed after ${MAX_PUBLISH_ATTEMPTS} attempt(s). Rolling back tag..."
-    git tag -d "$TAG"
-    git push --delete origin "$TAG"
+    PUBLISH_REF="$TAG"
   fi
-  exit 1
+
+  echo "📤 Queuing VS Code Marketplace publishing from GitHub Actions ($PUBLISH_REF)..."
+  gh workflow run publish-marketplace.yml --ref "$PUBLISH_REF"
 fi
 
 if [ "$PUBLISH_ONLY" != true ]; then
@@ -352,7 +193,7 @@ if [ "$PUBLISH_ONLY" != true ]; then
       --title "$TAG" \
       --notes "$CHANGELOG_ENTRY" \
       ./clprompter-${VERSION}.vsix || {
-      echo "⚠️  GitHub release creation failed (marketplace publish succeeded)"
+      echo "⚠️  GitHub release creation failed (Marketplace workflow was queued)"
       echo "📝 Create release manually at: https://github.com/bobcozzi/clPrompter/releases/new?tag=${TAG}"
     }
   else
@@ -367,7 +208,7 @@ if [ "$PUBLISH_ONLY" != true ]; then
   fi
 fi
 
-echo "✅ Successfully published ${TAG}!"
+echo "✅ Release steps completed for ${TAG}. Check the GitHub Actions run for Marketplace status."
 if [ "$OPENVSX_ONLY" != true ]; then
   echo "📦 VS Code Marketplace: https://marketplace.visualstudio.com/items?itemName=CozziResearch.clprompter"
 fi
