@@ -2,6 +2,11 @@
 
 All notable changes to this project are documented in this file.
 
+## [1.0.69] - 2026-11-27
+
+### What's New
+- **Code for IBM i integration** - CL Prompter now registers itself with Code for IBM i's command prompter API. A `?` library list command (for example `?CHGLIBL`) in a connection profile now opens the full CL Prompter form instead of a plain input box. Cancelling the prompt runs nothing. Older Code for IBM i versions without the API are unaffected.
+
 ## [1.0.68] - 2026-11-25
 
 ### What's Fixed
